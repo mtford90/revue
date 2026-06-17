@@ -9,10 +9,11 @@ a terminal UI built on [hunk](https://github.com/modem-dev/hunk), instead of a b
 An agent (via the bundled `revue-chapters` skill) clusters the diff into chapters and writes a JSON
 file. `revue show` validates that file and opens an interactive reviewer you drive from the keyboard.
 
-> **Status: early scaffold.** The chapter model, schema, skill, and the navigable TUI shell exist and
-> run today against a hand-written / agent-written chapters file. The two big pieces still to build:
-> `revue prep` (snapshot git + format hunks) and wiring hunk's `<HunkReviewStream>` so each chapter
-> renders its actual **diff body**, not just its metadata. See [the roadmap](#roadmap).
+> **Status: early scaffold.** The chapter model, schema, skill, the navigable TUI shell, and
+> per-chapter **diff rendering** through hunk's `<HunkReviewStream>` all run today against a
+> hand-written / agent-written chapters file (+ a unified-diff patch via `--diff`). The main piece
+> still to build is `revue prep` — snapshotting git state and formatting hunks — so the patch is
+> produced automatically instead of supplied by hand. See [the roadmap](#roadmap).
 
 ## How it relates to its parents
 
@@ -48,8 +49,11 @@ bun install
 # validate the sample and print a summary (no TUI)
 bun run check
 
-# open the interactive reviewer on the sample
+# open the interactive reviewer on the sample (chapter metadata only)
 bun run revue show examples/sample-chapters.json
+
+# ...or with a real diff, so each chapter renders its actual code
+bun run revue show examples/sample-chapters.json --diff examples/sample.diff
 ```
 
 Keys: `j`/`k` or `↑`/`↓` to move between beats, `g`/`G` first/last, `q` to quit.
@@ -58,8 +62,9 @@ Keys: `j`/`k` or `↑`/`↓` to move between beats, `g`/`G` first/last, `q` to q
 
 - [x] Chapters/prologue zod schema (ported from Stage)
 - [x] `revue show` — load + validate a chapters file, navigable TUI shell, `--check` summary
-- [ ] Render each chapter's **diff body** via hunk's `<HunkReviewStream>` (map `hunkRefs` → a filtered `HunkDiffFile`)
-- [ ] `revue prep` — snapshot git state, format hunks with stable `(filePath, oldStart)` ids
+- [x] Render each chapter's **diff body** via hunk's `<HunkReviewStream>` (`--diff <patch>`; `hunkRefs` → filtered hunks)
+- [ ] `revue prep` — snapshot git state, format hunks with stable `(filePath, oldStart)` ids (drops the manual `--diff`)
+- [ ] Scroll long diffs; choose split/stack layout by terminal width
 - [ ] Render `keyChanges` as inline annotations using hunk's `AgentContext` model
 - [ ] Decide static-file vs live agent-driven session (hunk's session daemon)
 - [ ] Mermaid prologue diagram rendering (ASCII)

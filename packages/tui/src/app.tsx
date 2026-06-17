@@ -1,14 +1,19 @@
 import { createCliRenderer } from "@opentui/core";
-import { createRoot, useKeyboard } from "@opentui/react";
+import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { Chapter, Prologue, RevueChaptersFile } from "@revue/types";
+import { type HunkDiffFile, HunkReviewStream } from "hunkdiff/opentui";
 import { useState } from "react";
+import { selectChapterFiles } from "./diff.ts";
 import { complexityColor, severityColor, theme } from "./theme.ts";
+
+const SIDEBAR_WIDTH = 34;
+const HUNK_THEME = "catppuccin-mocha" as const;
 
 // ── Page model ──────────────────────────────────────────────────────────────
 // The reviewer pages through one "beat" at a time: an optional prologue, then
 // each chapter in order. This is the core Stage UX that hunk's file-oriented nav
-// doesn't provide, so we own it here and (next milestone) delegate the diff body
-// of each chapter to hunk's <HunkReviewStream>.
+// doesn't provide, so we own it here and delegate each chapter's diff body to
+// hunk's <HunkReviewStream> (see ChapterView).
 
 type Page =
 	| { kind: "prologue"; label: string; prologue: Prologue }
@@ -91,20 +96,40 @@ function PrologueView({ prologue }: { prologue: Prologue }) {
 	);
 }
 
-function ChapterView({ chapter }: { chapter: Chapter }) {
+function ChapterView({
+	chapter,
+	diffFiles,
+	width,
+}: {
+	chapter: Chapter;
+	diffFiles: HunkDiffFile[] | null;
+	width: number;
+}) {
+	const selected = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
+
 	return (
 		<box flexDirection="column" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
 			<text fg={theme.text}>{chapter.summary}</text>
 
-			<box flexDirection="column">
-				<text fg={theme.mauve}>Hunks ({chapter.hunkRefs.length})</text>
-				{chapter.hunkRefs.map((h) => (
-					<text key={`${h.filePath}:${h.oldStart}`} fg={theme.dim}>
-						{h.filePath}:{h.oldStart}
-					</text>
-				))}
-			</box>
+			{selected.length ? (
+				<HunkReviewStream
+					files={selected}
+					width={width}
+					theme={HUNK_THEME}
+					showFileHeaders
+					showLineNumbers
+				/>
+			) : (
+				<box flexDirection="column">
+					<text fg={theme.mauve}>Hunks ({chapter.hunkRefs.length})</text>
+					{chapter.hunkRefs.map((h) => (
+						<text key={`${h.filePath}:${h.oldStart}`} fg={theme.dim}>
+							{h.filePath}:{h.oldStart}
+						</text>
+					))}
+				</box>
+			)}
 
 			{chapter.keyChanges.length ? (
 				<box flexDirection="column">
@@ -121,9 +146,18 @@ function ChapterView({ chapter }: { chapter: Chapter }) {
 }
 
 // ── App shell ───────────────────────────────────────────────────────────────
-export function App({ file }: { file: RevueChaptersFile }) {
+export function App({
+	file,
+	diffFiles = null,
+}: {
+	file: RevueChaptersFile;
+	diffFiles?: HunkDiffFile[] | null;
+}) {
 	const pages = buildPages(file);
 	const [current, setCurrent] = useState(0);
+	const { width } = useTerminalDimensions();
+	// content pane = total width minus the sidebar and the panes' borders/padding.
+	const contentWidth = Math.max(20, width - SIDEBAR_WIDTH - 4);
 
 	useKeyboard((key) => {
 		const name = key.name;
@@ -148,7 +182,9 @@ export function App({ file }: { file: RevueChaptersFile }) {
 				<Sidebar pages={pages} current={current} />
 				<box flexGrow={1} padding={1} flexDirection="column">
 					{page?.kind === "prologue" ? <PrologueView prologue={page.prologue} /> : null}
-					{page?.kind === "chapter" ? <ChapterView chapter={page.chapter} /> : null}
+					{page?.kind === "chapter" ? (
+						<ChapterView chapter={page.chapter} diffFiles={diffFiles} width={contentWidth} />
+					) : null}
 				</box>
 			</box>
 			<box paddingLeft={1} paddingRight={1}>
@@ -161,9 +197,12 @@ export function App({ file }: { file: RevueChaptersFile }) {
 }
 
 /** Boot the interactive TUI for a loaded chapters file. Resolves when the user quits. */
-export async function runApp(file: RevueChaptersFile): Promise<void> {
+export async function runApp(
+	file: RevueChaptersFile,
+	diffFiles: HunkDiffFile[] | null = null,
+): Promise<void> {
 	const renderer = await createCliRenderer({ exitOnCtrlC: true });
-	createRoot(renderer).render(<App file={file} />);
+	createRoot(renderer).render(<App file={file} diffFiles={diffFiles} />);
 	// The renderer keeps the event loop alive; quitting calls process.exit.
 	await new Promise<void>(() => {});
 }

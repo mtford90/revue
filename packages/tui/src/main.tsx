@@ -15,9 +15,11 @@ for the shape, and skills/revue-chapters/SKILL.md for how an agent produces one.
 
 async function cmdShow(args: string[]): Promise<number> {
 	const check = args.includes("--check");
-	const path = args.find((a) => !a.startsWith("-"));
+	const diffPath = flagValue(args, "--diff");
+	const positional = args.filter((a) => !a.startsWith("-"));
+	const path = positional[0];
 	if (!path) {
-		process.stderr.write("usage: revue show <chapters.json> [--check]\n");
+		process.stderr.write("usage: revue show <chapters.json> [--diff <patch>] [--check]\n");
 		return 1;
 	}
 
@@ -39,8 +41,15 @@ async function cmdShow(args: string[]): Promise<number> {
 	}
 
 	const { runApp } = await import("./app.tsx");
-	await runApp(file);
+	const diffFiles = diffPath ? await (await import("./diff.ts")).loadPatch(diffPath) : null;
+	await runApp(file, diffFiles);
 	return 0;
+}
+
+/** Read the value after a `--flag value` pair from argv, or undefined. */
+function flagValue(args: string[], flag: string): string | undefined {
+	const i = args.indexOf(flag);
+	return i >= 0 ? args[i + 1] : undefined;
 }
 
 async function main(): Promise<number> {

@@ -1,0 +1,83 @@
+{
+	"generatedAt": "2026-06-17T09:00:00Z",
+	"prologue": {
+		"motivation": "Dashboards would break during deploys, so people had to keep refreshing until things came back.",
+		"outcome": "Dashboards stay up during deploys now.",
+		"diagram": "graph LR\n  A[Dashboard] --> B[ApiClient]\n  B -->|retry on 503| C[Backend]",
+		"keyChanges": [
+			{
+				"summary": "API calls now survive a deploy blip",
+				"description": "Transient 503s are retried with backoff instead of surfacing as errors."
+			},
+			{
+				"summary": "Retry behaviour is covered by tests",
+				"description": "Adds a fake clock so backoff timing is asserted without real waits."
+			}
+		],
+		"focusAreas": [
+			{
+				"type": "new-pattern",
+				"severity": "info",
+				"title": "Backoff helper",
+				"description": "First use of a shared backoff utility — confirm the base delay and cap suit our traffic.",
+				"locations": ["src/lib/backoff.ts"]
+			},
+			{
+				"type": "performance",
+				"severity": "medium",
+				"title": "Retry budget",
+				"description": "Verify max retries won't pile up request load during a sustained outage.",
+				"locations": ["src/lib/apiClient.ts"]
+			}
+		],
+		"complexity": {
+			"level": "medium",
+			"reasoning": "New shared utility plus a behavioural change in the API client."
+		}
+	},
+	"chapters": [
+		{
+			"id": "chapter-1",
+			"order": 1,
+			"title": "Add a reusable backoff helper",
+			"summary": "Introduces `backoff()` — a small utility that computes exponential delays with a ceiling.\n\nLater chapters build on this to retry failed requests without hammering the backend.",
+			"hunkRefs": [{ "filePath": "src/lib/backoff.ts", "oldStart": 0 }],
+			"keyChanges": [
+				{
+					"content": "Is a 100ms base with a 5s cap the right shape for our request volume, or should the cap be lower?",
+					"lineRefs": [
+						{ "filePath": "src/lib/backoff.ts", "side": "additions", "startLine": 4, "endLine": 9 }
+					]
+				}
+			]
+		},
+		{
+			"id": "chapter-2",
+			"order": 2,
+			"title": "Retry transient failures in the API client",
+			"summary": "Now that `backoff()` exists, the API client retries 503s instead of throwing.\n\nThis is the change that actually keeps dashboards alive through a deploy.",
+			"hunkRefs": [{ "filePath": "src/lib/apiClient.ts", "oldStart": 42 }],
+			"keyChanges": [
+				{
+					"content": "Should retries be capped per-request, or share a global budget so an outage can't multiply load?",
+					"lineRefs": [
+						{
+							"filePath": "src/lib/apiClient.ts",
+							"side": "additions",
+							"startLine": 50,
+							"endLine": 58
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "chapter-3",
+			"order": 3,
+			"title": "Cover retry timing with a fake clock",
+			"summary": "Adds tests that drive `backoff()` and the retry path through a controllable clock, so the timing is asserted without real delays.",
+			"hunkRefs": [{ "filePath": "src/lib/apiClient.test.ts", "oldStart": 0 }],
+			"keyChanges": []
+		}
+	]
+}

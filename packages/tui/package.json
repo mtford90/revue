@@ -1,0 +1,20 @@
+{
+	"name": "@revue/tui",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"bin": {
+		"revue": "./src/main.tsx"
+	},
+	"dependencies": {
+		"@opentui/core": "^0.1.89",
+		"@opentui/react": "^0.1.89",
+		"@revue/types": "workspace:*",
+		"hunkdiff": "^0.15.3",
+		"react": "^19.2.4",
+		"zod": "^4.0.0"
+	},
+	"devDependencies": {
+		"@types/react": "^19.0.0"
+	}
+}

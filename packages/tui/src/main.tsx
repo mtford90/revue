@@ -42,7 +42,15 @@ async function cmdShow(args: string[]): Promise<number> {
 
 	const { runApp } = await import("./app.tsx");
 	const diffFiles = diffPath ? await (await import("./diff.ts")).loadPatch(diffPath) : null;
-	await runApp(file, diffFiles);
+
+	const { defaultStatePath, openFileStore, runKey } = await import("./viewState.ts");
+	const store = await openFileStore(defaultStatePath(), runKey(file));
+
+	await runApp(file, {
+		diffFiles,
+		initialViewState: store.get(),
+		onViewStateChange: (next) => store.set(next),
+	});
 	return 0;
 }
 

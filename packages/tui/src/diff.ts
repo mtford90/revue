@@ -49,3 +49,18 @@ export function selectChapterFiles(chapter: Chapter, files: HunkDiffFile[]): Hun
 	}
 	return selected;
 }
+
+export interface FileStat {
+	additions: number;
+	deletions: number;
+}
+
+/** Per-path add/delete counts from a parsed patch, for the chapter file list. */
+export function statsByPath(files: HunkDiffFile[]): Map<string, FileStat> {
+	const map = new Map<string, FileStat>();
+	for (const f of files) {
+		const path = f.path ?? f.metadata.name;
+		map.set(path, { additions: f.stats.additions, deletions: f.stats.deletions });
+	}
+	return map;
+}

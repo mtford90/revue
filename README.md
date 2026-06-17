@@ -56,16 +56,20 @@ bun run revue show examples/sample-chapters.json
 bun run revue show examples/sample-chapters.json --diff examples/sample.diff
 ```
 
-Keys: `j`/`k` or `↑`/`↓` to move between beats, `g`/`G` first/last, `q` to quit.
+Keys: `j`/`k` (or `↑`/`↓`) move between beats · `tab` cycle files · `f` mark file reviewed ·
+`space` mark chapter reviewed (auto-advances) · `1`–`9` check a key change · `a` jump to the next
+unreviewed chapter · `g`/`G` first/last · `q` quit. Progress persists to `.revue/state.json`.
 
 ## Roadmap
 
 - [x] Chapters/prologue zod schema (ported from Stage)
 - [x] `revue show` — load + validate a chapters file, navigable TUI shell, `--check` summary
 - [x] Render each chapter's **diff body** via hunk's `<HunkReviewStream>` (`--diff <patch>`; `hunkRefs` → filtered hunks)
+- [x] **Mark-as-reviewed** at chapter / file / key-change level, with progress + auto-advance, persisted to `.revue/state.json`
+- [x] Per-chapter **file list** with reviewed checkboxes and `+a -d` stats
 - [ ] `revue prep` — snapshot git state, format hunks with stable `(filePath, oldStart)` ids (drops the manual `--diff`)
 - [ ] Scroll long diffs; choose split/stack layout by terminal width
-- [ ] Render `keyChanges` as inline annotations using hunk's `AgentContext` model
+- [ ] Inline **comments** you can author in the TUI (hunk's comment model is unexported — build our own / fork `AgentInlineNote` / drive the session daemon)
 - [ ] Decide static-file vs live agent-driven session (hunk's session daemon)
 - [ ] Mermaid prologue diagram rendering (ASCII)
 

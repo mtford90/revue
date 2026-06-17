@@ -28,6 +28,14 @@ revue is the seam: Stage's brain, hunk's body, glued by a chapter-navigation she
   diagram, 2–5 key changes, 1–5 focus areas, and a complexity rating. Shown before chapter one.
 - **Focus area** — a typed/severity-tagged spot in the prologue worth a reviewer's attention.
 - **Page** — a TUI navigation unit: the prologue (if present) followed by each chapter in order.
+- **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
+  Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
+  `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes
+  the chapter, and vice-versa. Persisted locally, keyed by **run key**.
+- **Run key** — a stable sha256 of the chapters content (not the temp file path), so progress
+  survives re-runs that produce the same chapters; different chapters → fresh progress.
+- **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
+  revue's, persisted to `.revue/state.json` (a `{ [runKey]: ViewState }` map).
 - **The chapters file** — the JSON artifact the skill writes and `revue show` reads. Mirrors Stage's
   `AgentOutputSchema` (`{ chapters, prologue? }`). The agent's output *is* the source of truth — there
   is no database (unlike Stage).
@@ -42,6 +50,11 @@ revue is the seam: Stage's brain, hunk's body, glued by a chapter-navigation she
   `0.4.x`, which is a breaking API gap that would defeat embedding hunk's components.
 - **Static file, not (yet) a live session.** revue currently loads a finished chapters file. hunk also
   supports a live agent-driven session via a loopback daemon; whether revue adopts that is open.
+- **We build the review shell ourselves — by design.** hunk publishes only stateless render
+  primitives (`hunkdiff/opentui`); its docs explicitly say to build your own review UI on them. So
+  chapter nav, file list, mark-as-reviewed and (later) comments are revue's. We use hunk only as the
+  diff *renderer*. The per-chapter file list is our own component, not `HunkFileNav`, because
+  `HunkFileNav` can't render a reviewed checkbox.
 
 ## Open questions
 

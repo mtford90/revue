@@ -7,7 +7,8 @@
 		".": "./src/index.ts",
 		"./chapters": "./src/chapters.ts",
 		"./prologue": "./src/prologue.ts",
-		"./file": "./src/file.ts"
+		"./file": "./src/file.ts",
+		"./view-state": "./src/view-state.ts"
 	},
 	"dependencies": {
 		"zod": "^4.0.0"

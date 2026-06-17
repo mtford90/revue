@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.revue/
 *.tsbuildinfo
 .DS_Store
 *.log

@@ -1,4 +1,4 @@
-import { createCliRenderer } from "@opentui/core";
+import { createCliRenderer, type ScrollBoxRenderable } from "@opentui/core";
 import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
 	type Chapter,
@@ -8,7 +8,7 @@ import {
 	type ViewState,
 } from "@revue/types";
 import { type HunkDiffFile, HunkReviewStream } from "hunkdiff/opentui";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import { complexityColor, severityColor, theme } from "./theme.ts";
 import {
@@ -24,6 +24,24 @@ import {
 } from "./viewState.ts";
 
 const SIDEBAR_WIDTH = 34;
+const MIN_SPLIT_DIFF_WIDTH = 80;
+const APP_KEYS = new Set([
+	"q",
+	"escape",
+	"pageup",
+	"pagedown",
+	"j",
+	"k",
+	"up",
+	"down",
+	"g",
+	"G",
+	"tab",
+	"space",
+	"x",
+	"f",
+	"a",
+]);
 const HUNK_THEME = "catppuccin-mocha" as const;
 
 // ── Page model ──────────────────────────────────────────────────────────────
@@ -79,7 +97,12 @@ function Sidebar({
 					const label =
 						page.kind === "chapter" ? `${page.chapter.order}. ${page.label}` : page.label;
 					return (
-						<text key={page.label} fg={done ? theme.green : active ? theme.accent : theme.dim}>
+						<text
+							key={page.label}
+							fg={done ? theme.green : active ? theme.accent : theme.dim}
+							wrapMode="none"
+							truncate
+						>
 							{mark} {label}
 						</text>
 					);
@@ -199,6 +222,7 @@ function ChapterView({
 }) {
 	const selected = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
+	const layout = width >= MIN_SPLIT_DIFF_WIDTH ? "split" : "stack";
 
 	return (
 		<box flexDirection="column" gap={1}>
@@ -211,6 +235,7 @@ function ChapterView({
 			{selected.length ? (
 				<HunkReviewStream
 					files={selected}
+					layout={layout}
 					width={width}
 					theme={HUNK_THEME}
 					showFileHeaders
@@ -238,11 +263,15 @@ export function App({
 	const [current, setCurrent] = useState(0);
 	const [selectedFile, setSelectedFile] = useState(0);
 	const [vs, setVs] = useState(initialViewState);
+	const pageScroll = useRef<ScrollBoxRenderable>(null);
 	const { width } = useTerminalDimensions();
 	const contentWidth = Math.max(20, width - SIDEBAR_WIDTH - 4);
 
 	function goto(index: number) {
-		setCurrent(Math.max(0, Math.min(index, pages.length - 1)));
+		const next = Math.max(0, Math.min(index, pages.length - 1));
+		if (next === current) return;
+		pageScroll.current?.scrollTo(0);
+		setCurrent(next);
 		setSelectedFile(0);
 	}
 	function gotoChapter(chapter: Chapter) {
@@ -260,8 +289,15 @@ export function App({
 		const chapter = page?.kind === "chapter" ? page.chapter : null;
 		const paths = chapter ? chapterFilePaths(chapter) : [];
 
+		if (APP_KEYS.has(name) || (name && /^[1-9]$/.test(name))) {
+			key.preventDefault();
+			key.stopPropagation();
+		}
+
 		if (name === "q" || name === "escape") {
 			process.exit(0);
+		} else if (name === "pageup" || name === "pagedown") {
+			pageScroll.current?.scrollBy(name === "pageup" ? -1 : 1, "viewport");
 		} else if (name === "j" || name === "down") {
 			goto(current + 1);
 		} else if (name === "k" || name === "up") {
@@ -298,7 +334,7 @@ export function App({
 
 	return (
 		<box flexDirection="column" width="100%" height="100%">
-			<box flexDirection="row" flexGrow={1}>
+			<box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
 				<Sidebar
 					pages={pages}
 					current={current}
@@ -306,7 +342,20 @@ export function App({
 					reviewed={reviewed}
 					total={chapters.length}
 				/>
-				<box flexGrow={1} padding={1} flexDirection="column">
+				<scrollbox
+					id="chapter-viewport"
+					ref={pageScroll}
+					flexGrow={1}
+					flexShrink={1}
+					minHeight={0}
+					width="100%"
+					padding={1}
+					scrollY
+					viewportCulling
+					verticalScrollbarOptions={{
+						trackOptions: { foregroundColor: theme.surface },
+					}}
+				>
 					{page?.kind === "prologue" ? <PrologueView prologue={page.prologue} /> : null}
 					{page?.kind === "chapter" ? (
 						<ChapterView
@@ -317,12 +366,12 @@ export function App({
 							selectedFile={selectedFile}
 						/>
 					) : null}
-				</box>
+				</scrollbox>
 			</box>
-			<box paddingLeft={1} paddingRight={1}>
+			<box flexShrink={0} paddingLeft={1} paddingRight={1}>
 				<text fg={theme.dim}>
-					j/k move · tab file · f file done · space chapter done · 1-9 key · a next unreviewed · q
-					quit — {current + 1}/{pages.length}
+					{current + 1}/{pages.length} · j/k chapter · PgUp/PgDn or wheel scroll · tab file · f file
+					· space chapter · 1-9 key · a next · q quit
 				</text>
 			</box>
 		</box>

@@ -27,7 +27,7 @@ test("opens on the prologue with the chapter list and review progress", async ()
 
 	expect(frame).toContain("revue"); // sidebar title
 	expect(frame).toContain("Prologue"); // sidebar entry
-	expect(frame).toContain("Retry transient failures"); // sidebar chapter label
+	expect(frame).toContain("Retry tr"); // sidebar chapter label (single-line truncated)
 	expect(frame).toContain("Dashboards stay up during deploys now"); // prologue outcome
 	expect(frame).toContain("0/3 reviewed"); // none reviewed yet
 });

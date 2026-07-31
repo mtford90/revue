@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI pointer handlers use text renderables.
 import { createCliRenderer, type ScrollBoxRenderable } from "@opentui/core";
 import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
@@ -44,6 +45,10 @@ const APP_KEYS = new Set([
 	"x",
 	"f",
 	"a",
+	"[",
+	"]",
+	"r",
+	"?",
 ]);
 const HUNK_THEME = "catppuccin-mocha" as const;
 
@@ -96,7 +101,6 @@ function Sidebar({
 				{pages.map((page, i) => {
 					const active = i === current;
 					const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
-					const mark = done ? "✔" : active ? "▸" : " ";
 					const label =
 						page.kind === "chapter" ? `${page.chapter.order}. ${page.label}` : page.label;
 					return (
@@ -106,7 +110,8 @@ function Sidebar({
 							wrapMode="none"
 							truncate
 						>
-							{mark} {label}
+							{active ? "▸" : " "} {page.kind === "chapter" ? `[${done ? "x" : " "}] ` : ""}
+							{label}
 						</text>
 					);
 				})}
@@ -165,24 +170,30 @@ function FileList({
 	vs,
 	selected,
 	stats,
+	onToggle,
 }: {
 	chapter: Chapter;
 	vs: ViewState;
 	selected: number;
 	stats: Map<string, FileStat>;
+	onToggle: (path: string) => void;
 }) {
 	const paths = chapterFilePaths(chapter);
 	return (
 		<box flexDirection="column">
-			<text fg={theme.mauve}>Files ({paths.length})</text>
+			<text fg={theme.mauve}>Files ({paths.length}) — f toggles focused</text>
 			{paths.map((path, i) => {
 				const done = isFileReviewed(vs, chapter.id, path);
 				const active = i === selected;
 				const stat = stats.get(path);
 				const counts = stat ? `  +${stat.additions} -${stat.deletions}` : "";
 				return (
-					<text key={path} fg={active ? theme.accent : done ? theme.green : theme.dim}>
-						{active ? "▸" : " "} [{done ? "✔" : " "}] {path}
+					<text
+						key={path}
+						fg={active ? theme.accent : done ? theme.green : theme.dim}
+						onMouseDown={() => onToggle(path)}
+					>
+						{active ? "▸" : " "} [{done ? "x" : " "}] {path}
 						{counts}
 					</text>
 				);
@@ -192,16 +203,35 @@ function FileList({
 }
 
 // ── Chapter key changes (checkable) ───────────────────────────────────────────
-function KeyChanges({ chapter, vs }: { chapter: Chapter; vs: ViewState }) {
+const keyChangeId = (chapterId: string, index: number) =>
+	`chapter-key-change:${chapterId}:${index}`;
+
+function KeyChanges({
+	chapter,
+	vs,
+	selected,
+	onToggle,
+}: {
+	chapter: Chapter;
+	vs: ViewState;
+	selected: number;
+	onToggle: (index: number) => void;
+}) {
 	if (!chapter.keyChanges.length) return null;
 	return (
 		<box flexDirection="column">
-			<text fg={theme.yellow}>Key changes — needs a human call</text>
+			<text fg={theme.yellow}>Key changes — [ / ] focus · r toggle · 1–9 direct</text>
 			{chapter.keyChanges.map((kc, i) => {
 				const checked = isKeyChangeChecked(vs, chapter.id, i);
+				const active = i === selected;
 				return (
-					<text key={kc.content} fg={checked ? theme.green : theme.text}>
-						[{checked ? "✔" : " "}] {i + 1}. {kc.content}
+					<text
+						id={keyChangeId(chapter.id, i)}
+						key={kc.content}
+						fg={active ? theme.accent : checked ? theme.green : theme.text}
+						onMouseDown={() => onToggle(i)}
+					>
+						{active ? "▸" : " "} [{checked ? "x" : " "}] {i + 1}. {kc.content}
 					</text>
 				);
 			})}
@@ -219,31 +249,55 @@ function ChapterView({
 	width,
 	vs,
 	selectedFile,
+	selectedKeyChange,
 	collapsedFiles,
 	onSelectFile,
-	onToggleFile,
+	onToggleCollapse,
+	onToggleChapterReview,
+	onToggleFileReview,
+	onToggleKeyChange,
 }: {
 	chapter: Chapter;
 	diffFiles: HunkDiffFile[] | null;
 	width: number;
 	vs: ViewState;
 	selectedFile: number;
+	selectedKeyChange: number;
 	collapsedFiles: Set<string>;
 	onSelectFile: (index: number) => void;
-	onToggleFile: (path: string) => void;
+	onToggleCollapse: (path: string) => void;
+	onToggleChapterReview: () => void;
+	onToggleFileReview: (path: string) => void;
+	onToggleKeyChange: (index: number) => void;
 }) {
 	const chapterDiffFiles = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	const paths = chapterFilePaths(chapter);
 	const layout = width >= MIN_SPLIT_DIFF_WIDTH ? "split" : "stack";
 
+	const chapterReviewed = isChapterReviewed(vs, chapter.id);
+
 	return (
 		<box flexDirection="column" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
+			<text fg={chapterReviewed ? theme.green : theme.accent} onMouseDown={onToggleChapterReview}>
+				▸ [{chapterReviewed ? "x" : " "}] Chapter reviewed — space/x toggles
+			</text>
 			<text fg={theme.text}>{chapter.summary}</text>
 
-			<FileList chapter={chapter} vs={vs} selected={selectedFile} stats={stats} />
-			<KeyChanges chapter={chapter} vs={vs} />
+			<FileList
+				chapter={chapter}
+				vs={vs}
+				selected={selectedFile}
+				stats={stats}
+				onToggle={onToggleFileReview}
+			/>
+			<KeyChanges
+				chapter={chapter}
+				vs={vs}
+				selected={selectedKeyChange}
+				onToggle={onToggleKeyChange}
+			/>
 
 			{chapterDiffFiles.length ? (
 				<box flexDirection="column" width="100%">
@@ -252,6 +306,7 @@ function ChapterView({
 						const fileIndex = paths.indexOf(path);
 						const focused = fileIndex === selectedFile;
 						const collapsed = collapsedFiles.has(path);
+						const reviewed = isFileReviewed(vs, chapter.id, path);
 						return (
 							<box key={diffFile.id} flexDirection="column" width="100%">
 								{streamIndex > 0 ? (
@@ -263,18 +318,21 @@ function ChapterView({
 									height={1}
 									width="100%"
 								>
-									<text fg={focused ? theme.accent : theme.dim}>
-										{focused ? "▸" : " "}
-										{collapsed ? "▶" : "▼"}
+									<text
+										fg={focused ? theme.accent : reviewed ? theme.green : theme.dim}
+										onMouseDown={() => onToggleFileReview(path)}
+									>
+										{focused ? "▸" : " "}[{reviewed ? "x" : " "}]
 									</text>
+									<text fg={focused ? theme.accent : theme.dim}>{collapsed ? "▶" : "▼"}</text>
 									<box flexGrow={1} minWidth={0}>
 										<HunkDiffFileHeader
 											file={diffFile}
-											width={Math.max(1, width - 2)}
+											width={Math.max(1, width - 7)}
 											theme={HUNK_THEME}
 											onSelect={() => {
 												onSelectFile(fileIndex);
-												onToggleFile(path);
+												onToggleCollapse(path);
 											}}
 										/>
 									</box>
@@ -298,6 +356,33 @@ function ChapterView({
 	);
 }
 
+// ── Keyboard help ──────────────────────────────────────────────────────────
+function ShortcutHelp() {
+	return (
+		<box flexDirection="column" width="100%" flexShrink={0}>
+			<text fg={theme.accent}>Keyboard shortcuts</text>
+			<text fg={theme.mauve}>Navigation</text>
+			<text fg={theme.text}> j/k or ↑/↓ chapters</text>
+			<text fg={theme.text}> g/G first/last</text>
+			<text fg={theme.text}> a next unreviewed</text>
+			<text fg={theme.mauve}>Files</text>
+			<text fg={theme.text}> tab/shift-tab focus</text>
+			<text fg={theme.text}> enter toggle diff</text>
+			<text fg={theme.mauve}>Scrolling</text>
+			<text fg={theme.text}> PgUp/PgDn · wheel</text>
+			<text fg={theme.mauve}>Collapse</text>
+			<text fg={theme.text}> c/e all file diffs</text>
+			<text fg={theme.mauve}>Review</text>
+			<text fg={theme.text}> space/x chapter</text>
+			<text fg={theme.text}> f focused file</text>
+			<text fg={theme.text}> [/] key focus</text>
+			<text fg={theme.text}> r toggle key · 1–9 direct</text>
+			<text fg={theme.mauve}>Help/quit</text>
+			<text fg={theme.text}> ? close · q/esc quit</text>
+		</box>
+	);
+}
+
 // ── App shell ───────────────────────────────────────────────────────────────
 export function App({
 	file,
@@ -314,8 +399,11 @@ export function App({
 	const chapters = file.chapters;
 	const [current, setCurrent] = useState(0);
 	const [selectedFile, setSelectedFile] = useState(0);
+	const [selectedKeyChange, setSelectedKeyChange] = useState(0);
 	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(() => new Set());
 	const [fileFocusRequest, setFileFocusRequest] = useState(0);
+	const [keyFocusRequest, setKeyFocusRequest] = useState(0);
+	const [showHelp, setShowHelp] = useState(false);
 	const [vs, setVs] = useState(initialViewState);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
 	const { width } = useTerminalDimensions();
@@ -325,8 +413,21 @@ export function App({
 
 	useEffect(() => {
 		if (!chapter || fileFocusRequest === 0) return;
-		pageScroll.current?.scrollChildIntoView(fileHeaderId(chapter.id, selectedFile));
+		const anchorFocusedFile = () =>
+			pageScroll.current?.scrollChildIntoView(fileHeaderId(chapter.id, selectedFile));
+		anchorFocusedFile();
+		const retry = setTimeout(anchorFocusedFile, 50);
+		return () => clearTimeout(retry);
 	}, [chapter, selectedFile, fileFocusRequest]);
+
+	useEffect(() => {
+		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
+		const anchorFocusedKeyChange = () =>
+			pageScroll.current?.scrollChildIntoView(keyChangeId(chapter.id, selectedKeyChange));
+		anchorFocusedKeyChange();
+		const retry = setTimeout(anchorFocusedKeyChange, 50);
+		return () => clearTimeout(retry);
+	}, [chapter, selectedKeyChange, keyFocusRequest]);
 
 	function goto(index: number) {
 		const next = Math.max(0, Math.min(index, pages.length - 1));
@@ -334,8 +435,10 @@ export function App({
 		pageScroll.current?.scrollTo(0);
 		setCurrent(next);
 		setSelectedFile(0);
+		setSelectedKeyChange(0);
 		setCollapsedFiles(new Set());
 		setFileFocusRequest(0);
+		setKeyFocusRequest(0);
 	}
 	function gotoChapter(chapter: Chapter) {
 		const idx = pages.findIndex((p) => p.kind === "chapter" && p.chapter.id === chapter.id);
@@ -348,6 +451,9 @@ export function App({
 	function requestFileFocus() {
 		setFileFocusRequest((request) => request + 1);
 	}
+	function requestKeyFocus() {
+		setKeyFocusRequest((request) => request + 1);
+	}
 	function selectFile(index: number) {
 		if (!chapter) return;
 		const paths = chapterFilePaths(chapter);
@@ -355,6 +461,11 @@ export function App({
 			setSelectedFile(index);
 			requestFileFocus();
 		}
+	}
+	function selectKeyChange(index: number) {
+		if (!chapter || index < 0 || index >= chapter.keyChanges.length) return;
+		setSelectedKeyChange(index);
+		requestKeyFocus();
 	}
 	function toggleCollapsedFile(path: string) {
 		setCollapsedFiles((currentCollapsed) => {
@@ -364,6 +475,63 @@ export function App({
 			return next;
 		});
 		requestFileFocus();
+	}
+	function toggleChapterReview() {
+		if (!chapter) return;
+		const wasReviewed = isChapterReviewed(vs, chapter.id);
+		const next = toggleChapter(vs, chapter);
+		commit(next);
+		if (!wasReviewed) {
+			const target = nextUnreviewedChapter(chapters, next, chapter.order);
+			if (target) gotoChapter(target);
+		}
+	}
+	function toggleFileReview(path: string) {
+		if (!chapter) return;
+		const paths = chapterFilePaths(chapter);
+		const fileIndex = paths.indexOf(path);
+		if (fileIndex < 0) return;
+
+		const wasReviewed = isFileReviewed(vs, chapter.id, path);
+		const next = toggleFile(vs, chapter, path);
+		commit(next);
+
+		if (wasReviewed) {
+			setSelectedFile(fileIndex);
+			setCollapsedFiles((currentCollapsed) => {
+				const expanded = new Set(currentCollapsed);
+				expanded.delete(path);
+				return expanded;
+			});
+			requestFileFocus();
+			return;
+		}
+
+		setCollapsedFiles((currentCollapsed) => new Set(currentCollapsed).add(path));
+		if (isChapterReviewed(next, chapter.id)) {
+			const target = nextUnreviewedChapter(chapters, next, chapter.order);
+			if (target) gotoChapter(target);
+			return;
+		}
+
+		const nextUnreviewed = paths
+			.map((candidate, index) => ({ candidate, index }))
+			.filter(({ candidate }) => !isFileReviewed(next, chapter.id, candidate))
+			.sort((a, b) => {
+				const aDistance = (a.index - fileIndex + paths.length) % paths.length;
+				const bDistance = (b.index - fileIndex + paths.length) % paths.length;
+				return aDistance - bDistance;
+			})[0];
+		if (nextUnreviewed) {
+			setSelectedFile(nextUnreviewed.index);
+			requestFileFocus();
+		}
+	}
+	function toggleSelectedKeyChange(index: number) {
+		if (!chapter || index < 0 || index >= chapter.keyChanges.length) return;
+		setSelectedKeyChange(index);
+		commit(toggleKeyChange(vs, chapter, index));
+		requestKeyFocus();
 	}
 
 	useKeyboard((key) => {
@@ -375,7 +543,10 @@ export function App({
 			key.stopPropagation();
 		}
 
-		if (name === "q" || name === "escape") {
+		if (name === "?") {
+			pageScroll.current?.scrollTo(0);
+			setShowHelp((visible) => !visible);
+		} else if (name === "q" || name === "escape") {
 			process.exit(0);
 		} else if (name === "pageup" || name === "pagedown") {
 			pageScroll.current?.scrollBy(name === "pageup" ? -1 : 1, "viewport");
@@ -405,21 +576,24 @@ export function App({
 			setCollapsedFiles(new Set());
 			requestFileFocus();
 		} else if (name === "space" || name === "x") {
-			const next = toggleChapter(vs, chapter);
-			commit(next);
-			if (isChapterReviewed(next, chapter.id)) {
-				const target = nextUnreviewedChapter(chapters, next, chapter.order);
-				if (target) gotoChapter(target);
-			}
+			toggleChapterReview();
 		} else if (name === "f") {
 			const path = paths[selectedFile];
-			if (path) commit(toggleFile(vs, chapter, path));
+			if (path) toggleFileReview(path);
 		} else if (name === "a") {
 			const target = nextUnreviewedChapter(chapters, vs, chapter.order);
 			if (target) gotoChapter(target);
+		} else if (name === "[" || name === "]") {
+			const count = chapter.keyChanges.length;
+			if (count) {
+				const delta = name === "[" ? -1 : 1;
+				selectKeyChange((selectedKeyChange + delta + count) % count);
+			}
+		} else if (name === "r") {
+			toggleSelectedKeyChange(selectedKeyChange);
 		} else if (name && /^[1-9]$/.test(name)) {
 			const idx = Number(name) - 1;
-			if (idx < chapter.keyChanges.length) commit(toggleKeyChange(vs, chapter, idx));
+			if (idx < chapter.keyChanges.length) toggleSelectedKeyChange(idx);
 		}
 	});
 
@@ -449,27 +623,37 @@ export function App({
 						trackOptions: { foregroundColor: theme.surface },
 					}}
 				>
-					{page?.kind === "prologue" ? <PrologueView prologue={page.prologue} /> : null}
-					{page?.kind === "chapter" ? (
-						<ChapterView
-							chapter={page.chapter}
-							diffFiles={diffFiles}
-							width={contentWidth}
-							vs={vs}
-							selectedFile={selectedFile}
-							collapsedFiles={collapsedFiles}
-							onSelectFile={selectFile}
-							onToggleFile={toggleCollapsedFile}
-						/>
-					) : null}
+					{showHelp ? (
+						<ShortcutHelp />
+					) : (
+						<box flexDirection="column" width="100%">
+							{page?.kind === "prologue" ? <PrologueView prologue={page.prologue} /> : null}
+							{page?.kind === "chapter" ? (
+								<ChapterView
+									chapter={page.chapter}
+									diffFiles={diffFiles}
+									width={contentWidth}
+									vs={vs}
+									selectedFile={selectedFile}
+									selectedKeyChange={selectedKeyChange}
+									collapsedFiles={collapsedFiles}
+									onSelectFile={selectFile}
+									onToggleCollapse={toggleCollapsedFile}
+									onToggleChapterReview={toggleChapterReview}
+									onToggleFileReview={toggleFileReview}
+									onToggleKeyChange={toggleSelectedKeyChange}
+								/>
+							) : null}
+						</box>
+					)}
 				</scrollbox>
 			</box>
 			<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
 				<text fg={theme.dim}>
-					{`${current + 1}/${pages.length} · j/k chapter · tab/shift-tab file · enter toggle · c/e collapse/expand all`}
+					{`${current + 1}/${pages.length} · j/k chapter · tab file · f review file · space review chapter`}
 				</text>
 				<text fg={theme.dim}>
-					PgUp/PgDn or wheel scroll · f file · space chapter · 1-9 key · a next · q quit
+					PgUp/PgDn or wheel scroll · [/] + r key changes · ? help · q quit
 				</text>
 			</box>
 		</box>

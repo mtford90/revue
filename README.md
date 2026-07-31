@@ -56,12 +56,16 @@ bun run revue show examples/sample-chapters.json
 bun run revue show examples/sample-chapters.json --diff examples/sample.diff
 ```
 
-Keys: `j`/`k` (or `↑`/`↓`) move between beats · `Page Up`/`Page Down` (or the mouse wheel /
-trackpad) scroll the current beat · `tab`/`shift-tab` focus the next/previous file · `enter` toggles
-the focused file's diff · `c`/`e` collapse/expand all file diffs · `f` marks the focused file reviewed
-· `space` marks the chapter reviewed (auto-advances) · `1`–`9` check a key change · `a` jumps to
-the next unreviewed chapter · `g`/`G` first/last · `q` quits. Progress persists to
-`.revue/state.json`.
+Review controls and state are shown inline as `[ ]` / `[x]` checkboxes; `▸` identifies the active
+chapter, file, and key change. `f` toggles the focused file: reviewing collapses it and moves to the
+next unreviewed file (or chapter), while unreviewing stays put and expands it. `space`/`x` toggles the
+whole chapter and `[`/`]` focus any key change with `r` toggling it; `1`–`9` remain direct shortcuts.
+The checkboxes are also clickable in terminals with pointer support.
+
+Navigation: `j`/`k` (or `↑`/`↓`) move between beats · `Page Up`/`Page Down` (or mouse wheel /
+trackpad) scroll · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e`
+collapse/expand all diffs · `a` jumps to the next unreviewed chapter · `g`/`G` first/last · `?`
+toggles the in-app shortcut reference · `q`/`esc` quits. Progress persists to `.revue/state.json`.
 
 ## Roadmap
 

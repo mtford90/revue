@@ -57,9 +57,11 @@ bun run revue show examples/sample-chapters.json --diff examples/sample.diff
 ```
 
 Keys: `j`/`k` (or `↑`/`↓`) move between beats · `Page Up`/`Page Down` (or the mouse wheel /
-trackpad) scroll the current beat · `tab` cycle files · `f` mark file reviewed · `space` mark chapter
-reviewed (auto-advances) · `1`–`9` check a key change · `a` jump to the next unreviewed chapter ·
-`g`/`G` first/last · `q` quit. Progress persists to `.revue/state.json`.
+trackpad) scroll the current beat · `tab`/`shift-tab` focus the next/previous file · `enter` toggles
+the focused file's diff · `c`/`e` collapse/expand all file diffs · `f` marks the focused file reviewed
+· `space` marks the chapter reviewed (auto-advances) · `1`–`9` check a key change · `a` jumps to
+the next unreviewed chapter · `g`/`G` first/last · `q` quits. Progress persists to
+`.revue/state.json`.
 
 ## Roadmap
 

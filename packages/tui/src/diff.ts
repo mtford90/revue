@@ -24,11 +24,14 @@ export async function loadPatch(path: string): Promise<HunkDiffFile[]> {
 // just those hunks correctly.
 type MetadataWithHunks = FileDiffMetadata & { hunks?: Array<{ deletionStart: number }> };
 
+/** A selected diff plus the exact chapter path that selected it. */
+export type ChapterDiffFile = HunkDiffFileInput & { chapterPath: string };
+
 /**
  * The diff files for one chapter: each file the chapter references, narrowed to
  * just the hunks it cites. Files/hunks not present in the patch are skipped.
  */
-export function selectChapterFiles(chapter: Chapter, files: HunkDiffFile[]): HunkDiffFileInput[] {
+export function selectChapterFiles(chapter: Chapter, files: HunkDiffFile[]): ChapterDiffFile[] {
 	const oldStartsByPath = new Map<string, Set<number>>();
 	for (const ref of chapter.hunkRefs) {
 		const set = oldStartsByPath.get(ref.filePath) ?? new Set<number>();
@@ -36,7 +39,7 @@ export function selectChapterFiles(chapter: Chapter, files: HunkDiffFile[]): Hun
 		oldStartsByPath.set(ref.filePath, set);
 	}
 
-	const selected: HunkDiffFileInput[] = [];
+	const selected: ChapterDiffFile[] = [];
 	for (const [filePath, oldStarts] of oldStartsByPath) {
 		const file = files.find((f) => f.path === filePath || f.metadata.name === filePath);
 		if (!file) continue;
@@ -45,7 +48,11 @@ export function selectChapterFiles(chapter: Chapter, files: HunkDiffFile[]): Hun
 		const hunks = (meta.hunks ?? []).filter((h) => oldStarts.has(h.deletionStart));
 		if (hunks.length === 0) continue;
 
-		selected.push({ ...file, metadata: { ...meta, hunks } as FileDiffMetadata });
+		selected.push({
+			...file,
+			chapterPath: filePath,
+			metadata: { ...meta, hunks } as FileDiffMetadata,
+		});
 	}
 	return selected;
 }

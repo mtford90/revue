@@ -56,16 +56,26 @@ bun run revue show examples/sample-chapters.json
 bun run revue show examples/sample-chapters.json --diff examples/sample.diff
 ```
 
-Review controls and state are shown inline as `[ ]` / `[x]` checkboxes; `▸` identifies the active
-chapter, file, and key change. `f` toggles the focused file: reviewing collapses it and moves to the
-next unreviewed file (or chapter), while unreviewing stays put and expands it. `space`/`x` toggles the
-whole chapter and `[`/`]` focus any key change with `r` toggling it; `1`–`9` remain direct shortcuts.
-The checkboxes are also clickable in terminals with pointer support.
+## Development
 
-Navigation: `j`/`k` (or `↑`/`↓`) move between beats · `Page Up`/`Page Down` (or mouse wheel /
-trackpad) scroll · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e`
-collapse/expand all diffs · `a` jumps to the next unreviewed chapter · `g`/`G` first/last · `?`
-toggles the in-app shortcut reference · `q`/`esc` quits. Progress persists to `.revue/state.json`.
+Read [`AGENTS.md`](AGENTS.md) before making changes. It requires coding agents to load this README,
+the domain context, relevant architecture decisions, and the testing policy rather than relying on a
+compacted summary.
+
+Tests follow [`docs/testing.md`](docs/testing.md): protect meaningful behaviour and contracts, choose
+the narrowest realistic boundary, and do not add tests merely to increase coverage.
+
+Review controls and state are shown inline as `[ ]` / `[x]` checkboxes; `▸` identifies the active
+chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused file, and `r` toggles
+the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking chapter, file, or key-
+change content navigates without changing review state—only its checkbox toggles it.
+
+Navigation follows Vim/less conventions: `j`/`k` (or `↑`/`↓`) scroll by line · `d`/`u` or
+`Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
+scroll by page · `g`/`G` jump to the top/bottom · `]c`/`[c` move between chapters · `{`/`}` focus key
+changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e` collapse/expand
+all diffs · `a` jumps to the next unreviewed chapter · `?` toggles shortcut help · `q`/`esc` quits.
+Mouse-wheel and trackpad scrolling are supported. Progress persists to `.revue/state.json`.
 
 ## Roadmap
 

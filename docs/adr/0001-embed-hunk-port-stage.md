@@ -1,6 +1,6 @@
 # ADR 0001 — Embed hunk, port Stage, fork neither
 
-- Status: accepted
+- Status: superseded by [ADR 0002](0002-own-diff-renderer.md)
 - Date: 2026-06-17
 
 ## Context

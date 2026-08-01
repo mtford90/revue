@@ -6,13 +6,18 @@ import {
 } from "@opentui/core";
 import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
+	DiffBody,
+	type DiffFile,
+	DiffFileHeader,
+	type RangeDecoration,
+} from "@revue/diff-renderer";
+import {
 	type Chapter,
 	emptyViewState,
 	type Prologue,
 	type RevueChaptersFile,
 	type ViewState,
 } from "@revue/types";
-import { HunkDiffBody, type HunkDiffFile, HunkDiffFileHeader } from "hunkdiff/opentui";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { type FileStat, hunkIndexForLineRef, selectChapterFiles, statsByPath } from "./diff.ts";
 import { complexityColor, severityColor, theme } from "./theme.ts";
@@ -65,13 +70,10 @@ const APP_KEYS = new Set([
 	"r",
 	"?",
 ]);
-const HUNK_THEME = "catppuccin-mocha" as const;
-
 // ── Page model ──────────────────────────────────────────────────────────────
 // The reviewer pages through one "beat" at a time: an optional prologue, then
-// each chapter in order. This is the core Stage UX that hunk's file-oriented nav
-// doesn't provide, so we own it here and compose hunk's exported file header
-// and diff body primitives into collapsible sections (see ChapterView).
+// each chapter in order. This is the core Stage UX, so we own it here and
+// compose the Revue renderer's file header and body into collapsible sections.
 
 type Page =
 	| { kind: "prologue"; label: string; prologue: Prologue }
@@ -297,7 +299,7 @@ function PrologueView({ prologue }: { prologue: Prologue }) {
 	);
 }
 
-// ── Chapter file list (our own — HunkFileNav can't show a reviewed checkbox) ──
+// ── Chapter file list (review state belongs to Revue's shell) ─────────────────
 function FileList({
 	chapter,
 	vs,
@@ -356,18 +358,19 @@ const findKeyChangeTarget = ({
 	index,
 }: {
 	chapter: Chapter;
-	diffFiles: HunkDiffFile[];
+	diffFiles: DiffFile[];
 	index: number;
 }): KeyChangeTarget | null => {
-	const ref = chapter.keyChanges[index]?.lineRefs[0];
-	if (!ref) return null;
-	const fileIndex = chapterFilePaths(chapter).indexOf(ref.filePath);
-	const file = selectChapterFiles(chapter, diffFiles).find(
-		(candidate) => candidate.chapterPath === ref.filePath,
-	);
-	if (fileIndex < 0 || !file) return null;
-	const hunkIndex = hunkIndexForLineRef(file, ref);
-	return hunkIndex < 0 ? null : { fileIndex, hunkIndex };
+	const refs = chapter.keyChanges[index]?.lineRefs ?? [];
+	const selectedFiles = selectChapterFiles(chapter, diffFiles);
+	for (const ref of refs) {
+		const fileIndex = chapterFilePaths(chapter).indexOf(ref.filePath);
+		const file = selectedFiles.find((candidate) => candidate.chapterPath === ref.filePath);
+		if (fileIndex < 0 || !file) continue;
+		const hunkIndex = hunkIndexForLineRef(file, ref);
+		if (hunkIndex >= 0) return { fileIndex, hunkIndex };
+	}
+	return null;
 };
 
 function KeyChanges({
@@ -426,17 +429,19 @@ function ChapterView({
 	vs,
 	selectedFile,
 	selectedHunkIndex,
+	selectedKeyChange,
 	collapsedFiles,
 	onSelectFile,
 	onToggleCollapse,
 	onToggleFileReview,
 }: {
 	chapter: Chapter;
-	diffFiles: HunkDiffFile[] | null;
+	diffFiles: DiffFile[] | null;
 	width: number;
 	vs: ViewState;
 	selectedFile: number;
 	selectedHunkIndex: number;
+	selectedKeyChange: number;
 	collapsedFiles: Set<string>;
 	onSelectFile: (index: number) => void;
 	onToggleCollapse: (path: string) => void;
@@ -445,6 +450,14 @@ function ChapterView({
 	const chapterDiffFiles = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const paths = chapterFilePaths(chapter);
 	const layout = width >= MIN_SPLIT_DIFF_WIDTH ? "split" : "stack";
+	const focusedDecorationId = `key-change:${chapter.id}:${selectedKeyChange}`;
+	const decorations: RangeDecoration[] = (
+		chapter.keyChanges[selectedKeyChange]?.lineRefs ?? []
+	).map((ref, refIndex) => ({
+		...ref,
+		id: `${focusedDecorationId}:${refIndex}`,
+		focusId: focusedDecorationId,
+	}));
 
 	return (
 		<box flexDirection="column" gap={1}>
@@ -481,22 +494,22 @@ function ChapterView({
 										{collapsed ? "▶" : "▼"}
 									</text>
 									<box flexGrow={1} minWidth={0}>
-										<HunkDiffFileHeader
+										<DiffFileHeader
 											file={diffFile}
 											width={Math.max(1, width - 7)}
-											theme={HUNK_THEME}
 											onSelect={() => onSelectFile(fileIndex)}
 										/>
 									</box>
 								</box>
 								{collapsed ? null : (
-									<HunkDiffBody
+									<DiffBody
 										file={diffFile}
 										layout={layout}
 										width={width}
-										theme={HUNK_THEME}
 										showLineNumbers
 										selectedHunkIndex={focused ? selectedHunkIndex : -1}
+										decorations={decorations}
+										focusedDecorationId={focusedDecorationId}
 									/>
 								)}
 							</box>
@@ -542,7 +555,7 @@ export function App({
 	onQuit,
 }: {
 	file: RevueChaptersFile;
-	diffFiles?: HunkDiffFile[] | null;
+	diffFiles?: DiffFile[] | null;
 	initialViewState?: ViewState;
 	onViewStateChange?: (next: ViewState) => void;
 	onQuit?: () => void;
@@ -875,6 +888,7 @@ export function App({
 									vs={vs}
 									selectedFile={selectedFile}
 									selectedHunkIndex={selectedHunkIndex}
+									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
@@ -901,7 +915,7 @@ export function App({
 export async function runApp(
 	file: RevueChaptersFile,
 	options: {
-		diffFiles?: HunkDiffFile[] | null;
+		diffFiles?: DiffFile[] | null;
 		initialViewState?: ViewState;
 		onViewStateChange?: (next: ViewState) => void;
 	} = {},

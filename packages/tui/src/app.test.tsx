@@ -118,6 +118,12 @@ test("key change content navigates while only its checkbox toggles review", asyn
 									startLine: 50,
 									endLine: 58,
 								},
+								{
+									filePath: "src/lib/apiClient.ts",
+									side: "deletions",
+									startLine: 43,
+									endLine: 43,
+								},
 							],
 						})),
 					}
@@ -137,7 +143,10 @@ test("key change content navigates while only its checkbox toggles review", asyn
 	const keyChangeLine = lines[keyChangeY] ?? "";
 	await click(t, keyChangeLine.indexOf("Is a 100ms base"), keyChangeY);
 	expect(seen).toHaveLength(0);
-	expect(t.captureCharFrame()).toContain("▸[ ]▼ src/lib/apiClient.ts");
+	const focusedFrame = t.captureCharFrame();
+	expect(focusedFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
+	expect(focusedFrame.split("\n").find((line) => line.includes("return fetch"))).toContain("▌");
+	expect(focusedFrame.split("\n").find((line) => line.includes("attempt += 1"))).toContain("▌");
 
 	await click(t, keyChangeLine.indexOf("[ ]") + 1, keyChangeY);
 	expect(seen.at(-1)?.keyChanges).toContain("chapter-1#0");

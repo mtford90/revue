@@ -5,14 +5,16 @@ Domain language and load-bearing concepts for revue. Keep this current as the de
 ## What revue is
 
 A terminal-native tool for reviewing a git branch as a **narrated sequence of chapters** rather than
-a flat diff. It combines two existing MIT projects without forking either:
+a flat diff.
 
-- **Stage** (`ReviewStage/stage-cli`) — contributes the *chapter model* and the *agent skill* that
+- **Stage** (`ReviewStage/stage-cli`) contributes the *chapter model* and the *agent skill* that
   clusters a diff into chapters. Stage renders to a browser; we discard that part.
-- **hunk** (`modem-dev/hunk`) — contributes the *diff renderer*, embeddable as the published
-  `hunkdiff/opentui` OpenTUI component surface.
+- **Pierre** (`@pierre/diffs`) provides public patch parsing, metadata, language detection, and
+  highlighting APIs.
+- **Revue** owns the terminal renderer and chapter-navigation shell. Its renderer selectively adapts
+  a bounded set of Hunk v0.15.3 concepts under MIT, but does not depend on Hunk at runtime.
 
-revue is the seam: Stage's brain, hunk's body, glued by a chapter-navigation shell we own.
+revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 
 ## Glossary
 
@@ -44,21 +46,21 @@ revue is the seam: Stage's brain, hunk's body, glued by a chapter-navigation she
 
 ## Key decisions
 
-- **Embed hunk, port Stage, fork neither.** See `docs/adr/0001`.
-- **Bun single-toolchain.** hunk runs on Bun; Bun executes `.tsx` directly, no build step.
-- **OpenTUI pinned to `^0.1.89`** to match `hunkdiff@0.15.3`'s peer requirement — *not* the latest
-  `0.4.x`, which is a breaking API gap that would defeat embedding hunk's components.
-- **Static file, not (yet) a live session.** revue currently loads a finished chapters file. hunk also
-  supports a live agent-driven session via a loopback daemon; whether revue adopts that is open.
-- **We build the review shell ourselves — by design.** hunk publishes only stateless render
-  primitives (`hunkdiff/opentui`); its docs explicitly say to build your own review UI on them. So
-  chapter nav, file list, mark-as-reviewed and (later) comments are revue's. We use hunk only as the
-  diff *renderer*. The per-chapter file list is our own component, not `HunkFileNav`, because
-  `HunkFileNav` can't render a reviewed checkbox.
+- **Own the renderer; use public Pierre APIs.** See `docs/adr/0002` (supersedes ADR 0001).
+  `@revue/diff-renderer` owns parsing adaptation, split/stack rows, terminal presentation, exact
+  inclusive old/new decorations, and focus anchors. `@pierre/diffs` is pinned directly to 1.2.2.
+- **Bounded Hunk adaptation.** Only Hunk v0.15.3 body/row/geometry/highlighting concepts were adapted;
+  provenance and MIT terms live in `packages/diff-renderer/THIRD_PARTY_NOTICES.md`. Do not import
+  Hunk, private Pierre paths, or Hunk app/controller/comments/menu/session code.
+- **Bun single-toolchain.** Bun executes `.tsx` directly; there is no build step.
+- **OpenTUI compatibility stays on `^0.1.89`.** The renderer and TUI share compatible peer/runtime
+  versions; upgrades need visual and terminal-behaviour verification.
+- **Static file, not (yet) a live session.** revue currently loads a finished chapters file; whether
+  it adopts a live agent-driven flow is open.
+- **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
+  collapse controls, and later comments belong to Revue. The renderer owns only patch presentation.
 
 ## Open questions
 
 - Static viewer vs live session (does the agent push chapters into a running TUI)?
-- How to render a chapter whose `hunkRefs` cover a *subset* of a file's hunks — filter a
-  `HunkDiffFile` down to just those hunks before handing it to `<HunkReviewStream>`.
 - Do we reimplement Stage's `prep` or shell out to git directly from the TUI process?

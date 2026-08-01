@@ -1,5 +1,5 @@
-// A small Catppuccin-ish palette so the TUI reads cleanly on dark terminals.
-// Kept separate so we can later map onto hunk's own theme names (HUNK_DIFF_THEME_NAMES).
+// A small Catppuccin-ish palette so Revue's shell reads cleanly on dark terminals.
+// The renderer owns its matching diff-semantic palette independently.
 export const theme = {
 	accent: "#89b4fa",
 	text: "#cdd6f4",

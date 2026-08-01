@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
+import { parsePatch } from "@revue/diff-renderer";
 import type { Chapter, LineRef } from "@revue/types";
-import { createHunkDiffFilesFromPatch } from "hunkdiff/opentui";
 import { hunkIndexForLineRef, selectChapterFiles } from "./diff.ts";
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
@@ -35,7 +35,7 @@ index 5555555..0000000
 -old eleven
 `;
 
-const files = createHunkDiffFilesFromPatch(PATCH);
+const files = parsePatch(PATCH);
 
 const chapter = (hunkRefs: Chapter["hunkRefs"]): Chapter => ({
 	id: "chapter",

@@ -1,18 +1,19 @@
 {
-	"name": "@revue/tui",
+	"name": "@revue/diff-renderer",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"bin": {
-		"revue": "./src/main.tsx"
+	"exports": {
+		".": "./src/index.ts"
 	},
 	"dependencies": {
+		"@pierre/diffs": "1.2.2"
+	},
+	"peerDependencies": {
 		"@opentui/core": "^0.1.89",
 		"@opentui/react": "^0.1.89",
-		"@revue/diff-renderer": "workspace:*",
-		"@revue/types": "workspace:*",
 		"react": "^19.2.4",
-		"zod": "^4.0.0"
+		"react-dom": "^19.2.4"
 	},
 	"devDependencies": {
 		"@types/react": "^19.0.0"

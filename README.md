@@ -4,35 +4,39 @@ Narrative code review in your terminal.
 
 `revue` takes the best idea from [Stage](https://github.com/ReviewStage/stage-cli) — organising a
 branch's diff into ordered, narrated **chapters** with a high-level **prologue** — and renders it in
-a terminal UI built on [hunk](https://github.com/modem-dev/hunk), instead of a browser.
+a terminal UI with a Revue-owned renderer built on public [Pierre](https://github.com/pierrecomputer/diffs) APIs, instead of a browser.
 
 An agent (via the bundled `revue-chapters` skill) clusters the diff into chapters and writes a JSON
 file. `revue show` validates that file and opens an interactive reviewer you drive from the keyboard.
 
 > **Status: early scaffold.** The chapter model, schema, skill, the navigable TUI shell, and
-> per-chapter **diff rendering** through hunk's `<HunkReviewStream>` all run today against a
-> hand-written / agent-written chapters file (+ a unified-diff patch via `--diff`). The main piece
+> per-chapter **diff rendering** through `@revue/diff-renderer` all run today against a hand-written /
+> agent-written chapters file (+ a unified-diff patch via `--diff`). The main piece
 > still to build is `revue prep` — snapshotting git state and formatting hunks — so the patch is
 > produced automatically instead of supplied by hand. See [the roadmap](#roadmap).
 
 ## How it relates to its parents
 
-revue is the **seam** between two MIT projects — it forks neither:
+revue combines ideas from MIT projects without taking on their application shells:
 
 - **Stage is the brain.** Its real value is the *skill* (chapter-clustering + prologue rules) and the
   *chapter data model* — not its React/SQLite web UI. We port the skill and the zod schema.
-- **hunk is the renderer.** It publishes `hunkdiff/opentui` — `HunkReviewStream`, `HunkDiffView`,
-  `createHunkDiffFile`, … — as an embeddable OpenTUI component surface. We depend on it as a library.
+- **Pierre parses and highlights.** `@revue/diff-renderer` uses public `@pierre/diffs` APIs, then owns
+  the terminal split/stack rows, exact side-aware range decorations, and OpenTUI presentation.
+- **Hunk informed the renderer.** A bounded set of Hunk v0.15.3 body/row/geometry/highlighting
+  concepts was selectively adapted under MIT; Hunk is not a runtime dependency.
 
-See [`docs/adr/0001-embed-hunk-port-stage.md`](docs/adr/0001-embed-hunk-port-stage.md) for the full
-decision and the options we rejected (hard-forking hunk; chapters-as-annotations).
+See [`docs/adr/0002-own-diff-renderer.md`](docs/adr/0002-own-diff-renderer.md) for the current decision
+and [`packages/diff-renderer/THIRD_PARTY_NOTICES.md`](packages/diff-renderer/THIRD_PARTY_NOTICES.md)
+for Hunk provenance.
 
 ## Layout
 
 ```
 packages/
-  types/   zod schema for the chapters file (ported from stage-cli)
-  tui/     the OpenTUI app — `revue show`, the chapter-navigation shell
+  diff-renderer/  Revue-owned Pierre/OpenTUI patch renderer
+  types/          zod schema for the chapters file (ported from stage-cli)
+  tui/            the OpenTUI app — `revue show`, the chapter-navigation shell
 skills/
   revue-chapters/  the chapter-generating agent skill (adapted from stage-chapters)
 examples/
@@ -81,16 +85,17 @@ Mouse-wheel and trackpad scrolling are supported. Progress persists to `.revue/s
 
 - [x] Chapters/prologue zod schema (ported from Stage)
 - [x] `revue show` — load + validate a chapters file, navigable TUI shell, `--check` summary
-- [x] Render each chapter's **diff body** via hunk's `<HunkReviewStream>` (`--diff <patch>`; `hunkRefs` → filtered hunks)
+- [x] Render each chapter's **diff body** via `@revue/diff-renderer` (`--diff <patch>`; `hunkRefs` → filtered hunks; `lineRefs` → exact decorations)
 - [x] **Mark-as-reviewed** at chapter / file / key-change level, with progress + auto-advance, persisted to `.revue/state.json`
 - [x] Per-chapter **file list** with reviewed checkboxes and `+a -d` stats
 - [ ] `revue prep` — snapshot git state, format hunks with stable `(filePath, oldStart)` ids (drops the manual `--diff`)
 - [x] Scroll long diffs; choose split/stack layout by terminal width
-- [ ] Inline **comments** you can author in the TUI (hunk's comment model is unexported — build our own / fork `AgentInlineNote` / drive the session daemon)
-- [ ] Decide static-file vs live agent-driven session (hunk's session daemon)
+- [ ] Inline **comments** you can author in the TUI (build a Revue-owned model)
+- [ ] Decide static-file vs live agent-driven session
 - [ ] Mermaid prologue diagram rendering (ASCII)
 
 ## Credits
 
-Built on [hunk](https://github.com/modem-dev/hunk) (MIT) and the chapter model + skill from
-[stage-cli](https://github.com/ReviewStage/stage-cli) (MIT). Thanks to both.
+Built with [@pierre/diffs](https://github.com/pierrecomputer/diffs), selectively adapted renderer
+concepts from [hunk](https://github.com/modem-dev/hunk) (MIT), and the chapter model + skill from
+[stage-cli](https://github.com/ReviewStage/stage-cli) (MIT). Thanks to all three.

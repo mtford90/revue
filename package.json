@@ -2,7 +2,7 @@
 	"name": "revue-monorepo",
 	"version": "0.0.0",
 	"private": true,
-	"description": "Narrative code review in your terminal — Stage's chapters, rendered through hunk's TUI.",
+	"description": "Narrative code review in your terminal — Stage's chapters with a Revue-owned TUI renderer.",
 	"type": "module",
 	"workspaces": [
 		"packages/*"
@@ -11,7 +11,7 @@
 		"revue": "bun run packages/tui/src/main.tsx",
 		"check": "bun run packages/tui/src/main.tsx show --check examples/sample-chapters.json",
 		"test": "bun test",
-		"typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/tui/tsconfig.json",
+		"typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/diff-renderer/tsconfig.json && tsc --noEmit -p packages/tui/tsconfig.json",
 		"lint": "biome check ."
 	},
 	"devDependencies": {

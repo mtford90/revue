@@ -85,6 +85,23 @@ test("hunkIndexForLineRef matches inclusive old and new hunk boundaries", () => 
 	expect(hunkIndexForLineRef(file, lineRef({ startLine: 34, endLine: 34 }))).toBe(-1);
 });
 
+test("chapter selection preserves a tracked leading a directory", () => {
+	const leadingDirectoryFiles = parsePatch(`diff --git a/a/file.ts b/a/file.ts
+--- a/a/file.ts
++++ b/a/file.ts
+@@ -1 +1 @@
+-old
++new
+`);
+	const selected = selectChapterFiles(
+		chapter([{ filePath: "a/file.ts", oldStart: 1 }]),
+		leadingDirectoryFiles,
+	);
+
+	expect(selected.map((file) => file.chapterPath)).toEqual(["a/file.ts"]);
+	expect(selected[0]?.path).toBe("a/file.ts");
+});
+
 test("hunkIndexForLineRef ignores a diff side with no lines", () => {
 	const file = files.find((candidate) => candidate.path === "src/deleted.ts");
 	expect(file).toBeDefined();

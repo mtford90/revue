@@ -9,6 +9,8 @@ import {
 	DiffBody,
 	type DiffFile,
 	DiffFileHeader,
+	decorationAnchorId,
+	findFocusedDecorationAnchor,
 	type RangeDecoration,
 } from "@revue/diff-renderer";
 import {
@@ -19,7 +21,7 @@ import {
 	type ViewState,
 } from "@revue/types";
 import { type RefObject, useEffect, useRef, useState } from "react";
-import { type FileStat, hunkIndexForLineRef, selectChapterFiles, statsByPath } from "./diff.ts";
+import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import { complexityColor, severityColor, theme } from "./theme.ts";
 import {
 	chapterFilePaths,
@@ -350,7 +352,7 @@ function FileList({
 const keyChangeId = (chapterId: string, index: number) =>
 	`chapter-key-change:${chapterId}:${index}`;
 
-type KeyChangeTarget = { fileIndex: number; hunkIndex: number };
+type KeyChangeTarget = { fileIndex: number; hunkIndex: number; anchorId: string };
 
 const findKeyChangeTarget = ({
 	chapter,
@@ -363,12 +365,23 @@ const findKeyChangeTarget = ({
 }): KeyChangeTarget | null => {
 	const refs = chapter.keyChanges[index]?.lineRefs ?? [];
 	const selectedFiles = selectChapterFiles(chapter, diffFiles);
-	for (const ref of refs) {
+	for (const [refIndex, ref] of refs.entries()) {
 		const fileIndex = chapterFilePaths(chapter).indexOf(ref.filePath);
 		const file = selectedFiles.find((candidate) => candidate.chapterPath === ref.filePath);
 		if (fileIndex < 0 || !file) continue;
-		const hunkIndex = hunkIndexForLineRef(file, ref);
-		if (hunkIndex >= 0) return { fileIndex, hunkIndex };
+		const focusId = `key-change:${chapter.id}:${index}`;
+		const anchor = findFocusedDecorationAnchor(
+			file,
+			[{ ...ref, id: `${focusId}:${refIndex}`, focusId }],
+			focusId,
+		);
+		if (anchor) {
+			return {
+				fileIndex,
+				hunkIndex: anchor.hunkIndex,
+				anchorId: decorationAnchorId(anchor),
+			};
+		}
 	}
 	return null;
 };
@@ -571,6 +584,9 @@ export function App({
 	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(() => new Set());
 	const [fileFocusRequest, setFileFocusRequest] = useState(0);
 	const [keyFocusRequest, setKeyFocusRequest] = useState(0);
+	const [diffAnchorTarget, setDiffAnchorTarget] = useState<{ id: string; request: number } | null>(
+		null,
+	);
 	const [showHelp, setShowHelp] = useState(false);
 	const [vs, setVs] = useState(initialViewState);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
@@ -607,6 +623,15 @@ export function App({
 		return () => clearTimeout(retry);
 	}, [chapter, selectedKeyChange, keyFocusRequest]);
 
+	useEffect(() => {
+		if (!diffAnchorTarget) return;
+		const anchorFocusedDiffLine = () =>
+			pageScroll.current?.scrollChildIntoView(diffAnchorTarget.id);
+		anchorFocusedDiffLine();
+		const retry = setTimeout(anchorFocusedDiffLine, 50);
+		return () => clearTimeout(retry);
+	}, [diffAnchorTarget]);
+
 	function goto(index: number) {
 		const next = Math.max(0, Math.min(index, pages.length - 1));
 		if (next === current) return;
@@ -618,6 +643,7 @@ export function App({
 		setCollapsedFiles(new Set());
 		setFileFocusRequest(0);
 		setKeyFocusRequest(0);
+		setDiffAnchorTarget(null);
 	}
 	function gotoChapter(chapter: Chapter) {
 		const idx = pages.findIndex((p) => p.kind === "chapter" && p.chapter.id === chapter.id);
@@ -729,7 +755,10 @@ export function App({
 		if (!target) return;
 		setSelectedFile(target.fileIndex);
 		setSelectedHunkIndex(target.hunkIndex);
-		requestFileFocus();
+		setDiffAnchorTarget((current) => ({
+			id: target.anchorId,
+			request: (current?.request ?? 0) + 1,
+		}));
 		const path = chapterFilePaths(chapter)[target.fileIndex];
 		setCollapsedFiles((current) => new Set([...current].filter((entry) => entry !== path)));
 	}

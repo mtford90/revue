@@ -6,6 +6,7 @@ export {
 } from "./components.tsx";
 export {
 	applicableDecorations,
+	decorationAnchorId,
 	decorationsAtLine,
 	findFocusedDecorationAnchor,
 	rangeToHunkIndex,
@@ -13,6 +14,7 @@ export {
 export { highlightedLines, prepareSyntaxHighlighting } from "./highlight.ts";
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export { buildDiffRows } from "./rows.ts";
+export { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
 export type {
 	DecorationAnchor,
 	DiffCell,

@@ -1,5 +1,6 @@
 import { applicableDecorations, decorationsAtLine } from "./decorations.ts";
 import { highlightedLines } from "./highlight.ts";
+import { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
 import type {
 	DiffCell,
 	DiffFile,
@@ -11,7 +12,7 @@ import type {
 } from "./types.ts";
 
 const cleanLine = (line: string | undefined) =>
-	(line ?? "").replace(/\r?\n$/, "").replaceAll("\t", "  ");
+	sanitizeTerminalLine((line ?? "").replace(/\r?\n$/, "")).replaceAll("\t", "  ");
 
 function makeCell({
 	kind,
@@ -35,10 +36,11 @@ function makeCell({
 	const isFocused = (range: RangeDecoration) =>
 		focusedDecorationId !== undefined &&
 		(range.id === focusedDecorationId || range.focusId === focusedDecorationId);
+	const safeText = cleanLine(text);
 	return {
 		kind,
-		text: cleanLine(text),
-		spans: spans?.length ? spans : cleanLine(text) ? [{ text: cleanLine(text) }] : [],
+		text: safeText,
+		spans: spans?.length ? sanitizeTerminalSpans(spans) : safeText ? [{ text: safeText }] : [],
 		oldLineNumber,
 		newLineNumber,
 		decorations: {

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
+import { parsePatch } from "@revue/diff-renderer";
 import { RevueChaptersFileSchema, type ViewState } from "@revue/types";
 import { act } from "react";
 import sample from "../../../examples/sample-chapters.json" with { type: "json" };
@@ -150,6 +151,54 @@ test("key change content navigates while only its checkbox toggles review", asyn
 
 	await click(t, keyChangeLine.indexOf("[ ]") + 1, keyChangeY);
 	expect(seen.at(-1)?.keyChanges).toContain("chapter-1#0");
+});
+
+test("key-change focus scrolls the exact anchored diff row into view", async () => {
+	const anchoredFile = RevueChaptersFileSchema.parse({
+		generatedAt: "2026-08-01T00:00:00Z",
+		chapters: [
+			{
+				id: "anchor-chapter",
+				order: 1,
+				title: "Anchor exact rows",
+				summary: "The focused range is deep enough to require scrolling.",
+				hunkRefs: [{ filePath: "deep.ts", oldStart: 1 }],
+				keyChanges: [
+					{
+						content: "Review the exact deep line",
+						lineRefs: [
+							{
+								filePath: "deep.ts",
+								side: "additions",
+								startLine: 25,
+								endLine: 25,
+							},
+						],
+					},
+				],
+			},
+		],
+	});
+	const additions = Array.from({ length: 30 }, (_, index) => `+exact row ${index + 1}`).join("\n");
+	const [diffFile] = parsePatch(`diff --git a/deep.ts b/deep.ts
+--- a/deep.ts
++++ b/deep.ts
+@@ -1 +1,30 @@
+-old row
+${additions}
+`);
+	if (!diffFile) throw new Error("missing diff fixture");
+	const t = await testRender(<App file={anchoredFile} diffFiles={[diffFile]} />, {
+		width: 100,
+		height: 14,
+	});
+	await t.renderOnce();
+	expect(t.captureCharFrame()).not.toContain("exact row 25");
+
+	await press(t, "}");
+	const visibleLines = t.captureCharFrame().split("\n");
+	expect(visibleLines.find((line) => line.includes("exact row 25"))).toContain("▌");
+	expect(visibleLines.some((line) => line.includes("exact row 1 "))).toBe(false);
 });
 
 test("number keys check a chapter's key changes", async () => {

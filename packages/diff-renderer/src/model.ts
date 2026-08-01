@@ -1,9 +1,9 @@
 import { type FileDiffMetadata, getFiletypeFromFileName, parsePatchFiles } from "@pierre/diffs";
 import type { DiffFile, DiffFileInput, DiffStats } from "./types.ts";
 
-function normalizePath(path: string | undefined): string | undefined {
+function usablePath(path: string | undefined): string | undefined {
 	if (!path || path === "/dev/null") return undefined;
-	return path.replace(/^(?:a|b)\//, "");
+	return path;
 }
 
 export function inferLanguage(path: string): string {
@@ -22,31 +22,47 @@ export function countDiffStats(metadata: FileDiffMetadata): DiffStats {
 }
 
 export function createDiffFile(input: DiffFileInput): DiffFile {
-	const path =
-		normalizePath(input.path) ?? normalizePath(input.metadata.name) ?? input.metadata.name;
+	const path = usablePath(input.path) ?? usablePath(input.metadata.name) ?? input.metadata.name;
 	return {
 		...input,
 		metadata: {
 			...input.metadata,
-			name: normalizePath(input.metadata.name) ?? input.metadata.name,
-			prevName: normalizePath(input.metadata.prevName),
+			name: usablePath(input.metadata.name) ?? input.metadata.name,
+			prevName: usablePath(input.metadata.prevName),
 		},
 		path,
-		previousPath: normalizePath(input.previousPath) ?? normalizePath(input.metadata.prevName),
+		previousPath: usablePath(input.previousPath) ?? usablePath(input.metadata.prevName),
 		language: input.language ?? inferLanguage(path),
 		stats: input.stats ?? countDiffStats(input.metadata),
 	};
 }
 
+function patchChunks(patchText: string): string[] {
+	const starts = [...patchText.matchAll(/^diff --git /gm)].map((match) => match.index);
+	if (starts.length <= 1) return [patchText];
+	return starts.map((start, index) =>
+		patchText.slice(start, starts[index + 1] ?? patchText.length),
+	);
+}
+
+const isBinaryPatch = (patch: string) =>
+	/^(?:Binary files .* differ|GIT binary patch)\s*$/m.test(patch);
+
 /** Parse a unified patch using Pierre's public parser into Revue's stable file model. */
 export function parsePatch(patchText: string, sourceId = "patch"): DiffFile[] {
-	return parsePatchFiles(patchText.replaceAll("\r\n", "\n"), sourceId, true)
-		.flatMap((patch) => patch.files)
-		.map((metadata, index) =>
-			createDiffFile({
-				id: `${sourceId}:${index}:${normalizePath(metadata.name) ?? metadata.name}`,
-				metadata,
-				patch: patchText,
+	const normalizedPatch = patchText.replaceAll("\r\n", "\n");
+	let fileIndex = 0;
+	return patchChunks(normalizedPatch).flatMap((chunk, chunkIndex) =>
+		parsePatchFiles(chunk, `${sourceId}:${chunkIndex}`, true)
+			.flatMap((patch) => patch.files)
+			.map((metadata) => {
+				const index = fileIndex++;
+				return createDiffFile({
+					id: `${sourceId}:${index}:${metadata.name}`,
+					metadata,
+					patch: chunk,
+					isBinary: isBinaryPatch(chunk),
+				});
 			}),
-		);
+	);
 }

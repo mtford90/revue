@@ -1,6 +1,11 @@
 import type { DecorationAnchor, DiffFileInput, DiffSide, RangeDecoration } from "./types.ts";
 
-const normalizePath = (path: string) => path.replace(/^(?:a|b)\//, "");
+/** Stable OpenTUI id for the concrete row represented by a decoration anchor. */
+export function decorationAnchorId(
+	anchor: Pick<DecorationAnchor, "fileId" | "side" | "lineNumber">,
+): string {
+	return `diff-decoration:${encodeURIComponent(anchor.fileId)}:${anchor.side}:${anchor.lineNumber}`;
+}
 
 export function rangeToHunkIndex(
 	file: DiffFileInput,
@@ -18,10 +23,10 @@ export function applicableDecorations(
 	file: DiffFileInput,
 	decorations: readonly RangeDecoration[],
 ): RangeDecoration[] {
-	const path = normalizePath(file.path ?? file.metadata.name);
+	const path = file.path ?? file.metadata.name;
 	return decorations.filter(
 		(range) =>
-			normalizePath(range.filePath) === path &&
+			range.filePath === path &&
 			Number.isInteger(range.startLine) &&
 			Number.isInteger(range.endLine) &&
 			range.startLine > 0 &&
@@ -45,7 +50,7 @@ export function findFocusedDecorationAnchor(
 			decorationId: range.id,
 			focusId: range.focusId ?? range.id,
 			fileId: file.id,
-			filePath: normalizePath(file.path ?? file.metadata.name),
+			filePath: file.path ?? file.metadata.name,
 			hunkIndex,
 			side: range.side,
 			lineNumber: Math.max(range.startLine, sideStart),

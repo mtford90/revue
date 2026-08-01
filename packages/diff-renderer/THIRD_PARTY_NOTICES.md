@@ -2,19 +2,22 @@
 
 ## Hunk
 
-This package selectively adapts diff body, row-model, line geometry, and syntax-highlighting concepts
-from [Hunk](https://github.com/modem-dev/hunk) v0.15.3, commit
-`3a2ba1c4c0580f0056bf67b031fb25f2186f35a3`.
+This package selectively adapts diff body, row-model, line geometry, syntax-highlighting, and
+terminal-text sanitisation concepts from [Hunk](https://github.com/modem-dev/hunk). The renderer
+concepts use v0.15.3, commit `3a2ba1c4c0580f0056bf67b031fb25f2186f35a3`; the later terminal
+safety concept uses commit `b0839f9400977e59457f2529b505db7006df3bd2`.
 
 Upstream concepts were studied in:
 
 - `src/opentui/HunkDiffBody.tsx` and `src/opentui/model.ts`
 - `src/ui/diff/pierre.ts`, `codeColumns.ts`, `rowStyle.ts`, and `useHighlightedDiff.ts`
 - `src/ui/components/panes/DiffFileHeaderRow.tsx`
+- `src/lib/terminalText.ts` (terminal control-string and control-character removal)
 
 Local modifications replace Hunk's app/session model with Revue-owned public types; use only public
 `@pierre/diffs` APIs; add side-aware exact range decoration and focus anchors; limit rendering to
-split/stack patch rows and compact headers; and omit Hunk's app, controller, comments, notes, menu,
+split/stack patch rows and compact headers; sanitise all terminal-bound row text without preserving
+ANSI styling; and omit Hunk's app, controller, comments, notes, menu,
 CLI, loader, watch mode, session broker, review plans, and private package paths. This is a bounded
 selective adaptation, not a copy of Hunk's `renderRows.tsx` or application.
 

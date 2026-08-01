@@ -94,8 +94,8 @@ export interface ViewStateStore {
 
 /**
  * A store backed by a single JSON file holding `{ [runKey]: ViewState }`, so one repo
- * accumulates progress for many runs. Writes are synchronous so progress is durable even
- * when the TUI quits via process.exit — the file is tiny and keystrokes are infrequent.
+ * accumulates progress for many runs. Writes are synchronous because the file is tiny and
+ * keystrokes are infrequent.
  */
 export async function openFileStore(path: string, key: string): Promise<ViewStateStore> {
 	const all = await readAllRuns(path);

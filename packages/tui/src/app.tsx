@@ -389,11 +389,13 @@ export function App({
 	diffFiles = null,
 	initialViewState = emptyViewState(),
 	onViewStateChange,
+	onQuit,
 }: {
 	file: RevueChaptersFile;
 	diffFiles?: HunkDiffFile[] | null;
 	initialViewState?: ViewState;
 	onViewStateChange?: (next: ViewState) => void;
+	onQuit?: () => void;
 }) {
 	const pages = buildPages(file);
 	const chapters = file.chapters;
@@ -547,7 +549,7 @@ export function App({
 			pageScroll.current?.scrollTo(0);
 			setShowHelp((visible) => !visible);
 		} else if (name === "q" || name === "escape") {
-			process.exit(0);
+			onQuit?.();
 		} else if (name === "pageup" || name === "pagedown") {
 			pageScroll.current?.scrollBy(name === "pageup" ? -1 : 1, "viewport");
 		} else if (name === "j" || name === "down") {
@@ -670,14 +672,25 @@ export async function runApp(
 	} = {},
 ): Promise<void> {
 	const renderer = await createCliRenderer({ exitOnCtrlC: true });
-	createRoot(renderer).render(
-		<App
-			file={file}
-			diffFiles={options.diffFiles ?? null}
-			initialViewState={options.initialViewState}
-			onViewStateChange={options.onViewStateChange}
-		/>,
-	);
-	// The renderer keeps the event loop alive; quitting calls process.exit.
-	await new Promise<void>(() => {});
+	const root = createRoot(renderer);
+	let quit = () => {};
+	const quitting = new Promise<void>((resolve) => {
+		quit = resolve;
+	});
+
+	try {
+		root.render(
+			<App
+				file={file}
+				diffFiles={options.diffFiles ?? null}
+				initialViewState={options.initialViewState}
+				onViewStateChange={options.onViewStateChange}
+				onQuit={quit}
+			/>,
+		);
+		await quitting;
+	} finally {
+		root.unmount();
+		renderer.destroy();
+	}
 }

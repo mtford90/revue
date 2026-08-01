@@ -1,6 +1,24 @@
-import { expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
+import { afterEach, expect, test } from "bun:test";
+import { testRender as renderOpenTui } from "@opentui/react/test-utils";
+import { act } from "react";
 import { DiffBody, DiffFileHeader, parsePatch } from "../src/index.ts";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const activeRenderers: Awaited<ReturnType<typeof renderOpenTui>>["renderer"][] = [];
+
+const testRender = async (...args: Parameters<typeof renderOpenTui>) => {
+	const result = await renderOpenTui(...args);
+	activeRenderers.push(result.renderer);
+	return result;
+};
+
+afterEach(async () => {
+	for (const renderer of activeRenderers.splice(0)) {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		await act(async () => renderer.destroy());
+	}
+});
 
 const patch = `diff --git a/a.ts b/a.ts
 --- a/a.ts

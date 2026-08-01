@@ -6,6 +6,7 @@ import {
 	findFocusedDecorationAnchor,
 	inferLanguage,
 	parsePatch,
+	prepareSyntaxHighlighting,
 	type RangeDecoration,
 	rangeToHunkIndex,
 	sanitizeTerminalSpans,
@@ -168,6 +169,95 @@ diff --git a/safe.ts b/safe.ts
 	expect(parsed[0]?.patch).toContain("Binary files");
 	expect(parsed[0]?.patch).not.toContain("safe.ts");
 	expect(parsed[1]?.patch).not.toContain("Binary files");
+});
+
+test("plain unified patches keep file paths and binary state isolated", () => {
+	const parsed = parsePatch(`--- a/safe.ts
++++ b/safe.ts
+@@ -1 +1 @@
+-old
++new
+--- a/image.png
++++ b/image.png
+Binary files a/image.png and b/image.png differ
+`);
+
+	expect(parsed.map((file) => [file.path, file.isBinary])).toEqual([
+		["safe.ts", false],
+		["image.png", true],
+	]);
+	expect(parsed[0]?.patch).not.toContain("image.png");
+	expect(parsed[1]?.patch).not.toContain("safe.ts");
+});
+
+test("diff content resembling file headers stays inside its hunk", () => {
+	for (const prefix of ["diff --git a/flags.txt b/flags.txt\n", ""]) {
+		const [file] = parsePatch(`${prefix}--- a/flags.txt
++++ b/flags.txt
+@@ -1 +1 @@
+--- old
++++ new
+`);
+
+		expect(file?.path).toBe("flags.txt");
+		expect(file?.stats).toEqual({ additions: 1, deletions: 1 });
+		expect(file?.metadata.hunks).toHaveLength(1);
+	}
+});
+
+test("mixed patch headers retain every file boundary", () => {
+	const parsed = parsePatch(`--- a/plain.ts
++++ b/plain.ts
+@@ -1 +1 @@
+-old
++new
+diff --git a/git.ts b/git.ts
+--- a/git.ts
++++ b/git.ts
+@@ -1 +1 @@
+-before
++after
+`);
+
+	expect(parsed.map((file) => file.path)).toEqual(["plain.ts", "git.ts"]);
+	expect(parsed[0]?.patch).not.toContain("diff --git");
+	expect(parsed[1]?.patch).toStartWith("diff --git");
+});
+
+test("plain add and delete patches retain their change types", () => {
+	const parsed = parsePatch(`--- /dev/null
++++ b/new.ts
+@@ -0,0 +1 @@
++new
+--- a/old.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-old
+`);
+
+	expect(parsed.map((file) => [file.path, file.metadata.type])).toEqual([
+		["new.ts", "new"],
+		["old.ts", "deleted"],
+	]);
+});
+
+test("TypeScript patches produce syntax-coloured terminal spans", async () => {
+	const [file] = parsePatch(`diff --git a/example.ts b/example.ts
+--- a/example.ts
++++ b/example.ts
+@@ -1 +1 @@
+-const answer = 41;
++const answer: number = 42;
+`);
+	if (!file) throw new Error("missing fixture");
+	await prepareSyntaxHighlighting([file]);
+	const row = buildDiffRows(file, "stack").find(
+		(candidate) => candidate.type === "stack-line" && candidate.cell.kind === "addition",
+	);
+	if (row?.type !== "stack-line") throw new Error("missing highlighted row");
+
+	const colours = new Set(row.cell.spans.map((span) => span.fg).filter(Boolean));
+	expect(colours.size).toBeGreaterThan(1);
 });
 
 test("terminal-bound raw lines and highlighted spans contain no unsafe controls", () => {

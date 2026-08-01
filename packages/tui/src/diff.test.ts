@@ -85,6 +85,19 @@ test("hunkIndexForLineRef matches inclusive old and new hunk boundaries", () => 
 	expect(hunkIndexForLineRef(file, lineRef({ startLine: 34, endLine: 34 }))).toBe(-1);
 });
 
+test("chapter selection retains referenced files without textual hunks", () => {
+	const binaryFiles = parsePatch(`diff --git a/image.png b/image.png
+index 1111111..2222222 100644
+Binary files a/image.png and b/image.png differ
+`);
+	const selected = selectChapterFiles(
+		chapter([{ filePath: "image.png", oldStart: 0 }]),
+		binaryFiles,
+	);
+
+	expect(selected.map((file) => [file.chapterPath, file.isBinary])).toEqual([["image.png", true]]);
+});
+
 test("chapter selection preserves a tracked leading a directory", () => {
 	const leadingDirectoryFiles = parsePatch(`diff --git a/a/file.ts b/a/file.ts
 --- a/a/file.ts

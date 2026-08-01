@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
+import { afterEach, expect, test } from "bun:test";
+import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff-renderer";
 import { RevueChaptersFileSchema, type ViewState } from "@revue/types";
 import { act } from "react";
@@ -13,6 +13,20 @@ const PATCH = `${import.meta.dir}/../../../examples/sample.diff`;
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const file = RevueChaptersFileSchema.parse(sample);
+const activeRenderers: Awaited<ReturnType<typeof renderOpenTui>>["renderer"][] = [];
+
+const testRender = async (...args: Parameters<typeof renderOpenTui>) => {
+	const result = await renderOpenTui(...args);
+	activeRenderers.push(result.renderer);
+	return result;
+};
+
+afterEach(async () => {
+	for (const renderer of activeRenderers.splice(0)) {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		await act(async () => renderer.destroy());
+	}
+});
 
 async function press(t: Awaited<ReturnType<typeof testRender>>, key: string) {
 	await act(async () => {

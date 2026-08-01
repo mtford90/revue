@@ -41,7 +41,7 @@ export function selectChapterFiles(chapter: Chapter, files: DiffFile[]): Chapter
 		if (!file) continue;
 
 		const hunks = file.metadata.hunks.filter((hunk) => oldStarts.has(hunk.deletionStart));
-		if (hunks.length === 0) continue;
+		if (file.metadata.hunks.length > 0 && hunks.length === 0) continue;
 
 		selected.push({
 			...file,

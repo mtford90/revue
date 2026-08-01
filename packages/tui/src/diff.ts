@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { Chapter } from "@revue/types";
+import type { Chapter, LineRef } from "@revue/types";
 import {
 	createHunkDiffFilesFromPatch,
 	type FileDiffMetadata,
@@ -55,6 +55,16 @@ export function selectChapterFiles(chapter: Chapter, files: HunkDiffFile[]): Cha
 		});
 	}
 	return selected;
+}
+
+export function hunkIndexForLineRef(file: HunkDiffFileInput, ref: LineRef): number {
+	return file.metadata.hunks.findIndex((hunk) => {
+		const start = ref.side === "additions" ? hunk.additionStart : hunk.deletionStart;
+		const count = ref.side === "additions" ? hunk.additionCount : hunk.deletionCount;
+		if (count === 0) return false;
+		const end = start + count - 1;
+		return ref.startLine <= end && ref.endLine >= start;
+	});
 }
 
 export interface FileStat {

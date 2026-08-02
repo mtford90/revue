@@ -16,9 +16,11 @@ comment lifecycle or Hunk's comment model.
 ## Decision
 
 Revue stores comments in repository-local `.revue/comments.json`, outside prepared run directories.
-The validated, atomically replaced file is keyed by the full immutable `runId`. Every independently
-identified comment records a UUID, creation time, body, reversible open/dealt-with status, and an
-anchor containing `(filePath, oldStart, side, startLine, endLine)`.
+The repository root is located by walking upwards from the supplied run directory, with the invoking
+repository as a fallback for portable runs outside a checkout. The validated, atomically replaced
+file is keyed by the full immutable `runId`. Every independently identified comment records a UUID,
+creation time, terminal-safe body, reversible open/dealt-with status, and an anchor containing
+`(filePath, oldStart, side, startLine, endLine)`.
 
 All display, export, and agent-readable operations load a verified run and reject comment anchors
 that do not belong to exactly one of its pinned review units. Chapter association is derived from

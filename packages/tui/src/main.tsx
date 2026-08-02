@@ -206,7 +206,7 @@ async function cmdExport(args: string[]): Promise<number> {
 
 	let comments: RevueComment[];
 	try {
-		comments = loadValidatedComments(defaultCommentsPath(), run);
+		comments = loadValidatedComments(defaultCommentsPath(parsed.directory), run);
 	} catch (error) {
 		if (error instanceof CommentStoreError) {
 			process.stderr.write(`${error.message}\n`);
@@ -274,7 +274,7 @@ async function cmdComments(args: string[]): Promise<number> {
 		}
 		try {
 			const run = await loadReviewRun(directory);
-			const comments = loadValidatedComments(defaultCommentsPath(), run).filter(
+			const comments = loadValidatedComments(defaultCommentsPath(directory), run).filter(
 				(comment) => rest.includes("--all") || comment.status === "open",
 			);
 			process.stdout.write(`${JSON.stringify({ runId: run.manifest.runId, comments }, null, 2)}\n`);
@@ -305,8 +305,9 @@ async function cmdComments(args: string[]): Promise<number> {
 		}
 		try {
 			const run = await loadReviewRun(directory);
-			loadValidatedComments(defaultCommentsPath(), run);
-			const store = openCommentStore(defaultCommentsPath(), run.manifest.runId);
+			const commentsPath = defaultCommentsPath(directory);
+			loadValidatedComments(commentsPath, run);
+			const store = openCommentStore(commentsPath, run.manifest.runId);
 			const comment =
 				operation === "delete"
 					? store.delete(id)
@@ -367,7 +368,7 @@ async function cmdShow(args: string[]): Promise<number> {
 
 	let comments: RevueComment[];
 	try {
-		comments = loadValidatedComments(defaultCommentsPath(), run);
+		comments = loadValidatedComments(defaultCommentsPath(directory), run);
 	} catch (error) {
 		if (error instanceof CommentStoreError) {
 			process.stderr.write(`${error.message}\n`);
@@ -390,7 +391,7 @@ async function cmdShow(args: string[]): Promise<number> {
 		]);
 	const diffFiles = await preparePatch(run.patch);
 	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
-	const commentStore = openCommentStore(defaultCommentsPath(), run.manifest.runId);
+	const commentStore = openCommentStore(defaultCommentsPath(directory), run.manifest.runId);
 	await runApp(run.chapters, {
 		diffFiles,
 		loadSemanticDiff: (width) => generateSemanticDiff(run, width),

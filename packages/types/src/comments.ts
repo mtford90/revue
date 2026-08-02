@@ -8,6 +8,12 @@ export const COMMENT_STATUS = {
 
 const runIdSchema = z.string().regex(/^[0-9a-f]{64}$/, "Expected a run ID");
 
+const containsTerminalControl = (value: string): boolean =>
+	[...value].some((character) => {
+		const code = character.codePointAt(0) ?? 0;
+		return (code < 0x20 && code !== 0x09 && code !== 0x0a) || (code >= 0x7f && code <= 0x9f);
+	});
+
 export const commentAnchorSchema = z
 	.strictObject({
 		filePath: z.string().min(1),
@@ -25,7 +31,13 @@ export const revueCommentSchema = z.strictObject({
 	id: z.uuid(),
 	runId: runIdSchema,
 	anchor: commentAnchorSchema,
-	body: z.string().refine((body) => body.trim().length > 0, "Comment body must not be blank"),
+	body: z
+		.string()
+		.refine((body) => body.trim().length > 0, "Comment body must not be blank")
+		.refine(
+			(body) => !containsTerminalControl(body),
+			"Comment body must not contain terminal control characters",
+		),
 	status: z.enum(COMMENT_STATUS),
 	createdAt: z.iso.datetime(),
 });

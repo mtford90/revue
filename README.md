@@ -112,8 +112,9 @@ number of independent comments.
 
 Open comments use an attention marker. Dealt-with comments stay inline with a green check and dimmed
 body; pointer controls mark dealt with, reopen, or permanently delete an erroneous comment. Comments
-are stored atomically under `.revue/comments.json`, keyed by immutable `runId`, so regenerating
-chapters for the same frozen code preserves feedback without modifying the run directory.
+are stored atomically under `.revue/comments.json` at the reviewed repository root, located from the
+supplied run directory and keyed by immutable `runId`. Regenerating chapters for the same frozen code
+therefore preserves feedback without modifying the run directory.
 
 Agents can use the verified public interface after `show` exits:
 

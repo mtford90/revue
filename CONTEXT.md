@@ -92,14 +92,15 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   Show rejects missing, extra, or duplicate review units and line ranges outside their chapter’s
   pinned hunks before claiming the run is valid.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
-  collapse controls, application menus, and later comments belong to Revue. Menu actions call the
+  collapse controls, application menus, and inline comments belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
 - **Export formats verified runs, not repositories.** Markdown export calls the same public run
   loading and coverage validation path as `show`, reads persisted state under the same run key, and
   delegates to a pure formatter package with no OpenTUI dependency.
-- **Comments are mutable state keyed by immutable code.** See `docs/adr/0004`. Revue validates and
-  atomically replaces repository-local `.revue/comments.json`, keyed by full `runId`; prepared run
-  directories remain immutable. Durable anchors include review-unit `oldStart`, while the renderer
+- **Comments are mutable state keyed by immutable code.** See `docs/adr/0004`. Revue locates the
+  reviewed repository from the supplied run, validates and atomically replaces its
+  `.revue/comments.json`, keyed by full `runId`; prepared run directories remain immutable. Durable
+  anchors include review-unit `oldStart`, while the renderer
   exposes only comment-neutral gutter selection and inline attachment placement. Revue owns UUIDs,
   lifecycle, presentation, CLI operations, and chapter association.
 - **Semantic diff is a read-only external view.** The TUI invokes a compatible `difft` lazily and

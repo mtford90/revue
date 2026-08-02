@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { parsePatch } from "@revue/diff-renderer";
 import {
 	COMMENT_STATUS,
@@ -9,6 +9,7 @@ import {
 	commentStoreFileSchema,
 	emptyCommentStoreFile,
 	type RevueComment,
+	revueCommentSchema,
 } from "@revue/types";
 import { z } from "zod";
 import type { ReviewRun } from "./load.ts";
@@ -28,7 +29,17 @@ export type CommentStore = {
 	reopen(id: string): RevueComment;
 };
 
-export const defaultCommentsPath = (): string => join(process.cwd(), ".revue", "comments.json");
+const findRepositoryRoot = (directory: string): string | null => {
+	if (existsSync(join(directory, ".git"))) return directory;
+	const parent = dirname(directory);
+	return parent === directory ? null : findRepositoryRoot(parent);
+};
+
+export const defaultCommentsPath = (runDirectory = process.cwd()): string => {
+	const root =
+		findRepositoryRoot(dirname(resolve(runDirectory))) ?? findRepositoryRoot(process.cwd());
+	return join(root ?? process.cwd(), ".revue", "comments.json");
+};
 
 export const sortComments = (comments: readonly RevueComment[]): RevueComment[] =>
 	[...comments].sort(
@@ -42,14 +53,14 @@ export function createComment(
 	body: string,
 	options: NewCommentOptions = {},
 ): RevueComment {
-	return {
+	return revueCommentSchema.parse({
 		id: options.id ?? randomUUID(),
 		runId,
 		anchor,
 		body: body.replace(/\r\n?/g, "\n"),
 		status: COMMENT_STATUS.OPEN,
 		createdAt: options.createdAt ?? new Date().toISOString(),
-	};
+	});
 }
 
 export const addComment = (

@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMMENT_STATUS, type CommentAnchor, commentStoreFileSchema } from "@revue/types";
-import { openCommentStore, readCommentStoreFile } from "./comments.ts";
+import { defaultCommentsPath, openCommentStore, readCommentStoreFile } from "./comments.ts";
 
 const anchor: CommentAnchor = {
 	filePath: "src/value.ts",
@@ -17,6 +17,18 @@ const ids = [
 	"00000000-0000-4000-8000-000000000001",
 	"00000000-0000-4000-8000-000000000002",
 ] as const;
+
+test("comment paths follow the reviewed repository rather than the invoking directory", async () => {
+	const repository = await mkdtemp(join(tmpdir(), "revue-comment-root-"));
+	const runDirectory = join(repository, "nested", "review-run");
+	try {
+		await mkdir(join(repository, ".git"));
+		await mkdir(runDirectory, { recursive: true });
+		expect(defaultCommentsPath(runDirectory)).toBe(join(repository, ".revue", "comments.json"));
+	} finally {
+		await rm(repository, { recursive: true, force: true });
+	}
+});
 
 test("comment stores isolate runs and preserve duplicate anchors through lifecycle changes", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "revue-comments-"));

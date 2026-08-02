@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -34,10 +34,18 @@ const git = async (cwd: string, ...args: string[]): Promise<void> => {
 	if (exitCode !== 0) throw new Error(stderr);
 };
 
+const copySampleRun = async (root: string): Promise<string> => {
+	const directory = join(root, "sample-run");
+	await mkdir(join(root, ".git"));
+	await cp(sampleRun, directory, { recursive: true });
+	return directory;
+};
+
 test("comment CLI lists and mutates verified-run feedback with stable JSON", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-comments-cli-"));
 	try {
-		const manifest = runManifestSchema.parse(await Bun.file(join(sampleRun, "run.json")).json());
+		const reviewRun = await copySampleRun(root);
+		const manifest = runManifestSchema.parse(await Bun.file(join(reviewRun, "run.json")).json());
 		const store = openCommentStore(join(root, ".revue", "comments.json"), manifest.runId);
 		const comment = store.add(
 			{
@@ -54,46 +62,46 @@ test("comment CLI lists and mutates verified-run feedback with stable JSON", asy
 			},
 		);
 
-		const listed = await run(root, ["comments", "list", sampleRun, "--json"]);
+		const listed = await run(root, ["comments", "list", reviewRun, "--json"]);
 		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
 		expect(JSON.parse(listed.stdout)).toEqual({ runId: manifest.runId, comments: [comment] });
-		const exported = await run(root, ["export", sampleRun, "--chapter-id", "chapter-1"]);
+		const exported = await run(root, ["export", reviewRun, "--chapter-id", "chapter-1"]);
 		expect(exported).toMatchObject({ exitCode: 0, stderr: "" });
 		expect(exported.stdout).toContain(`Comment \`${comment.id}\``);
 		expect(exported.stdout).toContain("> Use a lower retry cap\n> for interactive requests.");
 
-		const dealt = await run(root, ["comments", "mark-dealt", sampleRun, comment.id]);
+		const dealt = await run(root, ["comments", "mark-dealt", reviewRun, comment.id]);
 		expect(dealt).toMatchObject({ exitCode: 0, stderr: "" });
 		expect(JSON.parse(dealt.stdout)).toMatchObject({
 			action: "mark-dealt",
 			comment: { id: comment.id, status: "dealt-with" },
 		});
-		const openOnly = await run(root, ["comments", "list", sampleRun, "--json"]);
+		const openOnly = await run(root, ["comments", "list", reviewRun, "--json"]);
 		expect(JSON.parse(openOnly.stdout).comments).toEqual([]);
-		const all = await run(root, ["comments", "list", sampleRun, "--json", "--all"]);
+		const all = await run(root, ["comments", "list", reviewRun, "--json", "--all"]);
 		expect(JSON.parse(all.stdout).comments).toHaveLength(1);
 
-		const reopened = await run(root, ["comments", "reopen", sampleRun, comment.id]);
+		const reopened = await run(root, ["comments", "reopen", reviewRun, comment.id]);
 		expect(JSON.parse(reopened.stdout).comment.status).toBe("open");
 		const missing = await run(root, [
 			"comments",
 			"delete",
-			sampleRun,
+			reviewRun,
 			"00000000-0000-4000-8000-000000000099",
 		]);
 		expect(missing).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(missing.stderr).toContain("does not exist in this run");
-		const malformed = await run(root, ["comments", "delete", sampleRun, "not-an-id"]);
+		const malformed = await run(root, ["comments", "delete", reviewRun, "not-an-id"]);
 		expect(malformed).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(malformed.stderr).toContain("Comment ID must be a UUID");
 
-		const deleted = await run(root, ["comments", "delete", sampleRun, comment.id]);
+		const deleted = await run(root, ["comments", "delete", reviewRun, comment.id]);
 		expect(JSON.parse(deleted.stdout)).toMatchObject({
 			action: "delete",
 			comment: { id: comment.id },
 		});
 		expect(
-			JSON.parse((await run(root, ["comments", "list", sampleRun, "--json", "--all"])).stdout)
+			JSON.parse((await run(root, ["comments", "list", reviewRun, "--json", "--all"])).stdout)
 				.comments,
 		).toEqual([]);
 	} finally {
@@ -104,7 +112,8 @@ test("comment CLI lists and mutates verified-run feedback with stable JSON", asy
 test("comment operations reject stale anchors against the verified pinned patch", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-comments-stale-"));
 	try {
-		const manifest = runManifestSchema.parse(await Bun.file(join(sampleRun, "run.json")).json());
+		const reviewRun = await copySampleRun(root);
+		const manifest = runManifestSchema.parse(await Bun.file(join(reviewRun, "run.json")).json());
 		openCommentStore(join(root, ".revue", "comments.json"), manifest.runId).add(
 			{
 				filePath: "src/lib/backoff.ts",
@@ -115,7 +124,7 @@ test("comment operations reject stale anchors against the verified pinned patch"
 			},
 			"Stale feedback",
 		);
-		const result = await run(root, ["comments", "list", sampleRun, "--json"]);
+		const result = await run(root, ["comments", "list", reviewRun, "--json"]);
 		expect(result).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(result.stderr).toContain("corrupt or stale anchor");
 		expect(result.stderr).toContain("outside that review unit");
@@ -127,7 +136,8 @@ test("comment operations reject stale anchors against the verified pinned patch"
 test("export selects chapters unambiguously and preserves read-only review state", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-export-cli-"));
 	try {
-		const withoutState = await run(root, ["export", sampleRun, "--chapter-id", "chapter-2"]);
+		const reviewRun = await copySampleRun(root);
+		const withoutState = await run(root, ["export", reviewRun, "--chapter-id", "chapter-2"]);
 		expect(withoutState).toMatchObject({ exitCode: 0, stderr: "" });
 		expect(withoutState.stdout).toContain(
 			"# Chapter 2: Retry transient failures in the API client",
@@ -139,9 +149,9 @@ test("export selects chapters unambiguously and preserves read-only review state
 		expect(withoutState.stdout).not.toContain("Add a reusable backoff helper");
 		expect(await Bun.file(join(root, ".revue", "state.json")).exists()).toBe(false);
 
-		const manifest = runManifestSchema.parse(await Bun.file(join(sampleRun, "run.json")).json());
+		const manifest = runManifestSchema.parse(await Bun.file(join(reviewRun, "run.json")).json());
 		const chapters = RevueChaptersFileSchema.parse(
-			await Bun.file(join(sampleRun, "chapters.json")).json(),
+			await Bun.file(join(reviewRun, "chapters.json")).json(),
 		);
 		const key = runKey(manifest.runId, chapters);
 		const statePath = join(root, ".revue", "state.json");
@@ -157,7 +167,7 @@ test("export selects chapters unambiguously and preserves read-only review state
 		const output = join(root, "chapter.md");
 		const toFile = await run(root, [
 			"export",
-			sampleRun,
+			reviewRun,
 			"--chapter-order",
 			"2",
 			"--output",
@@ -176,7 +186,7 @@ test("export selects chapters unambiguously and preserves read-only review state
 
 		const ambiguous = await run(root, [
 			"export",
-			sampleRun,
+			reviewRun,
 			"--chapter-id",
 			"chapter-2",
 			"--chapter-order",
@@ -185,7 +195,7 @@ test("export selects chapters unambiguously and preserves read-only review state
 		expect(ambiguous).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(ambiguous.stderr).toContain("choose only one of");
 
-		const missingOutput = await run(root, ["export", sampleRun, "--output", "--prologue"]);
+		const missingOutput = await run(root, ["export", reviewRun, "--output", "--prologue"]);
 		expect(missingOutput).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(missingOutput.stderr).toContain("--output requires a path");
 	} finally {

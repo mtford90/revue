@@ -1,0 +1,93 @@
+{
+	"schemaVersion": 1,
+	"scope": {
+		"mode": "committed",
+		"comparison": "merge-base",
+		"base": {
+			"ref": "main",
+			"sha": "e3898e45b47df0b8860246761c039ed70791aafe"
+		},
+		"head": {
+			"ref": "HEAD",
+			"sha": "fa379091ba0a15c58c5fe94fe6c5b87d9b86d454"
+		},
+		"mergeBaseSha": "e3898e45b47df0b8860246761c039ed70791aafe",
+		"oldEndpoint": {
+			"kind": "commit",
+			"revision": "e3898e45b47df0b8860246761c039ed70791aafe"
+		},
+		"newEndpoint": {
+			"kind": "commit",
+			"revision": "fa379091ba0a15c58c5fe94fe6c5b87d9b86d454"
+		}
+	},
+	"patchSha256": "b84110316ba1fcc2cb550ee7aac37376663e27202c01789fb1b78e4ffd5e0570",
+	"hunksSha256": "893d178f2cab8a0e7fe9e6e3498b990fc4ed19125337be004ea10a054e91cdd0",
+	"files": [
+		{
+			"path": "src/lib/apiClient.test.ts",
+			"previousPath": null,
+			"status": "added",
+			"oldBlob": null,
+			"newBlob": "95e0a6cf9dbf6451e906e86b93247a73f90e70198cb63b55fb608db5efb70918",
+			"oldMode": null,
+			"newMode": "100644",
+			"oldKind": null,
+			"newKind": "file",
+			"isBinary": false,
+			"hunks": 1,
+			"referenceStarts": [0],
+			"additions": 6,
+			"deletions": 0
+		},
+		{
+			"path": "src/lib/apiClient.ts",
+			"previousPath": null,
+			"status": "modified",
+			"oldBlob": "aa5eae4919a54b92c89a163bbee765c3757d9e63df87913bd9b8dffd6c882cde",
+			"newBlob": "d1f9fb5df7d27847f2428967b64a1dd9e17072f362b2e3d3c2a39e01eb3eca8f",
+			"oldMode": "100644",
+			"newMode": "100644",
+			"oldKind": "file",
+			"newKind": "file",
+			"isBinary": false,
+			"hunks": 1,
+			"referenceStarts": [41],
+			"additions": 9,
+			"deletions": 1
+		},
+		{
+			"path": "src/lib/backoff.ts",
+			"previousPath": null,
+			"status": "added",
+			"oldBlob": null,
+			"newBlob": "a35deef4c71d75c4da38f2e9d3958ef0765e75307d80c0bac6dbfe4156c00e00",
+			"oldMode": null,
+			"newMode": "100644",
+			"oldKind": null,
+			"newKind": "file",
+			"isBinary": false,
+			"hunks": 1,
+			"referenceStarts": [0],
+			"additions": 9,
+			"deletions": 0
+		}
+	],
+	"commits": [
+		{
+			"sha": "fa379091ba0a15c58c5fe94fe6c5b87d9b86d454",
+			"subject": "Retry transient API failures"
+		}
+	],
+	"exclusions": [],
+	"totals": {
+		"files": 3,
+		"hunks": 3,
+		"additions": 24,
+		"deletions": 1,
+		"excluded": 0,
+		"reviewUnits": 3
+	},
+	"runId": "53ccae7e5270182901bbf8a35ebc149a2b32011261f6fb6f5be6f4e7694231cf",
+	"createdAt": "2026-08-02T05:46:58.745Z"
+}

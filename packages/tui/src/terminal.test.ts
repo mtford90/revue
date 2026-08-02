@@ -8,7 +8,7 @@ const terminalModes = [1000, 1002, 1003, 1006, 1049];
 const lacksPtyTools = !Bun.which("bash") || !Bun.which("script");
 
 const scriptCommand = () => {
-	const revue = "bun run revue show examples/sample-chapters.json";
+	const revue = "bun run revue show examples/sample-run";
 	if (process.platform === "linux") {
 		return `(sleep 1; printf q) | script -q -c '${revue}' "$TRANSCRIPT" >/dev/null`;
 	}

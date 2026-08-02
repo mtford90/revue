@@ -58,8 +58,8 @@ export const PrologueSchema = z.object({
 	outcome: z.string().nullable(),
 	/** Mermaid diagram source (without code fences), or null when prose alone is clear. */
 	diagram: z.string().nullable().default(null),
-	keyChanges: z.array(PrologueKeyChangeSchema),
-	focusAreas: z.array(FocusAreaSchema),
+	keyChanges: z.array(PrologueKeyChangeSchema).min(2).max(5),
+	focusAreas: z.array(FocusAreaSchema).min(1).max(5),
 	complexity: ComplexitySchema,
 });
 export type Prologue = z.infer<typeof PrologueSchema>;

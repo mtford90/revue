@@ -78,9 +78,14 @@ export function toggleKeyChange(vs: ViewState, chapter: Chapter, index: number):
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────
-/** A stable per-run key derived from the chapter content (not the temp file path). */
-export function runKey(file: RevueChaptersFile): string {
-	return createHash("sha256").update(JSON.stringify(file.chapters)).digest("hex").slice(0, 16);
+/** Review progress belongs to one pinned code snapshot narrated one specific way. */
+export function runKey(runId: string, file: RevueChaptersFile): string {
+	return createHash("sha256")
+		.update(runId)
+		.update("\0")
+		.update(JSON.stringify(file.chapters))
+		.digest("hex")
+		.slice(0, 16);
 }
 
 export function defaultStatePath(): string {

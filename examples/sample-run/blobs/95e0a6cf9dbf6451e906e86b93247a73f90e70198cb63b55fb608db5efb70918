@@ -1,0 +1,6 @@
+import { expect, test } from "bun:test";
+import { backoff } from "./backoff.ts";
+
+test("backoff is capped", () => {
+	expect(backoff(99)).toBe(5_000);
+});

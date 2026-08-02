@@ -1,3 +1,4 @@
+export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "@revue/diff-model";
 export {
 	DiffBody,
 	type DiffBodyProps,
@@ -12,7 +13,6 @@ export {
 	rangeToHunkIndex,
 } from "./decorations.ts";
 export { highlightedLines, prepareSyntaxHighlighting } from "./highlight.ts";
-export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export { buildDiffRows } from "./rows.ts";
 export { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
 export type {

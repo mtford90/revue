@@ -1,6 +1,7 @@
 // A small Catppuccin-ish palette so Revue's shell reads cleanly on dark terminals.
 // The renderer owns its matching diff-semantic palette independently.
 export const theme = {
+	base: "#1e1e2e",
 	accent: "#89b4fa",
 	text: "#cdd6f4",
 	dim: "#6c7086",

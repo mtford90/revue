@@ -22,6 +22,7 @@ import {
 } from "@revue/types";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
 import { complexityColor, severityColor, theme } from "./theme.ts";
 import {
 	chapterFilePaths,
@@ -44,6 +45,7 @@ const MIN_CHAPTER_PANEL_TERMINAL_WIDTH = Math.ceil(
 const MIN_CONTENT_WIDTH = 20;
 const MIN_SPLIT_DIFF_WIDTH = 80;
 const APP_KEYS = new Set([
+	"f10",
 	"q",
 	"escape",
 	"pageup",
@@ -553,8 +555,8 @@ function ShortcutHelp() {
 			<text fg={theme.mauve}>Review</text>
 			<text fg={theme.text}> x chapter · f focused file</text>
 			<text fg={theme.text}> {"{/}"} focus key change · r toggle · 1–9 direct</text>
-			<text fg={theme.mauve}>Help/quit</text>
-			<text fg={theme.text}> ? close · q/esc quit</text>
+			<text fg={theme.mauve}>Menu/help/quit</text>
+			<text fg={theme.text}> F10 menu · ? close · q/esc quit</text>
 		</box>
 	);
 }
@@ -783,14 +785,66 @@ export function App({
 		gotoChapterIndex(chapterIndex + (prefix === "]" ? 1 : -1));
 		return true;
 	}
+	function toggleShortcutHelp() {
+		pageScroll.current?.scrollTo(0);
+		setShowHelp((visible) => !visible);
+	}
+	function moveChapter(delta: number) {
+		gotoChapterIndex(chapterIndex + delta);
+	}
+	function moveNextUnreviewed() {
+		if (!chapter) return;
+		const target = nextUnreviewedChapter(chapters, vs, chapter.order);
+		if (target) gotoChapter(target);
+	}
+	function collapseFiles() {
+		if (!chapter) return;
+		setCollapsedFiles(new Set(chapterFilePaths(chapter)));
+		requestFileFocus();
+	}
+	function expandFiles() {
+		if (!chapter) return;
+		setCollapsedFiles(new Set());
+		requestFileFocus();
+	}
+
+	const menus = buildAppMenus({
+		canMovePrevious: chapterIndex > 0,
+		canMoveNext: chapterIndex < chapters.length - 1,
+		canChangeFiles: Boolean(chapter),
+		canMoveNextUnreviewed:
+			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate.id)),
+		showHelp,
+		requestQuit: () => onQuit?.(),
+		movePrevious: () => moveChapter(-1),
+		moveNext: () => moveChapter(1),
+		moveNextUnreviewed,
+		collapseFiles,
+		expandFiles,
+		toggleHelp: toggleShortcutHelp,
+	});
+	const menu = useMenuController(menus);
 
 	useKeyboard((key) => {
 		const name = key.name;
 		const paths = chapter ? chapterFilePaths(chapter) : [];
 
-		if (APP_KEYS.has(name) || (name && /^[1-9]$/.test(name))) {
+		if (APP_KEYS.has(name) || menu.activeMenuId || (name && /^[1-9]$/.test(name))) {
 			key.preventDefault();
 			key.stopPropagation();
+		}
+
+		if (menu.activeMenuId) {
+			if (name === "escape" || name === "f10") menu.close();
+			else if (name === "left" || name === "right") menu.switchMenu(name === "left" ? -1 : 1);
+			else if (name === "up" || name === "down") menu.move(name === "up" ? -1 : 1);
+			else if (name === "return") menu.activate();
+			return;
+		}
+		if (name === "f10") {
+			chapterNavigationPrefix.current = null;
+			menu.open("file");
+			return;
 		}
 
 		const previousKeyChange = name === "{" || (name === "[" && key.shift);
@@ -802,8 +856,7 @@ export function App({
 		if (handleChapterChord(name)) return;
 
 		if (name === "?") {
-			pageScroll.current?.scrollTo(0);
-			setShowHelp((visible) => !visible);
+			toggleShortcutHelp();
 		} else if (name === "q" || name === "escape") {
 			onQuit?.();
 		} else if (name === "pageup" || name === "pagedown") {
@@ -834,19 +887,16 @@ export function App({
 			const path = paths[selectedFile];
 			if (path) toggleCollapsedFile(path);
 		} else if (name === "c") {
-			setCollapsedFiles(new Set(paths));
-			requestFileFocus();
+			collapseFiles();
 		} else if (name === "e") {
-			setCollapsedFiles(new Set());
-			requestFileFocus();
+			expandFiles();
 		} else if (name === "x") {
 			toggleChapterReview();
 		} else if (name === "f") {
 			const path = paths[selectedFile];
 			if (path) toggleFileReview(path);
 		} else if (name === "a") {
-			const target = nextUnreviewedChapter(chapters, vs, chapter.order);
-			if (target) gotoChapter(target);
+			moveNextUnreviewed();
 		} else if (name === "r") {
 			toggleSelectedKeyChange(selectedKeyChange);
 		} else if (name && /^[1-9]$/.test(name)) {
@@ -866,6 +916,18 @@ export function App({
 			onMouseDragEnd={finishPanelResize}
 			onMouseUp={finishPanelResize}
 		>
+			<MenuBar
+				activeMenuId={menu.activeMenuId}
+				terminalWidth={width}
+				onHover={(id) => {
+					if (menu.activeMenuId) menu.open(id);
+				}}
+				onToggle={(id) => {
+					chapterNavigationPrefix.current = null;
+					menu.toggle(id);
+				}}
+				onClose={menu.close}
+			/>
 			<box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
 				{showChapterPanel ? (
 					<ChapterPanel
@@ -928,12 +990,25 @@ export function App({
 					)}
 				</scrollbox>
 			</box>
+			{menu.activeMenuId ? (
+				<>
+					<MenuBackdrop onClose={menu.close} />
+					<MenuDropdown
+						activeMenuId={menu.activeMenuId}
+						entries={menu.activeEntries}
+						selectedIndex={menu.activeItemIndex}
+						terminalWidth={width}
+						onHover={menu.setActiveItemIndex}
+						onSelect={menu.activate}
+					/>
+				</>
+			) : null}
 			<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
 				<text fg={theme.dim}>
 					{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
 				</text>
 				<text fg={theme.dim}>
-					]c/[c chapter · tab file · f review file · x review chapter · ? help · q quit
+					F10 menu · ]c/[c chapter · tab file · f review file · x review chapter · ? help · q quit
 				</text>
 			</box>
 		</box>

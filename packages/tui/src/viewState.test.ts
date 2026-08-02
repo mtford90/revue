@@ -60,12 +60,13 @@ test("nextUnreviewedChapter skips reviewed ones and wraps", () => {
 	expect(nextUnreviewedChapter(chapters, vs, 3)?.id).toBe("c1"); // wraps past the end
 });
 
-test("runKey is stable for the same chapters and differs when they change", () => {
+test("runKey changes when either the pinned code or its narration changes", () => {
 	const base = { chapters: [chapter("c1", 1, ["a"])] };
 	const same = { chapters: [chapter("c1", 1, ["a"])] };
-	const diff = { chapters: [chapter("c1", 1, ["b"])] };
-	expect(runKey(base)).toBe(runKey(same));
-	expect(runKey(base)).not.toBe(runKey(diff));
+	const changedNarration = { chapters: [chapter("c1", 1, ["b"])] };
+	expect(runKey("run-a", base)).toBe(runKey("run-a", same));
+	expect(runKey("run-a", base)).not.toBe(runKey("run-a", changedNarration));
+	expect(runKey("run-a", base)).not.toBe(runKey("run-b", base));
 });
 
 test("file store round-trips per run key and isolates runs", async () => {

@@ -1,52 +1,109 @@
 #!/usr/bin/env bun
-import { ChaptersFileError, loadChaptersFile } from "./load.ts";
+import {
+	GitError,
+	PrepArgumentError,
+	type PreparedRun,
+	PrepError,
+	prepareRun,
+	ReviewCoverageError,
+	RunArtifactError,
+} from "@revue/prep";
+import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { formatSummary } from "./summary.ts";
 
 const HELP = `revue — narrative code review in your terminal
 
 Usage:
-  revue show <chapters.json>        render a chapters file in the interactive TUI
-  revue show --check <chapters.json>  validate a chapters file and print a summary
-  revue prep [git refs]             (planned) dump hunks for the chapter-generating skill
+  revue prep [refs] [--base <ref>] [--compare <ref>] [--ref <mode>]
+  revue show <run-directory>           open a prepared run in the interactive TUI
+  revue show <run-directory> --check   validate a prepared run and print a summary
 
-The chapters file is written by the revue-chapters skill. See examples/sample-chapters.json
-for the shape, and skills/revue-chapters/SKILL.md for how an agent produces one.
+Prep modes: committed, staged, unstaged, work. Without explicit scope, prep reviews local
+working-tree changes when present and otherwise compares HEAD with the detected main/master base.
+The revue-chapters skill reads hunks.txt and writes chapters.json inside the printed run directory.
 `;
 
+const SHOW_HELP = `usage: revue show <run-directory> [--check]`;
+const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main...feature]
+                  [--base <ref>] [--compare <ref>]
+                  [--ref committed|staged|unstaged|work]`;
+
+const prepSummary = (run: PreparedRun): string => {
+	const { manifest } = run;
+	const scope = manifest.scope;
+	return [
+		`Prepared ${scope.mode} run ${manifest.runId.slice(0, 12)}`,
+		`base  ${scope.base.ref} ${scope.base.sha}`,
+		`head  ${scope.head.ref} ${scope.head.sha}`,
+		`scope ${scope.comparison} ${scope.oldEndpoint.kind}:${scope.oldEndpoint.revision} → ${scope.newEndpoint.kind}:${scope.newEndpoint.revision}`,
+		`${manifest.totals.files} files, ${manifest.totals.reviewUnits} review units, +${manifest.totals.additions} -${manifest.totals.deletions}, ${manifest.totals.excluded} excluded`,
+	].join("\n");
+};
+
+async function cmdPrep(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${PREP_HELP}\n`);
+		return 0;
+	}
+	try {
+		const run = await prepareRun(args);
+		process.stderr.write(`${prepSummary(run)}\n`);
+		process.stdout.write(`${run.directory}\n`);
+		return 0;
+	} catch (error) {
+		if (
+			error instanceof PrepArgumentError ||
+			error instanceof PrepError ||
+			error instanceof GitError ||
+			error instanceof RunArtifactError
+		) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
+}
+
 async function cmdShow(args: string[]): Promise<number> {
-	const check = args.includes("--check");
-	const diffPath = flagValue(args, "--diff");
-	const positional = args.filter((a) => !a.startsWith("-"));
-	const path = positional[0];
-	if (!path) {
-		process.stderr.write("usage: revue show <chapters.json> [--diff <patch>] [--check]\n");
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${SHOW_HELP}\n`);
+		return 0;
+	}
+	const unknownOption = args.find((argument) => argument.startsWith("-") && argument !== "--check");
+	const positionals = args.filter((argument) => !argument.startsWith("-"));
+	const directory = positionals[0];
+	if (unknownOption || positionals.length !== 1 || !directory) {
+		process.stderr.write(
+			`${unknownOption ? `unknown show option: ${unknownOption}\n` : ""}${SHOW_HELP}\n`,
+		);
 		return 1;
 	}
 
-	let file: Awaited<ReturnType<typeof loadChaptersFile>>;
+	let run: Awaited<ReturnType<typeof loadReviewRun>>;
 	try {
-		file = await loadChaptersFile(path);
-	} catch (err) {
-		if (err instanceof ChaptersFileError) {
-			process.stderr.write(`${err.message}\n`);
+		run = await loadReviewRun(directory);
+	} catch (error) {
+		if (
+			error instanceof ChaptersFileError ||
+			error instanceof RunArtifactError ||
+			error instanceof ReviewCoverageError
+		) {
+			process.stderr.write(`${error.message}\n`);
 			return 1;
 		}
-		throw err;
+		throw error;
 	}
 
-	// Non-interactive (CI, pipes) or --check: print a summary instead of booting the TUI.
-	if (check || !process.stdout.isTTY) {
-		process.stdout.write(`${formatSummary(file)}\n`);
+	if (args.includes("--check") || !process.stdout.isTTY) {
+		process.stdout.write(`${formatSummary(run.chapters)}\n`);
 		return 0;
 	}
 
-	const { runApp } = await import("./app.tsx");
-	const diffFiles = diffPath ? await (await import("./diff.ts")).loadPatch(diffPath) : null;
-
-	const { defaultStatePath, openFileStore, runKey } = await import("./viewState.ts");
-	const store = await openFileStore(defaultStatePath(), runKey(file));
-
-	await runApp(file, {
+	const [{ runApp }, { preparePatch }, { defaultStatePath, openFileStore, runKey }] =
+		await Promise.all([import("./app.tsx"), import("./diff.ts"), import("./viewState.ts")]);
+	const diffFiles = await preparePatch(run.patch);
+	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
+	await runApp(run.chapters, {
 		diffFiles,
 		initialViewState: store.get(),
 		onViewStateChange: (next) => store.set(next),
@@ -54,41 +111,25 @@ async function cmdShow(args: string[]): Promise<number> {
 	return 0;
 }
 
-/** Read the value after a `--flag value` pair from argv, or undefined. */
-function flagValue(args: string[], flag: string): string | undefined {
-	const i = args.indexOf(flag);
-	return i >= 0 ? args[i + 1] : undefined;
-}
-
 async function main(): Promise<number> {
-	const [cmd, ...args] = process.argv.slice(2);
-	switch (cmd) {
-		case "show":
-			return cmdShow(args);
-		case "prep":
-			process.stderr.write(
-				"revue prep is not implemented yet.\n" +
-					"For now, have the revue-chapters skill write a chapters file by hand and run\n" +
-					"`revue show <file>`. See examples/sample-chapters.json.\n",
-			);
-			return 2;
-		case undefined:
-		case "-h":
-		case "--help":
-		case "help":
-			process.stdout.write(HELP);
-			return 0;
-		default:
-			process.stderr.write(`unknown command: ${cmd}\n\n${HELP}`);
-			return 1;
+	const [command, ...args] = process.argv.slice(2);
+	if (command === "show") return cmdShow(args);
+	if (command === "prep") return cmdPrep(args);
+	if (!command || command === "-h" || command === "--help" || command === "help") {
+		process.stdout.write(HELP);
+		return 0;
 	}
+	process.stderr.write(`unknown command: ${command}\n\n${HELP}`);
+	return 1;
 }
 
 main()
 	.then((code) => {
 		if (code !== 0) process.exit(code);
 	})
-	.catch((err) => {
-		process.stderr.write(`${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
+	.catch((error) => {
+		process.stderr.write(
+			`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+		);
 		process.exit(1);
 	});

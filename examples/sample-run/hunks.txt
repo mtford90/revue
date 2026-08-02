@@ -1,0 +1,40 @@
+=== COMMIT MESSAGES ===
+fa379091ba0a Retry transient API failures
+
+=== HUNKS ===
+=== File: src/lib/apiClient.test.ts (added) | filePath: "src/lib/apiClient.test.ts", oldStart: 0 ===
+=== Hunk @0: @@ -0,0 +1,6 @@ ===
+  1 |+import { expect, test } from "bun:test";
+  2 |+import { backoff } from "./backoff.ts";
+  3 |+
+  4 |+test("backoff is capped", () => {
+  5 |+	expect(backoff(99)).toBe(5_000);
+  6 |+});
+=== File: src/lib/apiClient.ts (modified) | filePath: "src/lib/apiClient.ts", oldStart: 41 ===
+=== Hunk @41: @@ -41,6 +41,14 @@ ===
+41 41 | // existing line 41
+42 42 | export class ApiClient {
+43 43 | 	async get(path: string): Promise<Response> {
+44    |-		return fetch(this.base + path);
+   44 |+		let attempt = 0;
+   45 |+		while (true) {
+   46 |+			const res = await fetch(this.base + path);
+   47 |+			if (res.status !== 503 || attempt >= MAX_RETRIES) {
+   48 |+				return res;
+   49 |+			}
+   50 |+			await sleep(backoff(attempt));
+   51 |+			attempt += 1;
+   52 |+		}
+45 53 | 	}
+46 54 | }
+=== File: src/lib/backoff.ts (added) | filePath: "src/lib/backoff.ts", oldStart: 0 ===
+=== Hunk @0: @@ -0,0 +1,9 @@ ===
+  1 |+/** Exponential backoff with a ceiling, in milliseconds. */
+  2 |+export function backoff(attempt: number): number {
+  3 |+	const base = 100;
+  4 |+	const cap = 5_000;
+  5 |+	return Math.min(cap, base * 2 ** attempt);
+  6 |+}
+  7 |+
+  8 |+/** Give up after this many retries. */
+  9 |+export const MAX_RETRIES = 4;

@@ -1,13 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff-renderer";
 import { RevueChaptersFileSchema, type ViewState } from "@revue/types";
 import { act } from "react";
-import sample from "../../../examples/sample-chapters.json" with { type: "json" };
+import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
 import { App } from "./app.tsx";
-import { loadPatch } from "./diff.ts";
+import { preparePatch } from "./diff.ts";
 
-const PATCH = `${import.meta.dir}/../../../examples/sample.diff`;
+const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
+const loadPatch = async (path: string) => preparePatch(await readFile(path, "utf8"));
 
 // React's act() needs this flag to flush state updates from mocked key presses.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -42,6 +44,18 @@ async function nextChapter(t: Awaited<ReturnType<typeof testRender>>) {
 	await press(t, "c");
 }
 
+async function arrow(
+	t: Awaited<ReturnType<typeof testRender>>,
+	direction: "up" | "down" | "left" | "right",
+) {
+	await act(async () => {
+		t.mockInput.pressArrow(direction);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+}
+
 async function click(t: Awaited<ReturnType<typeof testRender>>, x: number, y: number) {
 	await act(async () => {
 		await t.mockMouse.click(x, y);
@@ -61,6 +75,104 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("backoff helper"); // sidebar chapter label (single-line truncated)
 	expect(frame).toContain("Dashboards stay up during deploys now"); // prologue outcome
 	expect(frame).toContain("0/3 reviewed"); // none reviewed yet
+});
+
+test("the keyboard menu reuses navigation and keeps Escape from quitting", async () => {
+	let quits = 0;
+	const t = await testRender(<App file={file} onQuit={() => (quits += 1)} />, {
+		width: 110,
+		height: 32,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await press(t, "F10");
+	expect(t.captureCharFrame()).toContain("Quit");
+	await press(t, "ESCAPE");
+	expect(t.captureCharFrame()).not.toContain("  Quit");
+	expect(quits).toBe(0);
+
+	await nextChapter(t);
+	await press(t, "F10");
+	await arrow(t, "right");
+	const menuFrame = t.captureCharFrame();
+	expect(menuFrame).toContain("[x] Patch view");
+	expect(menuFrame).toContain("Semantic diff (coming next)");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).toContain("3/4");
+});
+
+test("opening a menu cancels an incomplete chapter chord", async () => {
+	const t = await testRender(<App file={file} />, {
+		width: 110,
+		height: 32,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await press(t, "]");
+	await press(t, "F10");
+	await press(t, "ESCAPE");
+	await press(t, "c");
+
+	expect(t.captureCharFrame()).toContain("1/4");
+});
+
+test("next unreviewed is unavailable when every chapter is reviewed", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			initialViewState={{
+				chapters: file.chapters.map((chapter) => chapter.id),
+				files: [],
+				keyChanges: [],
+			}}
+		/>,
+		{ width: 120, height: 44, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await nextChapter(t);
+	await nextChapter(t);
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "down");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain("▶ src/lib/apiClient.test.ts");
+});
+
+test("the mouse menu acts once and blocks the chapter beneath it", async () => {
+	const seen: ViewState[] = [];
+	const t = await testRender(<App file={file} onViewStateChange={(next) => seen.push(next)} />, {
+		width: 58,
+		height: 32,
+	});
+	await t.renderOnce();
+	await nextChapter(t);
+	const chapterFrame = t.captureCharFrame().split("\n");
+	const chapterY = chapterFrame.findIndex((line) => line.includes("Chapter 1/3"));
+	const checkboxX = chapterFrame[chapterY]?.indexOf("[ ]") ?? -1;
+
+	const bar = chapterFrame[0] ?? "";
+	await click(t, bar.indexOf("View") + 1, 0);
+	const menuLines = t.captureCharFrame().split("\n");
+	const nextLine = menuLines.find((line) => line.includes("Next chapter")) ?? "";
+	expect(nextLine).not.toContain("]c");
+
+	await click(t, checkboxX + 1, chapterY);
+	expect(t.captureCharFrame()).not.toContain("Semantic diff (coming next)");
+	expect(seen).toHaveLength(0);
+
+	const reopenedBar = t.captureCharFrame().split("\n")[0] ?? "";
+	await click(t, reopenedBar.indexOf("View") + 1, 0);
+	const helpLines = t.captureCharFrame().split("\n");
+	const helpY = helpLines.findIndex((line) => line.includes("Keyboard shortcuts"));
+	const helpX = helpLines[helpY]?.indexOf("Keyboard shortcuts") ?? -1;
+	await click(t, helpX + 1, helpY);
+	expect(t.captureCharFrame()).toContain("Scrolling");
 });
 
 test("a chapter shows its file list", async () => {
@@ -123,21 +235,21 @@ test("key change content navigates while only its checkbox toggles review", asyn
 			chapter.id === "chapter-1"
 				? {
 						...chapter,
-						hunkRefs: [...chapter.hunkRefs, { filePath: "src/lib/apiClient.ts", oldStart: 42 }],
+						hunkRefs: [...chapter.hunkRefs, { filePath: "src/lib/apiClient.ts", oldStart: 41 }],
 						keyChanges: chapter.keyChanges.map((keyChange) => ({
 							...keyChange,
 							lineRefs: [
 								{
 									filePath: "src/lib/apiClient.ts",
 									side: "additions",
-									startLine: 50,
-									endLine: 58,
+									startLine: 44,
+									endLine: 52,
 								},
 								{
 									filePath: "src/lib/apiClient.ts",
 									side: "deletions",
-									startLine: 43,
-									endLine: 43,
+									startLine: 44,
+									endLine: 44,
 								},
 							],
 						})),
@@ -169,7 +281,6 @@ test("key change content navigates while only its checkbox toggles review", asyn
 
 test("key-change focus scrolls the exact anchored diff row into view", async () => {
 	const anchoredFile = RevueChaptersFileSchema.parse({
-		generatedAt: "2026-08-01T00:00:00Z",
 		chapters: [
 			{
 				id: "anchor-chapter",

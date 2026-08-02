@@ -1,6 +1,6 @@
+import { createDiffFile } from "@revue/diff-model";
 import { useMemo } from "react";
 import { decorationAnchorId, findFocusedDecorationAnchor } from "./decorations.ts";
-import { createDiffFile } from "./model.ts";
 import { buildDiffRows } from "./rows.ts";
 import { sanitizeTerminalLine } from "./terminalText.ts";
 import type {

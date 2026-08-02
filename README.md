@@ -6,14 +6,15 @@ Narrative code review in your terminal.
 branch's diff into ordered, narrated **chapters** with a high-level **prologue** — and renders it in
 a terminal UI with a Revue-owned renderer built on public [Pierre](https://github.com/pierrecomputer/diffs) APIs, instead of a browser.
 
-An agent (via the bundled `revue-chapters` skill) clusters the diff into chapters and writes a JSON
-file. `revue show` validates that file and opens an interactive reviewer you drive from the keyboard.
+`revue prep` freezes a Git scope into an immutable local run. An agent (via the bundled
+`revue-chapters` skill) reads that run’s numbered hunks, clusters them into chapters, and writes
+`chapters.json` beside the pinned patch. `revue show` validates the complete run and opens an
+interactive reviewer you drive from the keyboard.
 
-> **Status: early scaffold.** The chapter model, schema, skill, the navigable TUI shell, and
-> per-chapter **diff rendering** through `@revue/diff-renderer` all run today against a hand-written /
-> agent-written chapters file (+ a unified-diff patch via `--diff`). The main piece
-> still to build is `revue prep` — snapshotting git state and formatting hunks — so the patch is
-> produced automatically instead of supplied by hand. See [the roadmap](#roadmap).
+> **Status: early scaffold.** Prep, the chapter model and skill, the navigable TUI shell, review
+> persistence, and per-chapter rendering through `@revue/diff-renderer` run today. Prep supports
+> committed, staged, unstaged, and working-tree scopes; comments and semantic Difftastic rendering
+> remain on the roadmap.
 
 ## How it relates to its parents
 
@@ -23,8 +24,9 @@ revue combines ideas from MIT projects without taking on their application shell
   *chapter data model* — not its React/SQLite web UI. We port the skill and the zod schema.
 - **Pierre parses and highlights.** `@revue/diff-renderer` uses public `@pierre/diffs` APIs, then owns
   the terminal split/stack rows, exact side-aware range decorations, and OpenTUI presentation.
-- **Hunk informed the renderer.** A bounded set of Hunk v0.15.3 body/row/geometry/highlighting
-  concepts was selectively adapted under MIT; Hunk is not a runtime dependency.
+- **Hunk informed bounded terminal surfaces.** Revue selectively adapts Hunk v0.15.3
+  body/row/geometry/highlighting concepts in the renderer and menu-bar/controller concepts in the
+  TUI under MIT; Hunk is not a runtime dependency.
 
 See [`docs/adr/0002-own-diff-renderer.md`](docs/adr/0002-own-diff-renderer.md) for the current decision
 and [`packages/diff-renderer/THIRD_PARTY_NOTICES.md`](packages/diff-renderer/THIRD_PARTY_NOTICES.md)
@@ -34,13 +36,15 @@ for Hunk provenance.
 
 ```
 packages/
-  diff-renderer/  Revue-owned Pierre/OpenTUI patch renderer
-  types/          zod schema for the chapters file (ported from stage-cli)
-  tui/            the OpenTUI app — `revue show`, the chapter-navigation shell
+  diff-model/     Shared Pierre patch model and stable file/hunk identities
+  diff-renderer/  Revue-owned OpenTUI presentation over the shared model
+  prep/           Git scope resolution, immutable snapshots, filtering, and hunk formatting
+  types/          zod schemas for chapters, review state, and run manifests
+  tui/            The CLI and OpenTUI chapter-navigation shell
 skills/
-  revue-chapters/  the chapter-generating agent skill (adapted from stage-chapters)
+  revue-chapters/  The chapter-generating agent skill (adapted from stage-chapters)
 examples/
-  sample-chapters.json   a valid chapters file you can run without a repo
+  sample-run/      A complete prepared run that works without a Git repository
 ```
 
 ## Quickstart
@@ -50,14 +54,17 @@ Requires [Bun](https://bun.sh) ≥ 1.3.
 ```bash
 bun install
 
-# validate the sample and print a summary (no TUI)
+# validate the complete sample run and print a summary
 bun run check
 
-# open the interactive reviewer on the sample (chapter metadata only)
-bun run revue show examples/sample-chapters.json
+# open the interactive reviewer on the same pinned run
+bun run revue show examples/sample-run
 
-# ...or with a real diff, so each chapter renders its actual code
-bun run revue show examples/sample-chapters.json --diff examples/sample.diff
+# prepare the current repository; stdout is only the new run directory
+RUN=$(bun run revue prep)
+
+# have the revue-chapters skill read "$RUN/hunks.txt" and write "$RUN/chapters.json"
+bun run revue show "$RUN"
 ```
 
 ## Development
@@ -69,6 +76,10 @@ compacted summary.
 Tests follow [`docs/testing.md`](docs/testing.md): protect meaningful behaviour and contracts, choose
 the narrowest realistic boundary, and do not add tests merely to increase coverage.
 
+The top File/View menu makes the main actions discoverable with a mouse or keyboard. Press `F10` to
+open it, use arrow keys and `Enter`, and press `Escape` or click outside to close. Patch view is the
+current checked mode; the read-only Semantic diff entry is disabled until Difftastic support lands.
+
 Review controls and state are shown inline as `[ ]` / `[x]` checkboxes; `▸` identifies the active
 chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused file, and `r` toggles
 the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking chapter, file, or key-
@@ -78,18 +89,22 @@ Navigation follows Vim/less conventions: `j`/`k` (or `↑`/`↓`) scroll by line
 `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
 scroll by page · `g`/`G` jump to the top/bottom · `]c`/`[c` move between chapters · `{`/`}` focus key
 changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e` collapse/expand
-all diffs · `a` jumps to the next unreviewed chapter · `?` toggles shortcut help · `q`/`esc` quits.
-Mouse-wheel and trackpad scrolling are supported. Progress persists to `.revue/state.json`.
+all diffs · `a` jumps to the next unreviewed chapter · `F10` opens the menu · `?` toggles shortcut
+help · `q`/`esc` quits.
+Mouse-wheel and trackpad scrolling are supported. Progress persists to `.revue/state.json`, keyed
+by both the pinned run and its chapter narration.
 
 ## Roadmap
 
 - [x] Chapters/prologue zod schema (ported from Stage)
-- [x] `revue show` — load + validate a chapters file, navigable TUI shell, `--check` summary
-- [x] Render each chapter's **diff body** via `@revue/diff-renderer` (`--diff <patch>`; `hunkRefs` → filtered hunks; `lineRefs` → exact decorations)
+- [x] `revue show` — load and validate a complete run, navigable TUI shell, `--check` summary
+- [x] Render each chapter's **diff body** via `@revue/diff-renderer` (`hunkRefs` → filtered hunks; `lineRefs` → exact decorations)
 - [x] **Mark-as-reviewed** at chapter / file / key-change level, with progress + auto-advance, persisted to `.revue/state.json`
 - [x] Per-chapter **file list** with reviewed checkboxes and `+a -d` stats
-- [ ] `revue prep` — snapshot git state, format hunks with stable `(filePath, oldStart)` ids (drops the manual `--diff`)
+- [x] `revue prep` — pin Git scope, old/new blobs, patch, exclusions, and stable `(filePath, oldStart)` review identities
 - [x] Scroll long diffs; choose split/stack layout by terminal width
+- [x] File/View application menu with pointer and keyboard operation
+- [ ] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
 - [ ] Inline **comments** you can author in the TUI (build a Revue-owned model)
 - [ ] Decide static-file vs live agent-driven session
 - [ ] Mermaid prologue diagram rendering (ASCII)

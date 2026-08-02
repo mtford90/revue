@@ -1,0 +1,9 @@
+/** Exponential backoff with a ceiling, in milliseconds. */
+export function backoff(attempt: number): number {
+	const base = 100;
+	const cap = 5_000;
+	return Math.min(cap, base * 2 ** attempt);
+}
+
+/** Give up after this many retries. */
+export const MAX_RETRIES = 4;

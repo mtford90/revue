@@ -10,11 +10,19 @@
         "typescript": "^5.7.0",
       },
     },
+    "packages/diff-model": {
+      "name": "@revue/diff-model",
+      "version": "0.0.0",
+      "dependencies": {
+        "@pierre/diffs": "1.2.2",
+      },
+    },
     "packages/diff-renderer": {
       "name": "@revue/diff-renderer",
       "version": "0.0.0",
       "dependencies": {
         "@pierre/diffs": "1.2.2",
+        "@revue/diff-model": "workspace:*",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
@@ -24,6 +32,16 @@
         "@opentui/react": "^0.1.89",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
+      },
+    },
+    "packages/prep": {
+      "name": "@revue/prep",
+      "version": "0.0.0",
+      "dependencies": {
+        "@revue/diff-model": "workspace:*",
+        "@revue/types": "workspace:*",
+        "ignore": "^7.0.5",
+        "zod": "^4.0.0",
       },
     },
     "packages/tui": {
@@ -36,6 +54,7 @@
         "@opentui/core": "^0.1.89",
         "@opentui/react": "^0.1.89",
         "@revue/diff-renderer": "workspace:*",
+        "@revue/prep": "workspace:*",
         "@revue/types": "workspace:*",
         "react": "^19.2.4",
         "zod": "^4.0.0",
@@ -149,7 +168,11 @@
 
     "@pierre/theme": ["@pierre/theme@1.0.3", "", {}, "sha512-sWHv11TMoqKxKDgTIk5VbhQjdPhs8DCcBxbjh3mRlS3YOM/OcrWoGX6MM8eBGn9cUu3M46Py0JnxsG2nJaFTuA=="],
 
+    "@revue/diff-model": ["@revue/diff-model@workspace:packages/diff-model"],
+
     "@revue/diff-renderer": ["@revue/diff-renderer@workspace:packages/diff-renderer"],
+
+    "@revue/prep": ["@revue/prep@workspace:packages/prep"],
 
     "@revue/tui": ["@revue/tui@workspace:packages/tui"],
 
@@ -254,6 +277,8 @@
     "html-void-elements": ["html-void-elements@3.0.0", "", {}, "sha512-bEqo66MRXsUGxWHV5IP0PUiAWwoEjba4VCzg0LjFJBpchPaTfyfCKTG6bc5F8ucKec3q5y6qOdGyYTSBEvhCrg=="],
 
     "ieee754": ["ieee754@1.2.1", "", {}, "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA=="],
+
+    "ignore": ["ignore@7.0.6", "", {}, "sha512-BAg6QkE8W+TuQLrrw0Ugr7HegXduRuuj8/ti2kSOc+jz1dmx8/WNcjr6XGnq5YpDWxFwwaavqD0+jIUOKelTsw=="],
 
     "image-q": ["image-q@4.0.0", "", { "dependencies": { "@types/node": "16.9.1" } }, "sha512-PfJGVgIfKQJuq3s0tTDOKtztksibuUEbJQIYT3by6wctQo+Rdlh7ef4evJ5NCdxY4CfMbvFkocEwbl4BF8RlJw=="],
 

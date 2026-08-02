@@ -1,8 +1,19 @@
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { loadPreparedRun, type PreparedRun, validateReviewCoverage } from "@revue/prep";
 import { type RevueChaptersFile, RevueChaptersFileSchema } from "@revue/types";
 import { z } from "zod";
 
 export class ChaptersFileError extends Error {}
+
+export type ReviewRun = PreparedRun & { chapters: RevueChaptersFile };
+
+export async function loadReviewRun(directory: string): Promise<ReviewRun> {
+	const prepared = await loadPreparedRun(directory);
+	const chapters = await loadChaptersFile(join(directory, "chapters.json"));
+	validateReviewCoverage(prepared, chapters);
+	return { ...prepared, chapters };
+}
 
 /** Read, JSON-parse and validate a chapters file written by the revue-chapters skill. */
 export async function loadChaptersFile(path: string): Promise<RevueChaptersFile> {

@@ -1,0 +1,47 @@
+diff --git a/src/lib/apiClient.test.ts b/src/lib/apiClient.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..db8fa235b22c801dd570011e60cbbd9744026ed9
+--- /dev/null
++++ b/src/lib/apiClient.test.ts
+@@ -0,0 +1,6 @@
++import { expect, test } from "bun:test";
++import { backoff } from "./backoff.ts";
++
++test("backoff is capped", () => {
++	expect(backoff(99)).toBe(5_000);
++});
+diff --git a/src/lib/apiClient.ts b/src/lib/apiClient.ts
+index b1ae9a31cc4f333bb2e5425bc10ecaa6c03c5d1c..a918b66ebe585172c21520835d05a5ba2f0427c0 100644
+--- a/src/lib/apiClient.ts
++++ b/src/lib/apiClient.ts
+@@ -41,6 +41,14 @@
+ // existing line 41
+ export class ApiClient {
+ 	async get(path: string): Promise<Response> {
+-		return fetch(this.base + path);
++		let attempt = 0;
++		while (true) {
++			const res = await fetch(this.base + path);
++			if (res.status !== 503 || attempt >= MAX_RETRIES) {
++				return res;
++			}
++			await sleep(backoff(attempt));
++			attempt += 1;
++		}
+ 	}
+ }
+diff --git a/src/lib/backoff.ts b/src/lib/backoff.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..62a641e57c4664b949af035f73bba5379fdd014a
+--- /dev/null
++++ b/src/lib/backoff.ts
+@@ -0,0 +1,9 @@
++/** Exponential backoff with a ceiling, in milliseconds. */
++export function backoff(attempt: number): number {
++	const base = 100;
++	const cap = 5_000;
++	return Math.min(cap, base * 2 ** attempt);
++}
++
++/** Give up after this many retries. */
++export const MAX_RETRIES = 4;

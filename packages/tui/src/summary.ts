@@ -1,14 +1,11 @@
 import type { RevueChaptersFile } from "@revue/types";
 
-/**
- * Plain-text render of a chapters file. Used by `revue show --check` and as the fallback
- * when stdout is not a TTY (CI, pipes), where booting an interactive TUI makes no sense.
- */
+/** Plain-text summary after a complete run has passed validation. */
 export function formatSummary(file: RevueChaptersFile): string {
 	const lines: string[] = [];
 	const { prologue, chapters } = file;
 
-	lines.push("revue — chapters file is valid ✓");
+	lines.push("revue — run is valid ✓");
 	lines.push("");
 
 	if (prologue) {

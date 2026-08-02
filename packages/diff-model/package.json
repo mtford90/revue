@@ -1,0 +1,12 @@
+{
+	"name": "@revue/diff-model",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@pierre/diffs": "1.2.2"
+	}
+}

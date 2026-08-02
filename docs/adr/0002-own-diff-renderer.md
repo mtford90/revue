@@ -19,12 +19,13 @@ host concern.
 
 Revue owns `@revue/diff-renderer` and removes the `hunkdiff` runtime dependency.
 
-The package:
+The renderer and its shared model:
 
-1. pins `@pierre/diffs` 1.2.2 directly and uses only its public package exports;
-2. owns a small file model, patch adapter, split/stack row model, OpenTUI body/header components,
+1. pin `@pierre/diffs` 1.2.2 directly and use only its public package exports;
+2. own a small file model, patch adapter, split/stack row model, OpenTUI body/header components,
    exact inclusive side-aware range decorations, stable focus identity/anchors, and `.env*`
-   language fallback;
+   language fallback; the pure model/parser later moved to `@revue/diff-model` so prep and rendering
+   share identities (ADR 0003);
 3. selectively adapts only Hunk v0.15.3 body, row, geometry, and highlighting concepts, with the
    upstream version, commit, source concepts, local modifications, and MIT licence recorded in
    `packages/diff-renderer/THIRD_PARTY_NOTICES.md`; and

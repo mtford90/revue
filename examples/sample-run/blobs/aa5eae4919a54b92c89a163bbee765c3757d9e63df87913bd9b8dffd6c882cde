@@ -1,0 +1,46 @@
+// existing line 1
+// existing line 2
+// existing line 3
+// existing line 4
+// existing line 5
+// existing line 6
+// existing line 7
+// existing line 8
+// existing line 9
+// existing line 10
+// existing line 11
+// existing line 12
+// existing line 13
+// existing line 14
+// existing line 15
+// existing line 16
+// existing line 17
+// existing line 18
+// existing line 19
+// existing line 20
+// existing line 21
+// existing line 22
+// existing line 23
+// existing line 24
+// existing line 25
+// existing line 26
+// existing line 27
+// existing line 28
+// existing line 29
+// existing line 30
+// existing line 31
+// existing line 32
+// existing line 33
+// existing line 34
+// existing line 35
+// existing line 36
+// existing line 37
+// existing line 38
+// existing line 39
+// existing line 40
+// existing line 41
+export class ApiClient {
+	async get(path: string): Promise<Response> {
+		return fetch(this.base + path);
+	}
+}

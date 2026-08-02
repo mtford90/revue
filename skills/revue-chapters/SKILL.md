@@ -6,43 +6,55 @@ user-invocable: true
 
 # revue-chapters
 
-Generates a revue chapter run for the current local git branch and opens it in a terminal UI
-(built on [hunk](https://github.com/modem-dev/hunk)). The agent clusters the diff into narrative
-**chapters** and a **prologue**, writes them to a JSON file, and hands that file to `revue show`.
+Generates a Revue chapter run for local Git changes and opens it in the terminal UI. `revue prep`
+freezes the review scope; the agent reads its numbered hunks, clusters them into narrative
+**chapters** and a **prologue**, writes `chapters.json` into the run, and hands that same run to
+`revue show`.
 
 This skill is adapted from ReviewStage/stage-cli's `stage-chapters` skill (MIT). The clustering,
-narration, and prologue rules are the same — only the final display step differs: revue renders in
-the terminal instead of a browser.
-
-> **Status — early scaffold.** `revue prep` (the git-diff/hunk-formatting step) is not built yet.
-> Until it lands, generate the diff yourself (`git diff` against the merge-base), build the chapters
-> file by hand following the schema below, and run `revue show <file>`. The schema and the
-> clustering/narration/prologue rules below are stable and match what `prep` will eventually feed you.
+narration, and prologue rules remain the same. Revue differs by preserving one immutable patch and
+its old/new snapshots instead of recomputing Git state during display.
 
 ## Prerequisites
 
 1. **The current directory is a git repo.** Run `git rev-parse --is-inside-work-tree`. If it does
    not print `true`, stop.
-2. **`revue` is runnable.** From the revue repo: `bun run packages/tui/src/main.tsx show --help`.
+2. **`revue` is runnable.** From the Revue repo: `bun run revue --help`.
 
-## Step 1 — Get the diff
-
-Until `revue prep` exists, compute the diff yourself:
+## Step 1 — Prepare the run
 
 ```bash
-BASE=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main)
-git --no-pager diff "$BASE"...HEAD        # committed branch work
-# ...or, when there are uncommitted changes you want reviewed:
-git --no-pager diff "$BASE"               # working tree vs merge-base
-git --no-pager log --oneline "$BASE"..HEAD  # commit messages, for prologue context
+RUN=$(revue prep)
 ```
 
-Each hunk you reference needs a stable `(filePath, oldStart)` identity. `oldStart` is the
-pre-image start line from the hunk's `@@ -<oldStart>,<n> +<newStart>,<m> @@` header (`0` for a
-newly-added file). The two line-number columns in a unified diff are the **old** line (used for
-`side: "deletions"`) and the **new** line (used for `side: "additions"`).
+Prep prints only the run directory to stdout and reports its resolved refs, full SHAs, endpoint
+kinds, totals, and exclusions on stderr. It auto-selects local work when present and committed branch
+changes otherwise. Explicit forms are available when the user requests a scope:
 
-## Step 2 — Cluster + narrate
+```bash
+RUN=$(revue prep main)
+RUN=$(revue prep main feature)
+RUN=$(revue prep main..feature)       # direct endpoints
+RUN=$(revue prep main...feature)      # merge base to feature
+RUN=$(revue prep --ref staged)
+RUN=$(revue prep --ref unstaged)
+RUN=$(revue prep --ref work)
+```
+
+If prep exits non-zero, relay its error and stop. Do not edit `run.json`, `diff.patch`, `hunks.txt`,
+or `blobs/`; they are one immutable input.
+
+## Step 2 — Read the prepared hunks
+
+Read `$RUN/hunks.txt` completely (chunk large files with offset/limit). It contains commit messages
+followed by file/hunk sections. Every section gives the exact `(filePath, oldStart)` reference and
+two source-number columns. The left column is the old line for `side: "deletions"`; the right column
+is the new line for `side: "additions"`. A blank column means that line does not exist on that side.
+
+Files with no textual hunk receive a metadata review unit with `oldStart: 0`; include it exactly like
+a textual hunk. Use only references printed in `hunks.txt`.
+
+## Step 3 — Cluster + narrate
 
 Produce a `chapters` array. Each chapter groups related hunks into one coherent story beat,
 narrates it for a reviewer unfamiliar with this code, and flags judgment calls that need a human.
@@ -66,7 +78,7 @@ them in ascending `oldStart` order.
 
 ### Coverage rule
 
-Every hunk in the diff must appear in **exactly one** chapter — no omissions, no duplicates.
+Every review unit in `hunks.txt` must appear in **exactly one** chapter — no omissions, no duplicates.
 
 ### Narration rules
 
@@ -88,7 +100,7 @@ items. Each key change has `lineRefs`: one tight range per spot the question dep
 Good: "Should `retryCount` reset when the user switches orgs?"
 Bad: "Check that the auth logic is correct." (verifiable by reading the code)
 
-## Step 3 — Generate the prologue
+## Step 4 — Generate the prologue
 
 A high-level overview of the whole change, shown before the reviewer dives into chapters.
 
@@ -107,13 +119,12 @@ A high-level overview of the whole change, shown before the reviewer dives into 
 
 Talk like a coworker, not a changelog. No "this change introduces/implements/adds".
 
-## Step 4 — Write the chapters file
+## Step 5 — Write the chapters file
 
-Write the JSON via a heredoc to a temp path:
+Write the JSON to `$RUN/chapters.json` via a heredoc:
 
 ```bash
-OUT=$(mktemp "${TMPDIR:-/tmp}/revue-chapters.XXXXXX")
-cat > "$OUT" << 'EOF'
+cat > "$RUN/chapters.json" << 'EOF'
 {
   "chapters": [
     {
@@ -131,23 +142,24 @@ cat > "$OUT" << 'EOF'
         }
       ]
     }
-  ],
-  "prologue": { "motivation": null, "outcome": null, "diagram": null, "keyChanges": [], "focusAreas": [], "complexity": { "level": "low", "reasoning": "" } }
+  ]
 }
 EOF
 ```
 
 Field constraints: `order` is a positive 1-indexed integer; `hunkRefs[].oldStart` is a non-negative
-integer; every `keyChanges[].lineRefs` has ≥ 1 entry with positive `startLine ≤ endLine`; `prologue`
-is optional (omit the whole object if not desired). See `examples/sample-chapters.json` for a full,
-valid example, and `packages/types/src/` for the authoritative zod schema.
+integer copied from `hunks.txt`; every `keyChanges[].lineRefs` has ≥ 1 entry with positive
+`startLine ≤ endLine`; `prologue` is optional, so the minimal skeleton omits it. When included, obey
+Step 4’s key-change and focus-area cardinalities. See `examples/sample-run/chapters.json` for a full
+valid example and `packages/types/src/` for the authoritative zod schema.
 
-## Step 5 — Display
+## Step 6 — Display
 
 ```bash
-revue show "$OUT"
+revue show "$RUN"
 ```
 
-`revue show` validates the file against the schema and opens the interactive terminal UI. Navigate
-with `j`/`k` (or `↑`/`↓`), `g`/`G` for first/last, `q` to quit. Run with `--check` (or pipe stdout)
-to validate and print a plain-text summary without launching the UI.
+`revue show` verifies the run hashes, validates `chapters.json`, requires every prepared review unit
+exactly once, checks key-change ranges against their chapter hunks, and opens the pinned patch without
+touching Git. Run `revue show "$RUN" --check` to validate and print a plain-text summary without
+launching the UI.

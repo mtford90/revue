@@ -1,31 +1,7 @@
-import type { FileDiffMetadata } from "@pierre/diffs";
+export type { DiffFile, DiffFileInput, DiffStats } from "@revue/diff-model";
 
 export type DiffLayout = "split" | "stack";
 export type DiffSide = "additions" | "deletions";
-
-export interface DiffStats {
-	additions: number;
-	deletions: number;
-}
-
-export interface DiffFileInput {
-	id: string;
-	metadata: FileDiffMetadata;
-	language?: string;
-	path?: string;
-	previousPath?: string;
-	patch?: string;
-	stats?: DiffStats;
-	isBinary?: boolean;
-	isTooLarge?: boolean;
-	statsTruncated?: boolean;
-}
-
-export interface DiffFile extends Omit<DiffFileInput, "stats" | "path" | "language"> {
-	path: string;
-	language: string;
-	stats: DiffStats;
-}
 
 /** A 1-based, inclusive, side-aware range to decorate. */
 export interface RangeDecoration {

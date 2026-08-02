@@ -14,7 +14,7 @@ export type DiffSide = (typeof DIFF_SIDE)[keyof typeof DIFF_SIDE];
 /**
  * Anchors a single diff hunk by its file and pre-image start line. `(filePath, oldStart)`
  * is the stable identity the prep step prints in each hunk header; the agent copies these
- * verbatim rather than inventing them. `oldStart` is 0 for newly-added files.
+ * verbatim rather than inventing them. `oldStart` is 0 for new files and metadata-only units.
  */
 export const hunkReferenceSchema = z.strictObject({
 	filePath: z.string().min(1),

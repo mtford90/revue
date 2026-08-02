@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import {
 	type DiffFile,
 	type DiffFileInput,
@@ -12,9 +11,8 @@ import type { Chapter, LineRef } from "@revue/types";
 // `(filePath, oldStart)`; Pierre parses a unified diff into files whose
 // `metadata.hunks[].deletionStart` is that `oldStart`.
 
-/** Parse and prepare a unified diff (e.g. `git diff` output) for terminal rendering. */
-export async function loadPatch(path: string): Promise<DiffFile[]> {
-	const text = await readFile(path, "utf8");
+/** Parse and prepare a pinned run patch for terminal rendering. */
+export async function preparePatch(text: string): Promise<DiffFile[]> {
 	const files = parsePatch(text);
 	await prepareSyntaxHighlighting(files);
 	return files;

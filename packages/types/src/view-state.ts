@@ -13,6 +13,14 @@ export const ViewStateSchema = z.object({
 });
 export type ViewState = z.infer<typeof ViewStateSchema>;
 
+/** Stable persisted identity for one file reviewed within a chapter. */
+export const viewStateFileId = (chapterId: string, filePath: string): string =>
+	`${chapterId}::${filePath}`;
+
+/** Stable persisted identity for one key-change question within a chapter. */
+export const viewStateKeyChangeId = (chapterId: string, index: number): string =>
+	`${chapterId}#${index}`;
+
 export function emptyViewState(): ViewState {
 	return { chapters: [], files: [], keyChanges: [] };
 }

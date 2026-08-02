@@ -1,0 +1,12 @@
+{
+	"name": "@revue/markdown-export",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@revue/types": "workspace:*"
+	}
+}

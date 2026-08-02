@@ -9,7 +9,8 @@ a terminal UI with a Revue-owned renderer built on public [Pierre](https://githu
 `revue prep` freezes a Git scope into an immutable local run. An agent (via the bundled
 `revue-chapters` skill) reads that run’s numbered hunks, clusters them into chapters, and writes
 `chapters.json` beside the pinned patch. `revue show` validates the complete run and opens an
-interactive reviewer you drive from the keyboard.
+interactive reviewer you drive from the keyboard. `revue export` validates that same pinned run and
+renders its narrative and review progress as deterministic Markdown.
 
 > **Status: early scaffold.** Prep, the chapter model and skill, the navigable TUI shell, review
 > persistence, and per-chapter rendering through `@revue/diff-renderer` run today. Prep supports
@@ -38,9 +39,10 @@ for Hunk provenance.
 packages/
   diff-model/     Shared Pierre patch model and stable file/hunk identities
   diff-renderer/  Revue-owned OpenTUI presentation over the shared model
-  prep/           Git scope resolution, immutable snapshots, filtering, and hunk formatting
-  types/          zod schemas for chapters, review state, and run manifests
-  tui/            The CLI and OpenTUI chapter-navigation shell
+  prep/            Git scope resolution, immutable snapshots, filtering, and hunk formatting
+  markdown-export/ Pure deterministic Markdown formatting with no OpenTUI dependency
+  types/           zod schemas for chapters, review state, and run manifests
+  tui/             The CLI and OpenTUI chapter-navigation shell
 skills/
   revue-chapters/  The chapter-generating agent skill (adapted from stage-chapters)
 examples/
@@ -69,6 +71,34 @@ RUN=$(bun run revue prep --ignore '*.generated.ts' --ignore 'fixtures/**' --show
 # have the revue-chapters skill read "$RUN/hunks.txt" and write "$RUN/chapters.json"
 bun run revue show "$RUN"
 ```
+
+## Markdown export
+
+`revue export` consumes only a complete run directory and uses the same integrity and chapter-
+coverage validation as `show`. A full review in chapter order is the default:
+
+```bash
+bun run revue export examples/sample-run > review.md
+```
+
+Select one portable slice explicitly by stable chapter identity, numeric chapter order, or the
+prologue:
+
+```bash
+bun run revue export examples/sample-run --chapter-id chapter-2
+bun run revue export examples/sample-run --chapter-order 2
+bun run revue export examples/sample-run --prologue
+```
+
+Use `--output <path>` to write the Markdown directly. With no `--output`, stdout contains only the
+Markdown; errors and the output-file confirmation go to stderr. Export reads review progress for the
+pinned run from the same `.revue/state.json` used by `show` and never writes review state. When that
+local state is absent, all chapter, file, and review-question checkboxes are deterministically
+unchecked.
+
+The document includes the prologue overview, key changes, focus areas and optional Mermaid diagram;
+ordered chapter titles and summaries; pinned file paths, statuses and whole-file line counts; review
+questions and line anchors; and chapter/file/question review state. It does not recompute Git state.
 
 ## Development
 
@@ -136,6 +166,7 @@ by both the pinned run and its chapter narration.
 - [x] `revue prep` — pin Git scope, old/new blobs, patch, exclusions, and stable `(filePath, oldStart)` review identities
 - [x] Scroll long diffs; choose split/stack layout by terminal width
 - [x] File/View application menu with pointer and keyboard operation
+- [x] Deterministic **Markdown export** for the full review, prologue, or one chapter
 - [ ] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
 - [ ] Inline **comments** you can author in the TUI (build a Revue-owned model)
 - [ ] Decide static-file vs live agent-driven session

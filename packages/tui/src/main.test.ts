@@ -2,9 +2,16 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { runManifestSchema } from "@revue/types";
+import {
+	RevueChaptersFileSchema,
+	runManifestSchema,
+	viewStateFileId,
+	viewStateKeyChangeId,
+} from "@revue/types";
+import { runKey } from "./viewState.ts";
 
 const mainPath = resolve(import.meta.dir, "main.tsx");
+const sampleRun = resolve(import.meta.dir, "../../../examples/sample-run");
 
 const run = async (cwd: string, args: string[]) => {
 	const child = Bun.spawn(["bun", mainPath, ...args], {
@@ -25,6 +32,71 @@ const git = async (cwd: string, ...args: string[]): Promise<void> => {
 	const [stderr, exitCode] = await Promise.all([new Response(child.stderr).text(), child.exited]);
 	if (exitCode !== 0) throw new Error(stderr);
 };
+
+test("export selects chapters unambiguously and preserves read-only review state", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-export-cli-"));
+	try {
+		const withoutState = await run(root, ["export", sampleRun, "--chapter-id", "chapter-2"]);
+		expect(withoutState).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(withoutState.stdout).toContain(
+			"# Chapter 2: Retry transient failures in the API client",
+		);
+		expect(withoutState.stdout).toContain("- [ ] Chapter reviewed");
+		expect(withoutState.stdout).toContain(
+			"- [ ] `src/lib/apiClient.ts` — status: modified; file total: +9 / -1",
+		);
+		expect(withoutState.stdout).not.toContain("Add a reusable backoff helper");
+		expect(await Bun.file(join(root, ".revue", "state.json")).exists()).toBe(false);
+
+		const manifest = runManifestSchema.parse(await Bun.file(join(sampleRun, "run.json")).json());
+		const chapters = RevueChaptersFileSchema.parse(
+			await Bun.file(join(sampleRun, "chapters.json")).json(),
+		);
+		const key = runKey(manifest.runId, chapters);
+		const statePath = join(root, ".revue", "state.json");
+		const stateContents = `${JSON.stringify({
+			[key]: {
+				chapters: ["chapter-2"],
+				files: [viewStateFileId("chapter-2", "src/lib/apiClient.ts")],
+				keyChanges: [viewStateKeyChangeId("chapter-2", 0)],
+			},
+		})}\n`;
+		await mkdir(join(root, ".revue"));
+		await writeFile(statePath, stateContents);
+		const output = join(root, "chapter.md");
+		const toFile = await run(root, [
+			"export",
+			sampleRun,
+			"--chapter-order",
+			"2",
+			"--output",
+			output,
+		]);
+		expect(toFile).toMatchObject({
+			exitCode: 0,
+			stdout: "",
+			stderr: `Wrote Markdown export to ${output}\n`,
+		});
+		const markdown = await Bun.file(output).text();
+		expect(markdown).toContain("- [x] Chapter reviewed");
+		expect(markdown).toContain("- [x] `src/lib/apiClient.ts`");
+		expect(markdown).toContain("1. [x] Should retries be capped per-request");
+		expect(await Bun.file(statePath).text()).toBe(stateContents);
+
+		const ambiguous = await run(root, [
+			"export",
+			sampleRun,
+			"--chapter-id",
+			"chapter-2",
+			"--chapter-order",
+			"2",
+		]);
+		expect(ambiguous).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(ambiguous.stderr).toContain("choose only one of");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
 
 test("prep composes persistent and session ignore controls without mutating the file", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-cli-ignore-"));
@@ -137,6 +209,10 @@ test("prep prints only the run path and show validates that same run", async () 
 		const mismatched = await run(root, ["show", runDirectory, "--check"]);
 		expect(mismatched).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(mismatched.stderr).toContain("does not cover the prepared run");
+
+		const mismatchedExport = await run(root, ["export", runDirectory]);
+		expect(mismatchedExport).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(mismatchedExport.stderr).toContain("does not cover the prepared run");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

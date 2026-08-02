@@ -54,6 +54,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   and emits numbered hunks. Persistent rules run before session rules; both rename paths are tested,
   and every effective input and omission reason is pinned in the run. Local modes detect
   index/worktree races and fail rather than produce a mixed snapshot.
+- **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
+  chapters, pinned file metadata, review questions, and optional local review progress. Full review
+  is the default; prologue and one chapter by stable id/order are explicit selections. It never
+  recomputes Git state or writes view state.
 
 ## Key decisions
 
@@ -78,6 +82,9 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and later comments belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
+- **Export formats verified runs, not repositories.** Markdown export calls the same public run
+  loading and coverage validation path as `show`, reads persisted state under the same run key, and
+  delegates to a pure formatter package with no OpenTUI dependency.
 
 ## Open questions
 

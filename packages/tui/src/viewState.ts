@@ -8,11 +8,9 @@ import {
 	type RevueChaptersFile,
 	type ViewState,
 	ViewStateSchema,
+	viewStateFileId,
+	viewStateKeyChangeId,
 } from "@revue/types";
-
-// ── Ids ─────────────────────────────────────────────────────────────────────
-const fileId = (chapterId: string, filePath: string) => `${chapterId}::${filePath}`;
-const keyChangeId = (chapterId: string, index: number) => `${chapterId}#${index}`;
 
 /** Distinct file paths a chapter touches, in first-seen order. */
 export function chapterFilePaths(chapter: Chapter): string[] {
@@ -24,10 +22,10 @@ export const isChapterReviewed = (vs: ViewState, chapterId: string) =>
 	vs.chapters.includes(chapterId);
 
 export const isFileReviewed = (vs: ViewState, chapterId: string, filePath: string) =>
-	vs.files.includes(fileId(chapterId, filePath));
+	vs.files.includes(viewStateFileId(chapterId, filePath));
 
 export const isKeyChangeChecked = (vs: ViewState, chapterId: string, index: number) =>
-	vs.keyChanges.includes(keyChangeId(chapterId, index));
+	vs.keyChanges.includes(viewStateKeyChangeId(chapterId, index));
 
 export function reviewedChapterCount(vs: ViewState, chapters: Chapter[]): number {
 	return chapters.filter((c) => isChapterReviewed(vs, c.id)).length;
@@ -52,7 +50,7 @@ function toggleMember(arr: string[], value: string): string[] {
 /** Toggle a whole chapter. Marking it reviewed marks all its files too (and vice-versa). */
 export function toggleChapter(vs: ViewState, chapter: Chapter): ViewState {
 	const willReview = !isChapterReviewed(vs, chapter.id);
-	const ids = chapterFilePaths(chapter).map((p) => fileId(chapter.id, p));
+	const ids = chapterFilePaths(chapter).map((p) => viewStateFileId(chapter.id, p));
 	return {
 		...vs,
 		chapters: toggleMember(vs.chapters, chapter.id),
@@ -64,8 +62,10 @@ export function toggleChapter(vs: ViewState, chapter: Chapter): ViewState {
 
 /** Toggle one file within a chapter; a chapter auto-(un)marks when all/not-all its files are reviewed. */
 export function toggleFile(vs: ViewState, chapter: Chapter, filePath: string): ViewState {
-	const files = toggleMember(vs.files, fileId(chapter.id, filePath));
-	const allReviewed = chapterFilePaths(chapter).every((p) => files.includes(fileId(chapter.id, p)));
+	const files = toggleMember(vs.files, viewStateFileId(chapter.id, filePath));
+	const allReviewed = chapterFilePaths(chapter).every((p) =>
+		files.includes(viewStateFileId(chapter.id, p)),
+	);
 	let chapters = vs.chapters;
 	if (allReviewed && !chapters.includes(chapter.id)) chapters = [...chapters, chapter.id];
 	if (!allReviewed && chapters.includes(chapter.id))
@@ -74,7 +74,10 @@ export function toggleFile(vs: ViewState, chapter: Chapter, filePath: string): V
 }
 
 export function toggleKeyChange(vs: ViewState, chapter: Chapter, index: number): ViewState {
-	return { ...vs, keyChanges: toggleMember(vs.keyChanges, keyChangeId(chapter.id, index)) };
+	return {
+		...vs,
+		keyChanges: toggleMember(vs.keyChanges, viewStateKeyChangeId(chapter.id, index)),
+	};
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────
@@ -102,6 +105,11 @@ export interface ViewStateStore {
  * accumulates progress for many runs. Writes are synchronous because the file is tiny and
  * keystrokes are infrequent.
  */
+export async function loadViewState(path: string, key: string): Promise<ViewState> {
+	const all = await readAllRuns(path);
+	return all[key] ? ViewStateSchema.parse(all[key]) : emptyViewState();
+}
+
 export async function openFileStore(path: string, key: string): Promise<ViewStateStore> {
 	const all = await readAllRuns(path);
 	let current = all[key] ? ViewStateSchema.parse(all[key]) : emptyViewState();

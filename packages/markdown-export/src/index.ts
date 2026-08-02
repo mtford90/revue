@@ -9,12 +9,11 @@ import {
 	viewStateKeyChangeId,
 } from "@revue/types";
 
-/** The verified, pinned data needed to produce a Markdown review. */
-export interface MarkdownReview {
+export type MarkdownReview = {
 	runId: string;
 	files: RunFile[];
 	chapters: RevueChaptersFile;
-}
+};
 
 export type MarkdownExportSelection =
 	| { kind: "full" }
@@ -22,10 +21,10 @@ export type MarkdownExportSelection =
 	| { kind: "chapter-id"; id: string }
 	| { kind: "chapter-order"; order: number };
 
-export interface MarkdownExportOptions {
+export type MarkdownExportOptions = {
 	selection?: MarkdownExportSelection;
 	viewState?: ViewState;
-}
+};
 
 export class MarkdownExportError extends Error {}
 

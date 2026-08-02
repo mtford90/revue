@@ -23,9 +23,9 @@ if [ "$1" = "--help" ]; then
   exit 0
 fi
 if [ -n "$REVUE_TEST_DIFFT_LOG" ]; then
-  printf '%s\\t%s\\t%s\\n' "$4" "$5" "$8" >> "$REVUE_TEST_DIFFT_LOG"
+  printf '%s\\t%s\\t%s\\n' "$5" "$6" "$9" >> "$REVUE_TEST_DIFFT_LOG"
 fi
-printf '\\033[31msemantic output for %s\\033[0m\\n' "$4"
+printf '\\033[31msemantic output for %s\\033[0m\\n' "$5"
 `,
 	);
 	await chmod(executable, 0o755);
@@ -68,6 +68,40 @@ test("semantic diff invokes Difftastic with only pinned run blobs", async () => 
 	} finally {
 		if (previousLog === undefined) delete process.env.REVUE_TEST_DIFFT_LOG;
 		else process.env.REVUE_TEST_DIFFT_LOG = previousLog;
+		await rm(temporary, { recursive: true, force: true });
+	}
+});
+
+test("semantic diff accepts a pinned path beginning with a hyphen", async () => {
+	const temporary = await mkdtemp(join(tmpdir(), "revue-semantic-hyphen-"));
+	try {
+		const executable = join(temporary, "difft");
+		await writeFile(
+			executable,
+			`#!/bin/sh
+if [ "$1" = "--version" ]; then echo "Difftastic 0.67.0"; exit 0; fi
+if [ "$1" = "--help" ]; then echo "--color --display --width"; exit 0; fi
+if [ "$4" != "--" ] || [ "$5" != "-leading.ts" ]; then exit 9; fi
+echo "semantic leading path"
+`,
+		);
+		await chmod(executable, 0o755);
+		const run = await loadPreparedRun(sampleRun);
+		const source = run.manifest.files.find(
+			(file) => file.oldBlob && file.newBlob && file.oldBlob !== file.newBlob,
+		);
+		if (!source) throw new Error("sample run needs a changed two-sided file");
+		const result = await generateSemanticDiff(
+			{ ...run, manifest: { ...run.manifest, files: [{ ...source, path: "-leading.ts" }] } },
+			80,
+			executable,
+		);
+
+		expect(result.files[0]).toMatchObject({
+			path: "-leading.ts",
+			lines: expect.arrayContaining(["semantic leading path"]),
+		});
+	} finally {
 		await rm(temporary, { recursive: true, force: true });
 	}
 });

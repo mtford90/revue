@@ -126,6 +126,7 @@ const semanticArgs = (
 	"--color=never",
 	"--display=inline",
 	`--width=${Math.max(SAFE_WIDTH_MINIMUM, Math.floor(width))}`,
+	"--",
 	file.path,
 	blobPath(run, file.oldBlob, emptyPath),
 	file.oldBlob ?? "0000000",

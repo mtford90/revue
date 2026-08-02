@@ -710,10 +710,7 @@ export function App({
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 
 	useEffect(() => {
-		const restoreModeScroll = () => pageScroll.current?.scrollTo(modeScroll.current[viewMode]);
-		restoreModeScroll();
-		const retry = setTimeout(restoreModeScroll, 0);
-		return () => clearTimeout(retry);
+		pageScroll.current?.scrollTo(modeScroll.current[viewMode]);
 	}, [viewMode]);
 
 	useEffect(() => {

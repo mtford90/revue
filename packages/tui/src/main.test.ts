@@ -93,6 +93,10 @@ test("export selects chapters unambiguously and preserves read-only review state
 		]);
 		expect(ambiguous).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(ambiguous.stderr).toContain("choose only one of");
+
+		const missingOutput = await run(root, ["export", sampleRun, "--output", "--prologue"]);
+		expect(missingOutput).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(missingOutput.stderr).toContain("--output requires a path");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

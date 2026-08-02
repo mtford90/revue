@@ -109,11 +109,11 @@ async function cmdPrep(args: string[]): Promise<number> {
 	}
 }
 
-interface ExportArguments {
+type ExportArguments = {
 	directory: string;
 	selection: MarkdownExportSelection;
 	output?: string;
-}
+};
 
 function parseExportArguments(args: string[]): ExportArguments {
 	const positionals: string[] = [];
@@ -128,7 +128,9 @@ function parseExportArguments(args: string[]): ExportArguments {
 		}
 		if (argument === "--chapter-id") {
 			const id = args[++index];
-			if (!id) throw new Error("--chapter-id requires a non-empty id");
+			if (!id || id.startsWith("--")) {
+				throw new Error("--chapter-id requires a non-empty id");
+			}
 			selections.push({ kind: "chapter-id", id });
 			continue;
 		}
@@ -143,7 +145,7 @@ function parseExportArguments(args: string[]): ExportArguments {
 		}
 		if (argument === "--output") {
 			const path = args[++index];
-			if (!path) throw new Error("--output requires a path");
+			if (!path || path.startsWith("--")) throw new Error("--output requires a path");
 			if (output !== undefined) throw new Error("--output may only be specified once");
 			output = path;
 			continue;

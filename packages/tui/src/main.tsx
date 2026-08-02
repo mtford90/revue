@@ -8,6 +8,7 @@ import {
 	ReviewCoverageError,
 	RunArtifactError,
 } from "@revue/prep";
+import { RUN_EXCLUSION_REASON } from "@revue/types";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { formatSummary } from "./summary.ts";
 
@@ -15,6 +16,7 @@ const HELP = `revue — narrative code review in your terminal
 
 Usage:
   revue prep [refs] [--base <ref>] [--compare <ref>] [--ref <mode>]
+             [--ignore <pattern>]... [--show-ignored]
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
 
@@ -26,7 +28,8 @@ The revue-chapters skill reads hunks.txt and writes chapters.json inside the pri
 const SHOW_HELP = `usage: revue show <run-directory> [--check]`;
 const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main...feature]
                   [--base <ref>] [--compare <ref>]
-                  [--ref committed|staged|unstaged|work]`;
+                  [--ref committed|staged|unstaged|work]
+                  [--ignore <gitignore-pattern>]... [--show-ignored]`;
 
 const prepSummary = (run: PreparedRun): string => {
 	const { manifest } = run;
@@ -36,7 +39,35 @@ const prepSummary = (run: PreparedRun): string => {
 		`base  ${scope.base.ref} ${scope.base.sha}`,
 		`head  ${scope.head.ref} ${scope.head.sha}`,
 		`scope ${scope.comparison} ${scope.oldEndpoint.kind}:${scope.oldEndpoint.revision} → ${scope.newEndpoint.kind}:${scope.newEndpoint.revision}`,
-		`${manifest.totals.files} files, ${manifest.totals.reviewUnits} review units, +${manifest.totals.additions} -${manifest.totals.deletions}, ${manifest.totals.excluded} excluded`,
+		`${manifest.totals.files} files, ${manifest.totals.reviewUnits} review units, +${manifest.totals.additions} -${manifest.totals.deletions}, ${manifest.totals.excluded} omitted`,
+	].join("\n");
+};
+
+const exclusionSource = (reason: string): string => {
+	if (reason === RUN_EXCLUSION_REASON.REVUE_IGNORE) return ".revueignore";
+	if (reason === RUN_EXCLUSION_REASON.SESSION_IGNORE) return "--ignore";
+	return "built-in";
+};
+
+const ignoredDetails = (run: PreparedRun): string => {
+	const persistent = run.manifest.ignore?.revueIgnore ?? [];
+	const session = run.manifest.ignore?.session ?? [];
+	const patterns = [
+		...persistent.map((pattern) => `  .revueignore ${JSON.stringify(pattern)}`),
+		...session.map((pattern) => `  --ignore     ${JSON.stringify(pattern)}`),
+	];
+	const exclusions = run.manifest.exclusions.map((exclusion) => {
+		const matched =
+			exclusion.matchedPath && exclusion.matchedPath !== exclusion.path
+				? ` (matched ${JSON.stringify(exclusion.matchedPath)})`
+				: "";
+		return `  ${JSON.stringify(exclusion.path)}${matched}: ${exclusionSource(exclusion.reason)} ${JSON.stringify(exclusion.pattern)}`;
+	});
+	return [
+		"Effective review ignore patterns (.revueignore, then --ignore):",
+		...(patterns.length ? patterns : ["  (none)"]),
+		"Omitted paths:",
+		...(exclusions.length ? exclusions : ["  (none)"]),
 	].join("\n");
 };
 
@@ -46,8 +77,11 @@ async function cmdPrep(args: string[]): Promise<number> {
 		return 0;
 	}
 	try {
-		const run = await prepareRun(args);
+		const showIgnored = args.includes("--show-ignored");
+		const prepArgs = args.filter((argument) => argument !== "--show-ignored");
+		const run = await prepareRun(prepArgs);
 		process.stderr.write(`${prepSummary(run)}\n`);
+		if (showIgnored) process.stderr.write(`${ignoredDetails(run)}\n`);
 		process.stdout.write(`${run.directory}\n`);
 		return 0;
 	} catch (error) {

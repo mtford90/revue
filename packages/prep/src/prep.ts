@@ -4,6 +4,7 @@ import {
 	RUN_FILE_STATUS,
 	RUN_SCHEMA_VERSION,
 	type RunFile,
+	type RunIgnoreInputs,
 	type RunManifestContent,
 	type RunScope,
 } from "@revue/types";
@@ -96,16 +97,20 @@ const addBlobs = (
 const prepareFiles = async (
 	plan: ScopePlan,
 	patch: string,
+	sessionPatterns: string[],
 ): Promise<{
 	files: PreparedFile[];
 	exclusions: RunManifestContent["exclusions"];
+	ignore: RunIgnoreInputs;
+	changedFiles: number;
 	blobs: Map<string, Uint8Array<ArrayBuffer>>;
 }> => {
-	const rules = await loadFilterRules(plan.context.root);
+	const rules = await loadFilterRules(plan.context.root, sessionPatterns);
 	const files: PreparedFile[] = [];
 	const exclusions: RunManifestContent["exclusions"] = [];
 	const blobs = new Map<string, Uint8Array<ArrayBuffer>>();
-	for (const diff of parsePatch(patch).sort((left, right) => left.path.localeCompare(right.path))) {
+	const changed = parsePatch(patch).sort((left, right) => left.path.localeCompare(right.path));
+	for (const diff of changed) {
 		const [oldResult, newResult] = await expectedSnapshots(plan, diff);
 		const isGitlink = oldResult === "gitlink" || newResult === "gitlink";
 		const exclusion = exclusionFor(
@@ -126,7 +131,7 @@ const prepareFiles = async (
 			files.push({ diff, runFile, oldSnapshot, newSnapshot });
 		}
 	}
-	return { files, exclusions, blobs };
+	return { files, exclusions, ignore: rules.inputs, changedFiles: changed.length, blobs };
 };
 
 const endpoint = (source: SnapshotSource, worktreeRevision: string): RunScope["oldEndpoint"] =>
@@ -187,11 +192,26 @@ const totals = (
 });
 
 export async function prepareRun(args: string[], directory?: string): Promise<PreparedRun> {
-	const plan = await resolveScopePlan(parseScopeRequest(args), directory);
+	const request = parseScopeRequest(args);
+	const plan = await resolveScopePlan(request, directory);
 	const capture = await captureRawPatch(plan);
 	if (!capture.patch.trim()) throw new PrepError("No changes found for the resolved review scope");
-	const { files, exclusions, blobs } = await prepareFiles(plan, capture.patch);
-	if (!files.length) throw new PrepError("No reviewable changes remain after filtering");
+	const { files, exclusions, ignore, changedFiles, blobs } = await prepareFiles(
+		plan,
+		capture.patch,
+		request.ignorePatterns,
+	);
+	if (!files.length) {
+		const details = exclusions
+			.map(
+				(exclusion) =>
+					`- ${JSON.stringify(exclusion.path)}: ${exclusion.reason} pattern ${JSON.stringify(exclusion.pattern)}`,
+			)
+			.join("\n");
+		throw new PrepError(
+			`All ${changedFiles} changed files were omitted from review. Adjust .revueignore or --ignore patterns and run revue prep again.${details ? `\n${details}` : ""}`,
+		);
+	}
 	const commits = await commitMessages(plan);
 	const patch = files.map(({ diff }) => diff.patch ?? "").join("");
 	const hunks = formatAgentInput(commits, files);
@@ -201,9 +221,10 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 		runsDirectory: defaultRunsDirectory(plan.context.root),
 		content: {
 			schemaVersion: RUN_SCHEMA_VERSION,
-			scope: runScope(plan, capture.patch, files),
+			scope: runScope(plan, patch, files),
 			files: files.map(({ runFile }) => runFile),
 			commits,
+			ignore,
 			exclusions,
 			totals: totals(files, exclusions),
 		},

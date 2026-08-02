@@ -26,6 +26,61 @@ const git = async (cwd: string, ...args: string[]): Promise<void> => {
 	if (exitCode !== 0) throw new Error(stderr);
 };
 
+test("prep composes persistent and session ignore controls without mutating the file", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-cli-ignore-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "fixtures"));
+		await mkdir(join(root, "src"));
+		const persistentRules = "# review fixtures separately\nfixtures/**\n";
+		await writeFile(join(root, ".revueignore"), persistentRules);
+		await writeFile(join(root, "fixtures", "value.ts"), "before\n");
+		await writeFile(join(root, "src", "value.generated.ts"), "before\n");
+		await writeFile(join(root, "src", "value.ts"), "before\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "fixtures", "value.ts"), "after\n");
+		await writeFile(join(root, "src", "value.generated.ts"), "after\n");
+		await writeFile(join(root, "src", "value.ts"), "after\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Change values");
+
+		const prepared = await run(root, [
+			"prep",
+			"main",
+			"HEAD",
+			"--ignore",
+			"*.generated.ts",
+			"--show-ignored",
+		]);
+		const runDirectory = prepared.stdout.trim();
+
+		expect(prepared.exitCode).toBe(0);
+		expect(prepared.stderr).toContain("1 files, 1 review units, +1 -1, 2 omitted");
+		expect(prepared.stderr).toContain(
+			'Effective review ignore patterns (.revueignore, then --ignore):\n  .revueignore "fixtures/**"\n  --ignore     "*.generated.ts"',
+		);
+		expect(prepared.stderr).toContain(
+			'Omitted paths:\n  "fixtures/value.ts": .revueignore "fixtures/**"\n  "src/value.generated.ts": --ignore "*.generated.ts"',
+		);
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+		expect(manifest.ignore).toEqual({
+			revueIgnore: ["fixtures/**"],
+			session: ["*.generated.ts"],
+		});
+		expect(manifest.exclusions.map(({ reason }) => reason)).toEqual([
+			"revueignore",
+			"session-ignore",
+		]);
+		expect(await Bun.file(join(root, ".revueignore")).text()).toBe(persistentRules);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("prep prints only the run path and show validates that same run", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-cli-"));
 	try {

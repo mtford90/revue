@@ -8,6 +8,7 @@ export type ScopeRequest = {
 	baseRef?: string;
 	headRef: string;
 	explicitRefs: boolean;
+	ignorePatterns: string[];
 };
 
 type ParsedArguments = {
@@ -15,6 +16,7 @@ type ParsedArguments = {
 	baseRef?: string;
 	compareRef?: string;
 	mode: ScopeRequest["mode"];
+	ignorePatterns: string[];
 };
 
 const parseMode = (value: string): ScopeRequest["mode"] => {
@@ -29,11 +31,12 @@ const parseArguments = (args: string[]): ParsedArguments => {
 	let baseRef: string | undefined;
 	let compareRef: string | undefined;
 	let mode: ScopeRequest["mode"] = "auto";
+	const ignorePatterns: string[] = [];
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index] ?? "";
 		const [parsedFlag, inlineValue] = argument.split("=", 2);
 		const flag = parsedFlag ?? argument;
-		if (!["--base", "--compare", "--ref"].includes(flag)) {
+		if (!["--base", "--compare", "--ref", "--ignore"].includes(flag)) {
 			if (argument.startsWith("-")) throw new PrepArgumentError(`Unknown prep option: ${argument}`);
 			positionals.push(argument);
 		} else {
@@ -43,9 +46,15 @@ const parseArguments = (args: string[]): ParsedArguments => {
 			if (flag === "--base") baseRef = value;
 			if (flag === "--compare") compareRef = value;
 			if (flag === "--ref") mode = parseMode(value);
+			if (flag === "--ignore") {
+				if (/[\r\n]/.test(value)) {
+					throw new PrepArgumentError("--ignore accepts one pattern per option");
+				}
+				ignorePatterns.push(value);
+			}
 		}
 	}
-	return { positionals, baseRef, compareRef, mode };
+	return { positionals, baseRef, compareRef, mode, ignorePatterns };
 };
 
 const splitRange = (value: string): Pick<ScopeRequest, "baseRef" | "headRef" | "comparison"> => {
@@ -83,5 +92,12 @@ export function parseScopeRequest(args: string[]): ScopeRequest {
 			"Working-tree modes compare the current checkout and cannot use a compare ref",
 		);
 	}
-	return { mode: parsed.mode, comparison, baseRef, headRef, explicitRefs };
+	return {
+		mode: parsed.mode,
+		comparison,
+		baseRef,
+		headRef,
+		explicitRefs,
+		ignorePatterns: parsed.ignorePatterns,
+	};
 }

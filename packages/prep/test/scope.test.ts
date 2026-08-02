@@ -9,6 +9,7 @@ test("scope parsing distinguishes merge-base and direct committed ranges", () =>
 		baseRef: "main",
 		headRef: "feature",
 		explicitRefs: true,
+		ignorePatterns: [],
 	});
 	expect(parseScopeRequest(["main..feature"])).toMatchObject({
 		comparison: RUN_COMPARISON.DIRECT,
@@ -30,5 +31,22 @@ test("working-tree modes retain base context but reject another checkout", () =>
 	});
 	expect(() => parseScopeRequest(["--ref=staged", "--compare", "feature"])).toThrow(
 		PrepArgumentError,
+	);
+});
+
+test("session ignore options retain command-line order", () => {
+	expect(
+		parseScopeRequest([
+			"main",
+			"HEAD",
+			"--ignore",
+			"*.generated.ts",
+			"--ignore=!src/keep.generated.ts",
+		]),
+	).toMatchObject({
+		ignorePatterns: ["*.generated.ts", "!src/keep.generated.ts"],
+	});
+	expect(() => parseScopeRequest(["--ignore", "one\ntwo"])).toThrow(
+		"--ignore accepts one pattern per option",
 	);
 });

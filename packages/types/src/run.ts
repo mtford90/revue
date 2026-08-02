@@ -34,6 +34,7 @@ export const RUN_OBJECT_KIND = {
 export const RUN_EXCLUSION_REASON = {
 	BUILT_IN: "built-in",
 	REVUE_IGNORE: "revueignore",
+	SESSION_IGNORE: "session-ignore",
 } as const;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "Expected a SHA-256 digest");
@@ -135,8 +136,15 @@ export const runFileSchema = z
 	});
 export type RunFile = z.infer<typeof runFileSchema>;
 
+export const runIgnoreInputsSchema = z.strictObject({
+	revueIgnore: z.array(z.string().min(1)),
+	session: z.array(z.string().min(1)),
+});
+export type RunIgnoreInputs = z.infer<typeof runIgnoreInputsSchema>;
+
 export const runExclusionSchema = z.strictObject({
 	path: z.string().min(1),
+	matchedPath: z.string().min(1).optional(),
 	reason: z.enum(RUN_EXCLUSION_REASON),
 	pattern: z.string().min(1),
 });
@@ -165,6 +173,7 @@ export const runManifestContentSchema = z.strictObject({
 	hunksSha256: sha256Schema,
 	files: z.array(runFileSchema),
 	commits: z.array(runCommitSchema),
+	ignore: runIgnoreInputsSchema.optional(),
 	exclusions: z.array(runExclusionSchema),
 	totals: runTotalsSchema,
 });

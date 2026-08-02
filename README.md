@@ -63,6 +63,9 @@ bun run revue show examples/sample-run
 # prepare the current repository; stdout is only the new run directory
 RUN=$(bun run revue prep)
 
+# add session-only rules and inspect every effective rule and omitted path
+RUN=$(bun run revue prep --ignore '*.generated.ts' --ignore 'fixtures/**' --show-ignored)
+
 # have the revue-chapters skill read "$RUN/hunks.txt" and write "$RUN/chapters.json"
 bun run revue show "$RUN"
 ```
@@ -79,6 +82,35 @@ the narrowest realistic boundary, and do not add tests merely to increase covera
 The top File/View menu makes the main actions discoverable with a mouse or keyboard. Press `F10` to
 open it, use arrow keys and `Enter`, and press `Escape` or click outside to close. Patch view is the
 current checked mode; the read-only Semantic diff entry is disabled until Difftastic support lands.
+
+## Review ignore rules
+
+A repository may put review-only rules in `.revueignore` at its Git root. Rules use gitignore
+semantics and are always relative to that root:
+
+- `/generated.ts` is root-anchored, while `generated.ts` matches that name at any depth.
+- A trailing slash matches a directory and its contents (`fixtures/`); `**` spans directories.
+- Empty lines and lines beginning with `#` are comments. Escape a leading `#` or `!` (`\#name`,
+  `\!name`) to match it literally, and escape trailing spaces when they are significant.
+- `!pattern` negates an earlier rule. A file cannot be re-included while one of its parent
+  directories remains excluded, matching normal gitignore behaviour.
+
+Repeatable `--ignore <pattern>` options add rules for one prep invocation only. They are evaluated in
+command-line order after `.revueignore`, so they can refine or negate persistent rules, and they
+never read or modify `.revueignore`. Revue does not import a global Git excludes file into these
+rules. Repository `.gitignore` still controls discovery of untracked files, but never hides changes
+to files Git already tracks.
+
+Added and modified files match their current path. Deleted files match their deleted path. Renames
+and copies match both the current path and the old path; the file is omitted when either path's final
+rule state is ignored. Current-path matches are reported first when both paths are ignored. Negate
+the relevant old and current patterns to re-include a rename.
+
+Every prepared run records the ordered `.revueignore` and session patterns plus each omitted current
+path, matched old/current path, source, and pattern. Prep always reports the omitted count on stderr;
+pass `--show-ignored` for a deterministic listing of the effective patterns and omission reasons.
+If every changed file is omitted, prep fails with the responsible paths and patterns instead of
+creating an empty run.
 
 Review controls and state are shown inline as `[ ]` / `[x]` checkboxes; `▸` identifies the active
 chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused file, and `r` toggles

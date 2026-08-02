@@ -36,6 +36,43 @@ test("coverage validation requires each prepared unit exactly once", async () =>
 	);
 });
 
+test("coverage validation explains references to paths omitted during prep", async () => {
+	const { run, chapters } = await sample();
+	const first = chapters.chapters[0];
+	if (!first) throw new Error("Expected a sample chapter");
+	const omittedPath = "fixtures/generated.ts";
+	const withOmittedReference = {
+		...chapters,
+		chapters: chapters.chapters.map((chapter, index) =>
+			index === 0
+				? {
+						...chapter,
+						hunkRefs: [...chapter.hunkRefs, { filePath: omittedPath, oldStart: 1 }],
+					}
+				: chapter,
+		),
+	};
+	const withExclusion = {
+		...run,
+		manifest: {
+			...run.manifest,
+			exclusions: [
+				...run.manifest.exclusions,
+				{
+					path: omittedPath,
+					matchedPath: omittedPath,
+					reason: "session-ignore" as const,
+					pattern: "fixtures/**",
+				},
+			],
+		},
+	};
+
+	expect(() => validateReviewCoverage(withExclusion, withOmittedReference)).toThrow(
+		`prep omitted via --ignore pattern "fixtures/**"; regenerate chapters.json from this run's hunks.txt`,
+	);
+});
+
 test("coverage validation rejects chapter identities that would corrupt review state", async () => {
 	const { run, chapters } = await sample();
 	const first = chapters.chapters[0];

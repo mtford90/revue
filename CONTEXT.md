@@ -41,8 +41,8 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   `diff.patch`, agent-facing `hunks.txt`, content-addressed old/new blobs, and the agent-written
   `chapters.json`. `show` consumes this directory and never recomputes Git state.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
-  hunk hashes, file snapshots/modes, commit messages, exclusions, and totals. Creation time and
-  narration are deliberately excluded.
+  hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
+  totals. Creation time and narration are deliberately excluded.
 - **Run key** — `sha256(runId + chapters)`, truncated for local persistence. Review progress belongs
   to one pinned code snapshot narrated one specific way; changing either starts fresh.
 - **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
@@ -50,8 +50,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 - **The chapters file** — `chapters.json` inside a run. It mirrors Stage’s agent output
   (`{ chapters, prologue? }`). The narration is the source of truth; there is no database.
 - **prep** — the CLI step that resolves committed/staged/unstaged/work scope, freezes the exact patch
-  and old/new file bytes, applies built-in and `.revueignore` filtering, and emits numbered hunks.
-  Local modes detect index/worktree races and fail rather than produce a mixed snapshot.
+  and old/new file bytes, applies built-in, root `.revueignore`, and session `--ignore` filtering,
+  and emits numbered hunks. Persistent rules run before session rules; both rename paths are tested,
+  and every effective input and omission reason is pinned in the run. Local modes detect
+  index/worktree races and fail rather than produce a mixed snapshot.
 
 ## Key decisions
 

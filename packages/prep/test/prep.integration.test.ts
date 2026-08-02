@@ -110,6 +110,111 @@ test("committed prep pins blobs, modes, pseudo-references, and exclusions", asyn
 	expect(run.patch).not.toContain("ignored.txt");
 });
 
+test("persistent and session ignores compose with rename path provenance", async () => {
+	const root = await repository();
+	const ignoreFile = "persistent/**\nold-name.ts\n*.generated.ts\n";
+	await write(root, ".revueignore", ignoreFile);
+	await write(root, "persistent/value.ts", "before\n");
+	await write(root, "old-name.ts", "rename me\n");
+	await write(root, "src/drop.generated.ts", "before\n");
+	await write(root, "src/keep.generated.ts", "before\n");
+	await commit(root, "Baseline");
+	await git(root, "checkout", "-b", "feature");
+	await write(root, "persistent/value.ts", "after\n");
+	await git(root, "mv", "old-name.ts", "new-name.ts");
+	await write(root, "src/drop.generated.ts", "after\n");
+	await write(root, "src/keep.generated.ts", "after\n");
+	await commit(root, "Change generated files");
+
+	const run = await prepareRun(
+		[
+			"main",
+			"HEAD",
+			"--ignore",
+			"!old-name.ts",
+			"--ignore",
+			"!src/keep.generated.ts",
+			"--ignore",
+			"src/keep.generated.ts",
+		],
+		root,
+	);
+
+	expect(run.manifest.ignore).toEqual({
+		revueIgnore: ["persistent/**", "old-name.ts", "*.generated.ts"],
+		session: ["!old-name.ts", "!src/keep.generated.ts", "src/keep.generated.ts"],
+	});
+	expect(run.manifest.files.map((file) => file.path)).toEqual(["new-name.ts"]);
+	expect(run.manifest.exclusions).toEqual([
+		{
+			path: "persistent/value.ts",
+			matchedPath: "persistent/value.ts",
+			reason: "revueignore",
+			pattern: "persistent/**",
+		},
+		{
+			path: "src/drop.generated.ts",
+			matchedPath: "src/drop.generated.ts",
+			reason: "revueignore",
+			pattern: "*.generated.ts",
+		},
+		{
+			path: "src/keep.generated.ts",
+			matchedPath: "src/keep.generated.ts",
+			reason: "session-ignore",
+			pattern: "src/keep.generated.ts",
+		},
+	]);
+	expect(await readFile(join(root, ".revueignore"), "utf8")).toBe(ignoreFile);
+});
+
+test("ignored worktree bytes do not change review identity or inherit global excludes", async () => {
+	const root = await repository();
+	const globalExcludes = join(root, "..", `${root.split("/").at(-1)}-global-excludes`);
+	await writeFile(globalExcludes, "global-hidden.txt\n");
+	try {
+		await git(root, "config", "core.excludesFile", globalExcludes);
+		await write(root, ".gitignore", ".revue/\nkeep.txt\n");
+		await write(root, ".revueignore", "ignored.txt\n");
+		await write(root, "keep.txt", "before\n");
+		await write(root, "ignored.txt", "before\n");
+		await git(root, "add", "-f", "keep.txt");
+		await commit(root, "Baseline");
+		await write(root, "keep.txt", "after\n");
+		await write(root, "ignored.txt", "ignored one\n");
+		await write(root, "global-hidden.txt", "review me\n");
+
+		const first = await prepareRun(["--ref", "work", "--base", "main"], root);
+		expect(first.manifest.files.map((file) => file.path)).toEqual([
+			"global-hidden.txt",
+			"keep.txt",
+		]);
+		await write(root, "ignored.txt", "ignored two\n");
+		const second = await prepareRun(["--ref", "work", "--base", "main"], root);
+
+		expect(second.manifest.runId).toBe(first.manifest.runId);
+		expect(second.directory).toBe(first.directory);
+		const withDifferentInputs = await prepareRun(
+			["--ref", "work", "--base", "main", "--ignore", "never/**"],
+			root,
+		);
+		expect(withDifferentInputs.manifest.runId).not.toBe(first.manifest.runId);
+	} finally {
+		await rm(globalExcludes, { force: true });
+	}
+});
+
+test("ignoring every changed file fails with paths and rule sources", async () => {
+	const root = await repository();
+	await write(root, "value.ts", "before\n");
+	await commit(root, "Baseline");
+	await write(root, "value.ts", "after\n");
+
+	expect(prepareRun(["--ref", "work", "--ignore", "value.ts"], root)).rejects.toThrow(
+		'All 1 changed files were omitted from review. Adjust .revueignore or --ignore patterns and run revue prep again.\n- "value.ts": session-ignore pattern "value.ts"',
+	);
+});
+
 test("an explicit two-dot range compares endpoints instead of the merge base", async () => {
 	const root = await repository();
 	await write(root, "shared.txt", "baseline\n");

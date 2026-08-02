@@ -260,15 +260,18 @@ async function cmdShow(args: string[]): Promise<number> {
 		return 0;
 	}
 
-	const [{ runApp }, { preparePatch }, { openFileStore }] = await Promise.all([
-		import("./app.tsx"),
-		import("./diff.ts"),
-		import("./viewState.ts"),
-	]);
+	const [{ runApp }, { preparePatch }, { generateSemanticDiff }, { openFileStore }] =
+		await Promise.all([
+			import("./app.tsx"),
+			import("./diff.ts"),
+			import("./semantic.ts"),
+			import("./viewState.ts"),
+		]);
 	const diffFiles = await preparePatch(run.patch);
 	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
 	await runApp(run.chapters, {
 		diffFiles,
+		loadSemanticDiff: (width) => generateSemanticDiff(run, width),
 		initialViewState: store.get(),
 		onViewStateChange: (next) => store.set(next),
 	});

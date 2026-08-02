@@ -33,6 +33,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   diagram, 2–5 key changes, 1–5 focus areas, and a complexity rating. Shown before chapter one.
 - **Focus area** — a typed/severity-tagged spot in the prologue worth a reviewer's attention.
 - **Page** — a TUI navigation unit: the prologue (if present) followed by each chapter in order.
+- **Diff view** — Patch (the default, authoritative line-numbered review surface) or Semantic (a
+  lazy, read-only Difftastic rendering of the same run's pinned old/new blobs). Chapter/file focus
+  survives switching and each mode keeps its own scroll position. Exact key-change anchors, range
+  highlights, and comments are Patch-only; Difftastic output is never parsed into durable anchors.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes
@@ -85,6 +89,11 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 - **Export formats verified runs, not repositories.** Markdown export calls the same public run
   loading and coverage validation path as `show`, reads persisted state under the same run key, and
   delegates to a pure formatter package with no OpenTUI dependency.
+- **Semantic diff is a read-only external view.** The TUI invokes a compatible `difft` lazily and
+  passes only verified blob paths from the supplied run (using an empty temporary side for an absent
+  added/deleted snapshot). It consumes terminal-safe text, not unstable Difftastic JSON. Binary,
+  symlink, mode-only, and content-identical metadata states receive explicit descriptions rather
+  than fabricated semantic output; availability or process failures return the reviewer to Patch.
 
 ## Open questions
 

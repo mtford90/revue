@@ -13,9 +13,9 @@ interactive reviewer you drive from the keyboard. `revue export` validates that 
 renders its narrative and review progress as deterministic Markdown.
 
 > **Status: early scaffold.** Prep, the chapter model and skill, the navigable TUI shell, review
-> persistence, and per-chapter rendering through `@revue/diff-renderer` run today. Prep supports
-> committed, staged, unstaged, and working-tree scopes; comments and semantic Difftastic rendering
-> remain on the roadmap.
+> persistence, per-chapter patch rendering, and an optional read-only Difftastic semantic view run
+> today. Prep supports committed, staged, unstaged, and working-tree scopes; comments remain on the
+> roadmap.
 
 ## How it relates to its parents
 
@@ -110,8 +110,11 @@ Tests follow [`docs/testing.md`](docs/testing.md): protect meaningful behaviour 
 the narrowest realistic boundary, and do not add tests merely to increase coverage.
 
 The top File/View menu makes the main actions discoverable with a mouse or keyboard. Press `F10` to
-open it, use arrow keys and `Enter`, and press `Escape` or click outside to close. Patch view is the
-current checked mode; the read-only Semantic diff entry is disabled until Difftastic support lands.
+open it, use arrow keys and `Enter`, and press `Escape` or click outside to close. Patch is the
+default view. The View menu can lazily generate a read-only Semantic diff when a compatible
+[`difft`](https://difftastic.wilfred.me.uk/) executable is available; it compares only the verified
+old/new blobs in the prepared run. A missing or incompatible executable leaves Patch active and
+shows a terminal-safe explanation.
 
 ## Review ignore rules
 
@@ -153,8 +156,12 @@ scroll by page · `g`/`G` jump to the top/bottom · `]c`/`[c` move between chapt
 changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e` collapse/expand
 all diffs · `a` jumps to the next unreviewed chapter · `F10` opens the menu · `?` toggles shortcut
 help · `q`/`esc` quits.
-Mouse-wheel and trackpad scrolling are supported. Progress persists to `.revue/state.json`, keyed
-by both the pinned run and its chapter narration.
+Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
+change, and Patch/Semantic keep separate scroll positions. Semantic mode is intentionally
+read-only: key-change anchors, exact range highlights, and future comments are Patch-only. Binary,
+symlink, mode-only, and content-identical metadata changes are described rather than passed off as
+semantic source diffs. Progress persists to `.revue/state.json`, keyed by both the pinned run and its
+chapter narration.
 
 ## Roadmap
 
@@ -167,7 +174,7 @@ by both the pinned run and its chapter narration.
 - [x] Scroll long diffs; choose split/stack layout by terminal width
 - [x] File/View application menu with pointer and keyboard operation
 - [x] Deterministic **Markdown export** for the full review, prologue, or one chapter
-- [ ] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
+- [x] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
 - [ ] Inline **comments** you can author in the TUI (build a Revue-owned model)
 - [ ] Decide static-file vs live agent-driven session
 - [ ] Mermaid prologue diagram rendering (ASCII)

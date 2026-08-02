@@ -96,10 +96,160 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	await arrow(t, "right");
 	const menuFrame = t.captureCharFrame();
 	expect(menuFrame).toContain("[x] Patch view");
-	expect(menuFrame).toContain("Semantic diff (coming next)");
+	expect(menuFrame).toContain("Semantic diff (read-only)");
+	await arrow(t, "down");
 	await arrow(t, "down");
 	await press(t, "RETURN");
 	expect(t.captureCharFrame()).toContain("3/4");
+});
+
+test("View menu toggles a read-only semantic diff without losing the focused file", async () => {
+	const combined = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				...file.chapters[0],
+				hunkRefs: [
+					{ filePath: "src/lib/backoff.ts", oldStart: 0 },
+					{ filePath: "src/lib/apiClient.ts", oldStart: 41 },
+				],
+			},
+		],
+	});
+	const diffFiles = await loadPatch(PATCH);
+	let loads = 0;
+	const t = await testRender(
+		<App
+			file={combined}
+			diffFiles={diffFiles}
+			loadSemanticDiff={async () => {
+				loads += 1;
+				return {
+					version: "Difftastic 0.67.0",
+					files: [
+						{
+							path: "src/lib/backoff.ts",
+							lines: ["added: src/lib/backoff.ts", "semantic backoff"],
+						},
+						{
+							path: "src/lib/apiClient.ts",
+							lines: ["modified: src/lib/apiClient.ts", "semantic retry loop"],
+						},
+					],
+				};
+			}}
+		/>,
+		{ width: 120, height: 44, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await press(t, "TAB");
+	expect(t.captureCharFrame()).toContain("▸[ ]▼ src/lib/apiClient.ts");
+
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+	await act(async () => Promise.resolve());
+	await t.renderOnce();
+	const semanticFrame = t.captureCharFrame();
+	expect(semanticFrame).toContain("Semantic view (read-only)");
+	expect(semanticFrame).toContain("semantic retry loop");
+	expect(semanticFrame).toContain("anchors/ranges/comments Patch-only");
+	expect(semanticFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
+
+	await press(t, "F10");
+	await arrow(t, "right");
+	await press(t, "RETURN");
+	const patchFrame = t.captureCharFrame();
+	expect(patchFrame).toContain("Patch view");
+	expect(patchFrame).toContain("return fetch");
+	expect(patchFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
+	expect(loads).toBe(1);
+});
+
+test("Patch and Semantic restore independent scroll positions", async () => {
+	const scrollFile = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "scroll-chapter",
+				order: 1,
+				title: "Keep view positions",
+				summary: "Both renderings are longer than the viewport.",
+				hunkRefs: [{ filePath: "scroll.ts", oldStart: 1 }],
+				keyChanges: [],
+			},
+		],
+	});
+	const additions = Array.from({ length: 30 }, (_, index) => `+patch row ${index + 1}`).join("\n");
+	const diffFiles = parsePatch(`diff --git a/scroll.ts b/scroll.ts
+--- a/scroll.ts
++++ b/scroll.ts
+@@ -1 +1,30 @@
+-old row
+${additions}
+`);
+	const semanticLines = Array.from({ length: 30 }, (_, index) => `semantic row ${index + 1}`);
+	const t = await testRender(
+		<App
+			file={scrollFile}
+			diffFiles={diffFiles}
+			loadSemanticDiff={async () => ({
+				version: "Difftastic 0.67.0",
+				files: [{ path: "scroll.ts", lines: semanticLines }],
+			})}
+		/>,
+		{ width: 100, height: 14, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	for (let index = 0; index < 8; index += 1) await press(t, "j");
+	expect(t.captureCharFrame()).not.toContain("patch row 1 ");
+
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+	await act(async () => Promise.resolve());
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("semantic row 1 ");
+	for (let index = 0; index < 8; index += 1) await press(t, "j");
+	expect(t.captureCharFrame()).not.toContain("semantic row 1 ");
+
+	await press(t, "F10");
+	await arrow(t, "right");
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).not.toContain("patch row 1 ");
+
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).not.toContain("semantic row 1 ");
+});
+
+test("an unavailable semantic diff stays in Patch with a safe explanation", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			loadSemanticDiff={async () => {
+				throw new Error("Semantic diff unavailable: incompatible difft.\u001b[31m");
+			}}
+		/>,
+		{ width: 120, height: 44, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+	await act(async () => Promise.resolve());
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Patch view");
+	expect(frame).toContain("Semantic diff unavailable: incompatible difft.");
+	expect(frame).toContain("MAX_RETRIES");
+	expect(frame).not.toContain("[31m");
 });
 
 test("opening a menu cancels an incomplete chapter chord", async () => {
@@ -139,6 +289,7 @@ test("next unreviewed is unavailable when every chapter is reviewed", async () =
 	await arrow(t, "right");
 	await arrow(t, "down");
 	await arrow(t, "down");
+	await arrow(t, "down");
 	await press(t, "RETURN");
 
 	expect(t.captureCharFrame()).toContain("▶ src/lib/apiClient.test.ts");
@@ -163,7 +314,7 @@ test("the mouse menu acts once and blocks the chapter beneath it", async () => {
 	expect(nextLine).not.toContain("]c");
 
 	await click(t, checkboxX + 1, chapterY);
-	expect(t.captureCharFrame()).not.toContain("Semantic diff (coming next)");
+	expect(t.captureCharFrame()).not.toContain("Semantic diff (read-only)");
 	expect(seen).toHaveLength(0);
 
 	const reopenedBar = t.captureCharFrame().split("\n")[0] ?? "";

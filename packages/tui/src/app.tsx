@@ -23,6 +23,7 @@ import {
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
+import { type SemanticDiffResult, terminalSafe } from "./semantic.ts";
 import { complexityColor, severityColor, theme } from "./theme.ts";
 import {
 	chapterFilePaths,
@@ -536,6 +537,97 @@ function ChapterView({
 	);
 }
 
+// ── Read-only semantic view ────────────────────────────────────────────────
+const keyedSemanticLines = (lines: string[]) => {
+	const occurrences = new Map<string, number>();
+	return lines.map((line) => {
+		const occurrence = occurrences.get(line) ?? 0;
+		occurrences.set(line, occurrence + 1);
+		return { key: `${line}:${occurrence}`, line };
+	});
+};
+
+function SemanticChapterView({
+	chapter,
+	semantic,
+	vs,
+	selectedFile,
+	collapsedFiles,
+	onSelectFile,
+	onToggleCollapse,
+	onToggleFileReview,
+}: {
+	chapter: Chapter;
+	semantic: SemanticDiffResult;
+	vs: ViewState;
+	selectedFile: number;
+	collapsedFiles: Set<string>;
+	onSelectFile: (index: number) => void;
+	onToggleCollapse: (path: string) => void;
+	onToggleFileReview: (path: string) => void;
+}) {
+	const paths = chapterFilePaths(chapter);
+	const files = paths.flatMap((path) => {
+		const file = semantic.files.find((candidate) => candidate.path === path);
+		return file ? [file] : [];
+	});
+	return (
+		<box flexDirection="column" gap={1}>
+			<text fg={theme.yellow}>
+				Read-only semantic view · key-change anchors, exact range highlights, and comments are
+				Patch-only
+			</text>
+			<text fg={theme.dim}>{semantic.version}</text>
+			{files.map((file, streamIndex) => {
+				const fileIndex = paths.indexOf(file.path);
+				const focused = fileIndex === selectedFile;
+				const collapsed = collapsedFiles.has(file.path);
+				const reviewed = isFileReviewed(vs, chapter.id, file.path);
+				const lines = keyedSemanticLines(file.lines);
+				return (
+					<box key={file.path} flexDirection="column" width="100%">
+						{streamIndex > 0 ? <text fg={theme.surface}>{"─".repeat(20)}</text> : null}
+						<box
+							id={fileHeaderId(chapter.id, fileIndex)}
+							flexDirection="row"
+							height={1}
+							width="100%"
+						>
+							<text fg={focused ? theme.accent : theme.dim}>{focused ? "▸" : " "}</text>
+							<text
+								fg={reviewed ? theme.green : theme.dim}
+								onMouseDown={() => onToggleFileReview(file.path)}
+							>
+								[{reviewed ? "x" : " "}]
+							</text>
+							<text
+								fg={focused ? theme.accent : theme.dim}
+								onMouseDown={() => onToggleCollapse(file.path)}
+							>
+								{collapsed ? "▶" : "▼"} {file.path}
+							</text>
+						</box>
+						{collapsed ? null : (
+							<box flexDirection="column" paddingLeft={1}>
+								{lines.map(({ key, line }, index) => (
+									<text
+										key={`${file.path}:${key}`}
+										fg={index === 0 ? theme.mauve : theme.text}
+										wrapMode="word"
+										onMouseDown={() => onSelectFile(fileIndex)}
+									>
+										{line || " "}
+									</text>
+								))}
+							</box>
+						)}
+					</box>
+				);
+			})}
+		</box>
+	);
+}
+
 // ── Keyboard help ──────────────────────────────────────────────────────────
 function ShortcutHelp() {
 	return (
@@ -555,6 +647,9 @@ function ShortcutHelp() {
 			<text fg={theme.mauve}>Review</text>
 			<text fg={theme.text}> x chapter · f focused file</text>
 			<text fg={theme.text}> {"{/}"} focus key change · r toggle · 1–9 direct</text>
+			<text fg={theme.mauve}>Views</text>
+			<text fg={theme.text}> F10 → View toggles Patch / read-only Semantic</text>
+			<text fg={theme.dim}> anchors, exact range highlights, and comments are Patch-only</text>
 			<text fg={theme.mauve}>Menu/help/quit</text>
 			<text fg={theme.text}> F10 menu · ? close · q/esc quit</text>
 		</box>
@@ -565,12 +660,14 @@ function ShortcutHelp() {
 export function App({
 	file,
 	diffFiles = null,
+	loadSemanticDiff,
 	initialViewState = emptyViewState(),
 	onViewStateChange,
 	onQuit,
 }: {
 	file: RevueChaptersFile;
 	diffFiles?: DiffFile[] | null;
+	loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
 	initialViewState?: ViewState;
 	onViewStateChange?: (next: ViewState) => void;
 	onQuit?: () => void;
@@ -590,8 +687,13 @@ export function App({
 		null,
 	);
 	const [showHelp, setShowHelp] = useState(false);
+	const [viewMode, setViewMode] = useState<"patch" | "semantic">("patch");
+	const [semantic, setSemantic] = useState<SemanticDiffResult | null>(null);
+	const [semanticLoading, setSemanticLoading] = useState(false);
+	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
 	const [vs, setVs] = useState(initialViewState);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
+	const modeScroll = useRef<Record<"patch" | "semantic", number>>({ patch: 0, semantic: 0 });
 	const panelScroll = useRef<ScrollBoxRenderable>(null);
 	const resizingPanel = useRef(false);
 	const chapterNavigationPrefix = useRef<"[" | "]" | null>(null);
@@ -606,6 +708,13 @@ export function App({
 		? chapters.findIndex((candidate) => candidate.id === chapter.id)
 		: -1;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
+
+	useEffect(() => {
+		const restoreModeScroll = () => pageScroll.current?.scrollTo(modeScroll.current[viewMode]);
+		restoreModeScroll();
+		const retry = setTimeout(restoreModeScroll, 0);
+		return () => clearTimeout(retry);
+	}, [viewMode]);
 
 	useEffect(() => {
 		if (!chapter || fileFocusRequest === 0) return;
@@ -638,6 +747,7 @@ export function App({
 		const next = Math.max(0, Math.min(index, pages.length - 1));
 		if (next === current) return;
 		pageScroll.current?.scrollTo(0);
+		modeScroll.current = { patch: 0, semantic: 0 };
 		setCurrent(next);
 		setSelectedFile(0);
 		setSelectedHunkIndex(0);
@@ -752,7 +862,7 @@ export function App({
 		if (!chapter || index < 0 || index >= chapter.keyChanges.length) return;
 		setSelectedKeyChange(index);
 		requestKeyFocus();
-		if (!diffFiles) return;
+		if (viewMode !== "patch" || !diffFiles) return;
 		const target = findKeyChangeTarget({ chapter, diffFiles, index });
 		if (!target) return;
 		setSelectedFile(target.fileIndex);
@@ -807,6 +917,43 @@ export function App({
 		setCollapsedFiles(new Set());
 		requestFileFocus();
 	}
+	function changeViewMode(next: "patch" | "semantic") {
+		if (next === viewMode) return;
+		modeScroll.current[viewMode] = pageScroll.current?.scrollTop ?? 0;
+		setViewMode(next);
+	}
+	function showPatch() {
+		changeViewMode("patch");
+	}
+	async function showSemantic() {
+		if (semantic) {
+			setSemanticNotice(null);
+			changeViewMode("semantic");
+			return;
+		}
+		if (semanticLoading) return;
+		if (!loadSemanticDiff) {
+			setSemanticNotice(
+				"Semantic diff unavailable: no Difftastic loader was supplied. Patch view remains active.",
+			);
+			return;
+		}
+		modeScroll.current.patch = pageScroll.current?.scrollTop ?? 0;
+		setSemanticLoading(true);
+		setSemanticNotice("Loading read-only semantic diff from pinned run snapshots...");
+		try {
+			const result = await loadSemanticDiff(contentWidth);
+			setSemantic(result);
+			setSemanticNotice(null);
+			setViewMode("semantic");
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			setSemanticNotice(terminalSafe(detail));
+			setViewMode("patch");
+		} finally {
+			setSemanticLoading(false);
+		}
+	}
 
 	const menus = buildAppMenus({
 		canMovePrevious: chapterIndex > 0,
@@ -815,6 +962,8 @@ export function App({
 		canMoveNextUnreviewed:
 			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate.id)),
 		showHelp,
+		viewMode,
+		semanticLoading,
 		requestQuit: () => onQuit?.(),
 		movePrevious: () => moveChapter(-1),
 		moveNext: () => moveChapter(1),
@@ -822,6 +971,8 @@ export function App({
 		collapseFiles,
 		expandFiles,
 		toggleHelp: toggleShortcutHelp,
+		showPatch,
+		showSemantic: () => void showSemantic(),
 	});
 	const menu = useMenuController(menus);
 
@@ -919,6 +1070,7 @@ export function App({
 			<MenuBar
 				activeMenuId={menu.activeMenuId}
 				terminalWidth={width}
+				viewMode={viewMode}
 				onHover={(id) => {
 					if (menu.activeMenuId) menu.open(id);
 				}}
@@ -970,8 +1122,9 @@ export function App({
 						<ShortcutHelp />
 					) : (
 						<box flexDirection="column" width="100%">
+							{semanticNotice ? <text fg={theme.yellow}>{semanticNotice}</text> : null}
 							{page?.kind === "prologue" ? <PrologueView prologue={page.prologue} /> : null}
-							{page?.kind === "chapter" ? (
+							{page?.kind === "chapter" && viewMode === "patch" ? (
 								<ChapterView
 									chapter={page.chapter}
 									diffFiles={diffFiles}
@@ -980,6 +1133,18 @@ export function App({
 									selectedFile={selectedFile}
 									selectedHunkIndex={selectedHunkIndex}
 									selectedKeyChange={selectedKeyChange}
+									collapsedFiles={collapsedFiles}
+									onSelectFile={selectFile}
+									onToggleCollapse={toggleCollapsedFile}
+									onToggleFileReview={toggleFileReview}
+								/>
+							) : null}
+							{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
+								<SemanticChapterView
+									chapter={page.chapter}
+									semantic={semantic}
+									vs={vs}
+									selectedFile={selectedFile}
 									collapsedFiles={collapsedFiles}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
@@ -1008,7 +1173,9 @@ export function App({
 					{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
 				</text>
 				<text fg={theme.dim}>
-					F10 menu · ]c/[c chapter · tab file · f review file · x review chapter · ? help · q quit
+					{viewMode === "semantic"
+						? "Semantic is read-only · anchors/ranges/comments Patch-only · F10 View to switch"
+						: "F10 menu · ]c/[c chapter · tab file · f review file · x review chapter · ? help · q quit"}
 				</text>
 			</box>
 		</box>
@@ -1020,6 +1187,7 @@ export async function runApp(
 	file: RevueChaptersFile,
 	options: {
 		diffFiles?: DiffFile[] | null;
+		loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
 		initialViewState?: ViewState;
 		onViewStateChange?: (next: ViewState) => void;
 	} = {},
@@ -1036,6 +1204,7 @@ export async function runApp(
 			<App
 				file={file}
 				diffFiles={options.diffFiles ?? null}
+				loadSemanticDiff={options.loadSemanticDiff}
 				initialViewState={options.initialViewState}
 				onViewStateChange={options.onViewStateChange}
 				onQuit={quit}

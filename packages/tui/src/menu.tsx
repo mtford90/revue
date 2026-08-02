@@ -62,6 +62,8 @@ export const buildAppMenus = ({
 	canChangeFiles,
 	canMoveNextUnreviewed,
 	showHelp,
+	viewMode,
+	semanticLoading,
 	requestQuit,
 	movePrevious,
 	moveNext,
@@ -69,12 +71,16 @@ export const buildAppMenus = ({
 	collapseFiles,
 	expandFiles,
 	toggleHelp,
+	showPatch,
+	showSemantic,
 }: {
 	canMovePrevious: boolean;
 	canMoveNext: boolean;
 	canChangeFiles: boolean;
 	canMoveNextUnreviewed: boolean;
 	showHelp: boolean;
+	viewMode: "patch" | "semantic";
+	semanticLoading: boolean;
 	requestQuit: () => void;
 	movePrevious: () => void;
 	moveNext: () => void;
@@ -82,15 +88,23 @@ export const buildAppMenus = ({
 	collapseFiles: () => void;
 	expandFiles: () => void;
 	toggleHelp: () => void;
+	showPatch: () => void;
+	showSemantic: () => void;
 }): Record<MenuId, MenuEntry[]> => ({
 	file: [{ kind: "item", label: "Quit", hint: "q", action: requestQuit }],
 	view: [
-		{ kind: "item", label: "Patch view", checked: true, action: () => {} },
 		{
 			kind: "item",
-			label: "Semantic diff (coming next)",
-			disabled: true,
-			action: () => {},
+			label: "Patch view",
+			checked: viewMode === "patch",
+			action: showPatch,
+		},
+		{
+			kind: "item",
+			label: semanticLoading ? "Semantic diff (loading...)" : "Semantic diff (read-only)",
+			checked: viewMode === "semantic",
+			disabled: semanticLoading,
+			action: showSemantic,
 		},
 		{ kind: "separator", id: "view-mode" },
 		{
@@ -184,12 +198,14 @@ const stopMouse = (event: OpenTUIMouseEvent) => {
 export const MenuBar = ({
 	activeMenuId,
 	terminalWidth,
+	viewMode,
 	onHover,
 	onToggle,
 	onClose,
 }: {
 	activeMenuId: MenuId | null;
 	terminalWidth: number;
+	viewMode: "patch" | "semantic";
 	onHover: (id: MenuId) => void;
 	onToggle: (id: MenuId) => void;
 	onClose: () => void;
@@ -228,7 +244,11 @@ export const MenuBar = ({
 			);
 		})}
 		<box flexGrow={1} height={1} justifyContent="flex-end">
-			{terminalWidth >= 28 ? <text fg={theme.dim}>Patch view </text> : null}
+			{terminalWidth >= 28 ? (
+				<text fg={theme.dim}>
+					{viewMode === "patch" ? "Patch view " : "Semantic view (read-only) "}
+				</text>
+			) : null}
 		</box>
 	</box>
 );

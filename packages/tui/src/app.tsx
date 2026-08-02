@@ -1,6 +1,7 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI pointer handlers use text renderables.
 import {
 	createCliRenderer,
+	createTextAttributes,
 	type MouseEvent as OpenTUIMouseEvent,
 	type ScrollBoxRenderable,
 } from "@opentui/core";
@@ -538,12 +539,12 @@ function ChapterView({
 }
 
 // ── Read-only semantic view ────────────────────────────────────────────────
-const keyedSemanticLines = (lines: string[]) => {
+const keyedSemanticLines = (lines: SemanticDiffResult["files"][number]["lines"]) => {
 	const occurrences = new Map<string, number>();
 	return lines.map((line) => {
-		const occurrence = occurrences.get(line) ?? 0;
-		occurrences.set(line, occurrence + 1);
-		return { key: `${line}:${occurrence}`, line };
+		const occurrence = occurrences.get(line.text) ?? 0;
+		occurrences.set(line.text, occurrence + 1);
+		return { key: `${line.text}:${occurrence}`, line };
 	});
 };
 
@@ -613,10 +614,21 @@ function SemanticChapterView({
 									<text
 										key={`${file.path}:${key}`}
 										fg={index === 0 ? theme.mauve : theme.text}
-										wrapMode="word"
+										wrapMode="none"
 										onMouseDown={() => onSelectFile(fileIndex)}
 									>
-										{line || " "}
+										{line.spans.length
+											? line.spans.map((span, spanIndex) => (
+													<span
+														// biome-ignore lint/suspicious/noArrayIndexKey: immutable output spans have no independent identity.
+														key={`${spanIndex}:${span.text}`}
+														fg={span.fg}
+														attributes={createTextAttributes(span)}
+													>
+														{span.text}
+													</span>
+												))
+											: " "}
 									</text>
 								))}
 							</box>
@@ -693,7 +705,7 @@ export function App({
 	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
 	const [vs, setVs] = useState(initialViewState);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
-	const modeScroll = useRef<Record<"patch" | "semantic", number>>({ patch: 0, semantic: 0 });
+	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
 	const panelScroll = useRef<ScrollBoxRenderable>(null);
 	const resizingPanel = useRef(false);
 	const chapterNavigationPrefix = useRef<"[" | "]" | null>(null);
@@ -710,7 +722,12 @@ export function App({
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 
 	useEffect(() => {
-		pageScroll.current?.scrollTo(modeScroll.current[viewMode]);
+		const scroll = pageScroll.current;
+		const pending = pendingViewProgress.current;
+		if (!scroll || pending?.mode !== viewMode) return;
+		const maximum = Math.max(0, scroll.scrollHeight - scroll.viewport.height);
+		scroll.scrollTo(Math.round(maximum * pending.progress));
+		pendingViewProgress.current = null;
 	}, [viewMode]);
 
 	useEffect(() => {
@@ -744,7 +761,7 @@ export function App({
 		const next = Math.max(0, Math.min(index, pages.length - 1));
 		if (next === current) return;
 		pageScroll.current?.scrollTo(0);
-		modeScroll.current = { patch: 0, semantic: 0 };
+		pendingViewProgress.current = null;
 		setCurrent(next);
 		setSelectedFile(0);
 		setSelectedHunkIndex(0);
@@ -916,7 +933,12 @@ export function App({
 	}
 	function changeViewMode(next: "patch" | "semantic") {
 		if (next === viewMode) return;
-		modeScroll.current[viewMode] = pageScroll.current?.scrollTop ?? 0;
+		const scroll = pageScroll.current;
+		const maximum = scroll ? Math.max(0, scroll.scrollHeight - scroll.viewport.height) : 0;
+		pendingViewProgress.current = {
+			mode: next,
+			progress: maximum > 0 && scroll ? scroll.scrollTop / maximum : 0,
+		};
 		setViewMode(next);
 	}
 	function showPatch() {
@@ -935,14 +957,13 @@ export function App({
 			);
 			return;
 		}
-		modeScroll.current.patch = pageScroll.current?.scrollTop ?? 0;
 		setSemanticLoading(true);
 		setSemanticNotice("Loading read-only semantic diff from pinned run snapshots...");
 		try {
 			const result = await loadSemanticDiff(contentWidth);
 			setSemantic(result);
 			setSemanticNotice(null);
-			setViewMode("semantic");
+			changeViewMode("semantic");
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			setSemanticNotice(terminalSafe(detail));

@@ -23,7 +23,7 @@ if [ "$1" = "--help" ]; then
   exit 0
 fi
 if [ -n "$REVUE_TEST_DIFFT_LOG" ]; then
-  printf '%s\\t%s\\t%s\\n' "$5" "$6" "$9" >> "$REVUE_TEST_DIFFT_LOG"
+  printf '%s\\t%s\\t%s\\t%s\\n' "$2" "$5" "$6" "$9" >> "$REVUE_TEST_DIFFT_LOG"
 fi
 printf '\\033[31msemantic output for %s\\033[0m\\n' "$5"
 `,
@@ -32,7 +32,7 @@ printf '\\033[31msemantic output for %s\\033[0m\\n' "$5"
 	return { executable, log };
 }
 
-test("semantic diff invokes Difftastic with only pinned run blobs", async () => {
+test("semantic diff preserves colour and compares only pinned run blobs", async () => {
 	const temporary = await mkdtemp(join(tmpdir(), "revue-semantic-test-"));
 	const previousLog = process.env.REVUE_TEST_DIFFT_LOG;
 	try {
@@ -43,21 +43,32 @@ test("semantic diff invokes Difftastic with only pinned run blobs", async () => 
 
 		expect(result.version).toBe("Difftastic 0.67.0");
 		expect(result.files).toHaveLength(run.manifest.files.length);
-		expect(result.files[0]?.lines).toContain("semantic output for src/lib/apiClient.test.ts");
-		expect(result.files.flatMap((file) => file.lines).join("\n")).not.toContain("\u001b");
+		const styledLine = result.files[0]?.lines.find((line) =>
+			line.text.includes("semantic output for src/lib/apiClient.test.ts"),
+		);
+		expect(styledLine?.spans).toContainEqual({
+			text: "semantic output for src/lib/apiClient.test.ts",
+			fg: "#f38ba8",
+			bold: false,
+			dim: false,
+			italic: false,
+			underline: false,
+		});
+		expect(JSON.stringify(result.files)).not.toContain("\u001b");
 
 		const invocations = (await readFile(log, "utf8")).trim().split("\n");
 		const modified = run.manifest.files.find((file) => file.status === RUN_FILE_STATUS.MODIFIED);
 		expect(modified).toBeDefined();
 		expect(invocations).toContain(
 			[
+				"--display=side-by-side",
 				modified?.path,
 				join(sampleRun, "blobs", modified?.oldBlob ?? ""),
 				join(sampleRun, "blobs", modified?.newBlob ?? ""),
 			].join("\t"),
 		);
 		for (const invocation of invocations) {
-			const [, oldPath, newPath] = invocation.split("\t");
+			const [, , oldPath, newPath] = invocation.split("\t");
 			for (const snapshotPath of [oldPath, newPath]) {
 				expect(
 					snapshotPath?.startsWith(join(sampleRun, "blobs")) ||
@@ -65,6 +76,15 @@ test("semantic diff invokes Difftastic with only pinned run blobs", async () => 
 				).toBe(true);
 			}
 		}
+
+		if (!modified) throw new Error("sample run needs a modified file");
+		await generateSemanticDiff(
+			{ ...run, manifest: { ...run.manifest, files: [modified] } },
+			60,
+			executable,
+		);
+		const narrowInvocation = (await readFile(log, "utf8")).trim().split("\n").at(-1);
+		expect(narrowInvocation?.split("\t")[0]).toBe("--display=inline");
 	} finally {
 		if (previousLog === undefined) delete process.env.REVUE_TEST_DIFFT_LOG;
 		else process.env.REVUE_TEST_DIFFT_LOG = previousLog;
@@ -99,7 +119,7 @@ echo "semantic leading path"
 
 		expect(result.files[0]).toMatchObject({
 			path: "-leading.ts",
-			lines: expect.arrayContaining(["semantic leading path"]),
+			lines: expect.arrayContaining([expect.objectContaining({ text: "semantic leading path" })]),
 		});
 	} finally {
 		await rm(temporary, { recursive: true, force: true });
@@ -150,7 +170,7 @@ test("semantic diff describes special file states and absent snapshot sides", as
 			80,
 			executable,
 		);
-		const text = result.files.flatMap((file) => file.lines).join("\n");
+		const text = result.files.flatMap((file) => file.lines.map((line) => line.text)).join("\n");
 		expect(text).toContain("renamed: old.ts -> renamed.ts");
 		expect(text).toContain("contents are identical");
 		expect(text).toContain("File mode changed 100644 -> 100755");

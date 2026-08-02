@@ -113,8 +113,10 @@ The top File/View menu makes the main actions discoverable with a mouse or keybo
 open it, use arrow keys and `Enter`, and press `Escape` or click outside to close. Patch is the
 default view. The View menu can lazily generate a read-only Semantic diff when a compatible
 [`difft`](https://difftastic.wilfred.me.uk/) executable is available; it compares only the verified
-old/new blobs in the prepared run. A missing or incompatible executable leaves Patch active and
-shows a terminal-safe explanation.
+old/new blobs in the prepared run. Semantic uses Difftastic’s coloured side-by-side presentation at
+wide content widths and coloured inline output when narrow, translating its styling into safe
+OpenTUI spans rather than emitting terminal escapes. A missing or incompatible executable leaves
+Patch active and shows a terminal-safe explanation.
 
 ## Review ignore rules
 
@@ -157,8 +159,9 @@ changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · 
 all diffs · `a` jumps to the next unreviewed chapter · `F10` opens the menu · `?` toggles shortcut
 help · `q`/`esc` quits.
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
-change, and Patch/Semantic keep separate scroll positions. Semantic mode is intentionally
-read-only: key-change anchors, exact range highlights, and future comments are Patch-only. Binary,
+change, and switching Patch/Semantic carries the reviewer’s relative position through the chapter.
+Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and future
+comments are Patch-only. Binary,
 symlink, mode-only, and content-identical metadata changes are described rather than passed off as
 semantic source diffs. Progress persists to `.revue/state.json`, keyed by both the pinned run and its
 chapter narration.

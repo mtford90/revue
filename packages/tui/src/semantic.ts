@@ -7,10 +7,43 @@ import { RUN_FILE_STATUS, RUN_OBJECT_KIND, type RunFile } from "@revue/types";
 
 const REQUIRED_HELP_OPTIONS = ["--color", "--display", "--width"];
 const SAFE_WIDTH_MINIMUM = 40;
+const SIDE_BY_SIDE_MINIMUM = 80;
+const ANSI_FOREGROUNDS: Record<number, string> = {
+	30: "#45475a",
+	31: "#f38ba8",
+	32: "#a6e3a1",
+	33: "#f9e2af",
+	34: "#89b4fa",
+	35: "#cba6f7",
+	36: "#94e2d5",
+	37: "#bac2de",
+	90: "#6c7086",
+	91: "#f38ba8",
+	92: "#a6e3a1",
+	93: "#f9e2af",
+	94: "#89b4fa",
+	95: "#cba6f7",
+	96: "#94e2d5",
+	97: "#cdd6f4",
+};
+
+export type SemanticDiffSpan = {
+	text: string;
+	fg?: string;
+	bold: boolean;
+	dim: boolean;
+	italic: boolean;
+	underline: boolean;
+};
+
+export type SemanticDiffLine = {
+	text: string;
+	spans: SemanticDiffSpan[];
+};
 
 export type SemanticDiffFile = {
 	path: string;
-	lines: string[];
+	lines: SemanticDiffLine[];
 };
 
 export type SemanticDiffResult = {
@@ -23,9 +56,64 @@ export class SemanticDiffError extends Error {}
 type SemanticRun = Pick<PreparedRun, "directory" | "manifest">;
 
 type ProcessResult = { exitCode: number; stdout: string; stderr: string };
+type SemanticStyle = Omit<SemanticDiffSpan, "text">;
+
+const DEFAULT_STYLE: SemanticStyle = {
+	bold: false,
+	dim: false,
+	italic: false,
+	underline: false,
+};
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: Difftastic styling arrives as SGR sequences.
+const SGR_SEQUENCE = /\x1b\[([0-9;]*)m/g;
 
 export const terminalSafe = (value: string): string =>
 	value.split("\n").map(sanitizeTerminalLine).join("\n").trim();
+
+const applySgr = (style: SemanticStyle, parameters: string): SemanticStyle => {
+	const next = { ...style };
+	for (const value of (parameters || "0").split(";")) {
+		const code = Number(value);
+		if (code === 0) Object.assign(next, DEFAULT_STYLE, { fg: undefined });
+		else if (code === 1) next.bold = true;
+		else if (code === 2) next.dim = true;
+		else if (code === 3) next.italic = true;
+		else if (code === 4) next.underline = true;
+		else if (code === 22) Object.assign(next, { bold: false, dim: false });
+		else if (code === 23) next.italic = false;
+		else if (code === 24) next.underline = false;
+		else if (code === 39) next.fg = undefined;
+		else if (ANSI_FOREGROUNDS[code]) next.fg = ANSI_FOREGROUNDS[code];
+	}
+	return next;
+};
+
+const styledLine = (value: string): SemanticDiffLine => {
+	const spans: SemanticDiffSpan[] = [];
+	let cursor = 0;
+	let style = { ...DEFAULT_STYLE };
+	for (const match of value.matchAll(SGR_SEQUENCE)) {
+		const text = sanitizeTerminalLine(value.slice(cursor, match.index));
+		if (text) spans.push({ text, ...style });
+		style = applySgr(style, match[1] ?? "0");
+		cursor = (match.index ?? cursor) + match[0].length;
+	}
+	const remainder = sanitizeTerminalLine(value.slice(cursor));
+	if (remainder) spans.push({ text: remainder, ...style });
+	return { text: spans.map((span) => span.text).join(""), spans };
+};
+
+const plainLine = (text: string): SemanticDiffLine => ({
+	text,
+	spans: text ? [{ text, ...DEFAULT_STYLE }] : [],
+});
+
+const styledOutput = (output: string): SemanticDiffLine[] => {
+	const lines = output.split("\n").map((line) => styledLine(line.replace(/\r$/, "")));
+	const lastContent = lines.findLastIndex((line) => line.text.length > 0);
+	return lastContent < 0 ? [] : lines.slice(0, lastContent + 1);
+};
 
 const describeProcessFailure = (result: ProcessResult): string => {
 	const detail = terminalSafe(result.stderr || result.stdout)
@@ -88,27 +176,31 @@ const statusHeader = (file: RunFile): string => {
 
 const modeDescription = (mode: string | null): string => (mode ? mode : "absent");
 
-const metadataOnlyLines = (file: RunFile): string[] | null => {
-	const header = statusHeader(file);
+const metadataOnlyLines = (file: RunFile): SemanticDiffLine[] | null => {
+	const header = plainLine(statusHeader(file));
 	if (file.isBinary) {
-		return [header, "Binary snapshots cannot be represented as a semantic source diff."];
+		return [header, plainLine("Binary snapshots cannot be represented as a semantic source diff.")];
 	}
 	if (file.oldKind === RUN_OBJECT_KIND.SYMLINK || file.newKind === RUN_OBJECT_KIND.SYMLINK) {
 		return [
 			header,
-			"Symlink snapshots are not parsed as source code; review the link-target change in Patch view.",
+			plainLine(
+				"Symlink snapshots are not parsed as source code; review the link-target change in Patch view.",
+			),
 		];
 	}
 	if (file.status === RUN_FILE_STATUS.MODE_CHANGED) {
 		return [
 			header,
-			`File mode changed ${modeDescription(file.oldMode)} -> ${modeDescription(file.newMode)}; there is no semantic content change.`,
+			plainLine(
+				`File mode changed ${modeDescription(file.oldMode)} -> ${modeDescription(file.newMode)}; there is no semantic content change.`,
+			),
 		];
 	}
 	if (file.oldBlob === file.newBlob) {
 		return [
 			header,
-			"Pinned old and new contents are identical; there is no semantic content change.",
+			plainLine("Pinned old and new contents are identical; there is no semantic content change."),
 		];
 	}
 	return null;
@@ -123,8 +215,8 @@ const semanticArgs = (
 	emptyPath: string,
 	width: number,
 ): string[] => [
-	"--color=never",
-	"--display=inline",
+	"--color=always",
+	width >= SIDE_BY_SIDE_MINIMUM ? "--display=side-by-side" : "--display=inline",
 	`--width=${Math.max(SAFE_WIDTH_MINIMUM, Math.floor(width))}`,
 	"--",
 	file.path,
@@ -136,17 +228,25 @@ const semanticArgs = (
 	file.newMode ?? "000000",
 ];
 
-const outputLines = (file: RunFile, output: string): string[] => {
-	const safe = terminalSafe(output);
+const outputLines = (file: RunFile, output: string): SemanticDiffLine[] => {
+	const styled = styledOutput(output);
 	return [
-		statusHeader(file),
+		plainLine(statusHeader(file)),
 		...(file.status === RUN_FILE_STATUS.ADDED
-			? ["Old snapshot is absent; comparing an empty pre-image with the pinned new snapshot."]
+			? [
+					plainLine(
+						"Old snapshot is absent; comparing an empty pre-image with the pinned new snapshot.",
+					),
+				]
 			: []),
 		...(file.status === RUN_FILE_STATUS.DELETED
-			? ["New snapshot is absent; comparing the pinned old snapshot with an empty post-image."]
+			? [
+					plainLine(
+						"New snapshot is absent; comparing the pinned old snapshot with an empty post-image.",
+					),
+				]
 			: []),
-		...(safe ? safe.split("\n") : ["Difftastic found no semantic content changes."]),
+		...(styled.length ? styled : [plainLine("Difftastic found no semantic content changes.")]),
 	];
 };
 

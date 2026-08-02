@@ -10,6 +10,10 @@ import { preparePatch } from "./diff.ts";
 
 const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
 const loadPatch = async (path: string) => preparePatch(await readFile(path, "utf8"));
+const semanticLine = (text: string, fg?: string) => ({
+	text,
+	spans: [{ text, fg, bold: false, dim: false, italic: false, underline: false }],
+});
 
 // React's act() needs this flag to flush state updates from mocked key presses.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -128,11 +132,14 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 					files: [
 						{
 							path: "src/lib/backoff.ts",
-							lines: ["added: src/lib/backoff.ts", "semantic backoff"],
+							lines: [semanticLine("added: src/lib/backoff.ts"), semanticLine("semantic backoff")],
 						},
 						{
 							path: "src/lib/apiClient.ts",
-							lines: ["modified: src/lib/apiClient.ts", "semantic retry loop"],
+							lines: [
+								semanticLine("modified: src/lib/apiClient.ts"),
+								semanticLine("semantic retry loop", "#a6e3a1"),
+							],
 						},
 					],
 				};
@@ -155,6 +162,11 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 	expect(semanticFrame).toContain("semantic retry loop");
 	expect(semanticFrame).toContain("anchors/ranges/comments Patch-only");
 	expect(semanticFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
+	const semanticRow = t
+		.captureSpans()
+		.lines.flatMap((line) => line.spans)
+		.find((span) => span.text.includes("semantic retry loop"));
+	expect(semanticRow?.fg.g).toBeCloseTo(227 / 255);
 
 	await press(t, "F10");
 	await arrow(t, "right");
@@ -166,7 +178,7 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 	expect(loads).toBe(1);
 });
 
-test("Patch and Semantic restore independent scroll positions", async () => {
+test("switching views preserves relative progress through the chapter", async () => {
 	const scrollFile = RevueChaptersFileSchema.parse({
 		chapters: [
 			{
@@ -187,7 +199,9 @@ test("Patch and Semantic restore independent scroll positions", async () => {
 -old row
 ${additions}
 `);
-	const semanticLines = Array.from({ length: 30 }, (_, index) => `semantic row ${index + 1}`);
+	const semanticLines = Array.from({ length: 30 }, (_, index) =>
+		semanticLine(`semantic row ${index + 1}`),
+	);
 	const t = await testRender(
 		<App
 			file={scrollFile}
@@ -209,9 +223,11 @@ ${additions}
 	await press(t, "RETURN");
 	await act(async () => Promise.resolve());
 	await t.renderOnce();
-	expect(t.captureCharFrame()).toContain("semantic row 1 ");
-	for (let index = 0; index < 8; index += 1) await press(t, "j");
-	expect(t.captureCharFrame()).not.toContain("semantic row 1 ");
+	const semanticFrame = t.captureCharFrame();
+	expect(semanticFrame).toContain("Semantic view (read-only)");
+	expect(semanticFrame).toContain("semantic row");
+	expect(semanticFrame).not.toContain("semantic row 1 ");
+	for (let index = 0; index < 4; index += 1) await press(t, "j");
 
 	await press(t, "F10");
 	await arrow(t, "right");

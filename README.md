@@ -106,9 +106,9 @@ status, exact review-unit anchor, and multi-line body; prologue-only exports con
 
 In Patch view, click a visible old/new line-number gutter to comment on one line, or drag within one
 gutter to select an inclusive range in the same hunk and side. Dragging source code remains ordinary
-terminal text selection for copying. The composer identifies the path, side, range, and review unit;
-use `Ctrl+Enter` or its pointer control to save and `Escape` to cancel. The same range can hold any
-number of independent comments.
+terminal text selection for copying. The composer opens inline beneath the selected range and
+identifies its path, side, range, and review unit; use `Ctrl+Enter` or its pointer control to save and
+`Escape` to cancel. The same range can hold any number of independent comments.
 
 Open comments use an attention marker. Dealt-with comments stay inline with a green check and dimmed
 body; pointer controls mark dealt with, reopen, or permanently delete an erroneous comment. Comments

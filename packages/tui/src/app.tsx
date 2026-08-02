@@ -499,6 +499,86 @@ function InlineComment({
 	);
 }
 
+const COMMENT_COMPOSER_ID = "inline-comment-composer";
+
+function CommentComposer({
+	range,
+	body,
+	notice,
+	textareaRef,
+	onContentChange,
+	onSave,
+	onCancel,
+}: {
+	range: DiffLineRange;
+	body: string;
+	notice: string | null;
+	textareaRef: RefObject<TextareaRenderable | null>;
+	onContentChange: () => void;
+	onSave: () => void;
+	onCancel: () => void;
+}) {
+	const cursorPositioned = useRef(false);
+	useEffect(() => {
+		if (cursorPositioned.current || !textareaRef.current) return;
+		textareaRef.current.cursorOffset = body.length;
+		cursorPositioned.current = true;
+	});
+
+	return (
+		<box
+			id={COMMENT_COMPOSER_ID}
+			flexDirection="column"
+			border
+			borderColor={theme.accent}
+			paddingLeft={1}
+			paddingRight={1}
+		>
+			<text fg={theme.accent}>New inline comment</text>
+			<text fg={theme.text}>
+				{range.filePath} · {range.side} ·{" "}
+				{range.startLine === range.endLine
+					? `line ${range.startLine}`
+					: `lines ${range.startLine}-${range.endLine}`}{" "}
+				· review unit oldStart {range.hunkOldStart}
+			</text>
+			<textarea
+				ref={textareaRef}
+				initialValue={body}
+				focused
+				height={4}
+				placeholder="Write feedback…"
+				backgroundColor={theme.base}
+				focusedBackgroundColor={theme.base}
+				textColor={theme.text}
+				focusedTextColor={theme.text}
+				onContentChange={onContentChange}
+				onKeyDown={(key) => {
+					if (key.name === "escape") {
+						key.preventDefault();
+						key.stopPropagation();
+						onCancel();
+					} else if (key.name === "return" && key.ctrl) {
+						key.preventDefault();
+						key.stopPropagation();
+						onSave();
+					}
+				}}
+			/>
+			{notice ? <text fg={theme.red}>{notice}</text> : null}
+			<box flexDirection="row">
+				<text fg={theme.green} onMouseDown={onSave}>
+					[Save Ctrl+Enter]
+				</text>
+				<text> </text>
+				<text fg={theme.dim} onMouseDown={onCancel}>
+					[Cancel Escape]
+				</text>
+			</box>
+		</box>
+	);
+}
+
 const fileHeaderId = (chapterId: string, index: number) =>
 	`chapter-file-header:${chapterId}:${index}`;
 
@@ -513,6 +593,7 @@ function ChapterView({
 	collapsedFiles,
 	comments,
 	selectedCommentRange,
+	commentDraft,
 	onSelectFile,
 	onToggleCollapse,
 	onToggleFileReview,
@@ -530,6 +611,7 @@ function ChapterView({
 	collapsedFiles: Set<string>;
 	comments: RevueComment[];
 	selectedCommentRange: DiffLineRange | undefined;
+	commentDraft: DiffInlineAttachment | undefined;
 	onSelectFile: (index: number) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
@@ -555,23 +637,26 @@ function ChapterView({
 				reference.oldStart === comment.anchor.oldStart,
 		),
 	);
-	const inlineAttachments: DiffInlineAttachment[] = chapterComments.map((comment) => ({
-		id: comment.id,
-		anchor: {
-			filePath: comment.anchor.filePath,
-			hunkOldStart: comment.anchor.oldStart,
-			side: comment.anchor.side,
-			startLine: comment.anchor.startLine,
-			endLine: comment.anchor.endLine,
-		},
-		content: (
-			<InlineComment
-				comment={comment}
-				onDelete={onDeleteComment}
-				onToggleStatus={onToggleCommentStatus}
-			/>
-		),
-	}));
+	const inlineAttachments: DiffInlineAttachment[] = [
+		...chapterComments.map((comment) => ({
+			id: comment.id,
+			anchor: {
+				filePath: comment.anchor.filePath,
+				hunkOldStart: comment.anchor.oldStart,
+				side: comment.anchor.side,
+				startLine: comment.anchor.startLine,
+				endLine: comment.anchor.endLine,
+			},
+			content: (
+				<InlineComment
+					comment={comment}
+					onDelete={onDeleteComment}
+					onToggleStatus={onToggleCommentStatus}
+				/>
+			),
+		})),
+		...(commentDraft ? [commentDraft] : []),
+	];
 
 	return (
 		<box flexDirection="column" gap={1}>
@@ -866,6 +951,15 @@ export function App({
 		const retry = setTimeout(anchorFocusedDiffLine, 50);
 		return () => clearTimeout(retry);
 	}, [diffAnchorTarget]);
+
+	useEffect(() => {
+		if (!commentRange) return;
+		const revealCommentComposer = () =>
+			pageScroll.current?.scrollChildIntoView(COMMENT_COMPOSER_ID);
+		revealCommentComposer();
+		const retry = setTimeout(revealCommentComposer, 50);
+		return () => clearTimeout(retry);
+	}, [commentRange]);
 
 	function selectCommentRange(range: DiffLineRange) {
 		setCommentRange(range);
@@ -1168,6 +1262,23 @@ export function App({
 		showSemantic: () => void showSemantic(),
 	});
 	const menu = useMenuController(menus);
+	const commentDraft: DiffInlineAttachment | undefined = commentRange
+		? {
+				id: COMMENT_COMPOSER_ID,
+				anchor: commentRange,
+				content: (
+					<CommentComposer
+						range={commentRange}
+						body={commentBody}
+						notice={commentNotice}
+						textareaRef={textareaRef}
+						onContentChange={() => setCommentBody(textareaRef.current?.editBuffer.getText() ?? "")}
+						onSave={saveComment}
+						onCancel={cancelComment}
+					/>
+				),
+			}
+		: undefined;
 
 	useKeyboard((key) => {
 		const name = key.name;
@@ -1342,6 +1453,7 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									comments={comments}
 									selectedCommentRange={commentRange ?? undefined}
+									commentDraft={commentDraft}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
 									onToggleFileReview={toggleFileReview}
@@ -1379,59 +1491,7 @@ export function App({
 					/>
 				</>
 			) : null}
-			{commentRange ? (
-				<box
-					flexShrink={0}
-					flexDirection="column"
-					border
-					borderColor={theme.accent}
-					paddingLeft={1}
-					paddingRight={1}
-				>
-					<text fg={theme.accent}>New inline comment</text>
-					<text fg={theme.text}>
-						{commentRange.filePath} · {commentRange.side} ·{" "}
-						{commentRange.startLine === commentRange.endLine
-							? `line ${commentRange.startLine}`
-							: `lines ${commentRange.startLine}-${commentRange.endLine}`}{" "}
-						· review unit oldStart {commentRange.hunkOldStart}
-					</text>
-					<textarea
-						ref={textareaRef}
-						focused
-						height={4}
-						placeholder="Write feedback…"
-						backgroundColor={theme.base}
-						focusedBackgroundColor={theme.base}
-						textColor={theme.text}
-						focusedTextColor={theme.text}
-						onContentChange={() => setCommentBody(textareaRef.current?.editBuffer.getText() ?? "")}
-						onKeyDown={(key) => {
-							if (key.name === "escape") {
-								key.preventDefault();
-								key.stopPropagation();
-								cancelComment();
-							} else if (key.name === "return" && key.ctrl) {
-								key.preventDefault();
-								key.stopPropagation();
-								saveComment();
-							}
-						}}
-					/>
-					{commentNotice ? <text fg={theme.red}>{commentNotice}</text> : null}
-					<box flexDirection="row">
-						<text fg={theme.green} onMouseDown={saveComment}>
-							[Save Ctrl+Enter]
-						</text>
-						<text> </text>
-						<text fg={theme.dim} onMouseDown={cancelComment}>
-							[Cancel Escape]
-						</text>
-					</box>
-				</box>
-			) : commentNotice ? (
-				<text fg={theme.red}>{commentNotice}</text>
-			) : null}
+			{!commentRange && commentNotice ? <text fg={theme.red}>{commentNotice}</text> : null}
 			<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
 				<text fg={theme.dim}>
 					{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}

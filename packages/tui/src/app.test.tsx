@@ -582,10 +582,26 @@ test("inline comment composing isolates app keys and keeps dealt-with feedback v
 	const sourceX = lines[lineY]?.indexOf("new value") ?? -1;
 	const gutterX = lines[lineY]?.lastIndexOf("1", sourceX) ?? -1;
 	await click(t, gutterX, lineY);
-	expect(t.captureCharFrame()).toContain("New inline comment");
-	expect(t.captureCharFrame()).toContain("comment.ts · additions · line 1");
+	const composerFrame = t.captureCharFrame();
+	expect(composerFrame).toContain("New inline comment");
+	expect(composerFrame).toContain("comment.ts · additions · line 1");
+	const composerLines = composerFrame.split("\n");
+	const existingCommentActionsY = composerLines.findIndex((line) => line.includes("[Delete]"));
+	const composerY = composerLines.findIndex((line) => line.includes("New inline comment"));
+	expect(composerY - 1).toBe(existingCommentActionsY + 1);
 
 	await act(async () => t.mockInput.typeText("Please adjust"));
+	let draftFrameLines = t.captureCharFrame().split("\n");
+	let fileHeaderY = draftFrameLines.findIndex((line) => line.includes("comment.ts"));
+	let collapseX = draftFrameLines[fileHeaderY]?.indexOf("▼") ?? -1;
+	await click(t, collapseX, fileHeaderY);
+	expect(t.captureCharFrame()).not.toContain("New inline comment");
+	draftFrameLines = t.captureCharFrame().split("\n");
+	fileHeaderY = draftFrameLines.findIndex((line) => line.includes("comment.ts"));
+	collapseX = draftFrameLines[fileHeaderY]?.indexOf("▶") ?? -1;
+	await click(t, collapseX, fileHeaderY);
+	expect(t.captureCharFrame()).toContain("Please adjust");
+
 	await press(t, "q");
 	expect(quits).toBe(0);
 	expect(t.captureCharFrame()).toContain("Please adjustq");

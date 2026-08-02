@@ -1,5 +1,6 @@
+import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { createDiffFile } from "@revue/diff-model";
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { decorationAnchorId, findFocusedDecorationAnchor } from "./decorations.ts";
 import { buildDiffRows } from "./rows.ts";
 import { sanitizeTerminalLine } from "./terminalText.ts";
@@ -8,8 +9,11 @@ import type {
 	DiffCell,
 	DiffFile,
 	DiffFileInput,
+	DiffInlineAttachment,
 	DiffLayout,
+	DiffLineRange,
 	DiffRow,
+	DiffSide,
 	RangeDecoration,
 } from "./types.ts";
 
@@ -43,18 +47,65 @@ function CellContent({ cell }: { cell: DiffCell }) {
 	);
 }
 
+type GutterHandlers = {
+	onMouseDown?: (event: OpenTUIMouseEvent) => void;
+	onMouseDrag?: (event: OpenTUIMouseEvent) => void;
+	onMouseDragEnd?: (event: OpenTUIMouseEvent) => void;
+	onMouseOver?: (event: OpenTUIMouseEvent) => void;
+	onMouseUp?: (event: OpenTUIMouseEvent) => void;
+};
+
+type CellInteractions = Partial<Record<DiffSide, GutterHandlers>>;
+type AttachmentCounts = Partial<Record<DiffSide, number>>;
+
+const attachmentMarker = (count: number): string =>
+	count > 0 ? `${String(count).padStart(2)}●` : "   ";
+
+function Gutter({
+	focused,
+	number,
+	digits,
+	showLineNumbers,
+	attachmentCount,
+	handlers,
+}: {
+	focused: boolean;
+	number: number | undefined;
+	digits: number;
+	showLineNumbers: boolean;
+	attachmentCount: number;
+	handlers?: GutterHandlers;
+}) {
+	return (
+		<text
+			fg={focused ? palette.accent : palette.dim}
+			wrapMode="none"
+			selectable={false}
+			{...handlers}
+		>
+			{focused ? "▌" : " "}
+			{showLineNumbers ? lineNumber(number, digits) : ""}
+			{attachmentMarker(attachmentCount)}
+		</text>
+	);
+}
+
 function SplitCell({
 	cell,
 	side,
 	digits,
 	showLineNumbers,
 	width,
+	attachmentCount,
+	handlers,
 }: {
 	cell: DiffCell;
-	side: "additions" | "deletions";
+	side: DiffSide;
 	digits: number;
 	showLineNumbers: boolean;
 	width: number;
+	attachmentCount: number;
+	handlers?: GutterHandlers;
 }) {
 	const focused = cell.focusedSides.includes(side);
 	const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
@@ -75,10 +126,17 @@ function SplitCell({
 			height={1}
 			overflow="hidden"
 			backgroundColor={backgroundColor}
+			flexDirection="row"
 		>
-			<text fg={focused ? palette.accent : palette.dim} wrapMode="none">
-				{focused ? "▌" : " "}
-				{showLineNumbers ? `${lineNumber(number, digits)} ` : ""}
+			<Gutter
+				focused={focused}
+				number={number}
+				digits={digits}
+				showLineNumbers={showLineNumbers}
+				attachmentCount={attachmentCount}
+				handlers={number === undefined ? undefined : handlers}
+			/>
+			<text fg={palette.text} wrapMode="none" selectable>
 				{sign} <CellContent cell={cell} />
 			</text>
 		</box>
@@ -89,10 +147,14 @@ function StackCell({
 	cell,
 	digits,
 	showLineNumbers,
+	attachmentCounts,
+	interactions,
 }: {
 	cell: DiffCell;
 	digits: number;
 	showLineNumbers: boolean;
+	attachmentCounts: AttachmentCounts;
+	interactions: CellInteractions;
 }) {
 	const oldFocused = cell.focusedSides.includes("deletions");
 	const newFocused = cell.focusedSides.includes("additions");
@@ -107,12 +169,30 @@ function StackCell({
 					? palette.deletion
 					: undefined;
 	return (
-		<box width="100%" height={1} overflow="hidden" backgroundColor={backgroundColor}>
-			<text fg={palette.dim} wrapMode="none">
-				<span fg={oldFocused ? palette.accent : palette.dim}>{oldFocused ? "▌" : " "}</span>
-				{showLineNumbers ? lineNumber(cell.oldLineNumber, digits) : ""}
-				<span fg={newFocused ? palette.accent : palette.dim}>{newFocused ? "▌" : " "}</span>
-				{showLineNumbers ? `${lineNumber(cell.newLineNumber, digits)} ` : ""}
+		<box
+			width="100%"
+			height={1}
+			overflow="hidden"
+			backgroundColor={backgroundColor}
+			flexDirection="row"
+		>
+			<Gutter
+				focused={oldFocused}
+				number={cell.oldLineNumber}
+				digits={digits}
+				showLineNumbers={showLineNumbers}
+				attachmentCount={attachmentCounts.deletions ?? 0}
+				handlers={cell.oldLineNumber === undefined ? undefined : interactions.deletions}
+			/>
+			<Gutter
+				focused={newFocused}
+				number={cell.newLineNumber}
+				digits={digits}
+				showLineNumbers={showLineNumbers}
+				attachmentCount={attachmentCounts.additions ?? 0}
+				handlers={cell.newLineNumber === undefined ? undefined : interactions.additions}
+			/>
+			<text fg={palette.text} wrapMode="none" selectable>
 				{sign} <CellContent cell={cell} />
 			</text>
 		</box>
@@ -129,6 +209,9 @@ export interface DiffBodyProps {
 	decorations?: readonly RangeDecoration[];
 	/** A decoration id or shared focusId; all matching ranges receive focus styling. */
 	focusedDecorationId?: string;
+	selectedRange?: DiffLineRange;
+	inlineAttachments?: readonly DiffInlineAttachment[];
+	onRangeSelect?: (range: DiffLineRange) => void;
 }
 
 function rowHasAnchor(row: DiffRow, anchor: DecorationAnchor): boolean {
@@ -162,11 +245,26 @@ export function DiffBody({
 	selectedHunkIndex = 0,
 	decorations = [],
 	focusedDecorationId,
+	selectedRange,
+	inlineAttachments = [],
+	onRangeSelect,
 }: DiffBodyProps) {
 	const normalized = useMemo(() => (file ? createDiffFile(file) : undefined), [file]);
+	const activeStart = useRef<DiffLineRange | null>(null);
+	const activeRange = useRef<DiffLineRange | null>(null);
+	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
+	const displayedRange = dragRange ?? selectedRange;
+	const selectionDecoration: RangeDecoration | null = displayedRange
+		? { ...displayedRange, id: "diff-pointer-selection" }
+		: null;
+	const renderedDecorations = selectionDecoration
+		? [...decorations, selectionDecoration]
+		: decorations;
+	const renderedFocusId = selectionDecoration?.id ?? focusedDecorationId;
 	const rows = useMemo(
-		() => (normalized ? buildDiffRows(normalized, layout, decorations, focusedDecorationId) : []),
-		[normalized, layout, decorations, focusedDecorationId],
+		() =>
+			normalized ? buildDiffRows(normalized, layout, renderedDecorations, renderedFocusId) : [],
+		[normalized, layout, renderedDecorations, renderedFocusId],
 	);
 	const anchor = useMemo(
 		() =>
@@ -191,13 +289,128 @@ export function DiffBody({
 	const oldPaneWidth = Math.floor(splitContentWidth / 2);
 	const newPaneWidth = splitContentWidth - oldPaneWidth;
 
+	const lineRange = (row: DiffRow, side: DiffSide): DiffLineRange | null => {
+		if (!normalized || row.type === "hunk-header") return null;
+		const cell = row.type === "split-line" ? (side === "deletions" ? row.old : row.new) : row.cell;
+		const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
+		const hunk = normalized.metadata.hunks[row.hunkIndex];
+		if (number === undefined || !hunk) return null;
+		return {
+			filePath: normalized.path,
+			hunkOldStart: hunk.deletionStart,
+			side,
+			startLine: number,
+			endLine: number,
+		};
+	};
+	const updateRange = (target: DiffLineRange): DiffLineRange | null => {
+		const start = activeStart.current;
+		if (
+			!start ||
+			start.filePath !== target.filePath ||
+			start.hunkOldStart !== target.hunkOldStart ||
+			start.side !== target.side
+		) {
+			return activeRange.current;
+		}
+		const next = {
+			...start,
+			startLine: Math.min(start.startLine, target.startLine),
+			endLine: Math.max(start.endLine, target.endLine),
+		};
+		activeRange.current = next;
+		setDragRange(next);
+		return next;
+	};
+	const finishRange = (target: DiffLineRange) => {
+		const start = activeStart.current;
+		if (!start) return;
+		const completed =
+			target.startLine === start.startLine &&
+			target.side === start.side &&
+			target.hunkOldStart === start.hunkOldStart
+				? activeRange.current
+				: updateRange(target);
+		activeStart.current = null;
+		activeRange.current = null;
+		setDragRange(null);
+		if (completed) onRangeSelect?.(completed);
+	};
+	const gutterHandlers = (target: DiffLineRange | null): GutterHandlers | undefined =>
+		target && onRangeSelect
+			? {
+					onMouseDown: (event) => {
+						if (event.button !== 0) return;
+						event.preventDefault();
+						event.stopPropagation();
+						activeStart.current = target;
+						activeRange.current = target;
+						setDragRange(target);
+					},
+					onMouseDrag: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						if (target !== activeStart.current) updateRange(target);
+					},
+					onMouseOver: (event) => {
+						if (!activeStart.current) return;
+						event.preventDefault();
+						event.stopPropagation();
+						updateRange(target);
+					},
+					onMouseDragEnd: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						finishRange(target);
+					},
+					onMouseUp: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						finishRange(target);
+					},
+				}
+			: undefined;
+	const rowAttachments = (row: DiffRow): DiffInlineAttachment[] => {
+		if (!normalized || row.type === "hunk-header") return [];
+		const hunk = normalized.metadata.hunks[row.hunkIndex];
+		if (!hunk) return [];
+		return inlineAttachments.filter((attachment) => {
+			if (
+				attachment.anchor.filePath !== normalized.path ||
+				attachment.anchor.hunkOldStart !== hunk.deletionStart
+			) {
+				return false;
+			}
+			const range = lineRange(row, attachment.anchor.side);
+			return range?.endLine === attachment.anchor.endLine;
+		});
+	};
+	const cancelActiveRange = () => {
+		activeStart.current = null;
+		activeRange.current = null;
+		setDragRange(null);
+	};
+	const attachmentCounts = (row: DiffRow): AttachmentCounts => {
+		const attachments = rowAttachments(row);
+		return {
+			deletions: attachments.filter((item) => item.anchor.side === "deletions").length,
+			additions: attachments.filter((item) => item.anchor.side === "additions").length,
+		};
+	};
+
 	if (!normalized) return <text fg={palette.dim}>No file selected.</text>;
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length) {
 		return <text fg={palette.dim}>{emptyBodyMessage(normalized)}</text>;
 	}
 
 	return (
-		<box width={width} flexDirection="column">
+		// biome-ignore lint/a11y/noStaticElementInteractions: the body clears incomplete gutter drags outside a selectable line.
+		<box
+			width={width}
+			flexDirection="column"
+			onMouseUp={cancelActiveRange}
+			onMouseDragEnd={cancelActiveRange}
+		>
 			{rows.map((row) => {
 				if (row.type === "hunk-header") {
 					return showHunkHeaders ? (
@@ -211,43 +424,70 @@ export function DiffBody({
 				}
 				const selected = row.hunkIndex === selectedHunkIndex;
 				const id = row.key === anchorRowKey ? anchorId : undefined;
+				const attachments = rowAttachments(row);
+				const counts = attachmentCounts(row);
 				if (row.type === "split-line") {
 					return (
-						<box
-							id={id}
-							key={row.key}
-							width="100%"
-							height={1}
-							flexDirection="row"
-							backgroundColor={selected ? palette.selected : undefined}
-						>
-							<SplitCell
-								cell={row.old}
-								side="deletions"
-								digits={digits}
-								showLineNumbers={showLineNumbers}
-								width={oldPaneWidth}
-							/>
-							<text fg={palette.dim}>│</text>
-							<SplitCell
-								cell={row.new}
-								side="additions"
-								digits={digits}
-								showLineNumbers={showLineNumbers}
-								width={newPaneWidth}
-							/>
+						<box key={row.key} flexDirection="column" width="100%">
+							<box
+								id={id}
+								width="100%"
+								height={1}
+								flexDirection="row"
+								backgroundColor={selected ? palette.selected : undefined}
+							>
+								<SplitCell
+									cell={row.old}
+									side="deletions"
+									digits={digits}
+									showLineNumbers={showLineNumbers}
+									width={oldPaneWidth}
+									attachmentCount={counts.deletions ?? 0}
+									handlers={gutterHandlers(lineRange(row, "deletions"))}
+								/>
+								<text fg={palette.dim}>│</text>
+								<SplitCell
+									cell={row.new}
+									side="additions"
+									digits={digits}
+									showLineNumbers={showLineNumbers}
+									width={newPaneWidth}
+									attachmentCount={counts.additions ?? 0}
+									handlers={gutterHandlers(lineRange(row, "additions"))}
+								/>
+							</box>
+							{attachments.map((attachment) => (
+								<box key={attachment.id} width="100%" flexDirection="column">
+									{attachment.content}
+								</box>
+							))}
 						</box>
 					);
 				}
 				return (
-					<box
-						id={id}
-						key={row.key}
-						width="100%"
-						height={1}
-						backgroundColor={selected ? palette.selected : undefined}
-					>
-						<StackCell cell={row.cell} digits={digits} showLineNumbers={showLineNumbers} />
+					<box key={row.key} flexDirection="column" width="100%">
+						<box
+							id={id}
+							width="100%"
+							height={1}
+							backgroundColor={selected ? palette.selected : undefined}
+						>
+							<StackCell
+								cell={row.cell}
+								digits={digits}
+								showLineNumbers={showLineNumbers}
+								attachmentCounts={counts}
+								interactions={{
+									deletions: gutterHandlers(lineRange(row, "deletions")),
+									additions: gutterHandlers(lineRange(row, "additions")),
+								}}
+							/>
+						</box>
+						{attachments.map((attachment) => (
+							<box key={attachment.id} width="100%" flexDirection="column">
+								{attachment.content}
+							</box>
+						))}
 					</box>
 				);
 			})}

@@ -14,7 +14,13 @@ import {
 	ReviewCoverageError,
 	RunArtifactError,
 } from "@revue/prep";
-import { RUN_EXCLUSION_REASON } from "@revue/types";
+import { type RevueComment, RUN_EXCLUSION_REASON } from "@revue/types";
+import {
+	CommentStoreError,
+	defaultCommentsPath,
+	loadValidatedComments,
+	openCommentStore,
+} from "./comments.ts";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { formatSummary } from "./summary.ts";
 import { defaultStatePath, loadViewState, runKey } from "./viewState.ts";
@@ -27,6 +33,7 @@ Usage:
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
   revue export <run-directory>         export the full ordered review as Markdown
+  revue comments <operation>           list or update inline comments
 
 Prep modes: committed, staged, unstaged, work. Without explicit scope, prep reviews local
 working-tree changes when present and otherwise compares HEAD with the detected main/master base.
@@ -37,6 +44,10 @@ const SHOW_HELP = `usage: revue show <run-directory> [--check]`;
 const EXPORT_HELP = `usage: revue export <run-directory>
                      [--prologue | --chapter-id <id> | --chapter-order <number>]
                      [--output <path>]`;
+const COMMENTS_HELP = `usage: revue comments list <run-directory> --json [--all]
+       revue comments delete <run-directory> <comment-id>
+       revue comments mark-dealt <run-directory> <comment-id>
+       revue comments reopen <run-directory> <comment-id>`;
 const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main...feature]
                   [--base <ref>] [--compare <ref>]
                   [--ref committed|staged|unstaged|work]
@@ -193,6 +204,16 @@ async function cmdExport(args: string[]): Promise<number> {
 		throw error;
 	}
 
+	let comments: RevueComment[];
+	try {
+		comments = loadValidatedComments(defaultCommentsPath(), run);
+	} catch (error) {
+		if (error instanceof CommentStoreError) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
 	const state = await loadViewState(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
 	let markdown: string;
 	try {
@@ -202,7 +223,7 @@ async function cmdExport(args: string[]): Promise<number> {
 				files: run.manifest.files,
 				chapters: run.chapters,
 			},
-			{ selection: parsed.selection, viewState: state },
+			{ selection: parsed.selection, viewState: state, comments },
 		);
 	} catch (error) {
 		if (error instanceof MarkdownExportError) {
@@ -225,6 +246,93 @@ async function cmdExport(args: string[]): Promise<number> {
 	}
 	process.stderr.write(`Wrote Markdown export to ${parsed.output}\n`);
 	return 0;
+}
+
+const commentIdPattern =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function cmdComments(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${COMMENTS_HELP}\n`);
+		return 0;
+	}
+	const [operation, ...rest] = args;
+	if (operation === "list") {
+		const unknown = rest.find(
+			(argument) => argument.startsWith("-") && !["--json", "--all"].includes(argument),
+		);
+		const positionals = rest.filter((argument) => !argument.startsWith("-"));
+		const directory = positionals[0];
+		if (unknown || !rest.includes("--json") || positionals.length !== 1 || !directory) {
+			const detail = unknown
+				? `unknown comments list option: ${unknown}`
+				: !rest.includes("--json")
+					? "comments list requires --json"
+					: "comments list requires one run directory";
+			process.stderr.write(`${detail}\n${COMMENTS_HELP}\n`);
+			return 1;
+		}
+		try {
+			const run = await loadReviewRun(directory);
+			const comments = loadValidatedComments(defaultCommentsPath(), run).filter(
+				(comment) => rest.includes("--all") || comment.status === "open",
+			);
+			process.stdout.write(`${JSON.stringify({ runId: run.manifest.runId, comments }, null, 2)}\n`);
+			return 0;
+		} catch (error) {
+			if (
+				error instanceof ChaptersFileError ||
+				error instanceof RunArtifactError ||
+				error instanceof ReviewCoverageError ||
+				error instanceof CommentStoreError
+			) {
+				process.stderr.write(`${error.message}\n`);
+				return 1;
+			}
+			throw error;
+		}
+	}
+
+	if (["delete", "mark-dealt", "reopen"].includes(operation ?? "")) {
+		const [directory, id, ...extra] = rest;
+		if (!directory || !id || extra.length || directory.startsWith("-") || id.startsWith("-")) {
+			process.stderr.write(`${COMMENTS_HELP}\n`);
+			return 1;
+		}
+		if (!commentIdPattern.test(id)) {
+			process.stderr.write(`Comment ID must be a UUID, received ${JSON.stringify(id)}\n`);
+			return 1;
+		}
+		try {
+			const run = await loadReviewRun(directory);
+			loadValidatedComments(defaultCommentsPath(), run);
+			const store = openCommentStore(defaultCommentsPath(), run.manifest.runId);
+			const comment =
+				operation === "delete"
+					? store.delete(id)
+					: operation === "mark-dealt"
+						? store.markDealt(id)
+						: store.reopen(id);
+			process.stdout.write(`${JSON.stringify({ action: operation, comment }, null, 2)}\n`);
+			return 0;
+		} catch (error) {
+			if (
+				error instanceof ChaptersFileError ||
+				error instanceof RunArtifactError ||
+				error instanceof ReviewCoverageError ||
+				error instanceof CommentStoreError
+			) {
+				process.stderr.write(`${error.message}\n`);
+				return 1;
+			}
+			throw error;
+		}
+	}
+
+	process.stderr.write(
+		`${operation ? `unknown comments operation: ${operation}\n` : ""}${COMMENTS_HELP}\n`,
+	);
+	return 1;
 }
 
 async function cmdShow(args: string[]): Promise<number> {
@@ -257,6 +365,17 @@ async function cmdShow(args: string[]): Promise<number> {
 		throw error;
 	}
 
+	let comments: RevueComment[];
+	try {
+		comments = loadValidatedComments(defaultCommentsPath(), run);
+	} catch (error) {
+		if (error instanceof CommentStoreError) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
+
 	if (args.includes("--check") || !process.stdout.isTTY) {
 		process.stdout.write(`${formatSummary(run.chapters)}\n`);
 		return 0;
@@ -271,10 +390,13 @@ async function cmdShow(args: string[]): Promise<number> {
 		]);
 	const diffFiles = await preparePatch(run.patch);
 	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
+	const commentStore = openCommentStore(defaultCommentsPath(), run.manifest.runId);
 	await runApp(run.chapters, {
 		diffFiles,
 		loadSemanticDiff: (width) => generateSemanticDiff(run, width),
 		initialViewState: store.get(),
+		initialComments: comments,
+		commentActions: commentStore,
 		onViewStateChange: (next) => store.set(next),
 	});
 	return 0;
@@ -285,6 +407,7 @@ async function main(): Promise<number> {
 	if (command === "show") return cmdShow(args);
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
+	if (command === "comments") return cmdComments(args);
 	if (!command || command === "-h" || command === "--help" || command === "help") {
 		process.stdout.write(HELP);
 		return 0;

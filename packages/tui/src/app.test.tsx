@@ -2,7 +2,13 @@ import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff-renderer";
-import { RevueChaptersFileSchema, type ViewState } from "@revue/types";
+import {
+	COMMENT_STATUS,
+	type CommentAnchor,
+	RevueChaptersFileSchema,
+	type RevueComment,
+	type ViewState,
+} from "@revue/types";
 import { act } from "react";
 import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
 import { App } from "./app.tsx";
@@ -491,6 +497,106 @@ ${additions}
 	const visibleLines = t.captureCharFrame().split("\n");
 	expect(visibleLines.find((line) => line.includes("exact row 25"))).toContain("▌");
 	expect(visibleLines.some((line) => line.includes("exact row 1 "))).toBe(false);
+});
+
+test("inline comment composing isolates app keys and keeps dealt-with feedback visible", async () => {
+	const commentFile = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "comment-chapter",
+				order: 1,
+				title: "Review the value",
+				summary: "A focused comment fixture.",
+				hunkRefs: [{ filePath: "comment.ts", oldStart: 1 }],
+				keyChanges: [],
+			},
+		],
+	});
+	const [diffFile] = parsePatch(`diff --git a/comment.ts b/comment.ts
+--- a/comment.ts
++++ b/comment.ts
+@@ -1 +1 @@
+-old value
++new value
+`);
+	if (!diffFile) throw new Error("missing diff fixture");
+	const runId = "a".repeat(64);
+	const initial: RevueComment = {
+		id: "00000000-0000-4000-8000-000000000001",
+		runId,
+		anchor: {
+			filePath: "comment.ts",
+			oldStart: 1,
+			side: "additions",
+			startLine: 1,
+			endLine: 1,
+		},
+		body: "Already addressed",
+		status: COMMENT_STATUS.DEALT_WITH,
+		createdAt: "2026-08-02T10:00:00.000Z",
+	};
+	const added: RevueComment[] = [];
+	let quits = 0;
+	const t = await testRender(
+		<App
+			file={commentFile}
+			diffFiles={[diffFile]}
+			initialComments={[initial]}
+			commentActions={{
+				add: (anchor: CommentAnchor, body: string) => {
+					const comment: RevueComment = {
+						...initial,
+						id: "00000000-0000-4000-8000-000000000002",
+						anchor,
+						body,
+						status: COMMENT_STATUS.OPEN,
+						createdAt: "2026-08-02T10:00:01.000Z",
+					};
+					added.push(comment);
+					return comment;
+				},
+				delete: () => initial,
+				markDealt: (id) => ({
+					...(id === initial.id ? initial : (added[0] ?? initial)),
+					status: COMMENT_STATUS.DEALT_WITH,
+				}),
+				reopen: () => ({ ...initial, status: COMMENT_STATUS.OPEN }),
+			}}
+			onQuit={() => (quits += 1)}
+		/>,
+		{ width: 100, height: 28, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("✓ Dealt with");
+	let lifecycleLines = t.captureCharFrame().split("\n");
+	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen]"));
+	await click(t, lifecycleLines[lifecycleY]?.indexOf("Reopen") ?? -1, lifecycleY);
+	expect(t.captureCharFrame()).toContain("! Open");
+	lifecycleLines = t.captureCharFrame().split("\n");
+	lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Mark dealt with]"));
+	await click(t, lifecycleLines[lifecycleY]?.indexOf("Mark dealt with") ?? -1, lifecycleY);
+	expect(t.captureCharFrame()).toContain("✓ Dealt with");
+
+	const lines = t.captureCharFrame().split("\n");
+	const lineY = lines.findIndex((line) => line.includes("new value"));
+	const sourceX = lines[lineY]?.indexOf("new value") ?? -1;
+	const gutterX = lines[lineY]?.lastIndexOf("1", sourceX) ?? -1;
+	await click(t, gutterX, lineY);
+	expect(t.captureCharFrame()).toContain("New inline comment");
+	expect(t.captureCharFrame()).toContain("comment.ts · additions · line 1");
+
+	await act(async () => t.mockInput.typeText("Please adjust"));
+	await press(t, "q");
+	expect(quits).toBe(0);
+	expect(t.captureCharFrame()).toContain("Please adjustq");
+	await act(async () => t.mockInput.pressEnter());
+	await act(async () => t.mockInput.typeText("Second line"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+
+	expect(added[0]?.body).toBe("Please adjustq\nSecond line");
+	expect(t.captureCharFrame()).toContain("! Open");
+	expect(t.captureCharFrame()).toContain("2●");
 });
 
 test("number keys check a chapter's key changes", async () => {

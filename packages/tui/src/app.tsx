@@ -4,24 +4,31 @@ import {
 	createTextAttributes,
 	type MouseEvent as OpenTUIMouseEvent,
 	type ScrollBoxRenderable,
+	type TextareaRenderable,
 } from "@opentui/core";
 import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
 	DiffBody,
 	type DiffFile,
 	DiffFileHeader,
+	type DiffInlineAttachment,
+	type DiffLineRange,
 	decorationAnchorId,
 	findFocusedDecorationAnchor,
 	type RangeDecoration,
 } from "@revue/diff-renderer";
 import {
 	type Chapter,
+	COMMENT_STATUS,
+	type CommentAnchor,
 	emptyViewState,
 	type Prologue,
 	type RevueChaptersFile,
+	type RevueComment,
 	type ViewState,
 } from "@revue/types";
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { createComment, sortComments } from "./comments.ts";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
 import { type SemanticDiffResult, terminalSafe } from "./semantic.ts";
@@ -436,6 +443,62 @@ function KeyChanges({
 }
 
 // ── Chapter detail ────────────────────────────────────────────────────────────
+type CommentActions = {
+	add(anchor: CommentAnchor, body: string): RevueComment;
+	delete(id: string): RevueComment;
+	markDealt(id: string): RevueComment;
+	reopen(id: string): RevueComment;
+};
+
+function InlineComment({
+	comment,
+	onDelete,
+	onToggleStatus,
+}: {
+	comment: RevueComment;
+	onDelete: (id: string) => void;
+	onToggleStatus: (comment: RevueComment) => void;
+}) {
+	const dealtWith = comment.status === COMMENT_STATUS.DEALT_WITH;
+	return (
+		<box
+			flexDirection="column"
+			border={["left"]}
+			borderColor={dealtWith ? theme.green : theme.yellow}
+			paddingLeft={1}
+			marginLeft={2}
+		>
+			<text fg={dealtWith ? theme.green : theme.yellow}>
+				{dealtWith ? "✓ Dealt with" : "! Open"} · {comment.id}
+			</text>
+			<text fg={dealtWith ? theme.dim : theme.text}>{comment.body}</text>
+			<box flexDirection="row">
+				<text
+					fg={theme.accent}
+					onMouseDown={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onToggleStatus(comment);
+					}}
+				>
+					[{dealtWith ? "Reopen" : "Mark dealt with"}]
+				</text>
+				<text> </text>
+				<text
+					fg={theme.red}
+					onMouseDown={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onDelete(comment.id);
+					}}
+				>
+					[Delete]
+				</text>
+			</box>
+		</box>
+	);
+}
+
 const fileHeaderId = (chapterId: string, index: number) =>
 	`chapter-file-header:${chapterId}:${index}`;
 
@@ -448,9 +511,14 @@ function ChapterView({
 	selectedHunkIndex,
 	selectedKeyChange,
 	collapsedFiles,
+	comments,
+	selectedCommentRange,
 	onSelectFile,
 	onToggleCollapse,
 	onToggleFileReview,
+	onSelectCommentRange,
+	onDeleteComment,
+	onToggleCommentStatus,
 }: {
 	chapter: Chapter;
 	diffFiles: DiffFile[] | null;
@@ -460,9 +528,14 @@ function ChapterView({
 	selectedHunkIndex: number;
 	selectedKeyChange: number;
 	collapsedFiles: Set<string>;
+	comments: RevueComment[];
+	selectedCommentRange: DiffLineRange | undefined;
 	onSelectFile: (index: number) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
+	onSelectCommentRange: (range: DiffLineRange) => void;
+	onDeleteComment: (id: string) => void;
+	onToggleCommentStatus: (comment: RevueComment) => void;
 }) {
 	const chapterDiffFiles = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const paths = chapterFilePaths(chapter);
@@ -474,6 +547,30 @@ function ChapterView({
 		...ref,
 		id: `${focusedDecorationId}:${refIndex}`,
 		focusId: focusedDecorationId,
+	}));
+	const chapterComments = comments.filter((comment) =>
+		chapter.hunkRefs.some(
+			(reference) =>
+				reference.filePath === comment.anchor.filePath &&
+				reference.oldStart === comment.anchor.oldStart,
+		),
+	);
+	const inlineAttachments: DiffInlineAttachment[] = chapterComments.map((comment) => ({
+		id: comment.id,
+		anchor: {
+			filePath: comment.anchor.filePath,
+			hunkOldStart: comment.anchor.oldStart,
+			side: comment.anchor.side,
+			startLine: comment.anchor.startLine,
+			endLine: comment.anchor.endLine,
+		},
+		content: (
+			<InlineComment
+				comment={comment}
+				onDelete={onDeleteComment}
+				onToggleStatus={onToggleCommentStatus}
+			/>
+		),
 	}));
 
 	return (
@@ -527,6 +624,9 @@ function ChapterView({
 										selectedHunkIndex={focused ? selectedHunkIndex : -1}
 										decorations={decorations}
 										focusedDecorationId={focusedDecorationId}
+										selectedRange={selectedCommentRange}
+										inlineAttachments={inlineAttachments}
+										onRangeSelect={onSelectCommentRange}
 									/>
 								)}
 							</box>
@@ -659,6 +759,7 @@ function ShortcutHelp() {
 			<text fg={theme.mauve}>Review</text>
 			<text fg={theme.text}> x chapter · f focused file</text>
 			<text fg={theme.text}> {"{/}"} focus key change · r toggle · 1–9 direct</text>
+			<text fg={theme.text}> pointer: click/drag line-number gutter to comment</text>
 			<text fg={theme.mauve}>Views</text>
 			<text fg={theme.text}> F10 → View toggles Patch / read-only Semantic</text>
 			<text fg={theme.dim}> anchors, exact range highlights, and comments are Patch-only</text>
@@ -674,6 +775,8 @@ export function App({
 	diffFiles = null,
 	loadSemanticDiff,
 	initialViewState = emptyViewState(),
+	initialComments = [],
+	commentActions,
 	onViewStateChange,
 	onQuit,
 }: {
@@ -681,6 +784,8 @@ export function App({
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
 	initialViewState?: ViewState;
+	initialComments?: RevueComment[];
+	commentActions?: CommentActions;
 	onViewStateChange?: (next: ViewState) => void;
 	onQuit?: () => void;
 }) {
@@ -704,6 +809,11 @@ export function App({
 	const [semanticLoading, setSemanticLoading] = useState(false);
 	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
 	const [vs, setVs] = useState(initialViewState);
+	const [comments, setComments] = useState(() => sortComments(initialComments));
+	const [commentRange, setCommentRange] = useState<DiffLineRange | null>(null);
+	const [commentBody, setCommentBody] = useState("");
+	const [commentNotice, setCommentNotice] = useState<string | null>(null);
+	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
 	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
 	const panelScroll = useRef<ScrollBoxRenderable>(null);
@@ -757,6 +867,69 @@ export function App({
 		return () => clearTimeout(retry);
 	}, [diffAnchorTarget]);
 
+	function selectCommentRange(range: DiffLineRange) {
+		setCommentRange(range);
+		setCommentBody("");
+		setCommentNotice(null);
+	}
+	function cancelComment() {
+		setCommentRange(null);
+		setCommentBody("");
+		setCommentNotice(null);
+	}
+	function saveComment() {
+		if (!commentRange) return;
+		const body = textareaRef.current?.editBuffer.getText() ?? commentBody;
+		if (!body.trim()) {
+			setCommentNotice("Write a comment before saving.");
+			return;
+		}
+		const anchor: CommentAnchor = {
+			filePath: commentRange.filePath,
+			oldStart: commentRange.hunkOldStart,
+			side: commentRange.side,
+			startLine: commentRange.startLine,
+			endLine: commentRange.endLine,
+		};
+		try {
+			const comment =
+				commentActions?.add(anchor, body) ?? createComment("0".repeat(64), anchor, body);
+			setComments((currentComments) => sortComments([...currentComments, comment]));
+			cancelComment();
+		} catch (error) {
+			setCommentNotice(error instanceof Error ? error.message : String(error));
+		}
+	}
+	function deleteInlineComment(id: string) {
+		try {
+			commentActions?.delete(id);
+			setComments((currentComments) => currentComments.filter((comment) => comment.id !== id));
+			setCommentNotice(null);
+		} catch (error) {
+			setCommentNotice(error instanceof Error ? error.message : String(error));
+		}
+	}
+	function toggleInlineCommentStatus(comment: RevueComment) {
+		try {
+			const updated =
+				comment.status === COMMENT_STATUS.OPEN
+					? (commentActions?.markDealt(comment.id) ?? {
+							...comment,
+							status: COMMENT_STATUS.DEALT_WITH,
+						})
+					: (commentActions?.reopen(comment.id) ?? {
+							...comment,
+							status: COMMENT_STATUS.OPEN,
+						});
+			setComments((currentComments) =>
+				currentComments.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+			);
+			setCommentNotice(null);
+		} catch (error) {
+			setCommentNotice(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	function goto(index: number) {
 		const next = Math.max(0, Math.min(index, pages.length - 1));
 		if (next === current) return;
@@ -770,6 +943,7 @@ export function App({
 		setFileFocusRequest(0);
 		setKeyFocusRequest(0);
 		setDiffAnchorTarget(null);
+		cancelComment();
 	}
 	function gotoChapter(chapter: Chapter) {
 		const idx = pages.findIndex((p) => p.kind === "chapter" && p.chapter.id === chapter.id);
@@ -945,6 +1119,7 @@ export function App({
 		changeViewMode("patch");
 	}
 	async function showSemantic() {
+		cancelComment();
 		if (semantic) {
 			setSemanticNotice(null);
 			changeViewMode("semantic");
@@ -997,6 +1172,19 @@ export function App({
 	useKeyboard((key) => {
 		const name = key.name;
 		const paths = chapter ? chapterFilePaths(chapter) : [];
+
+		if (commentRange) {
+			if (name === "escape") {
+				key.preventDefault();
+				key.stopPropagation();
+				cancelComment();
+			} else if (name === "return" && key.ctrl) {
+				key.preventDefault();
+				key.stopPropagation();
+				saveComment();
+			}
+			return;
+		}
 
 		if (APP_KEYS.has(name) || menu.activeMenuId || (name && /^[1-9]$/.test(name))) {
 			key.preventDefault();
@@ -1152,9 +1340,14 @@ export function App({
 									selectedHunkIndex={selectedHunkIndex}
 									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}
+									comments={comments}
+									selectedCommentRange={commentRange ?? undefined}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
 									onToggleFileReview={toggleFileReview}
+									onSelectCommentRange={selectCommentRange}
+									onDeleteComment={deleteInlineComment}
+									onToggleCommentStatus={toggleInlineCommentStatus}
 								/>
 							) : null}
 							{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
@@ -1186,6 +1379,59 @@ export function App({
 					/>
 				</>
 			) : null}
+			{commentRange ? (
+				<box
+					flexShrink={0}
+					flexDirection="column"
+					border
+					borderColor={theme.accent}
+					paddingLeft={1}
+					paddingRight={1}
+				>
+					<text fg={theme.accent}>New inline comment</text>
+					<text fg={theme.text}>
+						{commentRange.filePath} · {commentRange.side} ·{" "}
+						{commentRange.startLine === commentRange.endLine
+							? `line ${commentRange.startLine}`
+							: `lines ${commentRange.startLine}-${commentRange.endLine}`}{" "}
+						· review unit oldStart {commentRange.hunkOldStart}
+					</text>
+					<textarea
+						ref={textareaRef}
+						focused
+						height={4}
+						placeholder="Write feedback…"
+						backgroundColor={theme.base}
+						focusedBackgroundColor={theme.base}
+						textColor={theme.text}
+						focusedTextColor={theme.text}
+						onContentChange={() => setCommentBody(textareaRef.current?.editBuffer.getText() ?? "")}
+						onKeyDown={(key) => {
+							if (key.name === "escape") {
+								key.preventDefault();
+								key.stopPropagation();
+								cancelComment();
+							} else if (key.name === "return" && key.ctrl) {
+								key.preventDefault();
+								key.stopPropagation();
+								saveComment();
+							}
+						}}
+					/>
+					{commentNotice ? <text fg={theme.red}>{commentNotice}</text> : null}
+					<box flexDirection="row">
+						<text fg={theme.green} onMouseDown={saveComment}>
+							[Save Ctrl+Enter]
+						</text>
+						<text> </text>
+						<text fg={theme.dim} onMouseDown={cancelComment}>
+							[Cancel Escape]
+						</text>
+					</box>
+				</box>
+			) : commentNotice ? (
+				<text fg={theme.red}>{commentNotice}</text>
+			) : null}
 			<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
 				<text fg={theme.dim}>
 					{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
@@ -1193,7 +1439,7 @@ export function App({
 				<text fg={theme.dim}>
 					{viewMode === "semantic"
 						? "Semantic is read-only · anchors/ranges/comments Patch-only · F10 View to switch"
-						: "F10 menu · ]c/[c chapter · tab file · f review file · x review chapter · ? help · q quit"}
+						: "click/drag gutter comment · F10 menu · ]c/[c chapter · tab file · f/x review · ? help · q quit"}
 				</text>
 			</box>
 		</box>
@@ -1207,6 +1453,8 @@ export async function runApp(
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
 		initialViewState?: ViewState;
+		initialComments?: RevueComment[];
+		commentActions?: CommentActions;
 		onViewStateChange?: (next: ViewState) => void;
 	} = {},
 ): Promise<void> {
@@ -1224,6 +1472,8 @@ export async function runApp(
 				diffFiles={options.diffFiles ?? null}
 				loadSemanticDiff={options.loadSemanticDiff}
 				initialViewState={options.initialViewState}
+				initialComments={options.initialComments}
+				commentActions={options.commentActions}
 				onViewStateChange={options.onViewStateChange}
 				onQuit={quit}
 			/>,

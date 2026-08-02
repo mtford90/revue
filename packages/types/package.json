@@ -6,6 +6,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./chapters": "./src/chapters.ts",
+		"./comments": "./src/comments.ts",
 		"./prologue": "./src/prologue.ts",
 		"./run": "./src/run.ts",
 		"./file": "./src/file.ts",

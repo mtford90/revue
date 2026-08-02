@@ -163,3 +163,38 @@ revue show "$RUN"
 exactly once, checks key-change ranges against their chapter hunks, and opens the pinned patch without
 touching Git. Run `revue show "$RUN" --check` to validate and print a plain-text summary without
 launching the UI.
+
+## Step 7 — Act on inline feedback
+
+After `revue show "$RUN"` exits, retrieve the reviewer's open comments through Revue's public JSON
+interface. Do not scrape terminal output and do not read or edit `.revue/comments.json` directly.
+
+```bash
+revue comments list "$RUN" --json
+```
+
+Each comment includes a stable ID, exact path/review-unit/side/range anchor, multi-line body, and
+status. Address every open comment against the same prepared scope. Only after the requested change
+has been made should that exact comment be marked dealt with:
+
+```bash
+revue comments mark-dealt "$RUN" <comment-id>
+```
+
+Use `--all` when dealt-with history is relevant. Reopen feedback when it still applies or was marked
+prematurely:
+
+```bash
+revue comments list "$RUN" --json --all
+revue comments reopen "$RUN" <comment-id>
+```
+
+Hard deletion is only for a comment the reviewer identifies as erroneous. Never delete feedback
+merely because it is difficult, already addressed, or disagreed with:
+
+```bash
+revue comments delete "$RUN" <comment-id>
+```
+
+All operations re-verify the supplied run and pinned anchors without recomputing Git scope. Relay an
+actionable validation error instead of guessing a replacement anchor.

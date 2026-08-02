@@ -8,6 +8,7 @@ import {
 	viewStateFileId,
 	viewStateKeyChangeId,
 } from "@revue/types";
+import { openCommentStore } from "./comments.ts";
 import { runKey } from "./viewState.ts";
 
 const mainPath = resolve(import.meta.dir, "main.tsx");
@@ -32,6 +33,96 @@ const git = async (cwd: string, ...args: string[]): Promise<void> => {
 	const [stderr, exitCode] = await Promise.all([new Response(child.stderr).text(), child.exited]);
 	if (exitCode !== 0) throw new Error(stderr);
 };
+
+test("comment CLI lists and mutates verified-run feedback with stable JSON", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-comments-cli-"));
+	try {
+		const manifest = runManifestSchema.parse(await Bun.file(join(sampleRun, "run.json")).json());
+		const store = openCommentStore(join(root, ".revue", "comments.json"), manifest.runId);
+		const comment = store.add(
+			{
+				filePath: "src/lib/backoff.ts",
+				oldStart: 0,
+				side: "additions",
+				startLine: 4,
+				endLine: 6,
+			},
+			"Use a lower retry cap\nfor interactive requests.",
+			{
+				id: "00000000-0000-4000-8000-000000000001",
+				createdAt: "2026-08-02T10:00:00.000Z",
+			},
+		);
+
+		const listed = await run(root, ["comments", "list", sampleRun, "--json"]);
+		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(listed.stdout)).toEqual({ runId: manifest.runId, comments: [comment] });
+		const exported = await run(root, ["export", sampleRun, "--chapter-id", "chapter-1"]);
+		expect(exported).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(exported.stdout).toContain(`Comment \`${comment.id}\``);
+		expect(exported.stdout).toContain("> Use a lower retry cap\n> for interactive requests.");
+
+		const dealt = await run(root, ["comments", "mark-dealt", sampleRun, comment.id]);
+		expect(dealt).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(dealt.stdout)).toMatchObject({
+			action: "mark-dealt",
+			comment: { id: comment.id, status: "dealt-with" },
+		});
+		const openOnly = await run(root, ["comments", "list", sampleRun, "--json"]);
+		expect(JSON.parse(openOnly.stdout).comments).toEqual([]);
+		const all = await run(root, ["comments", "list", sampleRun, "--json", "--all"]);
+		expect(JSON.parse(all.stdout).comments).toHaveLength(1);
+
+		const reopened = await run(root, ["comments", "reopen", sampleRun, comment.id]);
+		expect(JSON.parse(reopened.stdout).comment.status).toBe("open");
+		const missing = await run(root, [
+			"comments",
+			"delete",
+			sampleRun,
+			"00000000-0000-4000-8000-000000000099",
+		]);
+		expect(missing).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(missing.stderr).toContain("does not exist in this run");
+		const malformed = await run(root, ["comments", "delete", sampleRun, "not-an-id"]);
+		expect(malformed).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(malformed.stderr).toContain("Comment ID must be a UUID");
+
+		const deleted = await run(root, ["comments", "delete", sampleRun, comment.id]);
+		expect(JSON.parse(deleted.stdout)).toMatchObject({
+			action: "delete",
+			comment: { id: comment.id },
+		});
+		expect(
+			JSON.parse((await run(root, ["comments", "list", sampleRun, "--json", "--all"])).stdout)
+				.comments,
+		).toEqual([]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("comment operations reject stale anchors against the verified pinned patch", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-comments-stale-"));
+	try {
+		const manifest = runManifestSchema.parse(await Bun.file(join(sampleRun, "run.json")).json());
+		openCommentStore(join(root, ".revue", "comments.json"), manifest.runId).add(
+			{
+				filePath: "src/lib/backoff.ts",
+				oldStart: 0,
+				side: "additions",
+				startLine: 999,
+				endLine: 999,
+			},
+			"Stale feedback",
+		);
+		const result = await run(root, ["comments", "list", sampleRun, "--json"]);
+		expect(result).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(result.stderr).toContain("corrupt or stale anchor");
+		expect(result.stderr).toContain("outside that review unit");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
 
 test("export selects chapters unambiguously and preserves read-only review state", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-export-cli-"));

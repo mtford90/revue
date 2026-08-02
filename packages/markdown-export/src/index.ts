@@ -3,6 +3,7 @@ import {
 	emptyViewState,
 	type Prologue,
 	type RevueChaptersFile,
+	type RevueComment,
 	type RunFile,
 	type ViewState,
 	viewStateFileId,
@@ -24,6 +25,7 @@ export type MarkdownExportSelection =
 export type MarkdownExportOptions = {
 	selection?: MarkdownExportSelection;
 	viewState?: ViewState;
+	comments?: RevueComment[];
 };
 
 export class MarkdownExportError extends Error {}
@@ -105,10 +107,41 @@ const formatQuestion = (chapter: Chapter, index: number, state: ViewState): stri
 	return lines;
 };
 
+const commentsForChapter = (chapter: Chapter, comments: readonly RevueComment[]): RevueComment[] =>
+	comments
+		.filter((comment) =>
+			chapter.hunkRefs.some(
+				(reference) =>
+					reference.filePath === comment.anchor.filePath &&
+					reference.oldStart === comment.anchor.oldStart,
+			),
+		)
+		.sort(
+			(left, right) =>
+				left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+		);
+
+const formatComment = (comment: RevueComment, level: number): string[] => {
+	const range =
+		comment.anchor.startLine === comment.anchor.endLine
+			? `line ${comment.anchor.startLine}`
+			: `lines ${comment.anchor.startLine}-${comment.anchor.endLine}`;
+	const body = comment.body.replace(/\r\n?/g, "\n").split("\n");
+	return [
+		heading(level, `Comment ${codeSpan(comment.id)}`),
+		"",
+		`- Status: ${codeSpan(comment.status)}`,
+		`- Anchor: ${codeSpan(comment.anchor.filePath)} — ${comment.anchor.side} ${range}; review unit oldStart ${comment.anchor.oldStart}`,
+		"",
+		...body.map((line) => (line ? `> ${line}` : ">")),
+	];
+};
+
 const formatChapter = (
 	chapter: Chapter,
 	files: Map<string, RunFile>,
 	state: ViewState,
+	comments: readonly RevueComment[],
 	level: number,
 ): string[] => {
 	const lines = [
@@ -130,6 +163,13 @@ const formatChapter = (
 		lines.push("", heading(level + 1, "Review questions"), "");
 		for (const index of chapter.keyChanges.keys())
 			lines.push(...formatQuestion(chapter, index, state));
+	}
+	const inlineComments = commentsForChapter(chapter, comments);
+	if (inlineComments.length) {
+		lines.push("", heading(level + 1, "Inline comments"));
+		for (const comment of inlineComments) {
+			lines.push("", ...formatComment(comment, level + 2));
+		}
 	}
 	return lines;
 };
@@ -163,6 +203,7 @@ export function formatMarkdownReview(
 ): string {
 	const selection = options.selection ?? { kind: "full" };
 	const state = options.viewState ?? emptyViewState();
+	const comments = options.comments ?? [];
 	const files = new Map(review.files.map((file) => [file.path, file]));
 	const ordered = [...review.chapters.chapters].sort((left, right) => left.order - right.order);
 	let lines: string[];
@@ -183,12 +224,13 @@ export function formatMarkdownReview(
 			"",
 			`Pinned run: ${codeSpan(review.runId)}`,
 			"",
-			...formatChapter(chapter, files, state, 1).slice(2),
+			...formatChapter(chapter, files, state, comments, 1).slice(2),
 		];
 	} else {
 		lines = ["# Revue Review", "", `Pinned run: ${codeSpan(review.runId)}`];
 		if (review.chapters.prologue) lines.push("", ...formatPrologue(review.chapters.prologue, 2));
-		for (const chapter of ordered) lines.push("", ...formatChapter(chapter, files, state, 2));
+		for (const chapter of ordered)
+			lines.push("", ...formatChapter(chapter, files, state, comments, 2));
 	}
 
 	return `${lines.join("\n")}\n`;

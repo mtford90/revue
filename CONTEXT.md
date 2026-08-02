@@ -29,6 +29,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   anchored to tight `lineRefs`. Empty when nothing needs human input.
 - **Line ref** — `(filePath, side, startLine, endLine)`. `side` is `additions` (new-side line
   numbers) or `deletions` (old-side).
+- **Inline comment** — independently identified reviewer feedback anchored by
+  `(filePath, oldStart, side, startLine, endLine)`. The review-unit `oldStart` keeps the anchor tied
+  to exactly one pinned hunk even when a path appears in multiple chapters. Status is `open` or the
+  reversible `dealt-with`; deletion is permanent. Comments are Patch-only.
 - **Prologue** — a high-level overview of the whole change: motivation, outcome, optional Mermaid
   diagram, 2–5 key changes, 1–5 focus areas, and a complexity rating. Shown before chapter one.
 - **Focus area** — a typed/severity-tagged spot in the prologue worth a reviewer's attention.
@@ -50,7 +54,9 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
   totals. Creation time and narration are deliberately excluded.
 - **Run key** — `sha256(runId + chapters)`, truncated for local persistence. Review progress belongs
-  to one pinned code snapshot narrated one specific way; changing either starts fresh.
+  to one pinned code snapshot narrated one specific way; changing either starts fresh. Comments use
+  the full immutable **run ID** instead, so feedback survives chapter regeneration for unchanged
+  frozen code.
 - **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
   revue's, persisted to `.revue/state.json` (a `{ [runKey]: ViewState }` map).
 - **The chapters file** — `chapters.json` inside a run. It mirrors Stage’s agent output
@@ -61,9 +67,9 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   and every effective input and omission reason is pinned in the run. Local modes detect
   index/worktree races and fail rather than produce a mixed snapshot.
 - **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
-  chapters, pinned file metadata, review questions, and optional local review progress. Full review
-  is the default; prologue and one chapter by stable id/order are explicit selections. It never
-  recomputes Git state or writes view state.
+  chapters, pinned file metadata, review questions, comments, and optional local review progress.
+  Full review is the default; prologue and one chapter by stable id/order are explicit selections.
+  Prologue-only output omits comments. Export never recomputes Git state or writes local state.
 
 ## Key decisions
 
@@ -91,6 +97,11 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 - **Export formats verified runs, not repositories.** Markdown export calls the same public run
   loading and coverage validation path as `show`, reads persisted state under the same run key, and
   delegates to a pure formatter package with no OpenTUI dependency.
+- **Comments are mutable state keyed by immutable code.** See `docs/adr/0004`. Revue validates and
+  atomically replaces repository-local `.revue/comments.json`, keyed by full `runId`; prepared run
+  directories remain immutable. Durable anchors include review-unit `oldStart`, while the renderer
+  exposes only comment-neutral gutter selection and inline attachment placement. Revue owns UUIDs,
+  lifecycle, presentation, CLI operations, and chapter association.
 - **Semantic diff is a read-only external view.** The TUI invokes a compatible `difft` lazily and
   passes only verified blob paths from the supplied run (using an empty temporary side for an absent
   added/deleted snapshot). It parses only Difftastic’s presentation styling into terminal-safe spans,

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+	COMMENT_STATUS,
 	type RevueChaptersFile,
 	RUN_FILE_STATUS,
 	RUN_OBJECT_KIND,
@@ -101,6 +102,54 @@ test("full export is ordered and renders pinned counts with persisted review sta
 	expect(formatMarkdownReview(review)).toBe(formatMarkdownReview(review));
 });
 
+test("comments retain duplicate anchors, status, multiline bodies, and chapter scope", () => {
+	const firstId = "00000000-0000-4000-8000-000000000001";
+	const secondId = "00000000-0000-4000-8000-000000000002";
+	const sharedAnchor = {
+		filePath: "src/core.ts",
+		oldStart: 1,
+		side: "additions" as const,
+		startLine: 4,
+		endLine: 6,
+	};
+	const comments = [
+		{
+			id: secondId,
+			runId: review.runId,
+			anchor: sharedAnchor,
+			body: "Second point\nwith a separate line",
+			status: COMMENT_STATUS.DEALT_WITH,
+			createdAt: "2026-08-02T10:00:01.000Z",
+		},
+		{
+			id: firstId,
+			runId: review.runId,
+			anchor: sharedAnchor,
+			body: "First point",
+			status: COMMENT_STATUS.OPEN,
+			createdAt: "2026-08-02T10:00:00.000Z",
+		},
+	];
+	const markdown = formatMarkdownReview(review, { comments });
+	const first = markdown.indexOf(firstId);
+	const second = markdown.indexOf(secondId);
+	expect(first).toBeGreaterThan(-1);
+	expect(first).toBeLessThan(second);
+	expect(markdown.match(new RegExp(secondId, "g"))).toHaveLength(1);
+	expect(markdown).toContain("- Status: `open`");
+	expect(markdown).toContain("- Status: `dealt-with`");
+	expect(markdown).toContain(
+		"- Anchor: `src/core.ts` — additions lines 4-6; review unit oldStart 1",
+	);
+	expect(markdown).toContain("> Second point\n> with a separate line");
+
+	const later = formatMarkdownReview(review, {
+		selection: { kind: "chapter-id", id: "later" },
+		comments,
+	});
+	expect(later).not.toContain("Inline comments");
+});
+
 test("prologue and chapter selections remain self-contained", () => {
 	const withPrologue: MarkdownReview = {
 		...review,
@@ -128,11 +177,30 @@ test("prologue and chapter selections remain self-contained", () => {
 		},
 	};
 
-	const prologue = formatMarkdownReview(withPrologue, { selection: { kind: "prologue" } });
+	const prologue = formatMarkdownReview(withPrologue, {
+		selection: { kind: "prologue" },
+		comments: [
+			{
+				id: "00000000-0000-4000-8000-000000000003",
+				runId: review.runId,
+				anchor: {
+					filePath: "src/core.ts",
+					oldStart: 1,
+					side: "additions",
+					startLine: 4,
+					endLine: 4,
+				},
+				body: "Hidden from prologue",
+				status: COMMENT_STATUS.OPEN,
+				createdAt: "2026-08-02T10:00:00.000Z",
+			},
+		],
+	});
 	expect(prologue).toContain("# Prologue\n");
 	expect(prologue).toContain("## Overview");
 	expect(prologue).toContain("## Focus areas");
 	expect(prologue).not.toContain("Chapter 1");
+	expect(prologue).not.toContain("Hidden from prologue");
 
 	const chapter = formatMarkdownReview(withPrologue, {
 		selection: { kind: "chapter-order", order: 2 },

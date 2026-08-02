@@ -13,9 +13,9 @@ interactive reviewer you drive from the keyboard. `revue export` validates that 
 renders its narrative and review progress as deterministic Markdown.
 
 > **Status: early scaffold.** Prep, the chapter model and skill, the navigable TUI shell, review
-> persistence, per-chapter patch rendering, and an optional read-only Difftastic semantic view run
-> today. Prep supports committed, staged, unstaged, and working-tree scopes; comments remain on the
-> roadmap.
+> persistence, per-chapter patch rendering, inline comments, deterministic Markdown export, and an
+> optional read-only Difftastic semantic view run today. Prep supports committed, staged, unstaged,
+> and working-tree scopes.
 
 ## How it relates to its parents
 
@@ -92,13 +92,41 @@ bun run revue export examples/sample-run --prologue
 
 Use `--output <path>` to write the Markdown directly. With no `--output`, stdout contains only the
 Markdown; errors and the output-file confirmation go to stderr. Export reads review progress for the
-pinned run from the same `.revue/state.json` used by `show` and never writes review state. When that
-local state is absent, all chapter, file, and review-question checkboxes are deterministically
-unchecked.
+pinned run from the same `.revue/state.json` used by `show` and reads inline feedback from
+`.revue/comments.json`; it never writes either store. When local review state is absent, all chapter,
+file, and review-question checkboxes are deterministically unchecked.
 
 The document includes the prologue overview, key changes, focus areas and optional Mermaid diagram;
 ordered chapter titles and summaries; pinned file paths, statuses and whole-file line counts; review
-questions and line anchors; and chapter/file/question review state. It does not recompute Git state.
+questions and line anchors; chapter/file/question review state; and comments for the selected
+chapters. It does not recompute Git state. Full and chapter exports preserve each comment's stable ID,
+status, exact review-unit anchor, and multi-line body; prologue-only exports contain no comments.
+
+## Inline comments
+
+In Patch view, click a visible old/new line-number gutter to comment on one line, or drag within one
+gutter to select an inclusive range in the same hunk and side. Dragging source code remains ordinary
+terminal text selection for copying. The composer identifies the path, side, range, and review unit;
+use `Ctrl+Enter` or its pointer control to save and `Escape` to cancel. The same range can hold any
+number of independent comments.
+
+Open comments use an attention marker. Dealt-with comments stay inline with a green check and dimmed
+body; pointer controls mark dealt with, reopen, or permanently delete an erroneous comment. Comments
+are stored atomically under `.revue/comments.json`, keyed by immutable `runId`, so regenerating
+chapters for the same frozen code preserves feedback without modifying the run directory.
+
+Agents can use the verified public interface after `show` exits:
+
+```bash
+revue comments list "$RUN" --json          # open comments only
+revue comments list "$RUN" --json --all    # include dealt-with comments
+revue comments mark-dealt "$RUN" <comment-id>
+revue comments reopen "$RUN" <comment-id>
+revue comments delete "$RUN" <comment-id>  # permanent; erroneous feedback only
+```
+
+List and mutation output is JSON. Every operation validates the supplied prepared run and its local
+comment state without recomputing Git scope.
 
 ## Development
 
@@ -160,7 +188,7 @@ all diffs · `a` jumps to the next unreviewed chapter · `F10` opens the menu ·
 help · `q`/`esc` quits.
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
 change, and switching Patch/Semantic carries the reviewer’s relative position through the chapter.
-Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and future
+Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and inline
 comments are Patch-only. Binary,
 symlink, mode-only, and content-identical metadata changes are described rather than passed off as
 semantic source diffs. Progress persists to `.revue/state.json`, keyed by both the pinned run and its
@@ -178,7 +206,7 @@ chapter narration.
 - [x] File/View application menu with pointer and keyboard operation
 - [x] Deterministic **Markdown export** for the full review, prologue, or one chapter
 - [x] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
-- [ ] Inline **comments** you can author in the TUI (build a Revue-owned model)
+- [x] Inline **comments** authored in Patch view with Revue-owned persistence and lifecycle
 - [ ] Decide static-file vs live agent-driven session
 - [ ] Mermaid prologue diagram rendering (ASCII)
 

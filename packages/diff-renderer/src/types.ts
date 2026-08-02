@@ -3,6 +3,14 @@ export type { DiffFile, DiffFileInput, DiffStats } from "@revue/diff-model";
 export type DiffLayout = "split" | "stack";
 export type DiffSide = "additions" | "deletions";
 
+export type DiffLineRange = {
+	filePath: string;
+	hunkOldStart: number;
+	side: DiffSide;
+	startLine: number;
+	endLine: number;
+};
+
 /** A 1-based, inclusive, side-aware range to decorate. */
 export interface RangeDecoration {
 	/** Stable identity for this exact range. */
@@ -25,6 +33,12 @@ export interface DecorationAnchor {
 	side: DiffSide;
 	lineNumber: number;
 }
+
+export type DiffInlineAttachment = {
+	id: string;
+	anchor: DiffLineRange;
+	content: React.ReactNode;
+};
 
 export interface RenderSpan {
 	text: string;

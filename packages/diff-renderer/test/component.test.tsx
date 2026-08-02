@@ -152,6 +152,115 @@ test("showLineNumbers false hides old and new number gutters in both layouts", a
 	}
 });
 
+test("line-number gutters select exact side-aware single and multi-line ranges", async () => {
+	const [file] = parsePatch(`diff --git a/select.ts b/select.ts
+--- a/select.ts
++++ b/select.ts
+@@ -1,3 +1,3 @@
+ keep one
+-old two
++new two
+ keep three
+`);
+	if (!file) throw new Error("missing fixture");
+	const selections: unknown[] = [];
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			layout="stack"
+			width={60}
+			onRangeSelect={(range) => selections.push(range)}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const oldTwoY = lines.findIndex((line) => line.includes("old two"));
+	const newTwoY = lines.findIndex((line) => line.includes("new two"));
+	const keepThreeY = lines.findIndex((line) => line.includes("keep three"));
+	const oldTwoX = lines[oldTwoY]?.indexOf("2") ?? -1;
+	const newTwoX = lines[newTwoY]?.indexOf("2", 4) ?? -1;
+	const keepThreeX = lines[keepThreeY]?.lastIndexOf("3") ?? -1;
+
+	await act(async () => t.mockMouse.click(oldTwoX, oldTwoY));
+	await t.renderOnce();
+	expect(selections.at(-1)).toMatchObject({ side: "deletions", startLine: 2, endLine: 2 });
+
+	await act(async () => t.mockMouse.click(newTwoX, newTwoY));
+	await t.renderOnce();
+	expect(selections.at(-1)).toEqual({
+		filePath: "select.ts",
+		hunkOldStart: 1,
+		side: "additions",
+		startLine: 2,
+		endLine: 2,
+	});
+
+	await act(async () => t.mockMouse.drag(newTwoX, newTwoY, keepThreeX, keepThreeY));
+	await t.renderOnce();
+	expect(selections.at(-1)).toEqual({
+		filePath: "select.ts",
+		hunkOldStart: 1,
+		side: "additions",
+		startLine: 2,
+		endLine: 3,
+	});
+});
+
+test("dragging source text remains terminal text selection instead of range selection", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const selections: unknown[] = [];
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			layout="stack"
+			width={60}
+			onRangeSelect={(range) => selections.push(range)}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const firstY = lines.findIndex((line) => line.includes("new one"));
+	const secondY = lines.findIndex((line) => line.includes("new two"));
+	const sourceX = (lines[firstY]?.indexOf("new one") ?? 0) + 1;
+	await act(async () => t.mockMouse.drag(sourceX, firstY, sourceX + 2, secondY));
+	await t.renderOnce();
+
+	expect(selections).toEqual([]);
+	expect(t.renderer.getSelection()?.getSelectedText()).toContain("new");
+});
+
+test("multiple inline attachments share an anchor and expose its gutter count", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const anchor = {
+		filePath: "a.ts",
+		hunkOldStart: 1,
+		side: "additions" as const,
+		startLine: 2,
+		endLine: 2,
+	};
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			layout="stack"
+			width={60}
+			inlineAttachments={[
+				{ id: "first", anchor, content: <text>first inline note</text> },
+				{ id: "second", anchor, content: <text>second inline note</text> },
+			]}
+		/>,
+		{ width: 60, height: 10 },
+	);
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("2●");
+	expect(frame).toContain("first inline note");
+	expect(frame).toContain("second inline note");
+});
+
 test("binary and pure rename files retain meaningful empty states and rename paths", async () => {
 	const [binary] = parsePatch(`diff --git a/image.png b/image.png
 index 1111111..2222222 100644

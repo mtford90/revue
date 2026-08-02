@@ -156,11 +156,13 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 	const [file] = parsePatch(`diff --git a/select.ts b/select.ts
 --- a/select.ts
 +++ b/select.ts
-@@ -1,3 +1,3 @@
+@@ -1,5 +1,5 @@
  keep one
 -old two
 +new two
  keep three
+ keep four
+ keep five
 `);
 	if (!file) throw new Error("missing fixture");
 	const selections: unknown[] = [];
@@ -177,10 +179,10 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 	const lines = t.captureCharFrame().split("\n");
 	const oldTwoY = lines.findIndex((line) => line.includes("old two"));
 	const newTwoY = lines.findIndex((line) => line.includes("new two"));
-	const keepThreeY = lines.findIndex((line) => line.includes("keep three"));
+	const keepFiveY = lines.findIndex((line) => line.includes("keep five"));
 	const oldTwoX = lines[oldTwoY]?.indexOf("2") ?? -1;
 	const newTwoX = lines[newTwoY]?.indexOf("2", 4) ?? -1;
-	const keepThreeX = lines[keepThreeY]?.lastIndexOf("3") ?? -1;
+	const keepFiveX = lines[keepFiveY]?.lastIndexOf("5") ?? -1;
 
 	await act(async () => t.mockMouse.click(oldTwoX, oldTwoY));
 	await t.renderOnce();
@@ -196,14 +198,14 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 		endLine: 2,
 	});
 
-	await act(async () => t.mockMouse.drag(newTwoX, newTwoY, keepThreeX, keepThreeY));
+	await act(async () => t.mockMouse.drag(newTwoX, newTwoY, keepFiveX, keepFiveY));
 	await t.renderOnce();
 	expect(selections.at(-1)).toEqual({
 		filePath: "select.ts",
 		hunkOldStart: 1,
 		side: "additions",
 		startLine: 2,
-		endLine: 3,
+		endLine: 5,
 	});
 });
 

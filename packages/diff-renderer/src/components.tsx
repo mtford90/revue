@@ -322,15 +322,9 @@ export function DiffBody({
 		setDragRange(next);
 		return next;
 	};
-	const finishRange = (target: DiffLineRange) => {
-		const start = activeStart.current;
-		if (!start) return;
-		const completed =
-			target.startLine === start.startLine &&
-			target.side === start.side &&
-			target.hunkOldStart === start.hunkOldStart
-				? activeRange.current
-				: updateRange(target);
+	const finishRange = () => {
+		if (!activeStart.current) return;
+		const completed = activeRange.current;
 		activeStart.current = null;
 		activeRange.current = null;
 		setDragRange(null);
@@ -350,7 +344,6 @@ export function DiffBody({
 					onMouseDrag: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						if (target !== activeStart.current) updateRange(target);
 					},
 					onMouseOver: (event) => {
 						if (!activeStart.current) return;
@@ -361,12 +354,12 @@ export function DiffBody({
 					onMouseDragEnd: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						finishRange(target);
+						finishRange();
 					},
 					onMouseUp: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						finishRange(target);
+						finishRange();
 					},
 				}
 			: undefined;

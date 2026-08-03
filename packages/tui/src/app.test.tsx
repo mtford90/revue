@@ -78,7 +78,7 @@ async function click(t: Awaited<ReturnType<typeof testRender>>, x: number, y: nu
 }
 
 test("opens on the prologue with the chapter list and review progress", async () => {
-	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
+	const t = await testRender(<App file={file} />, { width: 130, height: 32 });
 	await t.renderOnce();
 	const frame = t.captureCharFrame();
 
@@ -109,7 +109,7 @@ test("the view indicator is dropped rather than crowding a narrow menu bar", asy
 });
 
 test("the sidebar index walks back to the prologue from any chapter", async () => {
-	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
+	const t = await testRender(<App file={file} />, { width: 130, height: 32 });
 	await t.renderOnce();
 	await nextChapter(t);
 	await nextChapter(t);
@@ -178,11 +178,14 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	await nextChapter(t);
 	await press(t, "F10");
 	await arrow(t, "right");
+	await arrow(t, "right");
 	const menuFrame = t.captureCharFrame();
 	expect(menuFrame).toContain("[x] Patch view");
 	expect(menuFrame).toContain("Semantic diff (read-only)");
-	await arrow(t, "down");
-	await arrow(t, "down");
+	expect(menuFrame).not.toContain("Next page"); // navigation lives in its own menu
+
+	await arrow(t, "left");
+	expect(t.captureCharFrame()).toContain("Next page");
 	await press(t, "RETURN"); // Previous page — reachable from chapter one because the prologue is a page
 	expect(t.captureCharFrame()).toContain("1/4");
 });
@@ -233,6 +236,7 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 
 	await press(t, "F10");
 	await arrow(t, "right");
+	await arrow(t, "right");
 	await arrow(t, "down");
 	await press(t, "RETURN");
 	await act(async () => Promise.resolve());
@@ -249,6 +253,7 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 	expect(semanticRow?.fg.g).toBeCloseTo(227 / 255);
 
 	await press(t, "F10");
+	await arrow(t, "right");
 	await arrow(t, "right");
 	await press(t, "RETURN");
 	const patchFrame = t.captureCharFrame();
@@ -294,10 +299,11 @@ ${additions}
 		{ width: 100, height: 14, kittyKeyboard: true },
 	);
 	await t.renderOnce();
-	for (let index = 0; index < 8; index += 1) await press(t, "j");
+	for (let index = 0; index < 16; index += 1) await press(t, "j");
 	expect(t.captureCharFrame()).not.toContain("patch row 1 ");
 
 	await press(t, "F10");
+	await arrow(t, "right");
 	await arrow(t, "right");
 	await arrow(t, "down");
 	await press(t, "RETURN");
@@ -311,10 +317,12 @@ ${additions}
 
 	await press(t, "F10");
 	await arrow(t, "right");
+	await arrow(t, "right");
 	await press(t, "RETURN");
 	expect(t.captureCharFrame()).not.toContain("patch row 1 ");
 
 	await press(t, "F10");
+	await arrow(t, "right");
 	await arrow(t, "right");
 	await arrow(t, "down");
 	await press(t, "RETURN");
@@ -336,6 +344,7 @@ test("an unavailable semantic diff stays in Patch with a safe explanation", asyn
 	await t.renderOnce();
 	await nextChapter(t);
 	await press(t, "F10");
+	await arrow(t, "right");
 	await arrow(t, "right");
 	await arrow(t, "down");
 	await press(t, "RETURN");
@@ -383,12 +392,12 @@ test("next unreviewed is unavailable when every chapter is reviewed", async () =
 	await nextChapter(t);
 	await press(t, "F10");
 	await arrow(t, "right");
-	await arrow(t, "down");
-	await arrow(t, "down");
+	// On the last page both Next page and Next unreviewed chapter are spent, so
+	// the only selectable entry left is the one focus started on.
 	await arrow(t, "down");
 	await press(t, "RETURN");
 
-	expect(t.captureCharFrame()).toContain("▶ src/lib/apiClient.test.ts");
+	expect(t.captureCharFrame()).toContain("3/4");
 });
 
 test("the mouse menu acts once and blocks the chapter beneath it", async () => {
@@ -400,27 +409,62 @@ test("the mouse menu acts once and blocks the chapter beneath it", async () => {
 	await t.renderOnce();
 	await nextChapter(t);
 	const chapterFrame = t.captureCharFrame().split("\n");
-	const chapterY = chapterFrame.findIndex((line) => line.includes("Chapter 1/3"));
+	// Well clear of the dropdown: the file list inside the chapter's stacked narrative.
+	const chapterY = chapterFrame.findIndex((line) => line.includes("src/lib/backoff.ts"));
 	const checkboxX = chapterFrame[chapterY]?.indexOf("[ ]") ?? -1;
 
 	const bar = chapterFrame[0] ?? "";
-	await click(t, bar.indexOf("View") + 1, 0);
+	await click(t, bar.indexOf("Navigate") + 1, 0);
 	const menuLines = t.captureCharFrame().split("\n");
 	const nextLine = menuLines.find((line) => line.includes("Next page")) ?? "";
 	expect(nextLine).not.toContain("]c");
 
+	// The backdrop swallows the click aimed at the chapter's review checkbox.
 	await click(t, checkboxX + 1, chapterY);
 	expect(seen).toHaveLength(0);
-	await click(t, bar.indexOf("View") + 1, 0); // toggles the open menu shut
-	expect(t.captureCharFrame()).not.toContain("Semantic diff (read-only)");
+	expect(t.captureCharFrame()).not.toContain("Next page");
 
-	const reopenedBar = t.captureCharFrame().split("\n")[0] ?? "";
-	await click(t, reopenedBar.indexOf("View") + 1, 0);
+	await click(t, bar.indexOf("Help") + 1, 0);
 	const helpLines = t.captureCharFrame().split("\n");
 	const helpY = helpLines.findIndex((line) => line.includes("Keyboard shortcuts"));
 	const helpX = helpLines[helpY]?.indexOf("Keyboard shortcuts") ?? -1;
 	await click(t, helpX + 1, helpY);
 	expect(t.captureCharFrame()).toContain("Scrolling");
+});
+
+test("s hides and restores the sidebar, giving its columns to the diff", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 130, height: 32 });
+	await t.renderOnce();
+	await nextChapter(t);
+	expect(t.captureCharFrame()).toContain("Chapters (3)");
+
+	await press(t, "s");
+	const hidden = t.captureCharFrame();
+	expect(hidden).not.toContain("Chapters (3)");
+	expect(hidden).toContain("MAX_RETRIES"); // the diff took the freed columns
+	expect(hidden).toContain("Add a reusable backoff helper"); // the narrative stacked above it
+
+	await press(t, "s");
+	expect(t.captureCharFrame()).toContain("Chapters (3)");
+});
+
+test("the keymap floats over the review instead of replacing it", async () => {
+	let quits = 0;
+	const t = await testRender(<App file={file} onQuit={() => (quits += 1)} />, {
+		width: 110,
+		height: 60,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await press(t, "?");
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Scrolling");
+	expect(frame).toContain("Dashboards stay up during deploys now"); // the prologue is still behind it
+
+	await press(t, "ESCAPE");
+	expect(t.captureCharFrame()).not.toContain("Scrolling");
+	expect(quits).toBe(0);
 });
 
 test("a chapter shows its file list", async () => {
@@ -709,12 +753,16 @@ test("inline threads show authors and compose new roots and replies", async () =
 
 	await act(async () => t.mockInput.typeText("Please adjust"));
 	let draftFrameLines = t.captureCharFrame().split("\n");
-	let fileHeaderY = draftFrameLines.findIndex((line) => line.includes("thread.ts"));
+	let fileHeaderY = draftFrameLines.findIndex(
+		(line) => line.includes("thread.ts") && line.includes("▼"),
+	);
 	let collapseX = draftFrameLines[fileHeaderY]?.indexOf("▼") ?? -1;
 	await click(t, collapseX, fileHeaderY);
 	expect(t.captureCharFrame()).not.toContain("New review thread");
 	draftFrameLines = t.captureCharFrame().split("\n");
-	fileHeaderY = draftFrameLines.findIndex((line) => line.includes("thread.ts"));
+	fileHeaderY = draftFrameLines.findIndex(
+		(line) => line.includes("thread.ts") && line.includes("▶"),
+	);
 	collapseX = draftFrameLines[fileHeaderY]?.indexOf("▶") ?? -1;
 	await click(t, collapseX, fileHeaderY);
 	expect(t.captureCharFrame()).toContain("Please adjust");

@@ -2,9 +2,10 @@
 // biome-ignore-all lint/a11y/useKeyWithMouseEvents: Keyboard operation is routed by the menu controller.
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { useState } from "react";
+import type { DiffLayoutPreference, SidebarPreference } from "./layout.ts";
 import { theme } from "./theme.ts";
 
-export type MenuId = "file" | "view";
+export type MenuId = "file" | "navigate" | "view" | "help";
 
 export type MenuEntry =
 	| {
@@ -19,7 +20,12 @@ export type MenuEntry =
 
 type MenuSpec = { id: MenuId; label: string; left: number; width: number };
 
-const MENU_LABELS: Record<MenuId, string> = { file: "File", view: "View" };
+const MENU_LABELS: Record<MenuId, string> = {
+	file: "File",
+	navigate: "Navigate",
+	view: "View",
+	help: "Help",
+};
 export const MENU_ORDER = Object.keys(MENU_LABELS) as MenuId[];
 
 const menuSpecs = MENU_ORDER.reduce<MenuSpec[]>((specs, id) => {
@@ -33,6 +39,18 @@ const menuSpecs = MENU_ORDER.reduce<MenuSpec[]>((specs, id) => {
 	});
 	return specs;
 }, []);
+
+const DIFF_PREFERENCES: { preference: DiffLayoutPreference; label: string }[] = [
+	{ preference: "auto", label: "Diff layout: auto" },
+	{ preference: "split", label: "Diff layout: split" },
+	{ preference: "stacked", label: "Diff layout: stacked" },
+];
+
+const SIDEBAR_PREFERENCES: { preference: SidebarPreference; label: string }[] = [
+	{ preference: "auto", label: "Sidebar: auto" },
+	{ preference: "shown", label: "Sidebar: shown" },
+	{ preference: "hidden", label: "Sidebar: hidden" },
+];
 
 const selectable = (entry: MenuEntry | undefined): entry is Extract<MenuEntry, { kind: "item" }> =>
 	entry?.kind === "item" && !entry.disabled;
@@ -64,6 +82,11 @@ export const buildAppMenus = ({
 	showHelp,
 	viewMode,
 	semanticLoading,
+	sidebarPreference,
+	diffPreference,
+	splitReachable,
+	setSidebarPreference,
+	setDiffPreference,
 	requestQuit,
 	movePrevious,
 	moveNext,
@@ -81,6 +104,11 @@ export const buildAppMenus = ({
 	showHelp: boolean;
 	viewMode: "patch" | "semantic";
 	semanticLoading: boolean;
+	sidebarPreference: SidebarPreference;
+	diffPreference: DiffLayoutPreference;
+	splitReachable: boolean;
+	setSidebarPreference: (preference: SidebarPreference) => void;
+	setDiffPreference: (preference: DiffLayoutPreference) => void;
 	requestQuit: () => void;
 	movePrevious: () => void;
 	moveNext: () => void;
@@ -92,6 +120,30 @@ export const buildAppMenus = ({
 	showSemantic: () => void;
 }): Record<MenuId, MenuEntry[]> => ({
 	file: [{ kind: "item", label: "Quit", hint: "q", action: requestQuit }],
+	navigate: [
+		{
+			kind: "item",
+			label: "Previous page",
+			hint: "[c",
+			disabled: !canMovePrevious,
+			action: movePrevious,
+		},
+		{
+			kind: "item",
+			label: "Next page",
+			hint: "]c",
+			disabled: !canMoveNext,
+			action: moveNext,
+		},
+		{ kind: "separator", id: "page-navigation" },
+		{
+			kind: "item",
+			label: "Next unreviewed chapter",
+			hint: "a",
+			disabled: !canMoveNextUnreviewed,
+			action: moveNextUnreviewed,
+		},
+	],
 	view: [
 		{
 			kind: "item",
@@ -107,28 +159,25 @@ export const buildAppMenus = ({
 			action: showSemantic,
 		},
 		{ kind: "separator", id: "view-mode" },
-		{
-			kind: "item",
-			label: "Previous page",
-			hint: "[c",
-			disabled: !canMovePrevious,
-			action: movePrevious,
-		},
-		{
-			kind: "item",
-			label: "Next page",
-			hint: "]c",
-			disabled: !canMoveNext,
-			action: moveNext,
-		},
-		{
-			kind: "item",
-			label: "Next unreviewed chapter",
-			hint: "a",
-			disabled: !canMoveNextUnreviewed,
-			action: moveNextUnreviewed,
-		},
-		{ kind: "separator", id: "chapter-navigation" },
+		...DIFF_PREFERENCES.map(
+			({ preference, label }): MenuEntry => ({
+				kind: "item",
+				label:
+					preference === "split" && !splitReachable ? `${label} (needs a wider terminal)` : label,
+				checked: diffPreference === preference,
+				action: () => setDiffPreference(preference),
+			}),
+		),
+		{ kind: "separator", id: "diff-layout" },
+		...SIDEBAR_PREFERENCES.map(
+			({ preference, label }): MenuEntry => ({
+				kind: "item",
+				label,
+				checked: sidebarPreference === preference,
+				action: () => setSidebarPreference(preference),
+			}),
+		),
+		{ kind: "separator", id: "sidebar" },
 		{
 			kind: "item",
 			label: "Collapse files",
@@ -143,7 +192,8 @@ export const buildAppMenus = ({
 			disabled: !canChangeFiles,
 			action: expandFiles,
 		},
-		{ kind: "separator", id: "file-display" },
+	],
+	help: [
 		{
 			kind: "item",
 			label: "Keyboard shortcuts",

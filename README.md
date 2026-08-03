@@ -153,9 +153,26 @@ compacted summary.
 Tests follow [`docs/testing.md`](docs/testing.md): protect meaningful behaviour and contracts, choose
 the narrowest realistic boundary, and do not add tests merely to increase coverage.
 
-The top File/View menu makes the main actions discoverable with a mouse or keyboard. Press `F10` to
-open it, use arrow keys and `Enter`, and press `Escape` or click outside to close. Patch is the
-default view. The View menu can lazily generate a read-only Semantic diff when a compatible
+The top File/Navigate/View/Help menu makes the main actions discoverable with a mouse or keyboard.
+Press `F10` to open it, use arrow keys and `Enter`, and press `Escape` or click outside to close.
+Navigate walks pages and unreviewed chapters, View switches rendering and file collapse, and Help
+opens the keymap in a modal over the review.
+
+The sidebar and a side-by-side diff compete for the same columns, so View settles both together.
+Diff layout is `auto`, `split` or `stacked`, and the sidebar is `auto`, `shown` or `hidden`. Under
+`auto` the panel appears only while the diff beside it could still go side-by-side — below that it
+is taking columns from the thing under review — and a split body is used only when it fits and both
+sides of the file have changed lines. That threshold is measured against the panel's default width,
+so dragging the divider never makes it disappear under the pointer. Asking for `split` outranks an
+`auto` sidebar, which matters once the divider has been dragged wide, but an explicit sidebar
+preference is never overridden. Neither preference is written to view state.
+
+Losing the sidebar never costs the chapter. The narrative it holds—title, summary, key changes and
+file list—stacks above the diff in a single column instead, the way the prologue already renders.
+Page navigation and review progress live in a strip under the menu bar that is present at every
+width, so the panel is a layout choice rather than the only way to move through a review.
+
+Patch is the default view. The View menu can lazily generate a read-only Semantic diff when a compatible
 [`difft`](https://difftastic.wilfred.me.uk/) executable is available; it compares only the verified
 old/new blobs in the prepared run. Semantic uses Difftastic’s coloured side-by-side presentation at
 wide content widths and coloured inline output when narrow, translating its styling into safe
@@ -200,8 +217,8 @@ Navigation follows Vim/less conventions: `j`/`k` (or `↑`/`↓`) scroll by line
 `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
 scroll by page · `g`/`G` jump to the top/bottom · `]c`/`[c` move between chapters · `{`/`}` focus key
 changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e` collapse/expand
-all diffs · `a` jumps to the next unreviewed chapter · `F10` opens the menu · `?` toggles shortcut
-help · `q`/`esc` quits.
+all diffs · `a` jumps to the next unreviewed chapter · `s` shows/hides the sidebar · `F10` opens the
+menu · `?` toggles shortcut help · `q`/`esc` quits.
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
 change, and switching Patch/Semantic carries the reviewer’s relative position through the chapter.
 Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and review

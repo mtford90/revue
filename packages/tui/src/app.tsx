@@ -12,7 +12,6 @@ import {
 	type DiffFile,
 	DiffFileHeader,
 	type DiffInlineAttachment,
-	type DiffLayout,
 	type DiffLineRange,
 	decorationAnchorId,
 	findFocusedDecorationAnchor,
@@ -32,7 +31,15 @@ import {
 	type ViewState,
 } from "@revue/types";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
-import { type ChapterDiffFile, type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import {
+	type DiffLayoutPreference,
+	defaultPanelWidth,
+	layoutForFile,
+	resolveLayout,
+	resolvePanelWidth,
+	type SidebarPreference,
+} from "./layout.ts";
 import { Narration } from "./markdown.tsx";
 import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
 import { type SemanticDiffResult, terminalSafe } from "./semantic.ts";
@@ -50,16 +57,8 @@ import {
 	toggleKeyChange,
 } from "./viewState.ts";
 
-const CHAPTER_PANEL_MIN_WIDTH = 28;
-const CHAPTER_PANEL_DEFAULT_WIDTH_FRACTION = 0.3;
-const CHAPTER_PANEL_MAX_WIDTH_FRACTION = 0.5;
-const MIN_CHAPTER_PANEL_TERMINAL_WIDTH = Math.ceil(
-	CHAPTER_PANEL_MIN_WIDTH / CHAPTER_PANEL_MAX_WIDTH_FRACTION,
-);
-const MIN_CONTENT_WIDTH = 20;
-const MIN_SPLIT_DIFF_WIDTH = 80;
 const PANEL_INDEX_MAX_ROWS = 8;
-const COMPACT_NAV_WIDTH = 34;
+const COMPACT_STRIP_WIDTH = 60;
 const APP_KEYS = new Set([
 	"f10",
 	"q",
@@ -88,6 +87,7 @@ const APP_KEYS = new Set([
 	"{",
 	"}",
 	"r",
+	"s",
 	"?",
 ]);
 // ── Page model ──────────────────────────────────────────────────────────────
@@ -109,25 +109,6 @@ function buildPages(file: RevueChaptersFile): Page[] {
 	}
 	return pages;
 }
-
-const panelWidthBounds = (terminalWidth: number) => ({
-	min: CHAPTER_PANEL_MIN_WIDTH,
-	max: Math.max(
-		CHAPTER_PANEL_MIN_WIDTH,
-		Math.floor(terminalWidth * CHAPTER_PANEL_MAX_WIDTH_FRACTION),
-	),
-});
-
-const resolvePanelWidth = (terminalWidth: number, requestedWidth: number) => {
-	const { min, max } = panelWidthBounds(terminalWidth);
-	return Math.min(max, Math.max(min, requestedWidth));
-};
-
-const defaultPanelWidth = (terminalWidth: number) =>
-	resolvePanelWidth(
-		terminalWidth,
-		Math.round(terminalWidth * CHAPTER_PANEL_DEFAULT_WIDTH_FRACTION),
-	);
 
 const pageRowId = (index: number) => `page-index-row:${index}`;
 
@@ -237,6 +218,113 @@ function NavButton({
 	);
 }
 
+/** Where the reviewer is, and how to leave. Present whether or not the panel is. */
+function PageNavStrip({
+	page,
+	pages,
+	current,
+	chapterCount,
+	reviewed,
+	width,
+	vs,
+	onNavigatePage,
+	onToggleChapterReview,
+}: {
+	page: Page | undefined;
+	pages: Page[];
+	current: number;
+	chapterCount: number;
+	reviewed: number;
+	width: number;
+	vs: ViewState;
+	onNavigatePage: (index: number) => void;
+	onToggleChapterReview: () => void;
+}) {
+	const chapter = page?.kind === "chapter" ? page.chapter : null;
+	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
+	const compact = width < COMPACT_STRIP_WIDTH;
+	return (
+		<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
+			<NavButton
+				label={compact ? "◀" : "◀ Prev"}
+				enabled={current > 0}
+				onPress={() => onNavigatePage(current - 1)}
+			/>
+			<box flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center">
+				{chapter ? (
+					<text
+						flexShrink={0}
+						fg={chapterReviewed ? theme.green : theme.dim}
+						onMouseDown={onToggleChapterReview}
+					>
+						[{chapterReviewed ? "x" : " "}]{" "}
+					</text>
+				) : null}
+				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
+					{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
+				</text>
+			</box>
+			<text flexShrink={0} fg={theme.dim}>
+				{`${reviewed}/${chapterCount}${compact ? "" : " reviewed"} `}
+			</text>
+			<NavButton
+				label={compact ? "▶" : "Next ▶"}
+				enabled={current < pages.length - 1}
+				onPress={() => onNavigatePage(current + 1)}
+			/>
+		</box>
+	);
+}
+
+/**
+ * The chapter's narrative. It reads the same in the side panel or stacked above
+ * the diff, so a terminal too narrow for two columns loses the layout, not the
+ * story.
+ */
+function ChapterBrief({
+	chapter,
+	vs,
+	selectedFile,
+	selectedKeyChange,
+	stats,
+	onSelectFile,
+	onFocusKeyChange,
+	onToggleFileReview,
+	onToggleKeyChange,
+}: {
+	chapter: Chapter;
+	vs: ViewState;
+	selectedFile: number;
+	selectedKeyChange: number;
+	stats: Map<string, FileStat>;
+	onSelectFile: (index: number) => void;
+	onFocusKeyChange: (index: number) => void;
+	onToggleFileReview: (path: string) => void;
+	onToggleKeyChange: (index: number) => void;
+}) {
+	return (
+		<box flexDirection="column" width="100%" gap={1}>
+			<text fg={theme.accent}>{chapter.title}</text>
+			<Narration text={chapter.summary} fg={theme.dim} />
+			<KeyChanges
+				chapter={chapter}
+				vs={vs}
+				selected={selectedKeyChange}
+				onFocus={onFocusKeyChange}
+				onToggle={onToggleKeyChange}
+			/>
+			<FileList
+				chapter={chapter}
+				vs={vs}
+				selected={selectedFile}
+				stats={stats}
+				onSelect={onSelectFile}
+				onToggleReview={onToggleFileReview}
+			/>
+		</box>
+	);
+}
+
 function ChapterPanel({
 	page,
 	pages,
@@ -248,7 +336,6 @@ function ChapterPanel({
 	selectedFile,
 	selectedKeyChange,
 	stats,
-	reviewed,
 	onNavigatePage,
 	onToggleIndex,
 	onResizeStart,
@@ -256,7 +343,6 @@ function ChapterPanel({
 	onFocusKeyChange,
 	indexScrollRef,
 	scrollRef,
-	onToggleChapterReview,
 	onToggleFileReview,
 	onToggleKeyChange,
 }: {
@@ -270,7 +356,6 @@ function ChapterPanel({
 	selectedFile: number;
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
-	reviewed: number;
 	onNavigatePage: (index: number) => void;
 	onToggleIndex: () => void;
 	onResizeStart: (event: OpenTUIMouseEvent) => void;
@@ -278,13 +363,10 @@ function ChapterPanel({
 	onFocusKeyChange: (index: number) => void;
 	indexScrollRef: RefObject<ScrollBoxRenderable | null>;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
-	onToggleChapterReview: () => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
 }) {
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
-	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
-	const compact = width < COMPACT_NAV_WIDTH;
 	const rule = "─".repeat(Math.max(1, width - 1));
 
 	return (
@@ -298,15 +380,6 @@ function ChapterPanel({
 				if (event.x === width - 1) onResizeStart(event);
 			}}
 		>
-			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
-				<text flexShrink={0} fg={theme.accent}>
-					revue
-				</text>
-				<box flexGrow={1} minWidth={0} />
-				<text flexShrink={0} fg={theme.dim}>
-					{reviewed}/{chapterCount} reviewed
-				</text>
-			</box>
 			<box
 				flexDirection="row"
 				height={1}
@@ -315,6 +388,9 @@ function ChapterPanel({
 				paddingRight={1}
 				onMouseDown={onToggleIndex}
 			>
+				<text flexShrink={0} fg={theme.accent}>
+					revue{"  "}
+				</text>
 				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.mauve}>
 					{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
 				</text>
@@ -331,32 +407,6 @@ function ChapterPanel({
 			<text flexShrink={0} fg={theme.surface}>
 				{rule}
 			</text>
-			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
-				<NavButton
-					label={compact ? "◀" : "◀ Prev"}
-					enabled={current > 0}
-					onPress={() => onNavigatePage(current - 1)}
-				/>
-				<box flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center">
-					{chapter ? (
-						<text
-							flexShrink={0}
-							fg={chapterReviewed ? theme.green : theme.dim}
-							onMouseDown={onToggleChapterReview}
-						>
-							[{chapterReviewed ? "x" : " "}]{" "}
-						</text>
-					) : null}
-					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
-						{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
-					</text>
-				</box>
-				<NavButton
-					label={compact ? "▶" : "Next ▶"}
-					enabled={current < pages.length - 1}
-					onPress={() => onNavigatePage(current + 1)}
-				/>
-			</box>
 			{chapter ? (
 				<scrollbox
 					ref={scrollRef}
@@ -367,25 +417,17 @@ function ChapterPanel({
 					scrollY
 					viewportCulling
 				>
-					<box flexDirection="column" width="100%" gap={1}>
-						<text fg={theme.accent}>{chapter.title}</text>
-						<Narration text={chapter.summary} fg={theme.dim} />
-						<KeyChanges
-							chapter={chapter}
-							vs={vs}
-							selected={selectedKeyChange}
-							onFocus={onFocusKeyChange}
-							onToggle={onToggleKeyChange}
-						/>
-						<FileList
-							chapter={chapter}
-							vs={vs}
-							selected={selectedFile}
-							stats={stats}
-							onSelect={onSelectFile}
-							onToggleReview={onToggleFileReview}
-						/>
-					</box>
+					<ChapterBrief
+						chapter={chapter}
+						vs={vs}
+						selectedFile={selectedFile}
+						selectedKeyChange={selectedKeyChange}
+						stats={stats}
+						onSelectFile={onSelectFile}
+						onFocusKeyChange={onFocusKeyChange}
+						onToggleFileReview={onToggleFileReview}
+						onToggleKeyChange={onToggleKeyChange}
+					/>
 				</scrollbox>
 			) : (
 				<box flexGrow={1} flexShrink={1} minHeight={0} />
@@ -908,28 +950,12 @@ function ThreadComposer({
 const fileHeaderId = (chapterId: string, index: number) =>
 	`chapter-file-header:${chapterId}:${index}`;
 
-/**
- * Side-by-side only earns its half of the terminal when both sides have
- * changed lines; a new or deleted file would otherwise face a blank pane.
- */
-const layoutForFile = (file: ChapterDiffFile, width: number): DiffLayout => {
-	if (width < MIN_SPLIT_DIFF_WIDTH) return "stack";
-	const changes = file.metadata.hunks.flatMap((hunk) => hunk.hunkContent);
-	const deletions = changes.reduce(
-		(total, change) => total + (change.type === "context" ? 0 : change.deletions),
-		0,
-	);
-	const additions = changes.reduce(
-		(total, change) => total + (change.type === "context" ? 0 : change.additions),
-		0,
-	);
-	return deletions > 0 && additions > 0 ? "split" : "stack";
-};
-
 function ChapterView({
 	chapter,
 	diffFiles,
 	width,
+	diffPreference,
+	splitFits,
 	vs,
 	selectedFile,
 	selectedHunkIndex,
@@ -951,6 +977,8 @@ function ChapterView({
 	chapter: Chapter;
 	diffFiles: DiffFile[] | null;
 	width: number;
+	diffPreference: DiffLayoutPreference;
+	splitFits: boolean;
 	vs: ViewState;
 	selectedFile: number;
 	selectedHunkIndex: number;
@@ -1059,7 +1087,11 @@ function ChapterView({
 								{collapsed ? null : (
 									<DiffBody
 										file={diffFile}
-										layout={layoutForFile(diffFile, width)}
+										layout={layoutForFile({
+											file: diffFile,
+											preference: diffPreference,
+											splitFits,
+										})}
 										width={width}
 										showLineNumbers
 										selectedHunkIndex={focused ? selectedHunkIndex : -1}
@@ -1189,32 +1221,124 @@ function SemanticChapterView({
 }
 
 // ── Keyboard help ──────────────────────────────────────────────────────────
-function ShortcutHelp() {
+const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
+	{
+		title: "Scrolling",
+		lines: [
+			"j/k or ↑/↓ line",
+			"d/u or ctrl-d/ctrl-u half-page",
+			"space/ctrl-f page down · b/ctrl-b page up",
+			"g/gg top · G bottom · PgUp/PgDn · wheel",
+		],
+	},
+	{
+		title: "Navigation",
+		lines: [
+			"]c/[c next/previous page (prologue is page one)",
+			"a next unreviewed chapter",
+			"pointer: the strip under the menu bar, or the sidebar index",
+		],
+	},
+	{
+		title: "Files",
+		lines: ["tab/shift-tab focus · enter toggle diff", "c/e collapse/expand all"],
+	},
+	{
+		title: "Review",
+		lines: [
+			"x chapter · f focused file",
+			"{/} focus key change · r toggle · 1–9 direct",
+			"pointer: click/drag line-number gutter to start a thread",
+		],
+	},
+	{
+		title: "Views",
+		lines: [
+			"s show/hide the sidebar; its narrative stacks above the diff",
+			"F10 → View toggles Patch / read-only Semantic",
+			"F10 → View sets diff layout: auto, split or stacked",
+			"anchors, exact range highlights, and threads are Patch-only",
+		],
+	},
+	{ title: "Menus", lines: ["F10 · File, Navigate, View, Help", "? shortcuts · q/esc quit"] },
+];
+
+const SHORTCUT_ROWS = SHORTCUT_SECTIONS.reduce(
+	(total, section) => total + section.lines.length + 1,
+	0,
+);
+const HELP_MODAL_MAX_WIDTH = 66;
+
+/** Floats over the review rather than displacing it, so the page stays in sight. */
+function HelpModal({
+	terminalWidth,
+	terminalHeight,
+	scrollRef,
+	onClose,
+}: {
+	terminalWidth: number;
+	terminalHeight: number;
+	scrollRef: RefObject<ScrollBoxRenderable | null>;
+	onClose: () => void;
+}) {
+	const width = Math.max(20, Math.min(HELP_MODAL_MAX_WIDTH, terminalWidth - 4));
+	const height = Math.max(5, Math.min(SHORTCUT_ROWS + 3, terminalHeight - 4));
 	return (
-		<box flexDirection="column" width="100%" flexShrink={0}>
-			<text fg={theme.accent}>Keyboard shortcuts</text>
-			<text fg={theme.mauve}>Scrolling</text>
-			<text fg={theme.text}> j/k or ↑/↓ line</text>
-			<text fg={theme.text}> d/u or ctrl-d/ctrl-u half-page</text>
-			<text fg={theme.text}> space/ctrl-f page down · b/ctrl-b page up</text>
-			<text fg={theme.text}> g/gg top · G bottom · PgUp/PgDn · wheel</text>
-			<text fg={theme.mauve}>Navigation</text>
-			<text fg={theme.text}> ]c/[c next/previous page (prologue is page one)</text>
-			<text fg={theme.text}> a next unreviewed chapter</text>
-			<text fg={theme.text}> pointer: click any page in the sidebar index</text>
-			<text fg={theme.mauve}>Files</text>
-			<text fg={theme.text}> tab/shift-tab focus · enter toggle diff</text>
-			<text fg={theme.text}> c/e collapse/expand all</text>
-			<text fg={theme.mauve}>Review</text>
-			<text fg={theme.text}> x chapter · f focused file</text>
-			<text fg={theme.text}> {"{/}"} focus key change · r toggle · 1–9 direct</text>
-			<text fg={theme.text}> pointer: click/drag line-number gutter to start a thread</text>
-			<text fg={theme.mauve}>Views</text>
-			<text fg={theme.text}> F10 → View toggles Patch / read-only Semantic</text>
-			<text fg={theme.dim}> anchors, exact range highlights, and threads are Patch-only</text>
-			<text fg={theme.mauve}>Menu/help/quit</text>
-			<text fg={theme.text}> F10 menu · ? close · q/esc quit</text>
-		</box>
+		<>
+			<box
+				position="absolute"
+				top={0}
+				left={0}
+				width="100%"
+				height="100%"
+				zIndex={60}
+				shouldFill={false}
+				onMouseDown={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					onClose();
+				}}
+			/>
+			<box
+				position="absolute"
+				top={Math.max(0, Math.round((terminalHeight - height) / 2))}
+				left={Math.max(0, Math.round((terminalWidth - width) / 2))}
+				width={width}
+				height={height}
+				zIndex={70}
+				border
+				borderColor={theme.accent}
+				backgroundColor={theme.base}
+				title=" Keyboard shortcuts "
+				flexDirection="column"
+				onMouseDown={(event) => event.stopPropagation()}
+			>
+				<scrollbox
+					ref={scrollRef}
+					flexGrow={1}
+					flexShrink={1}
+					minHeight={0}
+					paddingLeft={1}
+					paddingRight={1}
+					scrollY
+					verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.surface } }}
+				>
+					{SHORTCUT_SECTIONS.map((section) => (
+						<box key={section.title} flexDirection="column" width="100%">
+							<text fg={theme.mauve}>{section.title}</text>
+							{section.lines.map((line) => (
+								<text key={line} fg={theme.text} wrapMode="none" truncate>
+									{`  ${line}`}
+								</text>
+							))}
+						</box>
+					))}
+				</scrollbox>
+				<box flexShrink={0} height={1} paddingLeft={1}>
+					<text fg={theme.dim}>? or Esc to close</text>
+				</box>
+			</box>
+		</>
 	);
 }
 
@@ -1273,6 +1397,8 @@ export function App({
 	);
 	const [showHelp, setShowHelp] = useState(false);
 	const [indexExpanded, setIndexExpanded] = useState(true);
+	const [sidebarPreference, setSidebarPreference] = useState<SidebarPreference>("auto");
+	const [diffPreference, setDiffPreference] = useState<DiffLayoutPreference>("auto");
 	const [viewMode, setViewMode] = useState<"patch" | "semantic">("patch");
 	const [semantic, setSemantic] = useState<SemanticDiffResult | null>(null);
 	const [semanticLoading, setSemanticLoading] = useState(false);
@@ -1287,13 +1413,23 @@ export function App({
 	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
 	const panelScroll = useRef<ScrollBoxRenderable>(null);
 	const indexScroll = useRef<ScrollBoxRenderable>(null);
+	const helpScroll = useRef<ScrollBoxRenderable>(null);
 	const resizingPanel = useRef(false);
 	const chapterNavigationPrefix = useRef<"[" | "]" | null>(null);
-	const { width } = useTerminalDimensions();
+	const { width, height } = useTerminalDimensions();
 	const [requestedPanelWidth, setRequestedPanelWidth] = useState(() => defaultPanelWidth(width));
-	const panelWidth = resolvePanelWidth(width, requestedPanelWidth);
-	const showChapterPanel = width >= MIN_CHAPTER_PANEL_TERMINAL_WIDTH;
-	const contentWidth = Math.max(MIN_CONTENT_WIDTH, width - (showChapterPanel ? panelWidth : 0) - 4);
+	const {
+		showSidebar: showChapterPanel,
+		sidebarWidth: panelWidth,
+		contentWidth,
+		splitFits,
+		splitReachable,
+	} = resolveLayout({
+		terminalWidth: width,
+		requestedSidebarWidth: requestedPanelWidth,
+		sidebar: sidebarPreference,
+		diff: diffPreference,
+	});
 	const page = pages[current];
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
@@ -1326,12 +1462,13 @@ export function App({
 
 	useEffect(() => {
 		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
+		const host = showChapterPanel ? panelScroll : pageScroll;
 		const anchorFocusedKeyChange = () =>
-			panelScroll.current?.scrollChildIntoView(keyChangeId(chapter.id, selectedKeyChange));
+			host.current?.scrollChildIntoView(keyChangeId(chapter.id, selectedKeyChange));
 		anchorFocusedKeyChange();
 		const retry = setTimeout(anchorFocusedKeyChange, 50);
 		return () => clearTimeout(retry);
-	}, [chapter, selectedKeyChange, keyFocusRequest]);
+	}, [chapter, selectedKeyChange, keyFocusRequest, showChapterPanel]);
 
 	useEffect(() => {
 		if (!diffAnchorTarget) return;
@@ -1598,7 +1735,6 @@ export function App({
 		return true;
 	}
 	function toggleShortcutHelp() {
-		pageScroll.current?.scrollTo(0);
 		setShowHelp((visible) => !visible);
 	}
 	function movePage(delta: number) {
@@ -1608,6 +1744,9 @@ export function App({
 		if (!chapter) return;
 		const target = nextUnreviewedChapter(chapters, vs, chapter.order);
 		if (target) gotoChapter(target);
+	}
+	function toggleSidebar() {
+		setSidebarPreference(showChapterPanel ? "hidden" : "shown");
 	}
 	function collapseFiles() {
 		if (!chapter) return;
@@ -1671,6 +1810,11 @@ export function App({
 		showHelp,
 		viewMode,
 		semanticLoading,
+		sidebarPreference,
+		diffPreference,
+		splitReachable,
+		setSidebarPreference,
+		setDiffPreference,
 		requestQuit: () => onQuit?.(),
 		movePrevious: () => movePage(-1),
 		moveNext: () => movePage(1),
@@ -1730,6 +1874,15 @@ export function App({
 			key.stopPropagation();
 		}
 
+		if (showHelp && !menu.activeMenuId) {
+			if (name === "escape" || name === "?" || name === "q" || name === "f10") setShowHelp(false);
+			else if (name === "j" || name === "down") helpScroll.current?.scrollBy(1);
+			else if (name === "k" || name === "up") helpScroll.current?.scrollBy(-1);
+			else if (name === "pagedown" || name === "pageup")
+				helpScroll.current?.scrollBy(name === "pagedown" ? 1 : -1, "viewport");
+			return;
+		}
+
 		if (menu.activeMenuId) {
 			if (name === "escape" || name === "f10") menu.close();
 			else if (name === "left" || name === "right") menu.switchMenu(name === "left" ? -1 : 1);
@@ -1753,6 +1906,8 @@ export function App({
 
 		if (name === "?") {
 			toggleShortcutHelp();
+		} else if (name === "s") {
+			toggleSidebar();
 		} else if (name === "q" || name === "escape") {
 			onQuit?.();
 		} else if (name === "pageup" || name === "pagedown") {
@@ -1825,6 +1980,17 @@ export function App({
 				}}
 				onClose={menu.close}
 			/>
+			<PageNavStrip
+				page={page}
+				pages={pages}
+				current={current}
+				chapterCount={chapters.length}
+				reviewed={reviewed}
+				width={width}
+				vs={vs}
+				onNavigatePage={goto}
+				onToggleChapterReview={toggleChapterReview}
+			/>
 			<box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
 				{showChapterPanel ? (
 					<ChapterPanel
@@ -1838,7 +2004,6 @@ export function App({
 						selectedFile={selectedFile}
 						selectedKeyChange={selectedKeyChange}
 						stats={stats}
-						reviewed={reviewed}
 						onNavigatePage={goto}
 						onToggleIndex={() => setIndexExpanded((expanded) => !expanded)}
 						onResizeStart={startPanelResize}
@@ -1846,7 +2011,6 @@ export function App({
 						onFocusKeyChange={focusKeyChange}
 						indexScrollRef={indexScroll}
 						scrollRef={panelScroll}
-						onToggleChapterReview={toggleChapterReview}
 						onToggleFileReview={toggleFileReview}
 						onToggleKeyChange={toggleSelectedKeyChange}
 					/>
@@ -1865,54 +2029,66 @@ export function App({
 						trackOptions: { foregroundColor: theme.surface },
 					}}
 				>
-					{showHelp ? (
-						<ShortcutHelp />
-					) : (
-						<box flexDirection="column" width="100%">
-							{semanticNotice ? <text fg={theme.yellow}>{semanticNotice}</text> : null}
-							{page?.kind === "prologue" ? (
-								<PrologueView prologue={page.prologue} pages={pages} vs={vs} onSelectPage={goto} />
-							) : null}
-							{page?.kind === "chapter" && viewMode === "patch" ? (
-								<ChapterView
-									chapter={page.chapter}
-									diffFiles={diffFiles}
-									width={contentWidth}
+					<box flexDirection="column" width="100%">
+						{semanticNotice ? <text fg={theme.yellow}>{semanticNotice}</text> : null}
+						{chapter && !showChapterPanel ? (
+							<box flexDirection="column" width="100%" paddingBottom={1}>
+								<ChapterBrief
+									chapter={chapter}
 									vs={vs}
 									selectedFile={selectedFile}
-									selectedHunkIndex={selectedHunkIndex}
 									selectedKeyChange={selectedKeyChange}
-									collapsedFiles={collapsedFiles}
-									threads={threads}
-									selectedThreadRange={
-										threadDraft?.kind === "thread" ? threadDraft.range : undefined
-									}
-									threadDraft={newThreadDraft}
-									replyDraft={replyDraft}
+									stats={stats}
 									onSelectFile={selectFile}
-									onToggleCollapse={toggleCollapsedFile}
+									onFocusKeyChange={focusKeyChange}
 									onToggleFileReview={toggleFileReview}
-									onSelectThreadRange={selectThreadRange}
-									onReplyThread={startThreadReply}
-									onDeleteThread={deleteInlineThread}
-									onDeleteThreadMessage={deleteInlineThreadMessage}
-									onToggleThreadStatus={toggleInlineThreadStatus}
+									onToggleKeyChange={toggleSelectedKeyChange}
 								/>
-							) : null}
-							{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
-								<SemanticChapterView
-									chapter={page.chapter}
-									semantic={semantic}
-									vs={vs}
-									selectedFile={selectedFile}
-									collapsedFiles={collapsedFiles}
-									onSelectFile={selectFile}
-									onToggleCollapse={toggleCollapsedFile}
-									onToggleFileReview={toggleFileReview}
-								/>
-							) : null}
-						</box>
-					)}
+								<text fg={theme.surface}>{"─".repeat(Math.max(1, contentWidth))}</text>
+							</box>
+						) : null}
+						{page?.kind === "prologue" ? (
+							<PrologueView prologue={page.prologue} pages={pages} vs={vs} onSelectPage={goto} />
+						) : null}
+						{page?.kind === "chapter" && viewMode === "patch" ? (
+							<ChapterView
+								chapter={page.chapter}
+								diffFiles={diffFiles}
+								width={contentWidth}
+								diffPreference={diffPreference}
+								splitFits={splitFits}
+								vs={vs}
+								selectedFile={selectedFile}
+								selectedHunkIndex={selectedHunkIndex}
+								selectedKeyChange={selectedKeyChange}
+								collapsedFiles={collapsedFiles}
+								threads={threads}
+								selectedThreadRange={threadDraft?.kind === "thread" ? threadDraft.range : undefined}
+								threadDraft={newThreadDraft}
+								replyDraft={replyDraft}
+								onSelectFile={selectFile}
+								onToggleCollapse={toggleCollapsedFile}
+								onToggleFileReview={toggleFileReview}
+								onSelectThreadRange={selectThreadRange}
+								onReplyThread={startThreadReply}
+								onDeleteThread={deleteInlineThread}
+								onDeleteThreadMessage={deleteInlineThreadMessage}
+								onToggleThreadStatus={toggleInlineThreadStatus}
+							/>
+						) : null}
+						{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
+							<SemanticChapterView
+								chapter={page.chapter}
+								semantic={semantic}
+								vs={vs}
+								selectedFile={selectedFile}
+								collapsedFiles={collapsedFiles}
+								onSelectFile={selectFile}
+								onToggleCollapse={toggleCollapsedFile}
+								onToggleFileReview={toggleFileReview}
+							/>
+						) : null}
+					</box>
 				</scrollbox>
 			</box>
 			{menu.activeMenuId ? (
@@ -1927,6 +2103,14 @@ export function App({
 						onSelect={menu.activate}
 					/>
 				</>
+			) : null}
+			{showHelp ? (
+				<HelpModal
+					terminalWidth={width}
+					terminalHeight={height}
+					scrollRef={helpScroll}
+					onClose={() => setShowHelp(false)}
+				/>
 			) : null}
 			{!threadDraft && threadNotice ? <text fg={theme.red}>{threadNotice}</text> : null}
 			<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">

@@ -109,14 +109,14 @@ export const buildAppMenus = ({
 		{ kind: "separator", id: "view-mode" },
 		{
 			kind: "item",
-			label: "Previous chapter",
+			label: "Previous page",
 			hint: "[c",
 			disabled: !canMovePrevious,
 			action: movePrevious,
 		},
 		{
 			kind: "item",
-			label: "Next chapter",
+			label: "Next page",
 			hint: "]c",
 			disabled: !canMoveNext,
 			action: moveNext,

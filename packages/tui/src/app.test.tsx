@@ -83,10 +83,64 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	const frame = t.captureCharFrame();
 
 	expect(frame).toContain("revue"); // sidebar title
+	expect(frame).toContain("Chapters (3)"); // sidebar index disclosure
 	expect(frame).toContain("Prologue"); // sidebar entry
-	expect(frame).toContain("backoff helper"); // sidebar chapter label (single-line truncated)
+	expect(frame).toContain("1. Add a re"); // sidebar chapter label (single-line truncated)
 	expect(frame).toContain("Dashboards stay up during deploys now"); // prologue outcome
 	expect(frame).toContain("0/3 reviewed"); // none reviewed yet
+});
+
+test("the sidebar index walks back to the prologue from any chapter", async () => {
+	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
+	await t.renderOnce();
+	await nextChapter(t);
+	await nextChapter(t);
+	expect(t.captureCharFrame()).toContain("3/4");
+
+	const lines = t.captureCharFrame().split("\n");
+	const prologueY = lines.findIndex((line) => line.includes("Prologue"));
+	await click(t, (lines[prologueY]?.indexOf("Prologue") ?? -1) + 1, prologueY);
+
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("1/4");
+	expect(frame).toContain("Dashboards stay up during deploys now");
+});
+
+test("the prologue's chapter list opens the chapter it names", async () => {
+	const t = await testRender(<App file={file} />, { width: 110, height: 60 });
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const entryY = lines.findLastIndex((line) => line.includes("Retry transient failures"));
+	await click(t, (lines[entryY]?.indexOf("Retry transient") ?? -1) + 1, entryY);
+
+	expect(t.captureCharFrame()).toContain("3/4");
+});
+
+test("a new file is rendered unified so no pane sits empty", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 160, height: 40 });
+	await t.renderOnce();
+	await nextChapter(t); // chapter 1 covers backoff.ts, a new file
+
+	const codeLine =
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((line) => line.includes("MAX_RETRIES")) ?? "";
+	// Past the sidebar border, a split body would show a second rule between its panes.
+	expect(codeLine.slice(codeLine.indexOf("│") + 1)).not.toContain("│");
+});
+
+test("[c walks back into the prologue instead of stopping at chapter one", async () => {
+	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
+	await t.renderOnce();
+	await nextChapter(t);
+	expect(t.captureCharFrame()).toContain("2/4");
+
+	await press(t, "[");
+	await press(t, "c");
+	expect(t.captureCharFrame()).toContain("1/4");
+	expect(t.captureCharFrame()).toContain("Dashboards stay up during deploys now");
 });
 
 test("the keyboard menu reuses navigation and keeps Escape from quitting", async () => {
@@ -111,8 +165,8 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	expect(menuFrame).toContain("Semantic diff (read-only)");
 	await arrow(t, "down");
 	await arrow(t, "down");
-	await press(t, "RETURN");
-	expect(t.captureCharFrame()).toContain("3/4");
+	await press(t, "RETURN"); // Previous page — reachable from chapter one because the prologue is a page
+	expect(t.captureCharFrame()).toContain("1/4");
 });
 
 test("View menu toggles a read-only semantic diff without losing the focused file", async () => {
@@ -334,12 +388,13 @@ test("the mouse menu acts once and blocks the chapter beneath it", async () => {
 	const bar = chapterFrame[0] ?? "";
 	await click(t, bar.indexOf("View") + 1, 0);
 	const menuLines = t.captureCharFrame().split("\n");
-	const nextLine = menuLines.find((line) => line.includes("Next chapter")) ?? "";
+	const nextLine = menuLines.find((line) => line.includes("Next page")) ?? "";
 	expect(nextLine).not.toContain("]c");
 
 	await click(t, checkboxX + 1, chapterY);
-	expect(t.captureCharFrame()).not.toContain("Semantic diff (read-only)");
 	expect(seen).toHaveLength(0);
+	await click(t, bar.indexOf("View") + 1, 0); // toggles the open menu shut
+	expect(t.captureCharFrame()).not.toContain("Semantic diff (read-only)");
 
 	const reopenedBar = t.captureCharFrame().split("\n")[0] ?? "";
 	await click(t, reopenedBar.indexOf("View") + 1, 0);
@@ -351,7 +406,7 @@ test("the mouse menu acts once and blocks the chapter beneath it", async () => {
 });
 
 test("a chapter shows its file list", async () => {
-	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
+	const t = await testRender(<App file={file} />, { width: 110, height: 40 });
 	await t.renderOnce();
 	await nextChapter(t); // into chapter 1
 	const frame = t.captureCharFrame();

@@ -294,3 +294,47 @@ rename to new.ts
 	await renameBody.renderOnce();
 	expect(renameBody.captureCharFrame()).toContain("Renamed without changes.");
 });
+
+test("line numbers stay in one column whether or not the content overflows", async () => {
+	const [file] = parsePatch(`diff --git a/mixed.ts b/mixed.ts
+--- a/mixed.ts
++++ b/mixed.ts
+@@ -1,3 +1,3 @@
+-short
++${"x".repeat(200)}
++short again
+`);
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(<DiffBody file={file} layout="stack" width={40} />, {
+		width: 40,
+		height: 8,
+	});
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const overflowing = lines.find((line) => line.includes("xxxx")) ?? "";
+	const fitting = lines.find((line) => line.includes("short again")) ?? "";
+	expect(overflowing.indexOf("+")).toBe(fitting.indexOf("+"));
+});
+
+test("a new file drops the gutter that can never hold an old line number", async () => {
+	const [added] = parsePatch(`diff --git a/added.ts b/added.ts
+new file mode 100644
+--- /dev/null
++++ b/added.ts
+@@ -0,0 +1,2 @@
++first
++second
+`);
+	if (!added) throw new Error("missing fixture");
+	const t = await testRender(<DiffBody file={added} layout="stack" width={40} />, {
+		width: 40,
+		height: 6,
+	});
+	await t.renderOnce();
+	const first =
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((line) => line.includes("first")) ?? "";
+	expect(first.indexOf("1")).toBeLessThan(4);
+});

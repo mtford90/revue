@@ -12,6 +12,7 @@ import {
 	type DiffFile,
 	DiffFileHeader,
 	type DiffInlineAttachment,
+	type DiffLayout,
 	type DiffLineRange,
 	decorationAnchorId,
 	findFocusedDecorationAnchor,
@@ -31,7 +32,8 @@ import {
 	type ViewState,
 } from "@revue/types";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
-import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import { type ChapterDiffFile, type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import { Narration } from "./markdown.tsx";
 import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
 import { type SemanticDiffResult, terminalSafe } from "./semantic.ts";
 import { complexityColor, severityColor, theme } from "./theme.ts";
@@ -56,6 +58,8 @@ const MIN_CHAPTER_PANEL_TERMINAL_WIDTH = Math.ceil(
 );
 const MIN_CONTENT_WIDTH = 20;
 const MIN_SPLIT_DIFF_WIDTH = 80;
+const PANEL_INDEX_MAX_ROWS = 8;
+const COMPACT_NAV_WIDTH = 34;
 const APP_KEYS = new Set([
 	"f10",
 	"q",
@@ -125,41 +129,132 @@ const defaultPanelWidth = (terminalWidth: number) =>
 		Math.round(terminalWidth * CHAPTER_PANEL_DEFAULT_WIDTH_FRACTION),
 	);
 
-function PageList({ pages, current, vs }: { pages: Page[]; current: number; vs: ViewState }) {
+const pageRowId = (index: number) => `page-index-row:${index}`;
+
+function PageIndexRows({
+	pages,
+	current,
+	vs,
+	onSelect,
+}: {
+	pages: Page[];
+	current: number;
+	vs: ViewState;
+	onSelect: (index: number) => void;
+}) {
 	return pages.map((page, index) => {
 		const active = index === current;
 		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
 		const label = page.kind === "chapter" ? `${page.chapter.order}. ${page.label}` : page.label;
 		return (
-			<text
+			<box
 				key={page.label}
-				fg={done ? theme.green : active ? theme.accent : theme.dim}
-				wrapMode="none"
-				truncate
+				id={pageRowId(index)}
+				height={1}
+				width="100%"
+				flexDirection="row"
+				backgroundColor={active ? theme.surface : undefined}
+				onMouseDown={() => onSelect(index)}
 			>
-				{active ? "▸" : " "} {page.kind === "chapter" ? `[${done ? "x" : " "}] ` : ""}
-				{label}
-			</text>
+				<text flexShrink={0} fg={active ? theme.accent : theme.surface}>
+					{active ? "▸" : " "}
+				</text>
+				<text flexShrink={0} fg={done ? theme.green : theme.dim}>
+					{page.kind === "chapter" ? `[${done ? "x" : " "}] ` : "    "}
+				</text>
+				<text
+					flexGrow={1}
+					minWidth={0}
+					wrapMode="none"
+					truncate
+					fg={active ? theme.accent : done ? theme.green : theme.dim}
+				>
+					{label}
+				</text>
+			</box>
 		);
 	});
+}
+
+/** Every page at a glance; scrolls itself once a review runs past a screenful. */
+function PageIndex({
+	pages,
+	current,
+	vs,
+	onSelect,
+	scrollRef,
+}: {
+	pages: Page[];
+	current: number;
+	vs: ViewState;
+	onSelect: (index: number) => void;
+	scrollRef: RefObject<ScrollBoxRenderable | null>;
+}) {
+	const rows = <PageIndexRows pages={pages} current={current} vs={vs} onSelect={onSelect} />;
+	if (pages.length <= PANEL_INDEX_MAX_ROWS) {
+		return (
+			<box flexDirection="column" flexShrink={0} width="100%" paddingLeft={1}>
+				{rows}
+			</box>
+		);
+	}
+	return (
+		<scrollbox
+			ref={scrollRef}
+			height={PANEL_INDEX_MAX_ROWS}
+			flexShrink={0}
+			width="100%"
+			paddingLeft={1}
+			scrollY
+			verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.surface } }}
+		>
+			{rows}
+		</scrollbox>
+	);
+}
+
+function NavButton({
+	label,
+	enabled,
+	onPress,
+}: {
+	label: string;
+	enabled: boolean;
+	onPress: () => void;
+}) {
+	return (
+		<box
+			height={1}
+			flexShrink={0}
+			backgroundColor={enabled ? theme.surface : undefined}
+			onMouseDown={(event) => {
+				event.stopPropagation();
+				if (enabled) onPress();
+			}}
+		>
+			<text fg={enabled ? theme.accent : theme.dim}>{` ${label} `}</text>
+		</box>
+	);
 }
 
 function ChapterPanel({
 	page,
 	pages,
 	current,
-	chapterIndex,
 	chapterCount,
 	width,
 	vs,
+	indexExpanded,
 	selectedFile,
 	selectedKeyChange,
 	stats,
 	reviewed,
-	onNavigateChapter,
+	onNavigatePage,
+	onToggleIndex,
 	onResizeStart,
 	onSelectFile,
 	onFocusKeyChange,
+	indexScrollRef,
 	scrollRef,
 	onToggleChapterReview,
 	onToggleFileReview,
@@ -168,18 +263,20 @@ function ChapterPanel({
 	page: Page | undefined;
 	pages: Page[];
 	current: number;
-	chapterIndex: number;
 	chapterCount: number;
 	width: number;
 	vs: ViewState;
+	indexExpanded: boolean;
 	selectedFile: number;
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
 	reviewed: number;
-	onNavigateChapter: (index: number) => void;
+	onNavigatePage: (index: number) => void;
+	onToggleIndex: () => void;
 	onResizeStart: (event: OpenTUIMouseEvent) => void;
 	onSelectFile: (index: number) => void;
 	onFocusKeyChange: (index: number) => void;
+	indexScrollRef: RefObject<ScrollBoxRenderable | null>;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
 	onToggleChapterReview: () => void;
 	onToggleFileReview: (path: string) => void;
@@ -187,6 +284,8 @@ function ChapterPanel({
 }) {
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
 	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
+	const compact = width < COMPACT_NAV_WIDTH;
+	const rule = "─".repeat(Math.max(1, width - 1));
 
 	return (
 		<box
@@ -199,111 +298,250 @@ function ChapterPanel({
 				if (event.x === width - 1) onResizeStart(event);
 			}}
 		>
-			{chapter ? (
-				<>
-					<box flexDirection="column" padding={1} gap={1} flexShrink={0}>
-						<box flexDirection="row" width="100%">
-							<text
-								fg={chapterReviewed ? theme.green : theme.dim}
-								onMouseDown={onToggleChapterReview}
-							>
-								[{chapterReviewed ? "x" : " "}]
-							</text>
-							<text
-								fg={chapterIndex > 0 ? theme.accent : theme.surface}
-								onMouseDown={() => onNavigateChapter(chapterIndex - 1)}
-							>
-								‹
-							</text>
-							<box flexGrow={1} justifyContent="center">
-								<text fg={theme.text}>
-									Chapter {chapter.order}/{chapterCount}
-								</text>
-							</box>
-							<text
-								fg={chapterIndex < chapterCount - 1 ? theme.accent : theme.surface}
-								onMouseDown={() => onNavigateChapter(chapterIndex + 1)}
-							>
-								›
-							</text>
-						</box>
-						<text fg={theme.accent}>{chapter.title}</text>
-					</box>
-					<text fg={theme.surface}>{"─".repeat(Math.max(1, width - 1))}</text>
-					<scrollbox
-						ref={scrollRef}
-						flexGrow={1}
-						flexShrink={1}
-						minHeight={0}
-						padding={1}
-						scrollY
-						viewportCulling
-					>
-						<box flexDirection="column" width="100%">
-							<text fg={theme.dim}>{chapter.summary}</text>
-							<KeyChanges
-								chapter={chapter}
-								vs={vs}
-								selected={selectedKeyChange}
-								onFocus={onFocusKeyChange}
-								onToggle={onToggleKeyChange}
-							/>
-							<text fg={theme.surface}>{"─".repeat(Math.max(1, width - 3))}</text>
-							<FileList
-								chapter={chapter}
-								vs={vs}
-								selected={selectedFile}
-								stats={stats}
-								onSelect={onSelectFile}
-								onToggleReview={onToggleFileReview}
-							/>
-						</box>
-					</scrollbox>
-				</>
-			) : (
-				<box flexDirection="column" flexGrow={1} padding={1} gap={1}>
-					<text fg={theme.accent}>revue</text>
-					<text fg={theme.mauve}>Chapters</text>
-					<PageList pages={pages} current={current} vs={vs} />
-				</box>
-			)}
-			<text fg={theme.dim} flexShrink={0} paddingLeft={1} paddingRight={1}>
-				{reviewed}/{chapterCount} reviewed
+			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
+				<text flexShrink={0} fg={theme.accent}>
+					revue
+				</text>
+				<box flexGrow={1} minWidth={0} />
+				<text flexShrink={0} fg={theme.dim}>
+					{reviewed}/{chapterCount} reviewed
+				</text>
+			</box>
+			<box
+				flexDirection="row"
+				height={1}
+				flexShrink={0}
+				paddingLeft={1}
+				paddingRight={1}
+				onMouseDown={onToggleIndex}
+			>
+				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.mauve}>
+					{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
+				</text>
+			</box>
+			{indexExpanded ? (
+				<PageIndex
+					pages={pages}
+					current={current}
+					vs={vs}
+					onSelect={onNavigatePage}
+					scrollRef={indexScrollRef}
+				/>
+			) : null}
+			<text flexShrink={0} fg={theme.surface}>
+				{rule}
 			</text>
+			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
+				<NavButton
+					label={compact ? "◀" : "◀ Prev"}
+					enabled={current > 0}
+					onPress={() => onNavigatePage(current - 1)}
+				/>
+				<box flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center">
+					{chapter ? (
+						<text
+							flexShrink={0}
+							fg={chapterReviewed ? theme.green : theme.dim}
+							onMouseDown={onToggleChapterReview}
+						>
+							[{chapterReviewed ? "x" : " "}]{" "}
+						</text>
+					) : null}
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
+						{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
+					</text>
+				</box>
+				<NavButton
+					label={compact ? "▶" : "Next ▶"}
+					enabled={current < pages.length - 1}
+					onPress={() => onNavigatePage(current + 1)}
+				/>
+			</box>
+			{chapter ? (
+				<scrollbox
+					ref={scrollRef}
+					flexGrow={1}
+					flexShrink={1}
+					minHeight={0}
+					padding={1}
+					scrollY
+					viewportCulling
+				>
+					<box flexDirection="column" width="100%" gap={1}>
+						<text fg={theme.accent}>{chapter.title}</text>
+						<Narration text={chapter.summary} fg={theme.dim} />
+						<KeyChanges
+							chapter={chapter}
+							vs={vs}
+							selected={selectedKeyChange}
+							onFocus={onFocusKeyChange}
+							onToggle={onToggleKeyChange}
+						/>
+						<FileList
+							chapter={chapter}
+							vs={vs}
+							selected={selectedFile}
+							stats={stats}
+							onSelect={onSelectFile}
+							onToggleReview={onToggleFileReview}
+						/>
+					</box>
+				</scrollbox>
+			) : (
+				<box flexGrow={1} flexShrink={1} minHeight={0} />
+			)}
 		</box>
 	);
 }
 
 // ── Prologue ────────────────────────────────────────────────────────────────
-function PrologueView({ prologue }: { prologue: Prologue }) {
+function Badge({ label, color }: { label: string; color: string }) {
 	return (
-		<box flexDirection="column" gap={1}>
-			{prologue.motivation ? <text fg={theme.text}>{prologue.motivation}</text> : null}
-			{prologue.outcome ? <text fg={theme.green}>→ {prologue.outcome}</text> : null}
-			<text fg={complexityColor[prologue.complexity.level] ?? theme.text}>
-				complexity: {prologue.complexity.level} — {prologue.complexity.reasoning}
+		<text flexShrink={0} fg={theme.base} bg={color}>
+			{` ${label} `}
+		</text>
+	);
+}
+
+/** A marker column plus a flexible body, so wrapped lines keep a hanging indent. */
+function Hanging({
+	marker,
+	markerColor,
+	children,
+}: {
+	marker: string;
+	markerColor: string;
+	children: ReactNode;
+}) {
+	return (
+		<box flexDirection="row" width="100%">
+			<text flexShrink={0} fg={markerColor}>
+				{marker}
 			</text>
+			<box flexDirection="column" flexGrow={1} minWidth={0}>
+				{children}
+			</box>
+		</box>
+	);
+}
+
+function PrologueSection({
+	title,
+	gap = 1,
+	children,
+}: {
+	title: string;
+	gap?: number;
+	children: ReactNode;
+}) {
+	return (
+		<box flexDirection="column" width="100%">
+			<text fg={theme.mauve} attributes={createTextAttributes({ bold: true })}>
+				{title.toUpperCase()}
+			</text>
+			<box flexDirection="column" width="100%" gap={gap} paddingTop={1}>
+				{children}
+			</box>
+		</box>
+	);
+}
+
+function PrologueChapters({
+	pages,
+	vs,
+	onSelectPage,
+}: {
+	pages: Page[];
+	vs: ViewState;
+	onSelectPage: (index: number) => void;
+}) {
+	return pages.flatMap((page, index) =>
+		page.kind === "chapter"
+			? [
+					<box
+						key={page.chapter.id}
+						height={1}
+						width="100%"
+						flexDirection="row"
+						onMouseDown={() => onSelectPage(index)}
+					>
+						<text
+							flexShrink={0}
+							fg={isChapterReviewed(vs, page.chapter.id) ? theme.green : theme.dim}
+						>
+							{`[${isChapterReviewed(vs, page.chapter.id) ? "x" : " "}] ${page.chapter.order}. `}
+						</text>
+						<text flexGrow={1} minWidth={0} wrapMode="none" truncate fg={theme.accent}>
+							{page.chapter.title}
+						</text>
+					</box>,
+				]
+			: [],
+	);
+}
+
+function PrologueView({
+	prologue,
+	pages,
+	vs,
+	onSelectPage,
+}: {
+	prologue: Prologue;
+	pages: Page[];
+	vs: ViewState;
+	onSelectPage: (index: number) => void;
+}) {
+	return (
+		<box flexDirection="column" width="100%" gap={1}>
+			{prologue.motivation ? <Narration text={prologue.motivation} fg={theme.text} /> : null}
+			{prologue.outcome ? (
+				<Hanging marker="→ " markerColor={theme.green}>
+					<Narration text={prologue.outcome} fg={theme.green} />
+				</Hanging>
+			) : null}
+			<box flexDirection="row" width="100%">
+				<Badge
+					label={`complexity ${prologue.complexity.level}`}
+					color={complexityColor[prologue.complexity.level] ?? theme.surface}
+				/>
+				<box flexGrow={1} minWidth={0} paddingLeft={1}>
+					<Narration text={prologue.complexity.reasoning} fg={theme.dim} />
+				</box>
+			</box>
 
 			{prologue.keyChanges.length ? (
-				<box flexDirection="column">
-					<text fg={theme.mauve}>What changed</text>
+				<PrologueSection title="What changed">
 					{prologue.keyChanges.map((kc) => (
-						<text key={kc.summary} fg={theme.text}>
-							• {kc.summary} — {kc.description}
-						</text>
+						<Hanging key={kc.summary} marker="• " markerColor={theme.accent}>
+							<Narration text={kc.summary} fg={theme.text} />
+							<Narration text={kc.description} fg={theme.dim} />
+						</Hanging>
 					))}
-				</box>
+				</PrologueSection>
 			) : null}
 
 			{prologue.focusAreas.length ? (
-				<box flexDirection="column">
-					<text fg={theme.mauve}>Worth a look</text>
+				<PrologueSection title="Worth a look">
 					{prologue.focusAreas.map((fa) => (
-						<text key={fa.title} fg={severityColor[fa.severity] ?? theme.text}>
-							[{fa.severity}] {fa.type}: {fa.title} — {fa.description}
-						</text>
+						<box key={fa.title} flexDirection="column" width="100%">
+							<box flexDirection="row" width="100%">
+								<Badge
+									label={fa.severity.toUpperCase()}
+									color={severityColor[fa.severity] ?? theme.surface}
+								/>
+								<text flexShrink={0} fg={theme.dim}>
+									{` ${fa.type} `}
+								</text>
+								<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
+									{fa.title}
+								</text>
+							</box>
+							<box paddingLeft={2} width="100%">
+								<Narration text={fa.description} fg={theme.dim} />
+							</box>
+						</box>
 					))}
-				</box>
+				</PrologueSection>
 			) : null}
 
 			{prologue.diagram ? (
@@ -311,6 +549,10 @@ function PrologueView({ prologue }: { prologue: Prologue }) {
 					<text fg={theme.dim}>{prologue.diagram}</text>
 				</box>
 			) : null}
+
+			<PrologueSection title="Chapters" gap={0}>
+				<PrologueChapters pages={pages} vs={vs} onSelectPage={onSelectPage} />
+			</PrologueSection>
 		</box>
 	);
 }
@@ -339,22 +581,36 @@ function FileList({
 				const done = isFileReviewed(vs, chapter.id, path);
 				const active = index === selected;
 				const stat = stats.get(path);
-				const counts = stat ? `  +${stat.additions} -${stat.deletions}` : "";
 				return (
-					<box key={path} flexDirection="row" width="100%">
-						<text fg={active ? theme.accent : theme.dim}>{active ? "▸" : " "} </text>
-						<text fg={done ? theme.green : theme.dim} onMouseDown={() => onToggleReview(path)}>
-							[{done ? "x" : " "}]
+					<box key={path} flexDirection="row" width="100%" height={1}>
+						<text flexShrink={0} fg={active ? theme.accent : theme.surface}>
+							{active ? "▸" : " "}
 						</text>
 						<text
+							flexShrink={0}
+							fg={done ? theme.green : theme.dim}
+							onMouseDown={() => onToggleReview(path)}
+						>
+							{`[${done ? "x" : " "}] `}
+						</text>
+						<text
+							flexGrow={1}
+							flexShrink={1}
+							minWidth={0}
 							fg={active ? theme.accent : done ? theme.green : theme.dim}
 							wrapMode="none"
 							truncate
 							onMouseDown={() => onSelect(index)}
 						>
 							{path}
-							{counts}
 						</text>
+						{stat ? (
+							<text flexShrink={0} paddingLeft={1}>
+								<span fg={theme.green}>+{stat.additions}</span>
+								<span> </span>
+								<span fg={theme.red}>-{stat.deletions}</span>
+							</text>
+						) : null}
 					</box>
 				);
 			})}
@@ -421,23 +677,26 @@ function KeyChanges({
 				const checked = isKeyChangeChecked(vs, chapter.id, i);
 				const active = i === selected;
 				return (
-					<box id={keyChangeId(chapter.id, i)} key={kc.content} flexDirection="row">
-						<text fg={active ? theme.accent : theme.dim}>{active ? "▸" : " "} </text>
+					<box id={keyChangeId(chapter.id, i)} key={kc.content} flexDirection="row" width="100%">
+						<text flexShrink={0} fg={active ? theme.accent : theme.surface}>
+							{active ? "▸" : " "}
+						</text>
 						<text
+							flexShrink={0}
 							fg={checked ? theme.green : theme.dim}
 							onMouseDown={(event) => {
 								event.stopPropagation();
 								onToggle(i);
 							}}
 						>
-							[{checked ? "x" : " "}]
+							{`[${checked ? "x" : " "}] `}
 						</text>
-						<text
-							fg={active ? theme.accent : checked ? theme.green : theme.text}
-							onMouseDown={() => onFocus(i)}
-						>
-							{i + 1}. {kc.content}
-						</text>
+						<box flexGrow={1} minWidth={0} onMouseDown={() => onFocus(i)}>
+							<Narration
+								text={`${i + 1}. ${kc.content}`}
+								fg={active ? theme.accent : checked ? theme.green : theme.text}
+							/>
+						</box>
 					</box>
 				);
 			})}
@@ -649,6 +908,24 @@ function ThreadComposer({
 const fileHeaderId = (chapterId: string, index: number) =>
 	`chapter-file-header:${chapterId}:${index}`;
 
+/**
+ * Side-by-side only earns its half of the terminal when both sides have
+ * changed lines; a new or deleted file would otherwise face a blank pane.
+ */
+const layoutForFile = (file: ChapterDiffFile, width: number): DiffLayout => {
+	if (width < MIN_SPLIT_DIFF_WIDTH) return "stack";
+	const changes = file.metadata.hunks.flatMap((hunk) => hunk.hunkContent);
+	const deletions = changes.reduce(
+		(total, change) => total + (change.type === "context" ? 0 : change.deletions),
+		0,
+	);
+	const additions = changes.reduce(
+		(total, change) => total + (change.type === "context" ? 0 : change.additions),
+		0,
+	);
+	return deletions > 0 && additions > 0 ? "split" : "stack";
+};
+
 function ChapterView({
 	chapter,
 	diffFiles,
@@ -694,7 +971,6 @@ function ChapterView({
 }) {
 	const chapterDiffFiles = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const paths = chapterFilePaths(chapter);
-	const layout = width >= MIN_SPLIT_DIFF_WIDTH ? "split" : "stack";
 	const focusedDecorationId = `key-change:${chapter.id}:${selectedKeyChange}`;
 	const decorations: RangeDecoration[] = (
 		chapter.keyChanges[selectedKeyChange]?.lineRefs ?? []
@@ -755,14 +1031,18 @@ function ChapterView({
 									height={1}
 									width="100%"
 								>
-									<text fg={focused ? theme.accent : theme.dim}>{focused ? "▸" : " "}</text>
+									<text flexShrink={0} fg={focused ? theme.accent : theme.surface}>
+										{focused ? "▸" : " "}
+									</text>
 									<text
+										flexShrink={0}
 										fg={reviewed ? theme.green : theme.dim}
 										onMouseDown={() => onToggleFileReview(path)}
 									>
 										[{reviewed ? "x" : " "}]
 									</text>
 									<text
+										flexShrink={0}
 										fg={focused ? theme.accent : theme.dim}
 										onMouseDown={() => onToggleCollapse(path)}
 									>
@@ -779,7 +1059,7 @@ function ChapterView({
 								{collapsed ? null : (
 									<DiffBody
 										file={diffFile}
-										layout={layout}
+										layout={layoutForFile(diffFile, width)}
 										width={width}
 										showLineNumbers
 										selectedHunkIndex={focused ? selectedHunkIndex : -1}
@@ -855,14 +1135,21 @@ function SemanticChapterView({
 							height={1}
 							width="100%"
 						>
-							<text fg={focused ? theme.accent : theme.dim}>{focused ? "▸" : " "}</text>
+							<text flexShrink={0} fg={focused ? theme.accent : theme.surface}>
+								{focused ? "▸" : " "}
+							</text>
 							<text
+								flexShrink={0}
 								fg={reviewed ? theme.green : theme.dim}
 								onMouseDown={() => onToggleFileReview(file.path)}
 							>
 								[{reviewed ? "x" : " "}]
 							</text>
 							<text
+								flexShrink={1}
+								minWidth={0}
+								wrapMode="none"
+								truncate
 								fg={focused ? theme.accent : theme.dim}
 								onMouseDown={() => onToggleCollapse(file.path)}
 							>
@@ -912,8 +1199,9 @@ function ShortcutHelp() {
 			<text fg={theme.text}> space/ctrl-f page down · b/ctrl-b page up</text>
 			<text fg={theme.text}> g/gg top · G bottom · PgUp/PgDn · wheel</text>
 			<text fg={theme.mauve}>Navigation</text>
-			<text fg={theme.text}> ]c/[c next/previous chapter</text>
-			<text fg={theme.text}> a next unreviewed</text>
+			<text fg={theme.text}> ]c/[c next/previous page (prologue is page one)</text>
+			<text fg={theme.text}> a next unreviewed chapter</text>
+			<text fg={theme.text}> pointer: click any page in the sidebar index</text>
 			<text fg={theme.mauve}>Files</text>
 			<text fg={theme.text}> tab/shift-tab focus · enter toggle diff</text>
 			<text fg={theme.text}> c/e collapse/expand all</text>
@@ -984,6 +1272,7 @@ export function App({
 		null,
 	);
 	const [showHelp, setShowHelp] = useState(false);
+	const [indexExpanded, setIndexExpanded] = useState(true);
 	const [viewMode, setViewMode] = useState<"patch" | "semantic">("patch");
 	const [semantic, setSemantic] = useState<SemanticDiffResult | null>(null);
 	const [semanticLoading, setSemanticLoading] = useState(false);
@@ -997,6 +1286,7 @@ export function App({
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
 	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
 	const panelScroll = useRef<ScrollBoxRenderable>(null);
+	const indexScroll = useRef<ScrollBoxRenderable>(null);
 	const resizingPanel = useRef(false);
 	const chapterNavigationPrefix = useRef<"[" | "]" | null>(null);
 	const { width } = useTerminalDimensions();
@@ -1006,9 +1296,6 @@ export function App({
 	const contentWidth = Math.max(MIN_CONTENT_WIDTH, width - (showChapterPanel ? panelWidth : 0) - 4);
 	const page = pages[current];
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
-	const chapterIndex = chapter
-		? chapters.findIndex((candidate) => candidate.id === chapter.id)
-		: -1;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 
 	useEffect(() => {
@@ -1019,6 +1306,14 @@ export function App({
 		scroll.scrollTo(Math.round(maximum * pending.progress));
 		pendingViewProgress.current = null;
 	}, [viewMode]);
+
+	useEffect(() => {
+		if (!indexExpanded) return;
+		const revealCurrentPage = () => indexScroll.current?.scrollChildIntoView(pageRowId(current));
+		revealCurrentPage();
+		const retry = setTimeout(revealCurrentPage, 50);
+		return () => clearTimeout(retry);
+	}, [current, indexExpanded]);
 
 	useEffect(() => {
 		if (!chapter || fileFocusRequest === 0) return;
@@ -1172,10 +1467,6 @@ export function App({
 		const idx = pages.findIndex((p) => p.kind === "chapter" && p.chapter.id === chapter.id);
 		if (idx >= 0) goto(idx);
 	}
-	function gotoChapterIndex(index: number) {
-		const target = chapters[index];
-		if (target) gotoChapter(target);
-	}
 	function startPanelResize(event: OpenTUIMouseEvent) {
 		event.preventDefault();
 		event.stopPropagation();
@@ -1303,15 +1594,15 @@ export function App({
 			return true;
 		}
 		if (name !== "c" || !prefix) return false;
-		gotoChapterIndex(chapterIndex + (prefix === "]" ? 1 : -1));
+		movePage(prefix === "]" ? 1 : -1);
 		return true;
 	}
 	function toggleShortcutHelp() {
 		pageScroll.current?.scrollTo(0);
 		setShowHelp((visible) => !visible);
 	}
-	function moveChapter(delta: number) {
-		gotoChapterIndex(chapterIndex + delta);
+	function movePage(delta: number) {
+		goto(current + delta);
 	}
 	function moveNextUnreviewed() {
 		if (!chapter) return;
@@ -1372,8 +1663,8 @@ export function App({
 	}
 
 	const menus = buildAppMenus({
-		canMovePrevious: chapterIndex > 0,
-		canMoveNext: chapterIndex < chapters.length - 1,
+		canMovePrevious: current > 0,
+		canMoveNext: current < pages.length - 1,
 		canChangeFiles: Boolean(chapter),
 		canMoveNextUnreviewed:
 			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate.id)),
@@ -1381,8 +1672,8 @@ export function App({
 		viewMode,
 		semanticLoading,
 		requestQuit: () => onQuit?.(),
-		movePrevious: () => moveChapter(-1),
-		moveNext: () => moveChapter(1),
+		movePrevious: () => movePage(-1),
+		moveNext: () => movePage(1),
 		moveNextUnreviewed,
 		collapseFiles,
 		expandFiles,
@@ -1540,18 +1831,20 @@ export function App({
 						page={page}
 						pages={pages}
 						current={current}
-						chapterIndex={chapterIndex}
 						chapterCount={chapters.length}
 						width={panelWidth}
 						vs={vs}
+						indexExpanded={indexExpanded}
 						selectedFile={selectedFile}
 						selectedKeyChange={selectedKeyChange}
 						stats={stats}
 						reviewed={reviewed}
-						onNavigateChapter={gotoChapterIndex}
+						onNavigatePage={goto}
+						onToggleIndex={() => setIndexExpanded((expanded) => !expanded)}
 						onResizeStart={startPanelResize}
 						onSelectFile={selectFile}
 						onFocusKeyChange={focusKeyChange}
+						indexScrollRef={indexScroll}
 						scrollRef={panelScroll}
 						onToggleChapterReview={toggleChapterReview}
 						onToggleFileReview={toggleFileReview}
@@ -1577,7 +1870,9 @@ export function App({
 					) : (
 						<box flexDirection="column" width="100%">
 							{semanticNotice ? <text fg={theme.yellow}>{semanticNotice}</text> : null}
-							{page?.kind === "prologue" ? <PrologueView prologue={page.prologue} /> : null}
+							{page?.kind === "prologue" ? (
+								<PrologueView prologue={page.prologue} pages={pages} vs={vs} onSelectPage={goto} />
+							) : null}
 							{page?.kind === "chapter" && viewMode === "patch" ? (
 								<ChapterView
 									chapter={page.chapter}
@@ -1641,7 +1936,7 @@ export function App({
 				<text fg={theme.dim}>
 					{viewMode === "semantic"
 						? "Semantic is read-only · anchors/ranges/threads Patch-only · F10 View to switch"
-						: "click/drag gutter thread · F10 menu · ]c/[c chapter · tab file · f/x review · ? help · q quit"}
+						: "click/drag gutter thread · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"}
 				</text>
 			</box>
 		</box>

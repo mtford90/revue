@@ -80,6 +80,7 @@ function Gutter({
 		<text
 			fg={focused ? palette.accent : palette.dim}
 			wrapMode="none"
+			flexShrink={0}
 			selectable={false}
 			{...handlers}
 		>
@@ -136,7 +137,7 @@ function SplitCell({
 				attachmentCount={attachmentCount}
 				handlers={number === undefined ? undefined : handlers}
 			/>
-			<text fg={palette.text} wrapMode="none" selectable>
+			<text fg={palette.text} wrapMode="none" flexShrink={0} selectable>
 				{sign} <CellContent cell={cell} />
 			</text>
 		</box>
@@ -147,12 +148,14 @@ function StackCell({
 	cell,
 	digits,
 	showLineNumbers,
+	sides,
 	attachmentCounts,
 	interactions,
 }: {
 	cell: DiffCell;
 	digits: number;
 	showLineNumbers: boolean;
+	sides: DiffSide[];
 	attachmentCounts: AttachmentCounts;
 	interactions: CellInteractions;
 }) {
@@ -176,23 +179,27 @@ function StackCell({
 			backgroundColor={backgroundColor}
 			flexDirection="row"
 		>
-			<Gutter
-				focused={oldFocused}
-				number={cell.oldLineNumber}
-				digits={digits}
-				showLineNumbers={showLineNumbers}
-				attachmentCount={attachmentCounts.deletions ?? 0}
-				handlers={cell.oldLineNumber === undefined ? undefined : interactions.deletions}
-			/>
-			<Gutter
-				focused={newFocused}
-				number={cell.newLineNumber}
-				digits={digits}
-				showLineNumbers={showLineNumbers}
-				attachmentCount={attachmentCounts.additions ?? 0}
-				handlers={cell.newLineNumber === undefined ? undefined : interactions.additions}
-			/>
-			<text fg={palette.text} wrapMode="none" selectable>
+			{sides.includes("deletions") ? (
+				<Gutter
+					focused={oldFocused}
+					number={cell.oldLineNumber}
+					digits={digits}
+					showLineNumbers={showLineNumbers}
+					attachmentCount={attachmentCounts.deletions ?? 0}
+					handlers={cell.oldLineNumber === undefined ? undefined : interactions.deletions}
+				/>
+			) : null}
+			{sides.includes("additions") ? (
+				<Gutter
+					focused={newFocused}
+					number={cell.newLineNumber}
+					digits={digits}
+					showLineNumbers={showLineNumbers}
+					attachmentCount={attachmentCounts.additions ?? 0}
+					handlers={cell.newLineNumber === undefined ? undefined : interactions.additions}
+				/>
+			) : null}
+			<text fg={palette.text} wrapMode="none" flexShrink={0} selectable>
 				{sign} <CellContent cell={cell} />
 			</text>
 		</box>
@@ -285,6 +292,15 @@ export function DiffBody({
 			)
 		: 1;
 	const digits = String(highestLine).length;
+	// A new or deleted file has one dead gutter for every row; drop it rather
+	// than indent the whole body past a column that can never hold a number.
+	const stackSides: DiffSide[] = (["deletions", "additions"] as const).filter((side) =>
+		rows.some(
+			(row) =>
+				row.type === "stack-line" &&
+				(side === "deletions" ? row.cell.oldLineNumber : row.cell.newLineNumber) !== undefined,
+		),
+	);
 	const splitContentWidth = Math.max(0, width - 1);
 	const oldPaneWidth = Math.floor(splitContentWidth / 2);
 	const newPaneWidth = splitContentWidth - oldPaneWidth;
@@ -469,6 +485,7 @@ export function DiffBody({
 								cell={row.cell}
 								digits={digits}
 								showLineNumbers={showLineNumbers}
+								sides={stackSides}
 								attachmentCounts={counts}
 								interactions={{
 									deletions: gutterHandlers(lineRange(row, "deletions")),
@@ -518,11 +535,11 @@ export function DiffFileHeader({ file, width, onSelect }: DiffFileHeaderProps) {
 			backgroundColor={palette.panel}
 			onMouseUp={onSelect}
 		>
-			<text fg={palette.text} wrapMode="none" truncate>
+			<text fg={palette.text} wrapMode="none" flexShrink={1} minWidth={0} truncate>
 				{sanitizeTerminalLine(path).replaceAll("\t", "  ")}
 				<span fg={palette.dim}>{state}</span>
 			</text>
-			<text wrapMode="none">
+			<text wrapMode="none" flexShrink={0} paddingLeft={1}>
 				<span fg={palette.green}>+{normalized.stats.additions}</span>
 				<span fg={palette.dim}> </span>
 				<span fg={palette.red}>-{normalized.stats.deletions}</span>

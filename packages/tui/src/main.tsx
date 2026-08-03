@@ -27,7 +27,7 @@ import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
-import { formatSummary } from "./summary.ts";
+import { formatChapterlessSummary, formatSummary } from "./summary.ts";
 import {
 	createThread,
 	defaultThreadsPath,
@@ -45,6 +45,8 @@ import { defaultStatePath, loadViewState, runKey } from "./viewState.ts";
 const HELP = `revue — narrative code review in your terminal
 
 Usage:
+  revue                                review local changes as a plain diff, no narrative needed
+  revue diff [refs] [prep options]     same, with an explicit review scope
   revue prep [refs] [--base <ref>] [--compare <ref>] [--ref <mode>]
              [--ignore <pattern>]... [--show-ignored]
   revue show <run-directory>           open a prepared run in the interactive TUI
@@ -59,12 +61,22 @@ Usage:
 
 Prep modes: committed, staged, unstaged, work. Without explicit scope, prep reviews local
 working-tree changes when present and otherwise compares HEAD with the detected main/master base.
-The revue skill reads hunks.txt and writes chapters.json inside the printed run directory.
+The revue skill reads hunks.txt and writes chapters.json inside the printed run directory;
+runs without a chapters.json open as a flat file-by-file diff.
 `;
 
 const SHOW_HELP = `usage: revue show <run-directory> [--check]
                    [--theme <name> | --theme auto | --theme list]
                    [--transparent-bg]`;
+const DIFF_HELP = `usage: revue diff [main | main feature | main..feature | main...feature]
+                  [--base <ref>] [--compare <ref>]
+                  [--pr <number | github-pull-request-url>]
+                  [--ref committed|staged|unstaged|work]
+                  [--ignore <gitignore-pattern>]...
+                  [--theme <name> | --theme auto] [--transparent-bg]
+
+Preps the requested scope and opens it immediately as a flat diff — no chapters required.
+The run directory is printed to stderr so agents can target it with revue threads.`;
 const EXPORT_HELP = `usage: revue export <run-directory>
                      [--prologue | --chapter-id <id> | --chapter-order <number>]
                      [--output <path>]`;
@@ -233,6 +245,13 @@ async function cmdExport(args: string[]): Promise<number> {
 			return 1;
 		}
 		throw error;
+	}
+
+	if (!run.chapters) {
+		process.stderr.write(
+			"revue export needs a narrated run — generate chapters.json with the revue skill first.\n",
+		);
+		return 1;
 	}
 
 	let threads: ReviewThread[];
@@ -516,7 +535,17 @@ async function cmdShow(args: string[]): Promise<number> {
 		process.stderr.write(`${SHOW_HELP}\n`);
 		return 1;
 	}
+	return showRun(directory, {
+		requestedTheme,
+		check: options.booleans.has("--check"),
+		transparentBg: options.booleans.has("--transparent-bg"),
+	});
+}
 
+async function showRun(
+	directory: string,
+	options: { requestedTheme?: string; check?: boolean; transparentBg?: boolean },
+): Promise<number> {
 	let run: Awaited<ReturnType<typeof loadReviewRun>>;
 	try {
 		run = await loadReviewRun(directory);
@@ -543,21 +572,22 @@ async function cmdShow(args: string[]): Promise<number> {
 		throw error;
 	}
 
-	if (options.booleans.has("--check") || !process.stdout.isTTY) {
-		process.stdout.write(`${formatSummary(run.chapters)}\n`);
+	if (options.check || !process.stdout.isTTY) {
+		process.stdout.write(
+			`${run.chapters ? formatSummary(run.chapters) : formatChapterlessSummary(run.manifest)}\n`,
+		);
 		return 0;
 	}
 
 	const preferencesPath = defaultPreferencesPath();
 	const preferences = await loadPreferences(preferencesPath);
-	const themeId = requestedTheme ?? preferences.themeId;
-	const transparentSurfaces =
-		options.booleans.has("--transparent-bg") || preferences.transparentBackground === true;
+	const themeId = options.requestedTheme ?? preferences.themeId;
+	const transparentSurfaces = options.transparentBg || preferences.transparentBackground === true;
 	// The terminal has not reported its own background yet, so highlight against the theme the
 	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
 	const startupTheme = resolveTheme(themeId, null);
 
-	const [{ runApp }, { preparePatch }, { generateSemanticDiff }, { openFileStore }] =
+	const [{ runApp }, { preparePatch }, { generateSemanticDiff }, { openRunStateStore }] =
 		await Promise.all([
 			import("./app.tsx"),
 			import("./diff.ts"),
@@ -565,7 +595,7 @@ async function cmdShow(args: string[]): Promise<number> {
 			import("./viewState.ts"),
 		]);
 	const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme);
-	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
+	const store = await openRunStateStore(defaultStatePath(), run.manifest.runId, run.chapters);
 	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
 	const repositoryRoot = repositoryRootForRun(directory);
 	const humanAuthor = resolveHumanAuthor(repositoryRoot);
@@ -590,6 +620,54 @@ async function cmdShow(args: string[]): Promise<number> {
 		onSessionStateChange: (next) => store.setSession(next),
 	});
 	return 0;
+}
+
+async function cmdDiff(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${DIFF_HELP}\n`);
+		return 0;
+	}
+	const prepArgs: string[] = [];
+	let requestedTheme: string | undefined;
+	let transparentBg = false;
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index];
+		if (argument === "--theme") {
+			const value = args[++index];
+			if (!value || value.startsWith("--")) {
+				process.stderr.write(`--theme requires a value\n${DIFF_HELP}\n`);
+				return 1;
+			}
+			requestedTheme = value;
+		} else if (argument === "--transparent-bg") {
+			transparentBg = true;
+		} else if (argument !== undefined) {
+			prepArgs.push(argument);
+		}
+	}
+	if (requestedTheme && requestedTheme !== "auto" && !isBundledShikiThemeId(requestedTheme)) {
+		process.stderr.write(
+			`unknown theme: ${requestedTheme}\nRun \`revue show <run-directory> --theme list\` for the available names.\n`,
+		);
+		return 1;
+	}
+	let run: PreparedRun;
+	try {
+		run = await prepareRun(prepArgs);
+	} catch (error) {
+		if (
+			error instanceof PrepArgumentError ||
+			error instanceof PrepError ||
+			error instanceof GitError ||
+			error instanceof RunArtifactError
+		) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
+	process.stderr.write(`${prepSummary(run)}\n${run.directory}\n`);
+	return showRun(run.directory, { requestedTheme, transparentBg });
 }
 
 const SKILL_HELP = `usage: revue skill install [--user]
@@ -656,13 +734,15 @@ async function main(): Promise<number> {
 		return 0;
 	}
 	if (command === "show") return cmdShow(args);
+	if (command === "diff") return cmdDiff(args);
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);
 	if (command === "doctor") return cmdDoctor();
-	if (!command || command === "-h" || command === "--help" || command === "help") {
+	if (!command) return cmdDiff([]);
+	if (command === "-h" || command === "--help" || command === "help") {
 		process.stdout.write(HELP);
 		return 0;
 	}

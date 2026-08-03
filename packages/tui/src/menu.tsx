@@ -86,6 +86,9 @@ export const buildAppMenus = ({
 	canMoveNext,
 	canChangeFiles,
 	canMoveNextUnreviewed,
+	allFiles,
+	canToggleAllFiles,
+	toggleAllFiles,
 	showHelp,
 	viewMode,
 	semanticLoading,
@@ -112,6 +115,9 @@ export const buildAppMenus = ({
 	canMoveNext: boolean;
 	canChangeFiles: boolean;
 	canMoveNextUnreviewed: boolean;
+	allFiles: boolean;
+	canToggleAllFiles: boolean;
+	toggleAllFiles: () => void;
 	showHelp: boolean;
 	viewMode: "patch" | "semantic";
 	semanticLoading: boolean;
@@ -157,6 +163,15 @@ export const buildAppMenus = ({
 			hint: "a",
 			disabled: !canMoveNextUnreviewed,
 			action: moveNextUnreviewed,
+		},
+		{ kind: "separator", id: "surfaces" },
+		{
+			kind: "item",
+			label: "All files",
+			hint: "w",
+			checked: allFiles,
+			disabled: !canToggleAllFiles,
+			action: toggleAllFiles,
 		},
 	],
 	view: [
@@ -281,12 +296,22 @@ const VIEW_LABELS: Record<"patch" | "semantic", string> = {
 	semantic: "Semantic view",
 };
 
+export type ReviewSurface = "story" | "files";
+const SURFACES: { id: ReviewSurface; label: string }[] = [
+	{ id: "story", label: "Story" },
+	{ id: "files", label: "Files" },
+];
+const SURFACE_BAR_WIDTH = SURFACES.reduce((total, { label }) => total + label.length + 2, 0);
+
 const MENU_BAR_WIDTH = menuSpecs.reduce((total, spec) => total + spec.width, 0);
 
 export const MenuBar = ({
 	activeMenuId,
 	terminalWidth,
 	viewMode,
+	surface,
+	canSwitchSurface,
+	onSelectSurface,
 	onHover,
 	onToggle,
 	onClose,
@@ -294,15 +319,22 @@ export const MenuBar = ({
 	activeMenuId: MenuId | null;
 	terminalWidth: number;
 	viewMode: "patch" | "semantic";
+	surface: ReviewSurface;
+	canSwitchSurface: boolean;
+	onSelectSurface: (surface: ReviewSurface) => void;
 	onHover: (id: MenuId) => void;
 	onToggle: (id: MenuId) => void;
 	onClose: () => void;
 }) => {
 	const theme = useTheme();
 	const viewLabel = VIEW_LABELS[viewMode];
+	const showSurfaces =
+		canSwitchSurface && terminalWidth - 2 - MENU_BAR_WIDTH >= SURFACE_BAR_WIDTH + 2;
 	// A passive indicator, not a third menu: only shown when it can sit against
 	// the right edge with a gap the menu titles can't close.
-	const showViewLabel = terminalWidth - 2 - MENU_BAR_WIDTH >= viewLabel.length + 2;
+	const showViewLabel =
+		terminalWidth - 2 - MENU_BAR_WIDTH - (showSurfaces ? SURFACE_BAR_WIDTH + 2 : 0) >=
+		viewLabel.length + 2;
 	return (
 		<box
 			height={1}
@@ -338,13 +370,33 @@ export const MenuBar = ({
 					</box>
 				);
 			})}
-			<box flexGrow={1} minWidth={0} height={1} flexDirection="row" justifyContent="flex-end">
-				{showViewLabel ? (
-					<text flexShrink={0} fg={theme.muted} wrapMode="none">
-						{viewLabel}
-					</text>
-				) : null}
+			<box flexGrow={1} minWidth={0} height={1} flexDirection="row" justifyContent="center">
+				{showSurfaces
+					? SURFACES.map(({ id, label }) => {
+							const active = surface === id;
+							return (
+								<box
+									key={id}
+									height={1}
+									flexShrink={0}
+									backgroundColor={active ? theme.accent : theme.panelAlt}
+									onMouseDown={stopMouse}
+									onMouseUp={(event) => {
+										stopMouse(event);
+										onSelectSurface(id);
+									}}
+								>
+									<text fg={active ? theme.background : theme.muted}>{` ${label} `}</text>
+								</box>
+							);
+						})
+					: null}
 			</box>
+			{showViewLabel ? (
+				<text flexShrink={0} fg={theme.muted} wrapMode="none">
+					{viewLabel}
+				</text>
+			) : null}
 		</box>
 	);
 };

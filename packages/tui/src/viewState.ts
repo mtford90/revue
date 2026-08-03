@@ -82,12 +82,15 @@ export function toggleKeyChange(vs: ViewState, chapter: Chapter, index: number):
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────
-/** Review progress belongs to one pinned code snapshot narrated one specific way. */
-export function runKey(runId: string, file: RevueChaptersFile): string {
+/**
+ * Review progress belongs to one pinned code snapshot narrated one specific way;
+ * a chapterless run keys on the snapshot alone so its progress survives narration.
+ */
+export function runKey(runId: string, file: RevueChaptersFile | null): string {
 	return createHash("sha256")
 		.update(runId)
 		.update("\0")
-		.update(JSON.stringify(file.chapters))
+		.update(file ? JSON.stringify(file.chapters) : "chapterless")
 		.digest("hex")
 		.slice(0, 16);
 }
@@ -129,6 +132,21 @@ export interface ViewStateStore {
 export async function loadViewState(path: string, key: string): Promise<ViewState> {
 	const all = await readAllRuns(path);
 	return all[key] ? ViewStateSchema.parse(all[key]) : emptyViewState();
+}
+
+/** A newly narrated run starts from any progress made reviewing it chapterless. */
+export async function openRunStateStore(
+	path: string,
+	runId: string,
+	file: RevueChaptersFile | null,
+): Promise<ViewStateStore> {
+	const store = await openFileStore(path, runKey(runId, file));
+	if (!file) return store;
+	const state = store.get();
+	if (state.chapters.length || state.files.length || state.keyChanges.length) return store;
+	const flat = await loadViewState(path, runKey(runId, null));
+	if (flat.chapters.length || flat.files.length) store.set(flat);
+	return store;
 }
 
 export async function openFileStore(path: string, key: string): Promise<ViewStateStore> {

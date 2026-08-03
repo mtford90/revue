@@ -412,15 +412,17 @@ export function validateThreadsForRun(run: ReviewRun, threads: readonly ReviewTh
 				`${thread.anchor.side} range ${thread.anchor.startLine}-${thread.anchor.endLine} is outside that review unit`,
 			);
 		}
-		const owners = run.chapters.chapters.filter((chapter) =>
-			chapter.hunkRefs.some(
-				(reference) =>
-					reference.filePath === thread.anchor.filePath &&
-					reference.oldStart === thread.anchor.oldStart,
-			),
-		);
-		if (owners.length !== 1) {
-			throw staleAnchor(thread, `review unit has ${owners.length} chapter owners instead of one`);
+		if (run.chapters) {
+			const owners = run.chapters.chapters.filter((chapter) =>
+				chapter.hunkRefs.some(
+					(reference) =>
+						reference.filePath === thread.anchor.filePath &&
+						reference.oldStart === thread.anchor.oldStart,
+				),
+			);
+			if (owners.length !== 1) {
+				throw staleAnchor(thread, `review unit has ${owners.length} chapter owners instead of one`);
+			}
 		}
 	}
 }

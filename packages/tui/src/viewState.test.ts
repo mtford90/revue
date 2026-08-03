@@ -10,6 +10,7 @@ import {
 	isFileReviewed,
 	nextUnreviewedChapter,
 	openFileStore,
+	openRunStateStore,
 	runKey,
 	toggleChapter,
 	toggleFile,
@@ -115,4 +116,26 @@ test("file store round-trips review progress and session position per run key", 
 	const onDisk = JSON.parse(await readFile(path, "utf8"));
 	expect(onDisk.runA.chapters).toContain("c1");
 	expect(onDisk.runA.session.pages.c1.scrollTop).toBe(27);
+});
+
+test("a chapterless run keys on the snapshot alone and seeds its later narration", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "revue-vs-flat-"));
+	tmpDirs.push(dir);
+	const path = join(dir, "state.json");
+	const narrated = { chapters: [chapter("c1", 1, ["a.ts"])] };
+
+	expect(runKey("run-a", null)).toBe(runKey("run-a", null));
+	expect(runKey("run-a", null)).not.toBe(runKey("run-a", narrated));
+
+	const flat = await openRunStateStore(path, "run-a", null);
+	flat.set({ chapters: [], files: ["__files__::a.ts"], keyChanges: [] });
+
+	// Narrating the same snapshot inherits the flat progress once, into its own slot.
+	const upgraded = await openRunStateStore(path, "run-a", narrated);
+	expect(upgraded.get().files).toContain("__files__::a.ts");
+
+	// An already-started narrated review is left alone.
+	upgraded.set({ chapters: ["c1"], files: [], keyChanges: [] });
+	const reopened = await openRunStateStore(path, "run-a", narrated);
+	expect(reopened.get()).toEqual({ chapters: ["c1"], files: [], keyChanges: [] });
 });

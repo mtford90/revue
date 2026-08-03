@@ -96,6 +96,94 @@ async function click(t: Awaited<ReturnType<typeof testRender>>, x: number, y: nu
 	});
 }
 
+test("a chapterless run opens straight onto every file with file-based progress", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const seen: ViewState[] = [];
+	const t = await testRender(
+		<App file={null} diffFiles={diffFiles} onViewStateChange={(next) => seen.push(next)} />,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("All files");
+	expect(frame).toContain("0/3 files reviewed");
+	expect(frame).not.toContain("Chapters (");
+	expect(frame).toContain("src/lib/apiClient.ts");
+	expect(frame).toContain("src/lib/backoff.ts");
+	expect(frame).toContain("1/1"); // the flat page is the only page
+
+	await press(t, "f"); // review the focused file
+	expect(seen.at(-1)?.files).toContain("__files__::src/lib/apiClient.test.ts");
+	expect(t.captureCharFrame()).toContain("1/3 files reviewed");
+});
+
+test("the Files surface never shows story paging, even without the sidebar", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {
+		width: 60, // too narrow for the sidebar, so the nav strip stands in
+		height: 44,
+	});
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("Prev");
+
+	await press(t, "w");
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("All files");
+	expect(frame).not.toContain("Prev");
+	expect(frame).not.toContain("Next");
+});
+
+test("w jumps a narrated run to the whole diff and page navigation returns to the story", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	await nextChapter(t); // chapter one, so the surface toggle must work mid-story
+
+	await press(t, "w");
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("All files");
+	expect(frame).toContain("Files (3)");
+	expect(frame).toContain("src/lib/apiClient.ts");
+	expect(frame).toContain("src/lib/backoff.ts");
+	expect(frame).toContain("src/lib/apiClient.test.ts");
+	// The surface drops every trace of the story: no chapter index, file-based progress.
+	expect(frame).not.toContain("Chapters (");
+	expect(frame).toContain("0/3 files reviewed");
+
+	await press(t, "w"); // toggles straight back to the story page it left
+	expect(t.captureCharFrame()).toContain("Add a reusable backoff helper");
+
+	await press(t, "w");
+	await nextChapter(t); // page navigation exits the surface into the story
+	const returned = t.captureCharFrame();
+	expect(returned).not.toContain("Files (3)");
+	expect(returned).toContain("3/4");
+});
+
+test("the menu bar's Story and Files buttons switch surfaces with the pointer", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+	expect(bar).toContain("Story");
+	expect(bar).toContain("Files");
+
+	await click(t, bar.indexOf("Files") + 1, 0);
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Files (3)");
+	expect(frame).not.toContain("Chapters (");
+
+	await click(t, bar.indexOf("Story") + 1, 0);
+	expect(t.captureCharFrame()).toContain("Chapters (3)");
+});
+
 test("opens on the prologue with the chapter list and review progress", async () => {
 	const t = await testRender(<App file={file} />, { width: 130, height: 32 });
 	await t.renderOnce();
@@ -590,8 +678,9 @@ test("next unreviewed is unavailable when every chapter is reviewed", async () =
 	await nextChapter(t);
 	await press(t, "F10");
 	await arrow(t, "right");
-	// On the last page both Next page and Next unreviewed chapter are spent, so
-	// the only selectable entry left is the one focus started on.
+	// On the last page Next page and Next unreviewed chapter are both spent, so focus
+	// skips them: down reaches All files, and a second down wraps back to Previous page.
+	await arrow(t, "down");
 	await arrow(t, "down");
 	await press(t, "RETURN");
 

@@ -361,6 +361,81 @@ test("prep prints only the run path and show validates that same run", async () 
 	}
 });
 
+test("a run without chapters.json validates, opens flat, and still takes threads", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-chapterless-"));
+	try {
+		const reviewRun = await copySampleRun(root);
+		await rm(join(reviewRun, "chapters.json"));
+
+		const checked = await run(root, ["show", reviewRun, "--check"]);
+		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(checked.stdout).toContain("chapterless run is valid");
+		expect(checked.stdout).toContain("3 files, 3 review units, +24 -1");
+		expect(checked.stdout).toContain("flat file-by-file diff");
+
+		const created = await run(root, [
+			"threads",
+			"create",
+			reviewRun,
+			"--file",
+			"src/lib/backoff.ts",
+			"--old-start",
+			"0",
+			"--side",
+			"additions",
+			"--start-line",
+			"4",
+			"--end-line",
+			"6",
+			"--author",
+			"Review agent",
+			"--body",
+			"Confirm the cap.",
+		]);
+		expect(created).toMatchObject({ exitCode: 0, stderr: "" });
+		const listed = await run(root, ["threads", "list", reviewRun, "--json"]);
+		expect(JSON.parse(listed.stdout).threads).toHaveLength(1);
+
+		const exported = await run(root, ["export", reviewRun]);
+		expect(exported).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(exported.stderr).toContain("needs a narrated run");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("bare revue and revue diff prep the scope and print the run directory", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-diff-cli-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "value.ts"), "export const value = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await writeFile(join(root, "src", "value.ts"), "export const value = 2;\n");
+
+		// stdout is not a TTY here, so the shared open path prints the summary instead.
+		const bare = await run(root, []);
+		expect(bare.exitCode).toBe(0);
+		expect(bare.stderr).toContain("Prepared work run");
+		expect(bare.stdout).toContain("chapterless run is valid");
+
+		const scoped = await run(root, ["diff", "--ref", "unstaged"]);
+		expect(scoped.exitCode).toBe(0);
+		expect(scoped.stderr).toContain("Prepared unstaged run");
+		const directory = scoped.stderr.trim().split("\n").at(-1) ?? "";
+		expect(await Bun.file(join(directory, "run.json")).exists()).toBe(true);
+
+		const badTheme = await run(root, ["diff", "--theme", "solarised-dark"]);
+		expect(badTheme.exitCode).toBe(1);
+		expect(badTheme.stderr).toContain("unknown theme: solarised-dark");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("show names its themes and refuses an unknown one before touching the run", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-theme-"));
 	try {

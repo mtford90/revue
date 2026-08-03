@@ -1,4 +1,4 @@
-import type { RevueChaptersFile } from "@revue/types";
+import type { RevueChaptersFile, RunManifest } from "@revue/types";
 
 /** Plain-text summary after a complete run has passed validation. */
 export function formatSummary(file: RevueChaptersFile): string {
@@ -32,4 +32,16 @@ export function formatSummary(file: RevueChaptersFile): string {
 	}
 
 	return lines.join("\n");
+}
+
+/** Plain-text summary for a run nobody has narrated yet. */
+export function formatChapterlessSummary(manifest: RunManifest): string {
+	const totals = manifest.totals;
+	return [
+		"revue — chapterless run is valid ✓",
+		"",
+		`  ${totals.files} file${totals.files === 1 ? "" : "s"}, ${totals.reviewUnits} review units, +${totals.additions} -${totals.deletions}`,
+		"",
+		"  No chapters.json — revue show opens this run as a flat file-by-file diff.",
+	].join("\n");
 }

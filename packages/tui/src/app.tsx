@@ -123,6 +123,7 @@ const APP_KEYS = new Set([
 	"r",
 	"s",
 	"t",
+	"w",
 	"y",
 	"?",
 ]);
@@ -133,7 +134,26 @@ const APP_KEYS = new Set([
 
 type Page =
 	| { kind: "prologue"; label: string; prologue: Prologue }
-	| { kind: "chapter"; label: string; chapter: Chapter };
+	| { kind: "chapter"; label: string; chapter: Chapter }
+	| { kind: "files"; label: string; chapter: Chapter };
+
+export const ALL_FILES_CHAPTER_ID = "__files__";
+const ALL_FILES_LABEL = "All files";
+
+/** The whole diff as one synthetic chapter, so the flat page reuses the chapter pipeline. */
+const allFilesChapter = (diffFiles: DiffFile[] | null, order: number): Chapter => ({
+	id: ALL_FILES_CHAPTER_ID,
+	order,
+	title: ALL_FILES_LABEL,
+	summary: "",
+	hunkRefs: (diffFiles ?? []).flatMap((file) => {
+		const path = file.path ?? file.metadata.name;
+		return file.metadata.hunks.length
+			? file.metadata.hunks.map((hunk) => ({ filePath: path, oldStart: hunk.deletionStart }))
+			: [{ filePath: path, oldStart: 0 }];
+	}),
+	keyChanges: [],
+});
 
 function buildPages(file: RevueChaptersFile): Page[] {
 	const pages: Page[] = [];
@@ -147,7 +167,7 @@ function buildPages(file: RevueChaptersFile): Page[] {
 }
 
 const pageId = (page: Page | undefined) =>
-	page?.kind === "chapter" ? page.chapter.id : "prologue";
+	page && page.kind !== "prologue" ? page.chapter.id : "prologue";
 
 const emptyReviewPageState = () => ({
 	selectedFile: 0,
@@ -174,7 +194,7 @@ function PageIndexRows({
 	const theme = useTheme();
 	return pages.map((page, index) => {
 		const active = index === current;
-		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
+		const done = page.kind !== "prologue" && isChapterReviewed(vs, page.chapter.id);
 		const label = page.kind === "chapter" ? `${page.chapter.order}. ${page.label}` : page.label;
 		return (
 			<box
@@ -190,7 +210,7 @@ function PageIndexRows({
 					{active ? "▸" : " "}
 				</text>
 				<text flexShrink={0} fg={done ? theme.badgeAdded : theme.muted}>
-					{page.kind === "chapter" ? `[${done ? "x" : " "}] ` : "    "}
+					{page.kind !== "prologue" ? `[${done ? "x" : " "}] ` : "    "}
 				</text>
 				<text
 					flexGrow={1}
@@ -275,7 +295,7 @@ function PageNavStrip({
 	pages,
 	current,
 	chapterCount,
-	reviewed,
+	progressLabel,
 	width,
 	vs,
 	onNavigatePage,
@@ -285,7 +305,7 @@ function PageNavStrip({
 	pages: Page[];
 	current: number;
 	chapterCount: number;
-	reviewed: number;
+	progressLabel: string;
 	width: number;
 	vs: ViewState;
 	onNavigatePage: (index: number) => void;
@@ -293,15 +313,19 @@ function PageNavStrip({
 }) {
 	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
+	// The Files surface is outside the page sequence, so it gets no Prev/Next.
+	const filesSurface = page?.kind === "files";
 	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
 	const compact = width < COMPACT_STRIP_WIDTH;
 	return (
 		<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
-			<NavButton
-				label={compact ? "◀" : "◀ Prev"}
-				enabled={current > 0}
-				onPress={() => onNavigatePage(current - 1)}
-			/>
+			{filesSurface ? null : (
+				<NavButton
+					label={compact ? "◀" : "◀ Prev"}
+					enabled={current > 0}
+					onPress={() => onNavigatePage(current - 1)}
+				/>
+			)}
 			<box flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center">
 				{chapter ? (
 					<text
@@ -317,13 +341,15 @@ function PageNavStrip({
 				</text>
 			</box>
 			<text flexShrink={0} fg={theme.muted}>
-				{`${reviewed}/${chapterCount}${compact ? "" : " reviewed"} `}
+				{`${progressLabel} `}
 			</text>
-			<NavButton
-				label={compact ? "▶" : "Next ▶"}
-				enabled={current < pages.length - 1}
-				onPress={() => onNavigatePage(current + 1)}
-			/>
+			{filesSurface ? null : (
+				<NavButton
+					label={compact ? "▶" : "Next ▶"}
+					enabled={current < pages.length - 1}
+					onPress={() => onNavigatePage(current + 1)}
+				/>
+			)}
 		</box>
 	);
 }
@@ -358,7 +384,7 @@ function ChapterBrief({
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
-			<Narration text={chapter.summary} fg={theme.muted} />
+			{chapter.summary ? <Narration text={chapter.summary} fg={theme.muted} /> : null}
 			<KeyChanges
 				chapter={chapter}
 				vs={vs}
@@ -389,7 +415,7 @@ function ChapterPanel({
 	selectedFile,
 	selectedKeyChange,
 	stats,
-	reviewed,
+	progressLabel,
 	onNavigatePage,
 	onToggleIndex,
 	onResizeStart,
@@ -411,7 +437,7 @@ function ChapterPanel({
 	selectedFile: number;
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
-	reviewed: number;
+	progressLabel: string;
 	onNavigatePage: (index: number) => void;
 	onToggleIndex: () => void;
 	onResizeStart: (event: OpenTUIMouseEvent) => void;
@@ -425,6 +451,9 @@ function ChapterPanel({
 }) {
 	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
+	const briefChapter = page && page.kind !== "prologue" ? page.chapter : null;
+	// The Files surface deliberately drops all story chrome so it reads as its own screen.
+	const filesSurface = page?.kind === "files";
 	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
 	const compact = width < COMPACT_NAV_WIDTH;
 	const rule = "─".repeat(Math.max(1, width - 1));
@@ -446,22 +475,24 @@ function ChapterPanel({
 				</text>
 				<box flexGrow={1} minWidth={0} />
 				<text flexShrink={0} fg={theme.muted}>
-					{reviewed}/{chapterCount} reviewed
+					{progressLabel}
 				</text>
 			</box>
-			<box
-				flexDirection="row"
-				height={1}
-				flexShrink={0}
-				paddingLeft={1}
-				paddingRight={1}
-				onMouseDown={onToggleIndex}
-			>
-				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.heading}>
-					{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
-				</text>
-			</box>
-			{indexExpanded ? (
+			{chapterCount > 0 && !filesSurface ? (
+				<box
+					flexDirection="row"
+					height={1}
+					flexShrink={0}
+					paddingLeft={1}
+					paddingRight={1}
+					onMouseDown={onToggleIndex}
+				>
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.heading}>
+						{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
+					</text>
+				</box>
+			) : null}
+			{chapterCount > 0 && !filesSurface && indexExpanded ? (
 				<PageIndex
 					pages={pages}
 					current={current}
@@ -470,36 +501,40 @@ function ChapterPanel({
 					scrollRef={indexScrollRef}
 				/>
 			) : null}
-			<text flexShrink={0} fg={theme.border}>
-				{rule}
-			</text>
-			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
-				<NavButton
-					label={compact ? "◀" : "◀ Prev"}
-					enabled={current > 0}
-					onPress={() => onNavigatePage(current - 1)}
-				/>
-				<box flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center">
-					{chapter ? (
-						<text
-							flexShrink={0}
-							fg={chapterReviewed ? theme.badgeAdded : theme.muted}
-							onMouseDown={onToggleChapterReview}
-						>
-							[{chapterReviewed ? "x" : " "}]{" "}
-						</text>
-					) : null}
-					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
-						{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
+			{pages.length > 1 && !filesSurface ? (
+				<>
+					<text flexShrink={0} fg={theme.border}>
+						{rule}
 					</text>
-				</box>
-				<NavButton
-					label={compact ? "▶" : "Next ▶"}
-					enabled={current < pages.length - 1}
-					onPress={() => onNavigatePage(current + 1)}
-				/>
-			</box>
-			{chapter ? (
+					<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
+						<NavButton
+							label={compact ? "◀" : "◀ Prev"}
+							enabled={current > 0}
+							onPress={() => onNavigatePage(current - 1)}
+						/>
+						<box flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center">
+							{chapter ? (
+								<text
+									flexShrink={0}
+									fg={chapterReviewed ? theme.badgeAdded : theme.muted}
+									onMouseDown={onToggleChapterReview}
+								>
+									[{chapterReviewed ? "x" : " "}]{" "}
+								</text>
+							) : null}
+							<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
+								{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
+							</text>
+						</box>
+						<NavButton
+							label={compact ? "▶" : "Next ▶"}
+							enabled={current < pages.length - 1}
+							onPress={() => onNavigatePage(current + 1)}
+						/>
+					</box>
+				</>
+			) : null}
+			{briefChapter ? (
 				<scrollbox
 					ref={scrollRef}
 					flexGrow={1}
@@ -510,7 +545,7 @@ function ChapterPanel({
 					viewportCulling
 				>
 					<ChapterBrief
-						chapter={chapter}
+						chapter={briefChapter}
 						vs={vs}
 						selectedFile={selectedFile}
 						selectedKeyChange={selectedKeyChange}
@@ -1515,6 +1550,7 @@ const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
 		title: "Navigation",
 		lines: [
 			"]c/[c next/previous page (prologue is page one)",
+			"w All files: the whole diff without the story",
 			"a next unreviewed chapter",
 			"pointer: the strip under the menu bar, or the sidebar index",
 		],
@@ -1716,7 +1752,8 @@ export function App({
 	onThemeChange,
 	onQuit,
 }: {
-	file: RevueChaptersFile;
+	/** Null for a chapterless run: the review opens straight onto the All files page. */
+	file: RevueChaptersFile | null;
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 	initialViewState?: ViewState;
@@ -1745,19 +1782,30 @@ export function App({
 	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
 	const shownTheme = previewTheme ?? chosenTheme;
 	const theme = transparentSurfaces ? withTransparentSurfaces(shownTheme) : shownTheme;
-	const pages = useMemo(() => buildPages(file), [file]);
+	const filesChapter = useMemo(
+		() => allFilesChapter(diffFiles, (file?.chapters.length ?? 0) + 1),
+		[diffFiles, file],
+	);
+	const filesPage = useMemo(
+		(): Page => ({ kind: "files", label: ALL_FILES_LABEL, chapter: filesChapter }),
+		[filesChapter],
+	);
+	const pages = useMemo(() => (file ? buildPages(file) : [filesPage]), [file, filesPage]);
 	const chapters = pages.flatMap((candidate) =>
 		candidate.kind === "chapter" ? [candidate.chapter] : [],
 	);
 	const restoredPage = pages.findIndex(
 		(candidate) => pageId(candidate) === initialSessionState.pageId,
 	);
+	const initialAllFiles = Boolean(file) && initialSessionState.pageId === pageId(filesPage);
 	const initialCurrent = restoredPage >= 0 ? restoredPage : 0;
 	const initialPageState =
-		initialSessionState.pages[pageId(pages[initialCurrent])] ?? emptyReviewPageState();
+		initialSessionState.pages[pageId(initialAllFiles ? filesPage : pages[initialCurrent])] ??
+		emptyReviewPageState();
 	const sessionRef = useRef(initialSessionState);
 	const preferencesRef = useRef(initialPreferences);
 	const [current, setCurrent] = useState(initialCurrent);
+	const [allFiles, setAllFiles] = useState(initialAllFiles);
 	const [selectedFile, setSelectedFile] = useState(initialPageState.selectedFile);
 	const [selectedHunkIndex, setSelectedHunkIndex] = useState(initialPageState.selectedHunk);
 	const [selectedKeyChange, setSelectedKeyChange] = useState(initialPageState.selectedKeyChange);
@@ -1816,8 +1864,8 @@ export function App({
 		sidebar: sidebarPreference,
 		diff: diffPreference,
 	});
-	const page = pages[current];
-	const chapter = page?.kind === "chapter" ? page.chapter : null;
+	const page = allFiles ? filesPage : pages[current];
+	const chapter = page && page.kind !== "prologue" ? page.chapter : null;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
@@ -2106,16 +2154,11 @@ export function App({
 			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
 	}
-	function goto(index: number) {
-		const next = Math.max(0, Math.min(index, pages.length - 1));
-		if (next === current) return;
-		const nextPageId = pageId(pages[next]);
-		saveCurrentSession(nextPageId);
+	function restorePageFocus(nextPageId: string) {
 		const restored = sessionRef.current.pages[nextPageId] ?? emptyReviewPageState();
 		pageScroll.current?.scrollTo(restored.scrollTop);
 		panelScroll.current?.scrollTo(restored.panelScrollTop);
 		pendingViewProgress.current = null;
-		setCurrent(next);
 		setSelectedFile(restored.selectedFile);
 		setSelectedHunkIndex(restored.selectedHunk);
 		setSelectedKeyChange(restored.selectedKeyChange);
@@ -2124,6 +2167,23 @@ export function App({
 		setKeyFocusRequest(0);
 		setDiffAnchorTarget(null);
 		cancelThreadDraft();
+	}
+	function goto(index: number) {
+		const next = Math.max(0, Math.min(index, pages.length - 1));
+		if (next === current && !allFiles) return;
+		const nextPageId = pageId(pages[next]);
+		saveCurrentSession(nextPageId);
+		setAllFiles(false);
+		setCurrent(next);
+		restorePageFocus(nextPageId);
+	}
+	/** Jump between the story and the whole diff, stage-style — not a page in the sequence. */
+	function toggleAllFiles() {
+		if (!file) return;
+		const nextPageId = pageId(allFiles ? pages[current] : filesPage);
+		saveCurrentSession(nextPageId);
+		setAllFiles(!allFiles);
+		restorePageFocus(nextPageId);
 	}
 	function gotoChapter(chapter: Chapter) {
 		const idx = pages.findIndex((p) => p.kind === "chapter" && p.chapter.id === chapter.id);
@@ -2388,6 +2448,9 @@ export function App({
 		canChangeFiles: Boolean(chapter),
 		canMoveNextUnreviewed:
 			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate.id)),
+		allFiles: allFiles || !file,
+		canToggleAllFiles: Boolean(file),
+		toggleAllFiles,
 		showHelp,
 		viewMode,
 		semanticLoading,
@@ -2540,6 +2603,8 @@ export function App({
 			toggleShortcutHelp();
 		} else if (name === "s") {
 			toggleSidebar();
+		} else if (name === "w") {
+			toggleAllFiles();
 		} else if (name === "t") {
 			openThemePicker();
 		} else if (name === "y") {
@@ -2594,6 +2659,14 @@ export function App({
 	});
 
 	const reviewed = reviewedChapterCount(vs, chapters);
+	const filesPaths = chapterFilePaths(filesChapter);
+	const reviewedFiles = filesPaths.filter((path) =>
+		isFileReviewed(vs, ALL_FILES_CHAPTER_ID, path),
+	).length;
+	const progressLabel =
+		page?.kind === "files"
+			? `${reviewedFiles}/${filesPaths.length} files reviewed`
+			: `${reviewed}/${chapters.length} reviewed`;
 
 	return (
 		<ThemeProvider value={theme}>
@@ -2610,6 +2683,11 @@ export function App({
 					activeMenuId={menu.activeMenuId}
 					terminalWidth={width}
 					viewMode={viewMode}
+					surface={page?.kind === "files" ? "files" : "story"}
+					canSwitchSurface={Boolean(file)}
+					onSelectSurface={(target) => {
+						if (target !== (page?.kind === "files" ? "files" : "story")) toggleAllFiles();
+					}}
 					onHover={(id) => {
 						if (menu.activeMenuId) menu.open(id);
 					}}
@@ -2625,7 +2703,7 @@ export function App({
 						pages={pages}
 						current={current}
 						chapterCount={chapters.length}
-						reviewed={reviewed}
+						progressLabel={progressLabel}
 						width={width}
 						vs={vs}
 						onNavigatePage={goto}
@@ -2645,7 +2723,7 @@ export function App({
 							selectedFile={selectedFile}
 							selectedKeyChange={selectedKeyChange}
 							stats={stats}
-							reviewed={reviewed}
+							progressLabel={progressLabel}
 							onNavigatePage={goto}
 							onToggleIndex={() => changeIndexExpanded(!indexExpanded)}
 							onResizeStart={startPanelResize}
@@ -2693,9 +2771,9 @@ export function App({
 							{page?.kind === "prologue" ? (
 								<PrologueView prologue={page.prologue} pages={pages} vs={vs} onSelectPage={goto} />
 							) : null}
-							{page?.kind === "chapter" && viewMode === "patch" ? (
+							{chapter && viewMode === "patch" ? (
 								<ChapterView
-									chapter={page.chapter}
+									chapter={chapter}
 									diffTheme={diffTheme}
 									diffFiles={diffFiles}
 									width={contentWidth}
@@ -2725,9 +2803,9 @@ export function App({
 									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
-							{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
+							{chapter && viewMode === "semantic" && semantic ? (
 								<SemanticChapterView
-									chapter={page.chapter}
+									chapter={chapter}
 									semantic={semantic}
 									diffTheme={diffTheme}
 									diffFiles={diffFiles ?? null}
@@ -2833,9 +2911,9 @@ export function App({
 
 const THEME_MODE_TIMEOUT_MS = 100;
 
-/** Boot the interactive TUI for a loaded chapters file. Resolves when the user quits. */
+/** Boot the interactive TUI for a loaded run, narrated or not. Resolves when the user quits. */
 export async function runApp(
-	file: RevueChaptersFile,
+	file: RevueChaptersFile | null,
 	options: {
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: () => Promise<SemanticDiffResult>;

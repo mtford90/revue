@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadPreparedRun, type PreparedRun, validateReviewCoverage } from "@revue/prep";
@@ -6,12 +7,14 @@ import { z } from "zod";
 
 export class ChaptersFileError extends Error {}
 
-export type ReviewRun = PreparedRun & { chapters: RevueChaptersFile };
+/** `chapters` is null for a chapterless run — a prepared diff nobody has narrated. */
+export type ReviewRun = PreparedRun & { chapters: RevueChaptersFile | null };
 
 export async function loadReviewRun(directory: string): Promise<ReviewRun> {
 	const prepared = await loadPreparedRun(directory);
-	const chapters = await loadChaptersFile(join(directory, "chapters.json"));
-	validateReviewCoverage(prepared, chapters);
+	const path = join(directory, "chapters.json");
+	const chapters = existsSync(path) ? await loadChaptersFile(path) : null;
+	if (chapters) validateReviewCoverage(prepared, chapters);
 	return { ...prepared, chapters };
 }
 

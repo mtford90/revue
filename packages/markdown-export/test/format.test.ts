@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import {
-	COMMENT_STATUS,
 	type RevueChaptersFile,
 	RUN_FILE_STATUS,
 	RUN_OBJECT_KIND,
 	type RunFile,
+	THREAD_AUTHOR_KIND,
+	THREAD_STATUS,
 	viewStateFileId,
 	viewStateKeyChangeId,
 } from "@revue/types";
@@ -102,7 +103,7 @@ test("full export is ordered and renders pinned counts with persisted review sta
 	expect(formatMarkdownReview(review)).toBe(formatMarkdownReview(review));
 });
 
-test("comments retain duplicate anchors, status, multiline bodies, and chapter scope", () => {
+test("threads retain duplicate anchors, authored replies, status, and chapter scope", () => {
 	const firstId = "00000000-0000-4000-8000-000000000001";
 	const secondId = "00000000-0000-4000-8000-000000000002";
 	const sharedAnchor = {
@@ -112,42 +113,67 @@ test("comments retain duplicate anchors, status, multiline bodies, and chapter s
 		startLine: 4,
 		endLine: 6,
 	};
-	const comments = [
+	const threads = [
 		{
 			id: secondId,
 			runId: review.runId,
 			anchor: sharedAnchor,
-			body: "Second point\nwith a separate line",
-			status: COMMENT_STATUS.DEALT_WITH,
+			status: THREAD_STATUS.DEALT_WITH,
 			createdAt: "2026-08-02T10:00:01.000Z",
+			messages: [
+				{
+					id: "00000000-0000-4000-8000-000000000004",
+					author: { kind: THREAD_AUTHOR_KIND.AGENT, name: "Fix agent" },
+					body: "Second point\nwith a separate line",
+					createdAt: "2026-08-02T10:00:01.000Z",
+				},
+			],
 		},
 		{
 			id: firstId,
 			runId: review.runId,
 			anchor: sharedAnchor,
-			body: "First point",
-			status: COMMENT_STATUS.OPEN,
+			status: THREAD_STATUS.OPEN,
 			createdAt: "2026-08-02T10:00:00.000Z",
+			messages: [
+				{
+					id: "00000000-0000-4000-8000-000000000003",
+					author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada Reviewer" },
+					body: "First point",
+					createdAt: "2026-08-02T10:00:00.000Z",
+				},
+				{
+					id: "00000000-0000-4000-8000-000000000005",
+					author: { kind: THREAD_AUTHOR_KIND.AGENT, name: "Review agent" },
+					body: "Reply despite a rolled-back clock",
+					createdAt: "2026-08-02T09:59:59.000Z",
+				},
+			],
 		},
 	];
-	const markdown = formatMarkdownReview(review, { comments });
+	const markdown = formatMarkdownReview(review, { threads });
 	const first = markdown.indexOf(firstId);
 	const second = markdown.indexOf(secondId);
 	expect(first).toBeGreaterThan(-1);
 	expect(first).toBeLessThan(second);
 	expect(markdown.match(new RegExp(secondId, "g"))).toHaveLength(1);
-	expect(markdown).toContain("- Status: `open`");
+	expect(markdown).toContain("- Status: `open`\n- Created: `2026-08-02T10:00:00.000Z`");
 	expect(markdown).toContain("- Status: `dealt-with`");
 	expect(markdown).toContain(
 		"- Anchor: `src/core.ts` — additions lines 4-6; review unit oldStart 1",
 	);
+	expect(markdown.indexOf("00000000-0000-4000-8000-000000000003")).toBeLessThan(
+		markdown.indexOf("00000000-0000-4000-8000-000000000005"),
+	);
+	expect(markdown).toContain("- Author: `human` — `Ada Reviewer`");
+	expect(markdown).toContain("- Author: `agent` — `Fix agent`");
 	expect(markdown).toContain("> Second point\n> with a separate line");
 
 	const later = formatMarkdownReview(review, {
 		selection: { kind: "chapter-id", id: "later" },
-		comments,
+		threads,
 	});
-	expect(later).not.toContain("Inline comments");
+	expect(later).not.toContain("Review threads");
 });
 
 test("prologue and chapter selections remain self-contained", () => {
@@ -179,7 +205,7 @@ test("prologue and chapter selections remain self-contained", () => {
 
 	const prologue = formatMarkdownReview(withPrologue, {
 		selection: { kind: "prologue" },
-		comments: [
+		threads: [
 			{
 				id: "00000000-0000-4000-8000-000000000003",
 				runId: review.runId,
@@ -190,9 +216,16 @@ test("prologue and chapter selections remain self-contained", () => {
 					startLine: 4,
 					endLine: 4,
 				},
-				body: "Hidden from prologue",
-				status: COMMENT_STATUS.OPEN,
+				status: THREAD_STATUS.OPEN,
 				createdAt: "2026-08-02T10:00:00.000Z",
+				messages: [
+					{
+						id: "00000000-0000-4000-8000-000000000004",
+						author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada Reviewer" },
+						body: "Hidden from prologue",
+						createdAt: "2026-08-02T10:00:00.000Z",
+					},
+				],
 			},
 		],
 	});

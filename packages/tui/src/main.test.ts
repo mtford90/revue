@@ -5,10 +5,11 @@ import { join, resolve } from "node:path";
 import {
 	RevueChaptersFileSchema,
 	runManifestSchema,
+	THREAD_AUTHOR_KIND,
 	viewStateFileId,
 	viewStateKeyChangeId,
 } from "@revue/types";
-import { openCommentStore } from "./comments.ts";
+import { openThreadStore } from "./threads.ts";
 import { runKey } from "./viewState.ts";
 
 const mainPath = resolve(import.meta.dir, "main.tsx");
@@ -41,80 +42,115 @@ const copySampleRun = async (root: string): Promise<string> => {
 	return directory;
 };
 
-test("comment CLI lists and mutates verified-run feedback with stable JSON", async () => {
-	const root = await mkdtemp(join(tmpdir(), "revue-comments-cli-"));
+test("thread CLI creates authored conversations and exposes lifecycle operations as JSON", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-threads-cli-"));
 	try {
 		const reviewRun = await copySampleRun(root);
 		const manifest = runManifestSchema.parse(await Bun.file(join(reviewRun, "run.json")).json());
-		const store = openCommentStore(join(root, ".revue", "comments.json"), manifest.runId);
-		const comment = store.add(
-			{
-				filePath: "src/lib/backoff.ts",
-				oldStart: 0,
-				side: "additions",
-				startLine: 4,
-				endLine: 6,
-			},
-			"Use a lower retry cap\nfor interactive requests.",
-			{
-				id: "00000000-0000-4000-8000-000000000001",
-				createdAt: "2026-08-02T10:00:00.000Z",
-			},
-		);
-
-		const listed = await run(root, ["comments", "list", reviewRun, "--json"]);
-		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
-		expect(JSON.parse(listed.stdout)).toEqual({ runId: manifest.runId, comments: [comment] });
-		const exported = await run(root, ["export", reviewRun, "--chapter-id", "chapter-1"]);
-		expect(exported).toMatchObject({ exitCode: 0, stderr: "" });
-		expect(exported.stdout).toContain(`Comment \`${comment.id}\``);
-		expect(exported.stdout).toContain("> Use a lower retry cap\n> for interactive requests.");
-
-		const dealt = await run(root, ["comments", "mark-dealt", reviewRun, comment.id]);
-		expect(dealt).toMatchObject({ exitCode: 0, stderr: "" });
-		expect(JSON.parse(dealt.stdout)).toMatchObject({
-			action: "mark-dealt",
-			comment: { id: comment.id, status: "dealt-with" },
+		const bodyFile = join(root, "agent-message.txt");
+		await writeFile(bodyFile, "Use a lower retry cap\nfor interactive requests.");
+		const created = await run(root, [
+			"threads",
+			"create",
+			reviewRun,
+			"--file",
+			"src/lib/backoff.ts",
+			"--old-start",
+			"0",
+			"--side",
+			"additions",
+			"--start-line",
+			"4",
+			"--end-line",
+			"6",
+			"--author",
+			"Review agent",
+			"--body-file",
+			bodyFile,
+		]);
+		expect(created).toMatchObject({ exitCode: 0, stderr: "" });
+		const thread = JSON.parse(created.stdout).thread;
+		expect(thread.messages[0]).toMatchObject({
+			author: { kind: THREAD_AUTHOR_KIND.AGENT, name: "Review agent" },
+			body: "Use a lower retry cap\nfor interactive requests.",
 		});
-		const openOnly = await run(root, ["comments", "list", reviewRun, "--json"]);
-		expect(JSON.parse(openOnly.stdout).comments).toEqual([]);
-		const all = await run(root, ["comments", "list", reviewRun, "--json", "--all"]);
-		expect(JSON.parse(all.stdout).comments).toHaveLength(1);
 
-		const reopened = await run(root, ["comments", "reopen", reviewRun, comment.id]);
-		expect(JSON.parse(reopened.stdout).comment.status).toBe("open");
+		const replied = await run(root, [
+			"threads",
+			"reply",
+			reviewRun,
+			thread.id,
+			"--author",
+			"Fix agent",
+			"--body",
+			"Adjusted in the next revision.",
+		]);
+		expect(replied).toMatchObject({ exitCode: 0, stderr: "" });
+		const reply = JSON.parse(replied.stdout).thread.messages[1];
+		expect(reply).toMatchObject({
+			author: { kind: THREAD_AUTHOR_KIND.AGENT, name: "Fix agent" },
+			body: "Adjusted in the next revision.",
+		});
+
+		const listed = await run(root, ["threads", "list", reviewRun, "--json"]);
+		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(listed.stdout)).toMatchObject({
+			runId: manifest.runId,
+			threads: [{ id: thread.id, messages: [{}, {}] }],
+		});
+		const alias = await run(root, ["comments", "list", reviewRun, "--json"]);
+		expect(JSON.parse(alias.stdout).threads).toHaveLength(1);
+
+		const dealt = await run(root, ["threads", "mark-dealt", reviewRun, thread.id]);
+		expect(JSON.parse(dealt.stdout).thread.status).toBe("dealt-with");
+		expect(
+			JSON.parse((await run(root, ["threads", "list", reviewRun, "--json"])).stdout).threads,
+		).toEqual([]);
+		expect(
+			JSON.parse((await run(root, ["threads", "list", reviewRun, "--json", "--all"])).stdout)
+				.threads,
+		).toHaveLength(1);
+
+		const reopened = await run(root, ["threads", "reopen", reviewRun, thread.id]);
+		expect(JSON.parse(reopened.stdout).thread.status).toBe("open");
+		const deletedMessage = await run(root, [
+			"threads",
+			"delete-message",
+			reviewRun,
+			thread.id,
+			reply.id,
+		]);
+		expect(JSON.parse(deletedMessage.stdout).message.id).toBe(reply.id);
+
 		const missing = await run(root, [
-			"comments",
+			"threads",
 			"delete",
 			reviewRun,
 			"00000000-0000-4000-8000-000000000099",
 		]);
 		expect(missing).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(missing.stderr).toContain("does not exist in this run");
-		const malformed = await run(root, ["comments", "delete", reviewRun, "not-an-id"]);
+		const malformed = await run(root, ["threads", "delete", reviewRun, "not-an-id"]);
 		expect(malformed).toMatchObject({ exitCode: 1, stdout: "" });
-		expect(malformed.stderr).toContain("Comment ID must be a UUID");
+		expect(malformed.stderr).toContain("Thread ID must be a UUID");
 
-		const deleted = await run(root, ["comments", "delete", reviewRun, comment.id]);
-		expect(JSON.parse(deleted.stdout)).toMatchObject({
-			action: "delete",
-			comment: { id: comment.id },
-		});
+		const deleted = await run(root, ["threads", "delete", reviewRun, thread.id]);
+		expect(JSON.parse(deleted.stdout).thread.id).toBe(thread.id);
 		expect(
-			JSON.parse((await run(root, ["comments", "list", reviewRun, "--json", "--all"])).stdout)
-				.comments,
+			JSON.parse((await run(root, ["threads", "list", reviewRun, "--json", "--all"])).stdout)
+				.threads,
 		).toEqual([]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
-test("comment operations reject stale anchors against the verified pinned patch", async () => {
-	const root = await mkdtemp(join(tmpdir(), "revue-comments-stale-"));
+test("thread operations reject stale anchors against the verified pinned patch", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-threads-stale-"));
 	try {
 		const reviewRun = await copySampleRun(root);
 		const manifest = runManifestSchema.parse(await Bun.file(join(reviewRun, "run.json")).json());
-		openCommentStore(join(root, ".revue", "comments.json"), manifest.runId).add(
+		openThreadStore(join(root, ".revue", "threads.json"), manifest.runId).create(
 			{
 				filePath: "src/lib/backoff.ts",
 				oldStart: 0,
@@ -122,9 +158,10 @@ test("comment operations reject stale anchors against the verified pinned patch"
 				startLine: 999,
 				endLine: 999,
 			},
+			{ kind: THREAD_AUTHOR_KIND.AGENT, name: "Review agent" },
 			"Stale feedback",
 		);
-		const result = await run(root, ["comments", "list", reviewRun, "--json"]);
+		const result = await run(root, ["threads", "list", reviewRun, "--json"]);
 		expect(result).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(result.stderr).toContain("corrupt or stale anchor");
 		expect(result.stderr).toContain("outside that review unit");

@@ -14,15 +14,25 @@ import {
 	ReviewCoverageError,
 	RunArtifactError,
 } from "@revue/prep";
-import { type RevueComment, RUN_EXCLUSION_REASON } from "@revue/types";
 import {
-	CommentStoreError,
-	defaultCommentsPath,
-	loadValidatedComments,
-	openCommentStore,
-} from "./comments.ts";
+	type ReviewThread,
+	RUN_EXCLUSION_REASON,
+	THREAD_AUTHOR_KIND,
+	type ThreadAnchor,
+	type ThreadAuthor,
+} from "@revue/types";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { formatSummary } from "./summary.ts";
+import {
+	createThread,
+	defaultThreadsPath,
+	loadValidatedThreads,
+	openThreadStore,
+	repositoryRootForRun,
+	resolveHumanAuthor,
+	ThreadStoreError,
+	validateThreadsForRun,
+} from "./threads.ts";
 import { defaultStatePath, loadViewState, runKey } from "./viewState.ts";
 
 const HELP = `revue — narrative code review in your terminal
@@ -33,7 +43,8 @@ Usage:
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
   revue export <run-directory>         export the full ordered review as Markdown
-  revue comments <operation>           list or update inline comments
+  revue threads <operation>            create, reply to, list, or update review threads
+  revue comments <operation>           compatibility alias for revue threads
 
 Prep modes: committed, staged, unstaged, work. Without explicit scope, prep reviews local
 working-tree changes when present and otherwise compares HEAD with the detected main/master base.
@@ -44,10 +55,16 @@ const SHOW_HELP = `usage: revue show <run-directory> [--check]`;
 const EXPORT_HELP = `usage: revue export <run-directory>
                      [--prologue | --chapter-id <id> | --chapter-order <number>]
                      [--output <path>]`;
-const COMMENTS_HELP = `usage: revue comments list <run-directory> --json [--all]
-       revue comments delete <run-directory> <comment-id>
-       revue comments mark-dealt <run-directory> <comment-id>
-       revue comments reopen <run-directory> <comment-id>`;
+const THREADS_HELP = `usage: revue threads list <run-directory> --json [--all]
+       revue threads create <run-directory> --file <path> --old-start <number>
+                            --side additions|deletions --start-line <number> --end-line <number>
+                            --author <agent-name> (--body <text> | --body-file <path|->)
+       revue threads reply <run-directory> <thread-id> --author <agent-name>
+                           (--body <text> | --body-file <path|->)
+       revue threads delete <run-directory> <thread-id>
+       revue threads delete-message <run-directory> <thread-id> <message-id>
+       revue threads mark-dealt <run-directory> <thread-id>
+       revue threads reopen <run-directory> <thread-id>`;
 const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main...feature]
                   [--base <ref>] [--compare <ref>]
                   [--ref committed|staged|unstaged|work]
@@ -204,11 +221,11 @@ async function cmdExport(args: string[]): Promise<number> {
 		throw error;
 	}
 
-	let comments: RevueComment[];
+	let threads: ReviewThread[];
 	try {
-		comments = loadValidatedComments(defaultCommentsPath(parsed.directory), run);
+		threads = loadValidatedThreads(defaultThreadsPath(parsed.directory), run);
 	} catch (error) {
-		if (error instanceof CommentStoreError) {
+		if (error instanceof ThreadStoreError) {
 			process.stderr.write(`${error.message}\n`);
 			return 1;
 		}
@@ -223,7 +240,7 @@ async function cmdExport(args: string[]): Promise<number> {
 				files: run.manifest.files,
 				chapters: run.chapters,
 			},
-			{ selection: parsed.selection, viewState: state, comments },
+			{ selection: parsed.selection, viewState: state, threads },
 		);
 	} catch (error) {
 		if (error instanceof MarkdownExportError) {
@@ -248,92 +265,211 @@ async function cmdExport(args: string[]): Promise<number> {
 	return 0;
 }
 
-const commentIdPattern =
+const entityIdPattern =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-async function cmdComments(args: string[]): Promise<number> {
+type CommandOptions = {
+	positionals: string[];
+	values: Map<string, string>;
+	booleans: Set<string>;
+};
+
+const parseCommandOptions = (
+	args: string[],
+	valueNames: readonly string[],
+	booleanNames: readonly string[] = [],
+): CommandOptions => {
+	const positionals: string[] = [];
+	const values = new Map<string, string>();
+	const booleans = new Set<string>();
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index];
+		if (!argument?.startsWith("-")) {
+			if (argument) positionals.push(argument);
+			continue;
+		}
+		if (booleanNames.includes(argument)) {
+			if (booleans.has(argument)) throw new Error(`${argument} may only be specified once`);
+			booleans.add(argument);
+			continue;
+		}
+		if (!valueNames.includes(argument)) throw new Error(`unknown option: ${argument}`);
+		if (values.has(argument)) throw new Error(`${argument} may only be specified once`);
+		const value = args[++index];
+		if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value`);
+		values.set(argument, value);
+	}
+	return { positionals, values, booleans };
+};
+
+const requiredOption = (options: CommandOptions, name: string): string => {
+	const value = options.values.get(name);
+	if (!value) throw new Error(`${name} is required`);
+	return value;
+};
+
+const integerOption = (options: CommandOptions, name: string, allowZero = false): number => {
+	const raw = requiredOption(options, name);
+	const pattern = allowZero ? /^\d+$/ : /^[1-9]\d*$/;
+	const value = pattern.test(raw) ? Number(raw) : Number.NaN;
+	if (!Number.isSafeInteger(value)) {
+		throw new Error(`${name} requires ${allowZero ? "a non-negative" : "a positive"} integer`);
+	}
+	return value;
+};
+
+const requireEntityId = (id: string | undefined, label: string): string => {
+	if (!id || !entityIdPattern.test(id)) {
+		throw new Error(`${label} ID must be a UUID, received ${JSON.stringify(id)}`);
+	}
+	return id;
+};
+
+const agentAuthor = (options: CommandOptions): ThreadAuthor => ({
+	kind: THREAD_AUTHOR_KIND.AGENT,
+	name: requiredOption(options, "--author"),
+});
+
+const threadBody = async (options: CommandOptions): Promise<string> => {
+	const body = options.values.get("--body");
+	const bodyFile = options.values.get("--body-file");
+	if (Boolean(body) === Boolean(bodyFile)) {
+		throw new Error("choose exactly one of --body or --body-file");
+	}
+	if (body !== undefined) return body;
+	if (bodyFile === "-") return Bun.stdin.text();
+	return Bun.file(bodyFile ?? "").text();
+};
+
+const loadThreadCommand = async (directory: string) => {
+	const run = await loadReviewRun(directory);
+	const path = defaultThreadsPath(directory);
+	const threads = loadValidatedThreads(path, run);
+	return { run, store: openThreadStore(path, run.manifest.runId), threads };
+};
+
+async function cmdThreads(args: string[], commandName = "threads"): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
-		process.stdout.write(`${COMMENTS_HELP}\n`);
+		process.stdout.write(`${THREADS_HELP}\n`);
 		return 0;
 	}
 	const [operation, ...rest] = args;
-	if (operation === "list") {
-		const unknown = rest.find(
-			(argument) => argument.startsWith("-") && !["--json", "--all"].includes(argument),
-		);
-		const positionals = rest.filter((argument) => !argument.startsWith("-"));
-		const directory = positionals[0];
-		if (unknown || !rest.includes("--json") || positionals.length !== 1 || !directory) {
-			const detail = unknown
-				? `unknown comments list option: ${unknown}`
-				: !rest.includes("--json")
-					? "comments list requires --json"
-					: "comments list requires one run directory";
-			process.stderr.write(`${detail}\n${COMMENTS_HELP}\n`);
-			return 1;
-		}
-		try {
-			const run = await loadReviewRun(directory);
-			const comments = loadValidatedComments(defaultCommentsPath(directory), run).filter(
-				(comment) => rest.includes("--all") || comment.status === "open",
+	try {
+		if (operation === "list") {
+			const options = parseCommandOptions(rest, [], ["--json", "--all"]);
+			const directory = options.positionals[0];
+			if (!directory || options.positionals.length !== 1) {
+				throw new Error(`${commandName} list requires one run directory`);
+			}
+			if (!options.booleans.has("--json")) throw new Error(`${commandName} list requires --json`);
+			const { run, threads } = await loadThreadCommand(directory);
+			const selected = threads.filter(
+				(thread) => options.booleans.has("--all") || thread.status === "open",
 			);
-			process.stdout.write(`${JSON.stringify({ runId: run.manifest.runId, comments }, null, 2)}\n`);
+			process.stdout.write(
+				`${JSON.stringify({ runId: run.manifest.runId, threads: selected }, null, 2)}\n`,
+			);
 			return 0;
-		} catch (error) {
-			if (
-				error instanceof ChaptersFileError ||
-				error instanceof RunArtifactError ||
-				error instanceof ReviewCoverageError ||
-				error instanceof CommentStoreError
-			) {
-				process.stderr.write(`${error.message}\n`);
-				return 1;
+		}
+		if (operation === "create") {
+			const options = parseCommandOptions(rest, [
+				"--file",
+				"--old-start",
+				"--side",
+				"--start-line",
+				"--end-line",
+				"--author",
+				"--body",
+				"--body-file",
+			]);
+			const directory = options.positionals[0];
+			if (!directory || options.positionals.length !== 1) {
+				throw new Error(`${commandName} create requires one run directory`);
 			}
-			throw error;
+			const side = requiredOption(options, "--side");
+			if (side !== "additions" && side !== "deletions") {
+				throw new Error("--side must be additions or deletions");
+			}
+			const anchor: ThreadAnchor = {
+				filePath: requiredOption(options, "--file"),
+				oldStart: integerOption(options, "--old-start", true),
+				side,
+				startLine: integerOption(options, "--start-line"),
+				endLine: integerOption(options, "--end-line"),
+			};
+			const author = agentAuthor(options);
+			const body = await threadBody(options);
+			const { run, store } = await loadThreadCommand(directory);
+			const candidate = createThread(run.manifest.runId, anchor, author, body);
+			validateThreadsForRun(run, [candidate]);
+			const root = candidate.messages[0];
+			if (!root) throw new ThreadStoreError("A new thread requires a root message");
+			const thread = store.create(anchor, author, body, {
+				id: candidate.id,
+				messageId: root.id,
+				createdAt: candidate.createdAt,
+			});
+			process.stdout.write(`${JSON.stringify({ action: operation, thread }, null, 2)}\n`);
+			return 0;
 		}
-	}
-
-	if (["delete", "mark-dealt", "reopen"].includes(operation ?? "")) {
-		const [directory, id, ...extra] = rest;
-		if (!directory || !id || extra.length || directory.startsWith("-") || id.startsWith("-")) {
-			process.stderr.write(`${COMMENTS_HELP}\n`);
-			return 1;
+		if (operation === "reply") {
+			const options = parseCommandOptions(rest, ["--author", "--body", "--body-file"]);
+			const [directory, rawThreadId] = options.positionals;
+			if (!directory || options.positionals.length !== 2) {
+				throw new Error(`${commandName} reply requires a run directory and thread ID`);
+			}
+			const threadId = requireEntityId(rawThreadId, "Thread");
+			const { store } = await loadThreadCommand(directory);
+			const thread = store.reply(threadId, agentAuthor(options), await threadBody(options));
+			process.stdout.write(`${JSON.stringify({ action: operation, thread }, null, 2)}\n`);
+			return 0;
 		}
-		if (!commentIdPattern.test(id)) {
-			process.stderr.write(`Comment ID must be a UUID, received ${JSON.stringify(id)}\n`);
-			return 1;
+		if (operation === "delete-message") {
+			const options = parseCommandOptions(rest, []);
+			const [directory, rawThreadId, rawMessageId] = options.positionals;
+			if (!directory || options.positionals.length !== 3) {
+				throw new Error(`${commandName} delete-message requires run, thread, and message IDs`);
+			}
+			const threadId = requireEntityId(rawThreadId, "Thread");
+			const messageId = requireEntityId(rawMessageId, "Message");
+			const { store } = await loadThreadCommand(directory);
+			const message = store.deleteMessage(threadId, messageId);
+			process.stdout.write(`${JSON.stringify({ action: operation, message }, null, 2)}\n`);
+			return 0;
 		}
-		try {
-			const run = await loadReviewRun(directory);
-			const commentsPath = defaultCommentsPath(directory);
-			loadValidatedComments(commentsPath, run);
-			const store = openCommentStore(commentsPath, run.manifest.runId);
-			const comment =
+		if (["delete", "mark-dealt", "reopen"].includes(operation ?? "")) {
+			const options = parseCommandOptions(rest, []);
+			const [directory, rawThreadId] = options.positionals;
+			if (!directory || options.positionals.length !== 2) {
+				throw new Error(`${commandName} ${operation} requires a run directory and thread ID`);
+			}
+			const threadId = requireEntityId(rawThreadId, "Thread");
+			const { store } = await loadThreadCommand(directory);
+			const thread =
 				operation === "delete"
-					? store.delete(id)
+					? store.delete(threadId)
 					: operation === "mark-dealt"
-						? store.markDealt(id)
-						: store.reopen(id);
-			process.stdout.write(`${JSON.stringify({ action: operation, comment }, null, 2)}\n`);
+						? store.markDealt(threadId)
+						: store.reopen(threadId);
+			process.stdout.write(`${JSON.stringify({ action: operation, thread }, null, 2)}\n`);
 			return 0;
-		} catch (error) {
-			if (
-				error instanceof ChaptersFileError ||
-				error instanceof RunArtifactError ||
-				error instanceof ReviewCoverageError ||
-				error instanceof CommentStoreError
-			) {
-				process.stderr.write(`${error.message}\n`);
-				return 1;
-			}
-			throw error;
 		}
+		throw new Error(
+			operation ? `unknown ${commandName} operation: ${operation}` : "missing operation",
+		);
+	} catch (error) {
+		if (
+			error instanceof ChaptersFileError ||
+			error instanceof RunArtifactError ||
+			error instanceof ReviewCoverageError ||
+			error instanceof ThreadStoreError ||
+			error instanceof Error
+		) {
+			process.stderr.write(`${error.message}\n${THREADS_HELP}\n`);
+			return 1;
+		}
+		throw error;
 	}
-
-	process.stderr.write(
-		`${operation ? `unknown comments operation: ${operation}\n` : ""}${COMMENTS_HELP}\n`,
-	);
-	return 1;
 }
 
 async function cmdShow(args: string[]): Promise<number> {
@@ -366,11 +502,11 @@ async function cmdShow(args: string[]): Promise<number> {
 		throw error;
 	}
 
-	let comments: RevueComment[];
+	let threads: ReviewThread[];
 	try {
-		comments = loadValidatedComments(defaultCommentsPath(directory), run);
+		threads = loadValidatedThreads(defaultThreadsPath(directory), run);
 	} catch (error) {
-		if (error instanceof CommentStoreError) {
+		if (error instanceof ThreadStoreError) {
 			process.stderr.write(`${error.message}\n`);
 			return 1;
 		}
@@ -391,13 +527,15 @@ async function cmdShow(args: string[]): Promise<number> {
 		]);
 	const diffFiles = await preparePatch(run.patch);
 	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
-	const commentStore = openCommentStore(defaultCommentsPath(directory), run.manifest.runId);
+	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
+	const humanAuthor = resolveHumanAuthor(repositoryRootForRun(directory));
 	await runApp(run.chapters, {
 		diffFiles,
 		loadSemanticDiff: (width) => generateSemanticDiff(run, width),
 		initialViewState: store.get(),
-		initialComments: comments,
-		commentActions: commentStore,
+		initialThreads: threads,
+		threadActions: threadStore,
+		humanAuthor,
 		onViewStateChange: (next) => store.set(next),
 	});
 	return 0;
@@ -408,7 +546,8 @@ async function main(): Promise<number> {
 	if (command === "show") return cmdShow(args);
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
-	if (command === "comments") return cmdComments(args);
+	if (command === "threads") return cmdThreads(args);
+	if (command === "comments") return cmdThreads(args, "comments");
 	if (!command || command === "-h" || command === "--help" || command === "help") {
 		process.stdout.write(HELP);
 		return 0;

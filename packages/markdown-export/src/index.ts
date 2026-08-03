@@ -2,9 +2,10 @@ import type { Chapter } from "@revue/types";
 import {
 	emptyViewState,
 	type Prologue,
+	type ReviewThread,
 	type RevueChaptersFile,
-	type RevueComment,
 	type RunFile,
+	type ThreadMessage,
 	type ViewState,
 	viewStateFileId,
 	viewStateKeyChangeId,
@@ -25,7 +26,7 @@ export type MarkdownExportSelection =
 export type MarkdownExportOptions = {
 	selection?: MarkdownExportSelection;
 	viewState?: ViewState;
-	comments?: RevueComment[];
+	threads?: ReviewThread[];
 };
 
 export class MarkdownExportError extends Error {}
@@ -107,13 +108,13 @@ const formatQuestion = (chapter: Chapter, index: number, state: ViewState): stri
 	return lines;
 };
 
-const commentsForChapter = (chapter: Chapter, comments: readonly RevueComment[]): RevueComment[] =>
-	comments
-		.filter((comment) =>
+const threadsForChapter = (chapter: Chapter, threads: readonly ReviewThread[]): ReviewThread[] =>
+	threads
+		.filter((thread) =>
 			chapter.hunkRefs.some(
 				(reference) =>
-					reference.filePath === comment.anchor.filePath &&
-					reference.oldStart === comment.anchor.oldStart,
+					reference.filePath === thread.anchor.filePath &&
+					reference.oldStart === thread.anchor.oldStart,
 			),
 		)
 		.sort(
@@ -121,27 +122,39 @@ const commentsForChapter = (chapter: Chapter, comments: readonly RevueComment[])
 				left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
 		);
 
-const formatComment = (comment: RevueComment, level: number): string[] => {
-	const range =
-		comment.anchor.startLine === comment.anchor.endLine
-			? `line ${comment.anchor.startLine}`
-			: `lines ${comment.anchor.startLine}-${comment.anchor.endLine}`;
-	const body = comment.body.replace(/\r\n?/g, "\n").split("\n");
+const formatMessage = (message: ThreadMessage, level: number): string[] => {
+	const body = message.body.replace(/\r\n?/g, "\n").split("\n");
 	return [
-		heading(level, `Comment ${codeSpan(comment.id)}`),
+		heading(level, `Message ${codeSpan(message.id)}`),
 		"",
-		`- Status: ${codeSpan(comment.status)}`,
-		`- Anchor: ${codeSpan(comment.anchor.filePath)} — ${comment.anchor.side} ${range}; review unit oldStart ${comment.anchor.oldStart}`,
+		`- Author: ${codeSpan(message.author.kind)} — ${codeSpan(message.author.name)}`,
+		`- Created: ${codeSpan(message.createdAt)}`,
 		"",
 		...body.map((line) => (line ? `> ${line}` : ">")),
 	];
+};
+
+const formatThread = (thread: ReviewThread, level: number): string[] => {
+	const range =
+		thread.anchor.startLine === thread.anchor.endLine
+			? `line ${thread.anchor.startLine}`
+			: `lines ${thread.anchor.startLine}-${thread.anchor.endLine}`;
+	const lines = [
+		heading(level, `Thread ${codeSpan(thread.id)}`),
+		"",
+		`- Status: ${codeSpan(thread.status)}`,
+		`- Created: ${codeSpan(thread.createdAt)}`,
+		`- Anchor: ${codeSpan(thread.anchor.filePath)} — ${thread.anchor.side} ${range}; review unit oldStart ${thread.anchor.oldStart}`,
+	];
+	for (const message of thread.messages) lines.push("", ...formatMessage(message, level + 1));
+	return lines;
 };
 
 const formatChapter = (
 	chapter: Chapter,
 	files: Map<string, RunFile>,
 	state: ViewState,
-	comments: readonly RevueComment[],
+	threads: readonly ReviewThread[],
 	level: number,
 ): string[] => {
 	const lines = [
@@ -164,12 +177,10 @@ const formatChapter = (
 		for (const index of chapter.keyChanges.keys())
 			lines.push(...formatQuestion(chapter, index, state));
 	}
-	const inlineComments = commentsForChapter(chapter, comments);
-	if (inlineComments.length) {
-		lines.push("", heading(level + 1, "Inline comments"));
-		for (const comment of inlineComments) {
-			lines.push("", ...formatComment(comment, level + 2));
-		}
+	const inlineThreads = threadsForChapter(chapter, threads);
+	if (inlineThreads.length) {
+		lines.push("", heading(level + 1, "Review threads"));
+		for (const thread of inlineThreads) lines.push("", ...formatThread(thread, level + 2));
 	}
 	return lines;
 };
@@ -194,8 +205,8 @@ const selectChapter = (
  * Format a verified review as deterministic Markdown.
  *
  * This function is intentionally pure and accepts only pinned run metadata, narration, and an
- * optional review-state value. Chapter sections are kept separate from document selection so a
- * future comments formatter can compose at that boundary without coupling export to a comment store.
+ * optional review-state and thread values. Chapter sections remain separate from document selection
+ * so thread formatting stays independent of persistence.
  */
 export function formatMarkdownReview(
 	review: MarkdownReview,
@@ -203,7 +214,7 @@ export function formatMarkdownReview(
 ): string {
 	const selection = options.selection ?? { kind: "full" };
 	const state = options.viewState ?? emptyViewState();
-	const comments = options.comments ?? [];
+	const threads = options.threads ?? [];
 	const files = new Map(review.files.map((file) => [file.path, file]));
 	const ordered = [...review.chapters.chapters].sort((left, right) => left.order - right.order);
 	let lines: string[];
@@ -224,13 +235,13 @@ export function formatMarkdownReview(
 			"",
 			`Pinned run: ${codeSpan(review.runId)}`,
 			"",
-			...formatChapter(chapter, files, state, comments, 1).slice(2),
+			...formatChapter(chapter, files, state, threads, 1).slice(2),
 		];
 	} else {
 		lines = ["# Revue Review", "", `Pinned run: ${codeSpan(review.runId)}`];
 		if (review.chapters.prologue) lines.push("", ...formatPrologue(review.chapters.prologue, 2));
 		for (const chapter of ordered)
-			lines.push("", ...formatChapter(chapter, files, state, comments, 2));
+			lines.push("", ...formatChapter(chapter, files, state, threads, 2));
 	}
 
 	return `${lines.join("\n")}\n`;

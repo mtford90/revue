@@ -19,20 +19,23 @@ import {
 } from "@revue/diff-renderer";
 import {
 	type Chapter,
-	COMMENT_STATUS,
-	type CommentAnchor,
 	emptyViewState,
 	type Prologue,
+	type ReviewThread,
 	type RevueChaptersFile,
-	type RevueComment,
+	THREAD_AUTHOR_KIND,
+	THREAD_STATUS,
+	type ThreadAnchor,
+	type ThreadAuthor,
+	type ThreadMessage,
 	type ViewState,
 } from "@revue/types";
-import { type RefObject, useEffect, useRef, useState } from "react";
-import { createComment, sortComments } from "./comments.ts";
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
 import { type SemanticDiffResult, terminalSafe } from "./semantic.ts";
 import { complexityColor, severityColor, theme } from "./theme.ts";
+import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
 import {
 	chapterFilePaths,
 	isChapterReviewed,
@@ -443,23 +446,65 @@ function KeyChanges({
 }
 
 // ── Chapter detail ────────────────────────────────────────────────────────────
-type CommentActions = {
-	add(anchor: CommentAnchor, body: string): RevueComment;
-	delete(id: string): RevueComment;
-	markDealt(id: string): RevueComment;
-	reopen(id: string): RevueComment;
+type ThreadActions = {
+	create(anchor: ThreadAnchor, author: ThreadAuthor, body: string): ReviewThread;
+	reply(threadId: string, author: ThreadAuthor, body: string): ReviewThread;
+	delete(threadId: string): ReviewThread;
+	deleteMessage(threadId: string, messageId: string): ThreadMessage;
+	markDealt(threadId: string): ReviewThread;
+	reopen(threadId: string): ReviewThread;
 };
 
-function InlineComment({
-	comment,
+function ThreadMessageView({
+	message,
+	dealtWith,
+	canDelete,
 	onDelete,
+}: {
+	message: ThreadMessage;
+	dealtWith: boolean;
+	canDelete: boolean;
+	onDelete: (messageId: string) => void;
+}) {
+	return (
+		<box flexDirection="column">
+			<text fg={message.author.kind === THREAD_AUTHOR_KIND.AGENT ? theme.mauve : theme.accent}>
+				{message.author.kind === THREAD_AUTHOR_KIND.AGENT ? "Agent" : "Human"} ·{" "}
+				{message.author.name}
+			</text>
+			<text fg={dealtWith ? theme.dim : theme.text}>{message.body}</text>
+			{canDelete ? (
+				<text
+					fg={theme.red}
+					onMouseDown={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onDelete(message.id);
+					}}
+				>
+					[Delete message]
+				</text>
+			) : null}
+		</box>
+	);
+}
+
+function InlineThread({
+	thread,
+	replyComposer,
+	onReply,
+	onDeleteThread,
+	onDeleteMessage,
 	onToggleStatus,
 }: {
-	comment: RevueComment;
-	onDelete: (id: string) => void;
-	onToggleStatus: (comment: RevueComment) => void;
+	thread: ReviewThread;
+	replyComposer?: ReactNode;
+	onReply: (thread: ReviewThread) => void;
+	onDeleteThread: (id: string) => void;
+	onDeleteMessage: (threadId: string, messageId: string) => void;
+	onToggleStatus: (thread: ReviewThread) => void;
 }) {
-	const dealtWith = comment.status === COMMENT_STATUS.DEALT_WITH;
+	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
 	return (
 		<box
 			flexDirection="column"
@@ -469,16 +514,36 @@ function InlineComment({
 			marginLeft={2}
 		>
 			<text fg={dealtWith ? theme.green : theme.yellow}>
-				{dealtWith ? "✓ Dealt with" : "! Open"} · {comment.id}
+				{dealtWith ? "✓ Dealt with" : "! Open"} · Thread {thread.id}
 			</text>
-			<text fg={dealtWith ? theme.dim : theme.text}>{comment.body}</text>
+			{thread.messages.map((message, index) => (
+				<ThreadMessageView
+					key={message.id}
+					message={message}
+					dealtWith={dealtWith}
+					canDelete={index > 0}
+					onDelete={(messageId) => onDeleteMessage(thread.id, messageId)}
+				/>
+			))}
+			{replyComposer}
 			<box flexDirection="row">
 				<text
 					fg={theme.accent}
 					onMouseDown={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						onToggleStatus(comment);
+						onReply(thread);
+					}}
+				>
+					[Reply]
+				</text>
+				<text> </text>
+				<text
+					fg={theme.accent}
+					onMouseDown={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onToggleStatus(thread);
 					}}
 				>
 					[{dealtWith ? "Reopen" : "Mark dealt with"}]
@@ -489,19 +554,20 @@ function InlineComment({
 					onMouseDown={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						onDelete(comment.id);
+						onDeleteThread(thread.id);
 					}}
 				>
-					[Delete]
+					[Delete thread]
 				</text>
 			</box>
 		</box>
 	);
 }
 
-const COMMENT_COMPOSER_ID = "inline-comment-composer";
+const THREAD_COMPOSER_ID = "inline-thread-composer";
 
-function CommentComposer({
+function ThreadComposer({
+	title,
 	range,
 	body,
 	notice,
@@ -510,6 +576,7 @@ function CommentComposer({
 	onSave,
 	onCancel,
 }: {
+	title: string;
 	range: DiffLineRange;
 	body: string;
 	notice: string | null;
@@ -527,14 +594,14 @@ function CommentComposer({
 
 	return (
 		<box
-			id={COMMENT_COMPOSER_ID}
+			id={THREAD_COMPOSER_ID}
 			flexDirection="column"
 			border
 			borderColor={theme.accent}
 			paddingLeft={1}
 			paddingRight={1}
 		>
-			<text fg={theme.accent}>New inline comment</text>
+			<text fg={theme.accent}>{title}</text>
 			<text fg={theme.text}>
 				{range.filePath} · {range.side} ·{" "}
 				{range.startLine === range.endLine
@@ -591,15 +658,18 @@ function ChapterView({
 	selectedHunkIndex,
 	selectedKeyChange,
 	collapsedFiles,
-	comments,
-	selectedCommentRange,
-	commentDraft,
+	threads,
+	selectedThreadRange,
+	threadDraft,
+	replyDraft,
 	onSelectFile,
 	onToggleCollapse,
 	onToggleFileReview,
-	onSelectCommentRange,
-	onDeleteComment,
-	onToggleCommentStatus,
+	onSelectThreadRange,
+	onReplyThread,
+	onDeleteThread,
+	onDeleteThreadMessage,
+	onToggleThreadStatus,
 }: {
 	chapter: Chapter;
 	diffFiles: DiffFile[] | null;
@@ -609,15 +679,18 @@ function ChapterView({
 	selectedHunkIndex: number;
 	selectedKeyChange: number;
 	collapsedFiles: Set<string>;
-	comments: RevueComment[];
-	selectedCommentRange: DiffLineRange | undefined;
-	commentDraft: DiffInlineAttachment | undefined;
+	threads: ReviewThread[];
+	selectedThreadRange: DiffLineRange | undefined;
+	threadDraft: DiffInlineAttachment | undefined;
+	replyDraft: { threadId: string; content: ReactNode } | undefined;
 	onSelectFile: (index: number) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
-	onSelectCommentRange: (range: DiffLineRange) => void;
-	onDeleteComment: (id: string) => void;
-	onToggleCommentStatus: (comment: RevueComment) => void;
+	onSelectThreadRange: (range: DiffLineRange) => void;
+	onReplyThread: (thread: ReviewThread) => void;
+	onDeleteThread: (id: string) => void;
+	onDeleteThreadMessage: (threadId: string, messageId: string) => void;
+	onToggleThreadStatus: (thread: ReviewThread) => void;
 }) {
 	const chapterDiffFiles = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const paths = chapterFilePaths(chapter);
@@ -630,32 +703,35 @@ function ChapterView({
 		id: `${focusedDecorationId}:${refIndex}`,
 		focusId: focusedDecorationId,
 	}));
-	const chapterComments = comments.filter((comment) =>
+	const chapterThreads = threads.filter((thread) =>
 		chapter.hunkRefs.some(
 			(reference) =>
-				reference.filePath === comment.anchor.filePath &&
-				reference.oldStart === comment.anchor.oldStart,
+				reference.filePath === thread.anchor.filePath &&
+				reference.oldStart === thread.anchor.oldStart,
 		),
 	);
 	const inlineAttachments: DiffInlineAttachment[] = [
-		...chapterComments.map((comment) => ({
-			id: comment.id,
+		...chapterThreads.map((thread) => ({
+			id: thread.id,
 			anchor: {
-				filePath: comment.anchor.filePath,
-				hunkOldStart: comment.anchor.oldStart,
-				side: comment.anchor.side,
-				startLine: comment.anchor.startLine,
-				endLine: comment.anchor.endLine,
+				filePath: thread.anchor.filePath,
+				hunkOldStart: thread.anchor.oldStart,
+				side: thread.anchor.side,
+				startLine: thread.anchor.startLine,
+				endLine: thread.anchor.endLine,
 			},
 			content: (
-				<InlineComment
-					comment={comment}
-					onDelete={onDeleteComment}
-					onToggleStatus={onToggleCommentStatus}
+				<InlineThread
+					thread={thread}
+					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
+					onReply={onReplyThread}
+					onDeleteThread={onDeleteThread}
+					onDeleteMessage={onDeleteThreadMessage}
+					onToggleStatus={onToggleThreadStatus}
 				/>
 			),
 		})),
-		...(commentDraft ? [commentDraft] : []),
+		...(threadDraft ? [threadDraft] : []),
 	];
 
 	return (
@@ -709,9 +785,9 @@ function ChapterView({
 										selectedHunkIndex={focused ? selectedHunkIndex : -1}
 										decorations={decorations}
 										focusedDecorationId={focusedDecorationId}
-										selectedRange={selectedCommentRange}
+										selectedRange={selectedThreadRange}
 										inlineAttachments={inlineAttachments}
-										onRangeSelect={onSelectCommentRange}
+										onRangeSelect={onSelectThreadRange}
 									/>
 								)}
 							</box>
@@ -760,7 +836,7 @@ function SemanticChapterView({
 	return (
 		<box flexDirection="column" gap={1}>
 			<text fg={theme.yellow}>
-				Read-only semantic view · key-change anchors, exact range highlights, and comments are
+				Read-only semantic view · key-change anchors, exact range highlights, and threads are
 				Patch-only
 			</text>
 			<text fg={theme.dim}>{semantic.version}</text>
@@ -844,10 +920,10 @@ function ShortcutHelp() {
 			<text fg={theme.mauve}>Review</text>
 			<text fg={theme.text}> x chapter · f focused file</text>
 			<text fg={theme.text}> {"{/}"} focus key change · r toggle · 1–9 direct</text>
-			<text fg={theme.text}> pointer: click/drag line-number gutter to comment</text>
+			<text fg={theme.text}> pointer: click/drag line-number gutter to start a thread</text>
 			<text fg={theme.mauve}>Views</text>
 			<text fg={theme.text}> F10 → View toggles Patch / read-only Semantic</text>
-			<text fg={theme.dim}> anchors, exact range highlights, and comments are Patch-only</text>
+			<text fg={theme.dim}> anchors, exact range highlights, and threads are Patch-only</text>
 			<text fg={theme.mauve}>Menu/help/quit</text>
 			<text fg={theme.text}> F10 menu · ? close · q/esc quit</text>
 		</box>
@@ -855,13 +931,31 @@ function ShortcutHelp() {
 }
 
 // ── App shell ───────────────────────────────────────────────────────────────
+type ThreadDraft =
+	| { kind: "thread"; range: DiffLineRange }
+	| { kind: "reply"; threadId: string; range: DiffLineRange };
+
+const defaultHumanAuthor: ThreadAuthor = {
+	kind: THREAD_AUTHOR_KIND.HUMAN,
+	name: "Reviewer",
+};
+
+const diffRangeForThread = (thread: ReviewThread): DiffLineRange => ({
+	filePath: thread.anchor.filePath,
+	hunkOldStart: thread.anchor.oldStart,
+	side: thread.anchor.side,
+	startLine: thread.anchor.startLine,
+	endLine: thread.anchor.endLine,
+});
+
 export function App({
 	file,
 	diffFiles = null,
 	loadSemanticDiff,
 	initialViewState = emptyViewState(),
-	initialComments = [],
-	commentActions,
+	initialThreads = [],
+	threadActions,
+	humanAuthor = defaultHumanAuthor,
 	onViewStateChange,
 	onQuit,
 }: {
@@ -869,8 +963,9 @@ export function App({
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
 	initialViewState?: ViewState;
-	initialComments?: RevueComment[];
-	commentActions?: CommentActions;
+	initialThreads?: ReviewThread[];
+	threadActions?: ThreadActions;
+	humanAuthor?: ThreadAuthor;
 	onViewStateChange?: (next: ViewState) => void;
 	onQuit?: () => void;
 }) {
@@ -894,10 +989,10 @@ export function App({
 	const [semanticLoading, setSemanticLoading] = useState(false);
 	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
 	const [vs, setVs] = useState(initialViewState);
-	const [comments, setComments] = useState(() => sortComments(initialComments));
-	const [commentRange, setCommentRange] = useState<DiffLineRange | null>(null);
-	const [commentBody, setCommentBody] = useState("");
-	const [commentNotice, setCommentNotice] = useState<string | null>(null);
+	const [threads, setThreads] = useState(() => sortThreads(initialThreads));
+	const [threadDraft, setThreadDraft] = useState<ThreadDraft | null>(null);
+	const [threadBody, setThreadBody] = useState("");
+	const [threadNotice, setThreadNotice] = useState<string | null>(null);
 	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
 	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
@@ -953,77 +1048,111 @@ export function App({
 	}, [diffAnchorTarget]);
 
 	useEffect(() => {
-		if (!commentRange) return;
-		const revealCommentComposer = () =>
-			pageScroll.current?.scrollChildIntoView(COMMENT_COMPOSER_ID);
-		revealCommentComposer();
-		const retry = setTimeout(revealCommentComposer, 50);
+		if (!threadDraft) return;
+		const revealThreadComposer = () => pageScroll.current?.scrollChildIntoView(THREAD_COMPOSER_ID);
+		revealThreadComposer();
+		const retry = setTimeout(revealThreadComposer, 50);
 		return () => clearTimeout(retry);
-	}, [commentRange]);
+	}, [threadDraft]);
 
-	function selectCommentRange(range: DiffLineRange) {
-		setCommentRange(range);
-		setCommentBody("");
-		setCommentNotice(null);
+	function selectThreadRange(range: DiffLineRange) {
+		setThreadDraft({ kind: "thread", range });
+		setThreadBody("");
+		setThreadNotice(null);
 	}
-	function cancelComment() {
-		setCommentRange(null);
-		setCommentBody("");
-		setCommentNotice(null);
+	function startThreadReply(thread: ReviewThread) {
+		setThreadDraft({ kind: "reply", threadId: thread.id, range: diffRangeForThread(thread) });
+		setThreadBody("");
+		setThreadNotice(null);
 	}
-	function saveComment() {
-		if (!commentRange) return;
-		const body = textareaRef.current?.editBuffer.getText() ?? commentBody;
+	function cancelThreadDraft() {
+		setThreadDraft(null);
+		setThreadBody("");
+		setThreadNotice(null);
+	}
+	function saveThreadDraft() {
+		if (!threadDraft) return;
+		const body = textareaRef.current?.editBuffer.getText() ?? threadBody;
 		if (!body.trim()) {
-			setCommentNotice("Write a comment before saving.");
+			setThreadNotice("Write a message before saving.");
 			return;
 		}
-		const anchor: CommentAnchor = {
-			filePath: commentRange.filePath,
-			oldStart: commentRange.hunkOldStart,
-			side: commentRange.side,
-			startLine: commentRange.startLine,
-			endLine: commentRange.endLine,
-		};
 		try {
-			const comment =
-				commentActions?.add(anchor, body) ?? createComment("0".repeat(64), anchor, body);
-			setComments((currentComments) => sortComments([...currentComments, comment]));
-			cancelComment();
+			if (threadDraft.kind === "thread") {
+				const range = threadDraft.range;
+				const anchor: ThreadAnchor = {
+					filePath: range.filePath,
+					oldStart: range.hunkOldStart,
+					side: range.side,
+					startLine: range.startLine,
+					endLine: range.endLine,
+				};
+				const thread =
+					threadActions?.create(anchor, humanAuthor, body) ??
+					createThread("0".repeat(64), anchor, humanAuthor, body);
+				setThreads((current) => sortThreads([...current, thread]));
+			} else {
+				const updated =
+					threadActions?.reply(threadDraft.threadId, humanAuthor, body) ??
+					addThreadReply(threads, threadDraft.threadId, createThreadMessage(humanAuthor, body))
+						.updated;
+				setThreads((current) =>
+					current.map((thread) => (thread.id === updated.id ? updated : thread)),
+				);
+			}
+			cancelThreadDraft();
 		} catch (error) {
-			setCommentNotice(error instanceof Error ? error.message : String(error));
+			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
 	}
-	function deleteInlineComment(id: string) {
+	function deleteInlineThread(id: string) {
 		try {
-			commentActions?.delete(id);
-			setComments((currentComments) => currentComments.filter((comment) => comment.id !== id));
-			setCommentNotice(null);
+			threadActions?.delete(id);
+			setThreads((current) => current.filter((thread) => thread.id !== id));
+			if (threadDraft?.kind === "reply" && threadDraft.threadId === id) cancelThreadDraft();
+			setThreadNotice(null);
 		} catch (error) {
-			setCommentNotice(error instanceof Error ? error.message : String(error));
+			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
 	}
-	function toggleInlineCommentStatus(comment: RevueComment) {
+	function deleteInlineThreadMessage(threadId: string, messageId: string) {
+		try {
+			threadActions?.deleteMessage(threadId, messageId);
+			setThreads((current) =>
+				current.map((thread) =>
+					thread.id === threadId
+						? {
+								...thread,
+								messages: thread.messages.filter((message) => message.id !== messageId),
+							}
+						: thread,
+				),
+			);
+			setThreadNotice(null);
+		} catch (error) {
+			setThreadNotice(error instanceof Error ? error.message : String(error));
+		}
+	}
+	function toggleInlineThreadStatus(thread: ReviewThread) {
 		try {
 			const updated =
-				comment.status === COMMENT_STATUS.OPEN
-					? (commentActions?.markDealt(comment.id) ?? {
-							...comment,
-							status: COMMENT_STATUS.DEALT_WITH,
+				thread.status === THREAD_STATUS.OPEN
+					? (threadActions?.markDealt(thread.id) ?? {
+							...thread,
+							status: THREAD_STATUS.DEALT_WITH,
 						})
-					: (commentActions?.reopen(comment.id) ?? {
-							...comment,
-							status: COMMENT_STATUS.OPEN,
+					: (threadActions?.reopen(thread.id) ?? {
+							...thread,
+							status: THREAD_STATUS.OPEN,
 						});
-			setComments((currentComments) =>
-				currentComments.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+			setThreads((current) =>
+				current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
 			);
-			setCommentNotice(null);
+			setThreadNotice(null);
 		} catch (error) {
-			setCommentNotice(error instanceof Error ? error.message : String(error));
+			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
 	}
-
 	function goto(index: number) {
 		const next = Math.max(0, Math.min(index, pages.length - 1));
 		if (next === current) return;
@@ -1037,7 +1166,7 @@ export function App({
 		setFileFocusRequest(0);
 		setKeyFocusRequest(0);
 		setDiffAnchorTarget(null);
-		cancelComment();
+		cancelThreadDraft();
 	}
 	function gotoChapter(chapter: Chapter) {
 		const idx = pages.findIndex((p) => p.kind === "chapter" && p.chapter.id === chapter.id);
@@ -1213,7 +1342,7 @@ export function App({
 		changeViewMode("patch");
 	}
 	async function showSemantic() {
-		cancelComment();
+		cancelThreadDraft();
 		if (semantic) {
 			setSemanticNotice(null);
 			changeViewMode("semantic");
@@ -1262,37 +1391,45 @@ export function App({
 		showSemantic: () => void showSemantic(),
 	});
 	const menu = useMenuController(menus);
-	const commentDraft: DiffInlineAttachment | undefined = commentRange
-		? {
-				id: COMMENT_COMPOSER_ID,
-				anchor: commentRange,
-				content: (
-					<CommentComposer
-						range={commentRange}
-						body={commentBody}
-						notice={commentNotice}
-						textareaRef={textareaRef}
-						onContentChange={() => setCommentBody(textareaRef.current?.editBuffer.getText() ?? "")}
-						onSave={saveComment}
-						onCancel={cancelComment}
-					/>
-				),
-			}
-		: undefined;
+	const threadComposer = threadDraft ? (
+		<ThreadComposer
+			key={threadDraft.kind === "thread" ? "new-thread" : threadDraft.threadId}
+			title={threadDraft.kind === "thread" ? "New review thread" : "Reply to thread"}
+			range={threadDraft.range}
+			body={threadBody}
+			notice={threadNotice}
+			textareaRef={textareaRef}
+			onContentChange={() => setThreadBody(textareaRef.current?.editBuffer.getText() ?? "")}
+			onSave={saveThreadDraft}
+			onCancel={cancelThreadDraft}
+		/>
+	) : undefined;
+	const newThreadDraft: DiffInlineAttachment | undefined =
+		threadDraft?.kind === "thread" && threadComposer
+			? {
+					id: THREAD_COMPOSER_ID,
+					anchor: threadDraft.range,
+					content: threadComposer,
+				}
+			: undefined;
+	const replyDraft =
+		threadDraft?.kind === "reply" && threadComposer
+			? { threadId: threadDraft.threadId, content: threadComposer }
+			: undefined;
 
 	useKeyboard((key) => {
 		const name = key.name;
 		const paths = chapter ? chapterFilePaths(chapter) : [];
 
-		if (commentRange) {
+		if (threadDraft) {
 			if (name === "escape") {
 				key.preventDefault();
 				key.stopPropagation();
-				cancelComment();
+				cancelThreadDraft();
 			} else if (name === "return" && key.ctrl) {
 				key.preventDefault();
 				key.stopPropagation();
-				saveComment();
+				saveThreadDraft();
 			}
 			return;
 		}
@@ -1451,15 +1588,20 @@ export function App({
 									selectedHunkIndex={selectedHunkIndex}
 									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}
-									comments={comments}
-									selectedCommentRange={commentRange ?? undefined}
-									commentDraft={commentDraft}
+									threads={threads}
+									selectedThreadRange={
+										threadDraft?.kind === "thread" ? threadDraft.range : undefined
+									}
+									threadDraft={newThreadDraft}
+									replyDraft={replyDraft}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
 									onToggleFileReview={toggleFileReview}
-									onSelectCommentRange={selectCommentRange}
-									onDeleteComment={deleteInlineComment}
-									onToggleCommentStatus={toggleInlineCommentStatus}
+									onSelectThreadRange={selectThreadRange}
+									onReplyThread={startThreadReply}
+									onDeleteThread={deleteInlineThread}
+									onDeleteThreadMessage={deleteInlineThreadMessage}
+									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
 							{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
@@ -1491,15 +1633,15 @@ export function App({
 					/>
 				</>
 			) : null}
-			{!commentRange && commentNotice ? <text fg={theme.red}>{commentNotice}</text> : null}
+			{!threadDraft && threadNotice ? <text fg={theme.red}>{threadNotice}</text> : null}
 			<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
 				<text fg={theme.dim}>
 					{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
 				</text>
 				<text fg={theme.dim}>
 					{viewMode === "semantic"
-						? "Semantic is read-only · anchors/ranges/comments Patch-only · F10 View to switch"
-						: "click/drag gutter comment · F10 menu · ]c/[c chapter · tab file · f/x review · ? help · q quit"}
+						? "Semantic is read-only · anchors/ranges/threads Patch-only · F10 View to switch"
+						: "click/drag gutter thread · F10 menu · ]c/[c chapter · tab file · f/x review · ? help · q quit"}
 				</text>
 			</box>
 		</box>
@@ -1513,8 +1655,9 @@ export async function runApp(
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
 		initialViewState?: ViewState;
-		initialComments?: RevueComment[];
-		commentActions?: CommentActions;
+		initialThreads?: ReviewThread[];
+		threadActions?: ThreadActions;
+		humanAuthor?: ThreadAuthor;
 		onViewStateChange?: (next: ViewState) => void;
 	} = {},
 ): Promise<void> {
@@ -1532,8 +1675,9 @@ export async function runApp(
 				diffFiles={options.diffFiles ?? null}
 				loadSemanticDiff={options.loadSemanticDiff}
 				initialViewState={options.initialViewState}
-				initialComments={options.initialComments}
-				commentActions={options.commentActions}
+				initialThreads={options.initialThreads}
+				threadActions={options.threadActions}
+				humanAuthor={options.humanAuthor}
 				onViewStateChange={options.onViewStateChange}
 				onQuit={quit}
 			/>,

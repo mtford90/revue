@@ -3,10 +3,12 @@ import { readFile } from "node:fs/promises";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff-renderer";
 import {
-	COMMENT_STATUS,
-	type CommentAnchor,
+	type ReviewThread,
 	RevueChaptersFileSchema,
-	type RevueComment,
+	THREAD_AUTHOR_KIND,
+	THREAD_STATUS,
+	type ThreadAnchor,
+	type ThreadAuthor,
 	type ViewState,
 } from "@revue/types";
 import { act } from "react";
@@ -166,7 +168,7 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 	const semanticFrame = t.captureCharFrame();
 	expect(semanticFrame).toContain("Semantic view (read-only)");
 	expect(semanticFrame).toContain("semantic retry loop");
-	expect(semanticFrame).toContain("anchors/ranges/comments Patch-only");
+	expect(semanticFrame).toContain("anchors/ranges/threads Patch-only");
 	expect(semanticFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
 	const semanticRow = t
 		.captureSpans()
@@ -499,75 +501,115 @@ ${additions}
 	expect(visibleLines.some((line) => line.includes("exact row 1 "))).toBe(false);
 });
 
-test("inline comment composing isolates app keys and keeps dealt-with feedback visible", async () => {
-	const commentFile = RevueChaptersFileSchema.parse({
+test("inline threads show authors and compose new roots and replies", async () => {
+	const threadFile = RevueChaptersFileSchema.parse({
 		chapters: [
 			{
-				id: "comment-chapter",
+				id: "thread-chapter",
 				order: 1,
 				title: "Review the value",
-				summary: "A focused comment fixture.",
-				hunkRefs: [{ filePath: "comment.ts", oldStart: 1 }],
+				summary: "A focused thread fixture.",
+				hunkRefs: [{ filePath: "thread.ts", oldStart: 1 }],
 				keyChanges: [],
 			},
 		],
 	});
-	const [diffFile] = parsePatch(`diff --git a/comment.ts b/comment.ts
---- a/comment.ts
-+++ b/comment.ts
+	const [diffFile] = parsePatch(`diff --git a/thread.ts b/thread.ts
+--- a/thread.ts
++++ b/thread.ts
 @@ -1 +1 @@
 -old value
 +new value
 `);
 	if (!diffFile) throw new Error("missing diff fixture");
 	const runId = "a".repeat(64);
-	const initial: RevueComment = {
+	const humanAuthor: ThreadAuthor = { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Matt Reviewer" };
+	const initial: ReviewThread = {
 		id: "00000000-0000-4000-8000-000000000001",
 		runId,
 		anchor: {
-			filePath: "comment.ts",
+			filePath: "thread.ts",
 			oldStart: 1,
 			side: "additions",
 			startLine: 1,
 			endLine: 1,
 		},
-		body: "Already addressed",
-		status: COMMENT_STATUS.DEALT_WITH,
+		status: THREAD_STATUS.DEALT_WITH,
 		createdAt: "2026-08-02T10:00:00.000Z",
+		messages: [
+			{
+				id: "00000000-0000-4000-8000-000000000002",
+				author: { kind: THREAD_AUTHOR_KIND.AGENT, name: "Review agent" },
+				body: "Already addressed",
+				createdAt: "2026-08-02T10:00:00.000Z",
+			},
+		],
 	};
-	const added: RevueComment[] = [];
+	const added: ReviewThread[] = [];
+	const replied: ReviewThread[] = [];
 	let quits = 0;
 	const t = await testRender(
 		<App
-			file={commentFile}
+			file={threadFile}
 			diffFiles={[diffFile]}
-			initialComments={[initial]}
-			commentActions={{
-				add: (anchor: CommentAnchor, body: string) => {
-					const comment: RevueComment = {
+			initialThreads={[initial]}
+			humanAuthor={humanAuthor}
+			threadActions={{
+				create: (anchor: ThreadAnchor, author: ThreadAuthor, body: string) => {
+					const thread: ReviewThread = {
 						...initial,
-						id: "00000000-0000-4000-8000-000000000002",
+						id: "00000000-0000-4000-8000-000000000003",
 						anchor,
-						body,
-						status: COMMENT_STATUS.OPEN,
+						status: THREAD_STATUS.OPEN,
 						createdAt: "2026-08-02T10:00:01.000Z",
+						messages: [
+							{
+								id: "00000000-0000-4000-8000-000000000004",
+								author,
+								body,
+								createdAt: "2026-08-02T10:00:01.000Z",
+							},
+						],
 					};
-					added.push(comment);
-					return comment;
+					added.push(thread);
+					return thread;
+				},
+				reply: (threadId, author, body) => {
+					const target = threadId === initial.id ? initial : (added[0] ?? initial);
+					const thread = {
+						...target,
+						messages: [
+							...target.messages,
+							{
+								id: "00000000-0000-4000-8000-000000000005",
+								author,
+								body,
+								createdAt: "2026-08-02T10:00:02.000Z",
+							},
+						],
+					};
+					replied.push(thread);
+					return thread;
 				},
 				delete: () => initial,
+				deleteMessage: () => {
+					const root = initial.messages[0];
+					if (!root) throw new Error("missing root message");
+					return root;
+				},
 				markDealt: (id) => ({
 					...(id === initial.id ? initial : (added[0] ?? initial)),
-					status: COMMENT_STATUS.DEALT_WITH,
+					status: THREAD_STATUS.DEALT_WITH,
 				}),
-				reopen: () => ({ ...initial, status: COMMENT_STATUS.OPEN }),
+				reopen: () => ({ ...initial, status: THREAD_STATUS.OPEN }),
 			}}
 			onQuit={() => (quits += 1)}
 		/>,
-		{ width: 100, height: 28, kittyKeyboard: true },
+		{ width: 100, height: 30, kittyKeyboard: true },
 	);
 	await t.renderOnce();
 	expect(t.captureCharFrame()).toContain("✓ Dealt with");
+	expect(t.captureCharFrame()).toContain("Agent · Review agent");
 	let lifecycleLines = t.captureCharFrame().split("\n");
 	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen]"));
 	await click(t, lifecycleLines[lifecycleY]?.indexOf("Reopen") ?? -1, lifecycleY);
@@ -583,21 +625,23 @@ test("inline comment composing isolates app keys and keeps dealt-with feedback v
 	const gutterX = lines[lineY]?.lastIndexOf("1", sourceX) ?? -1;
 	await click(t, gutterX, lineY);
 	const composerFrame = t.captureCharFrame();
-	expect(composerFrame).toContain("New inline comment");
-	expect(composerFrame).toContain("comment.ts · additions · line 1");
+	expect(composerFrame).toContain("New review thread");
+	expect(composerFrame).toContain("thread.ts · additions · line 1");
 	const composerLines = composerFrame.split("\n");
-	const existingCommentActionsY = composerLines.findIndex((line) => line.includes("[Delete]"));
-	const composerY = composerLines.findIndex((line) => line.includes("New inline comment"));
-	expect(composerY - 1).toBe(existingCommentActionsY + 1);
+	const existingThreadActionsY = composerLines.findIndex((line) =>
+		line.includes("[Delete thread]"),
+	);
+	const composerY = composerLines.findIndex((line) => line.includes("New review thread"));
+	expect(composerY - 1).toBe(existingThreadActionsY + 1);
 
 	await act(async () => t.mockInput.typeText("Please adjust"));
 	let draftFrameLines = t.captureCharFrame().split("\n");
-	let fileHeaderY = draftFrameLines.findIndex((line) => line.includes("comment.ts"));
+	let fileHeaderY = draftFrameLines.findIndex((line) => line.includes("thread.ts"));
 	let collapseX = draftFrameLines[fileHeaderY]?.indexOf("▼") ?? -1;
 	await click(t, collapseX, fileHeaderY);
-	expect(t.captureCharFrame()).not.toContain("New inline comment");
+	expect(t.captureCharFrame()).not.toContain("New review thread");
 	draftFrameLines = t.captureCharFrame().split("\n");
-	fileHeaderY = draftFrameLines.findIndex((line) => line.includes("comment.ts"));
+	fileHeaderY = draftFrameLines.findIndex((line) => line.includes("thread.ts"));
 	collapseX = draftFrameLines[fileHeaderY]?.indexOf("▶") ?? -1;
 	await click(t, collapseX, fileHeaderY);
 	expect(t.captureCharFrame()).toContain("Please adjust");
@@ -610,9 +654,22 @@ test("inline comment composing isolates app keys and keeps dealt-with feedback v
 	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
 	await t.renderOnce();
 
-	expect(added[0]?.body).toBe("Please adjustq\nSecond line");
-	expect(t.captureCharFrame()).toContain("! Open");
+	expect(added[0]?.messages[0]?.body).toBe("Please adjustq\nSecond line");
+	expect(added[0]?.messages[0]?.author).toEqual(humanAuthor);
 	expect(t.captureCharFrame()).toContain("2●");
+
+	const replyLines = t.captureCharFrame().split("\n");
+	const replyY = replyLines.findIndex((line) => line.includes("[Reply]"));
+	await click(t, replyLines[replyY]?.indexOf("Reply") ?? -1, replyY);
+	expect(t.captureCharFrame()).toContain("Reply to thread");
+	await act(async () => t.mockInput.typeText("Human follow-up"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+	expect(replied[0]?.messages.at(-1)).toMatchObject({
+		author: humanAuthor,
+		body: "Human follow-up",
+	});
+	expect(t.captureCharFrame()).toContain("Human · Matt Reviewer");
 });
 
 test("number keys check a chapter's key changes", async () => {

@@ -164,37 +164,59 @@ exactly once, checks key-change ranges against their chapter hunks, and opens th
 touching Git. Run `revue show "$RUN" --check` to validate and print a plain-text summary without
 launching the UI.
 
-## Step 7 — Act on inline feedback
+## Step 7 — Act on review threads
 
-After `revue show "$RUN"` exits, retrieve the reviewer's open comments through Revue's public JSON
-interface. Do not scrape terminal output and do not read or edit `.revue/comments.json` directly.
+After `revue show "$RUN"` exits, retrieve open threads through Revue's public JSON interface. Do not
+scrape terminal output and do not read or edit `.revue/threads.json` directly.
 
 ```bash
-revue comments list "$RUN" --json
+revue threads list "$RUN" --json
 ```
 
-Each comment includes a stable ID, exact path/review-unit/side/range anchor, multi-line body, and
-status. Address every open comment against the same prepared scope. Only after the requested change
-has been made should that exact comment be marked dealt with:
+Each thread includes a stable ID, exact path/review-unit/side/range anchor, thread-level status, and
+ordered messages. Every message includes its own stable ID, multi-line body, creation time, and
+`human` or `agent` author. Address every open thread against the same prepared scope.
+
+Agents must identify themselves explicitly when adding a root message or reply. Use a stable,
+human-readable role name; do not impersonate the repository's Git user:
 
 ```bash
-revue comments mark-dealt "$RUN" <comment-id>
+revue threads reply "$RUN" <thread-id> \
+  --author "revue-chapters agent" \
+  --body "Adjusted the retry cap and kept the interactive path within its budget."
+```
+
+Only after the requested change has been made should that exact thread be marked dealt with:
+
+```bash
+revue threads mark-dealt "$RUN" <thread-id>
 ```
 
 Use `--all` when dealt-with history is relevant. Reopen feedback when it still applies or was marked
 prematurely:
 
 ```bash
-revue comments list "$RUN" --json --all
-revue comments reopen "$RUN" <comment-id>
+revue threads list "$RUN" --json --all
+revue threads reopen "$RUN" <thread-id>
 ```
 
-Hard deletion is only for a comment the reviewer identifies as erroneous. Never delete feedback
-merely because it is difficult, already addressed, or disagreed with:
+An agent may start a new visible thread when it has concrete anchored feedback. Copy the exact
+review-unit identity and line range from the prepared run rather than inventing an anchor:
 
 ```bash
-revue comments delete "$RUN" <comment-id>
+revue threads create "$RUN" \
+  --file src/value.ts --old-start 4 --side additions --start-line 8 --end-line 10 \
+  --author "review agent" --body-file -
+```
+
+Hard deletion is only for a thread or reply the reviewer identifies as erroneous. Never delete
+feedback merely because it is difficult, already addressed, or disagreed with:
+
+```bash
+revue threads delete-message "$RUN" <thread-id> <message-id>
+revue threads delete "$RUN" <thread-id>
 ```
 
 All operations re-verify the supplied run and pinned anchors without recomputing Git scope. Relay an
-actionable validation error instead of guessing a replacement anchor.
+actionable validation error instead of guessing a replacement anchor. `revue comments` is only a
+compatibility command alias; use the official `threads` API.

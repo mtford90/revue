@@ -13,8 +13,8 @@ interactive reviewer you drive from the keyboard. `revue export` validates that 
 renders its narrative and review progress as deterministic Markdown.
 
 > **Status: early scaffold.** Prep, the chapter model and skill, the navigable TUI shell, review
-> persistence, per-chapter patch rendering, inline comments, deterministic Markdown export, and an
-> optional read-only Difftastic semantic view run today. Prep supports committed, staged, unstaged,
+> persistence, per-chapter patch rendering, authored review threads, deterministic Markdown export,
+> and an optional read-only Difftastic semantic view run today. Prep supports committed, staged, unstaged,
 > and working-tree scopes.
 
 ## How it relates to its parents
@@ -93,41 +93,56 @@ bun run revue export examples/sample-run --prologue
 Use `--output <path>` to write the Markdown directly. With no `--output`, stdout contains only the
 Markdown; errors and the output-file confirmation go to stderr. Export reads review progress for the
 pinned run from the same `.revue/state.json` used by `show` and reads inline feedback from
-`.revue/comments.json`; it never writes either store. When local review state is absent, all chapter,
+`.revue/threads.json`; it never writes either store. When local review state is absent, all chapter,
 file, and review-question checkboxes are deterministically unchecked.
 
 The document includes the prologue overview, key changes, focus areas and optional Mermaid diagram;
 ordered chapter titles and summaries; pinned file paths, statuses and whole-file line counts; review
-questions and line anchors; chapter/file/question review state; and comments for the selected
-chapters. It does not recompute Git state. Full and chapter exports preserve each comment's stable ID,
-status, exact review-unit anchor, and multi-line body; prologue-only exports contain no comments.
+questions and line anchors; chapter/file/question review state; and threads for the selected chapters.
+It does not recompute Git state. Full and chapter exports preserve each thread and message ID, thread
+status, exact review-unit anchor, author kind/name, creation time, and multi-line body; prologue-only
+exports contain no threads.
 
-## Inline comments
+## Inline review threads
 
-In Patch view, click a visible old/new line-number gutter to comment on one line, or drag within one
-gutter to select an inclusive range in the same hunk and side. Dragging source code remains ordinary
-terminal text selection for copying. The composer opens inline beneath the selected range and
-identifies its path, side, range, and review unit; use `Ctrl+Enter` or its pointer control to save and
-`Escape` to cancel. The same range can hold any number of independent comments.
+A **thread** is the official feedback concept. In Patch view, click a visible old/new line-number
+gutter to start one on a single line, or drag within one gutter to select an inclusive range in the
+same hunk and side. Dragging source code remains ordinary terminal text selection for copying. The
+composer opens inline beneath the selected range and identifies its path, side, range, and review
+unit; use `Ctrl+Enter` or its pointer control to save and `Escape` to cancel. Any number of independent
+threads may share an exact anchor.
 
-Open comments use an attention marker. Dealt-with comments stay inline with a green check and dimmed
-body; pointer controls mark dealt with, reopen, or permanently delete an erroneous comment. Comments
-are stored atomically under `.revue/comments.json` at the reviewed repository root, located from the
-supplied run directory and keyed by immutable `runId`. Regenerating chapters for the same frozen code
-therefore preserves feedback without modifying the run directory.
+Every root message and reply records an author kind (`human` or `agent`) and display name. Human TUI
+messages use the reviewed repository's `git config user.name`, falling back to the system login.
+Messages from the public agent CLI require an explicit author name. `[Reply]` opens an inline composer
+inside the owning thread. Open threads use an attention marker; dealt-with threads remain visible with
+a green check and dimmed messages and can be reopened. Replies may be deleted individually, while the
+root message is deleted only by deleting its thread.
 
-Agents can use the verified public interface after `show` exits:
+Threads are stored atomically under `.revue/threads.json` at the reviewed repository root, located
+from the supplied run directory and keyed by immutable `runId`. Every mutation takes a cross-process
+lock and re-reads the latest same-run threads before replacing the file, so concurrent TUI and agent
+writers preserve each other's feedback. Regenerating chapters for the same frozen code preserves
+feedback without modifying the run directory.
+
+Agents create and reply through the verified public interface:
 
 ```bash
-revue comments list "$RUN" --json          # open comments only
-revue comments list "$RUN" --json --all    # include dealt-with comments
-revue comments mark-dealt "$RUN" <comment-id>
-revue comments reopen "$RUN" <comment-id>
-revue comments delete "$RUN" <comment-id>  # permanent; erroneous feedback only
+revue threads create "$RUN" \
+  --file src/value.ts --old-start 4 --side additions --start-line 8 --end-line 10 \
+  --author "Review agent" --body "Should this limit be lower?"
+revue threads reply "$RUN" <thread-id> --author "Fix agent" --body-file response.md
+revue threads list "$RUN" --json          # open threads only
+revue threads list "$RUN" --json --all    # include dealt-with threads
+revue threads mark-dealt "$RUN" <thread-id>
+revue threads reopen "$RUN" <thread-id>
+revue threads delete-message "$RUN" <thread-id> <message-id>
+revue threads delete "$RUN" <thread-id>   # permanent; erroneous feedback only
 ```
 
-List and mutation output is JSON. Every operation validates the supplied prepared run and its local
-comment state without recomputing Git scope.
+Use `--body-file -` to read a multi-line message from stdin. List and mutation output is JSON. Every
+operation validates the supplied prepared run and its local thread state without recomputing Git
+scope. `revue comments` remains a command-name compatibility alias, but `threads` is the official API.
 
 ## Development
 
@@ -189,8 +204,8 @@ all diffs · `a` jumps to the next unreviewed chapter · `F10` opens the menu ·
 help · `q`/`esc` quits.
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
 change, and switching Patch/Semantic carries the reviewer’s relative position through the chapter.
-Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and inline
-comments are Patch-only. Binary,
+Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and review
+threads are Patch-only. Binary,
 symlink, mode-only, and content-identical metadata changes are described rather than passed off as
 semantic source diffs. Progress persists to `.revue/state.json`, keyed by both the pinned run and its
 chapter narration.
@@ -207,7 +222,7 @@ chapter narration.
 - [x] File/View application menu with pointer and keyboard operation
 - [x] Deterministic **Markdown export** for the full review, prologue, or one chapter
 - [x] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
-- [x] Inline **comments** authored in Patch view with Revue-owned persistence and lifecycle
+- [x] Authored inline **review threads** with replies and Revue-owned persistence/lifecycle
 - [ ] Decide static-file vs live agent-driven session
 - [ ] Mermaid prologue diagram rendering (ASCII)
 

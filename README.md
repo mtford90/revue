@@ -73,6 +73,15 @@ RUN=$(bun run revue prep --ignore '*.generated.ts' --ignore 'fixtures/**' --show
 bun run revue show "$RUN"
 ```
 
+## Installing the agent skill
+
+The CLI is the source of truth for the bundled `revue-chapters` skill. `revue skill install`
+writes it to `.claude/skills/revue-chapters/` at the current repository root (`--user` targets
+`~/.claude/skills/` instead), stamped with the CLI version that produced it. Re-run it after
+upgrading revue; `revue doctor` reports a stale or missing skill alongside the required Git and
+optional Difftastic dependencies. The skill itself only ever advises how to install the CLI — it
+never downloads or installs binaries.
+
 ## Markdown export
 
 `revue export` consumes only a complete run directory and uses the same integrity and chapter-

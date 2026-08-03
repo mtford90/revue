@@ -84,6 +84,11 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 
 ## Key decisions
 
+- **The CLI owns the skill.** The `revue-chapters` skill text is embedded in the CLI at build
+  time; `revue skill install` writes a version-stamped copy into `.claude/skills/` (project root
+  by default, `--user` for the home directory), and `revue doctor` reports drift between the
+  installed skill and the CLI. The skill advises how to install the CLI when it is missing but
+  never installs binaries itself, keeping one release train and one installer.
 - **Share the diff model; own the renderer.** See `docs/adr/0002` (supersedes ADR 0001).
   `@revue/diff-model` owns Pierre parsing adaptation and stable file/hunk identities;
   `@revue/diff-renderer` owns split/stack rows, terminal presentation, exact inclusive old/new

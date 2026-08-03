@@ -22,8 +22,10 @@ import {
 	type ThreadAnchor,
 	type ThreadAuthor,
 } from "@revue/types";
+import { runDoctor } from "./doctor.ts";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
+import { installSkill } from "./skill.ts";
 import { formatSummary } from "./summary.ts";
 import {
 	createThread,
@@ -35,6 +37,7 @@ import {
 	ThreadStoreError,
 	validateThreadsForRun,
 } from "./threads.ts";
+import { REVUE_VERSION } from "./version.ts";
 import { defaultStatePath, loadViewState, runKey } from "./viewState.ts";
 
 const HELP = `revue — narrative code review in your terminal
@@ -47,6 +50,9 @@ Usage:
   revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
   revue comments <operation>           compatibility alias for revue threads
+  revue skill install [--user]         write the bundled revue-chapters skill to .claude/skills
+  revue doctor                         check required and optional dependencies
+  revue --version                      print the CLI version
 
 Prep modes: committed, staged, unstaged, work. Without explicit scope, prep reviews local
 working-tree changes when present and otherwise compares HEAD with the detected main/master base.
@@ -574,13 +580,57 @@ async function cmdShow(args: string[]): Promise<number> {
 	return 0;
 }
 
+const SKILL_HELP = `usage: revue skill install [--user]
+
+Writes the bundled revue-chapters skill, stamped with this CLI's version, to
+.claude/skills/revue-chapters/SKILL.md at the current repository root, or under
+~/.claude/skills with --user. Re-run after upgrading revue.`;
+
+function cmdSkill(args: string[]): number {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${SKILL_HELP}\n`);
+		return 0;
+	}
+	const [operation, ...rest] = args;
+	try {
+		if (operation !== "install") {
+			throw new Error(operation ? `unknown skill operation: ${operation}` : "missing operation");
+		}
+		const options = parseCommandOptions(rest, [], ["--user"]);
+		if (options.positionals.length > 0) {
+			throw new Error("skill install takes no positional arguments");
+		}
+		const result = installSkill(options.booleans.has("--user") ? "user" : "project");
+		const outcome = result.outcome === "unchanged" ? "already up to date" : result.outcome;
+		process.stdout.write(`revue-chapters skill ${outcome} (${REVUE_VERSION}) at ${result.path}\n`);
+		return 0;
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${SKILL_HELP}\n`,
+		);
+		return 1;
+	}
+}
+
+function cmdDoctor(): number {
+	const report = runDoctor();
+	process.stdout.write(`${report.lines.join("\n")}\n`);
+	return report.healthy ? 0 : 1;
+}
+
 async function main(): Promise<number> {
 	const [command, ...args] = process.argv.slice(2);
+	if (command === "--version" || command === "-v") {
+		process.stdout.write(`revue ${REVUE_VERSION}\n`);
+		return 0;
+	}
 	if (command === "show") return cmdShow(args);
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
+	if (command === "skill") return cmdSkill(args);
+	if (command === "doctor") return cmdDoctor();
 	if (!command || command === "-h" || command === "--help" || command === "help") {
 		process.stdout.write(HELP);
 		return 0;

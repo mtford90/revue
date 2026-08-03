@@ -19,7 +19,14 @@ its old/new snapshots instead of recomputing Git state during display.
 
 1. **The current directory is a git repo.** Run `git rev-parse --is-inside-work-tree`. If it does
    not print `true`, stop.
-2. **`revue` is runnable.** From the Revue repo: `bun run revue --help`.
+2. **`revue` is runnable.** Run `revue --version`. If the command is missing, tell the user to
+   install the revue CLI (see the revue README for installation options) and stop — never download
+   or install the binary yourself. From a checkout of the Revue repo, `bun run revue` works
+   instead of an installed binary.
+3. **This skill matches the CLI.** The installed copy of this skill is written by
+   `revue skill install` and stamped with the CLI version that produced it. If `revue show`
+   rejects a chapters file this skill wrote, suggest re-running `revue skill install` (or
+   `revue doctor` to diagnose) before retrying.
 
 ## Step 1 — Prepare the run
 

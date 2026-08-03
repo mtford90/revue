@@ -380,3 +380,46 @@ test("show names its themes and refuses an unknown one before touching the run",
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("skill install writes a version-stamped copy at the repository root and is idempotent", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-skill-"));
+	try {
+		await git(root, "init", "-b", "main");
+		const nested = join(root, "packages");
+		await mkdir(nested);
+
+		const installed = await run(nested, ["skill", "install"]);
+		expect(installed).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(installed.stdout).toContain("skill installed");
+
+		const skillPath = join(root, ".claude", "skills", "revue-chapters", "SKILL.md");
+		const contents = await Bun.file(skillPath).text();
+		expect(contents).toMatch(/^---\nrevue-version: \d+\.\d+\.\d+\n/);
+		expect(contents).toContain("# revue-chapters");
+
+		const repeated = await run(nested, ["skill", "install"]);
+		expect(repeated).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(repeated.stdout).toContain("already up to date");
+		expect(await Bun.file(skillPath).text()).toBe(contents);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("doctor reports dependency and skill state and exits by git availability", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-doctor-"));
+	try {
+		await git(root, "init", "-b", "main");
+		const before = await run(root, ["doctor"]);
+		expect(before.exitCode).toBe(0);
+		expect(before.stdout).toContain("git: ok");
+		expect(before.stdout).toContain("skill project: not installed");
+
+		await run(root, ["skill", "install"]);
+		const after = await run(root, ["doctor"]);
+		expect(after.exitCode).toBe(0);
+		expect(after.stdout).toMatch(/skill project: ok \(\d+\.\d+\.\d+\)/);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

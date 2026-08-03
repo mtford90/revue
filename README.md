@@ -11,18 +11,24 @@ Everything happens on your machine.
 
 ## Install
 
-Requires [Bun](https://bun.sh) ≥ 1.3.
-
 ```bash
-bun install
+brew install mtford90/tap/revue
 ```
+
+Prebuilt executables for macOS (arm64 and x64) and Linux x64, with checksums, are on the
+[releases page](https://github.com/mtford90/revue/releases). Git is required for `revue prep`;
+[difftastic](https://difftastic.wilfred.me.uk/) is optional and enables the Semantic view
+(`brew install difftastic`).
+
+To run from a checkout instead, install [Bun](https://bun.sh) ≥ 1.3, `bun install`, and prefix
+the commands below with `bun run`.
 
 Register the chapter-writing agent skill (auto-detects your coding agents):
 
 ```bash
-bun run revue skill install          # project scope
-bun run revue skill install --user   # user scope
-bun run revue doctor                 # check the skill and dependencies
+revue skill install          # project scope
+revue skill install --user   # user scope
+revue doctor                 # check the skill and dependencies
 ```
 
 ## Quick start

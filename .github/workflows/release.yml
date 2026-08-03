@@ -45,10 +45,12 @@ jobs:
         run: |
           staging="dist/revue-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "$staging"
-          cp dist/revue README.md "$staging/"
-          for pkg in tui diff-renderer theme; do
+          cp dist/revue README.md LICENSE "$staging/"
+          for pkg in tui diff-renderer theme types; do
             cp "packages/$pkg/THIRD_PARTY_NOTICES.md" "$staging/THIRD_PARTY_NOTICES-$pkg.md"
           done
+          cp skills/revue-chapters/THIRD_PARTY_NOTICES.md "$staging/THIRD_PARTY_NOTICES-skill.md"
+          bun scripts/collect-licenses.ts "$staging/BUNDLED_LICENSES.md"
           tar -czf "$staging.tar.gz" -C "$staging" .
       - uses: actions/upload-artifact@v4
         with:

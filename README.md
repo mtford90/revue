@@ -102,3 +102,9 @@ unreviewed · `t` themes · `F10` menu · `?` full keymap.
 Built with [@pierre/diffs](https://github.com/pierrecomputer/diffs), renderer concepts adapted
 from [hunk](https://github.com/modem-dev/hunk) (MIT), and the chapter model + skill from
 [stage-cli](https://github.com/ReviewStage/stage-cli) (MIT). Thanks to all three.
+
+## Licence
+
+MIT — see [`LICENSE`](LICENSE). Adapted material is credited in the `THIRD_PARTY_NOTICES.md`
+files beside the packages that adapt it, and release archives additionally carry
+`BUNDLED_LICENSES.md` with the licence of every dependency compiled into the executable.

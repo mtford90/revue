@@ -2,10 +2,11 @@
 
 Before changing this repository, read these files completely:
 
-1. `README.md` for the product, current capabilities, commands, and roadmap.
-2. `CONTEXT.md` for domain language and load-bearing decisions.
-3. `docs/testing.md` before adding, changing, or reviewing tests.
-4. Relevant records in `docs/adr/` before changing architecture.
+1. `README.md` for the product, install, and the core review loop.
+2. `docs/guide.md` for current capabilities in detail, commands, and the roadmap.
+3. `CONTEXT.md` for domain language and load-bearing decisions.
+4. `docs/testing.md` before adding, changing, or reviewing tests.
+5. Relevant records in `docs/adr/` before changing architecture.
 
 Do not rely on a compacted summary in place of these files. Re-read them when the task changes their subject area. If the documents conflict, stop and surface the conflict rather than silently choosing one.
 

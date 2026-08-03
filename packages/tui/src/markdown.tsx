@@ -1,5 +1,5 @@
 import { createTextAttributes } from "@opentui/core";
-import { theme } from "./theme.ts";
+import { useTheme } from "./theme.ts";
 
 // Narration is authored as prose with light Markdown emphasis. The terminal has
 // no renderer for it, so the markers would otherwise show up verbatim.
@@ -30,18 +30,20 @@ const spanAttributes = (style: InlineStyle | undefined) =>
 	createTextAttributes({ bold: style === "bold", italic: style === "italic" });
 
 /** One paragraph of narration with `code`, **bold** and *italic* runs styled. */
-export function Narration({ text, fg = theme.text }: { text: string; fg?: string }) {
+export function Narration({ text, fg }: { text: string; fg?: string }) {
+	const theme = useTheme();
+	const color = fg ?? theme.text;
 	const spans = parseInline(text);
 	if (spans.length <= 1 && !spans[0]?.style) {
-		return <text fg={fg}>{text}</text>;
+		return <text fg={color}>{text}</text>;
 	}
 	return (
-		<text fg={fg}>
+		<text fg={color}>
 			{spans.map((span, index) => (
 				<span
 					// biome-ignore lint/suspicious/noArrayIndexKey: repeated emphasis runs have no independent identity.
 					key={`${index}:${span.text}`}
-					fg={span.style === "code" ? theme.mauve : fg}
+					fg={span.style === "code" ? theme.heading : color}
 					attributes={spanAttributes(span.style)}
 				>
 					{span.text}

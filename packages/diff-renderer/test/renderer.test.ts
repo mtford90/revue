@@ -12,6 +12,8 @@ import {
 	sanitizeTerminalSpans,
 } from "../src/index.ts";
 
+const SYNTAX_THEME = "catppuccin-mocha";
+
 const PATCH = `diff --git a/src/example.ts b/src/example.ts
 index 1111111..2222222 100644
 --- a/src/example.ts
@@ -92,9 +94,10 @@ test("inclusive decorations affect only requested sides and lines and support mu
 			endLine: 13,
 		},
 	];
-	const rows = buildDiffRows(source, "split", decorations, "key-change").filter(
-		(row) => row.type === "split-line",
-	);
+	const rows = buildDiffRows(source, "split", {
+		decorations,
+		focusedDecorationId: "key-change",
+	}).filter((row) => row.type === "split-line");
 
 	expect(
 		rows.map((row) => ({
@@ -250,8 +253,8 @@ test("TypeScript patches produce syntax-coloured terminal spans", async () => {
 +const answer: number = 42;
 `);
 	if (!file) throw new Error("missing fixture");
-	await prepareSyntaxHighlighting([file]);
-	const row = buildDiffRows(file, "stack").find(
+	await prepareSyntaxHighlighting([file], SYNTAX_THEME);
+	const row = buildDiffRows(file, "stack", { syntaxTheme: SYNTAX_THEME }).find(
 		(candidate) => candidate.type === "stack-line" && candidate.cell.kind === "addition",
 	);
 	if (row?.type !== "stack-line") throw new Error("missing highlighted row");

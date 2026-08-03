@@ -14,6 +14,7 @@ import {
 	ReviewCoverageError,
 	RunArtifactError,
 } from "@revue/prep";
+import { isBundledShikiThemeId, resolveTheme, THEME_IDS } from "@revue/theme";
 import {
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
@@ -22,6 +23,7 @@ import {
 	type ThreadAuthor,
 } from "@revue/types";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
+import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { formatSummary } from "./summary.ts";
 import {
 	createThread,
@@ -51,7 +53,9 @@ working-tree changes when present and otherwise compares HEAD with the detected 
 The revue-chapters skill reads hunks.txt and writes chapters.json inside the printed run directory.
 `;
 
-const SHOW_HELP = `usage: revue show <run-directory> [--check]`;
+const SHOW_HELP = `usage: revue show <run-directory> [--check]
+                   [--theme <name> | --theme auto | --theme list]
+                   [--transparent-bg]`;
 const EXPORT_HELP = `usage: revue export <run-directory>
                      [--prologue | --chapter-id <id> | --chapter-order <number>]
                      [--output <path>]`;
@@ -477,13 +481,29 @@ async function cmdShow(args: string[]): Promise<number> {
 		process.stdout.write(`${SHOW_HELP}\n`);
 		return 0;
 	}
-	const unknownOption = args.find((argument) => argument.startsWith("-") && argument !== "--check");
-	const positionals = args.filter((argument) => !argument.startsWith("-"));
-	const directory = positionals[0];
-	if (unknownOption || positionals.length !== 1 || !directory) {
+	let options: CommandOptions;
+	try {
+		options = parseCommandOptions(args, ["--theme"], ["--check", "--transparent-bg"]);
+	} catch (error) {
 		process.stderr.write(
-			`${unknownOption ? `unknown show option: ${unknownOption}\n` : ""}${SHOW_HELP}\n`,
+			`${error instanceof Error ? error.message : String(error)}\n${SHOW_HELP}\n`,
 		);
+		return 1;
+	}
+	const requestedTheme = options.values.get("--theme");
+	if (requestedTheme === "list") {
+		process.stdout.write(`${THEME_IDS.join("\n")}\n`);
+		return 0;
+	}
+	if (requestedTheme && requestedTheme !== "auto" && !isBundledShikiThemeId(requestedTheme)) {
+		process.stderr.write(
+			`unknown theme: ${requestedTheme}\nRun \`revue show <run-directory> --theme list\` for the available names.\n`,
+		);
+		return 1;
+	}
+	const directory = options.positionals[0];
+	if (options.positionals.length !== 1 || !directory) {
+		process.stderr.write(`${SHOW_HELP}\n`);
 		return 1;
 	}
 
@@ -513,10 +533,19 @@ async function cmdShow(args: string[]): Promise<number> {
 		throw error;
 	}
 
-	if (args.includes("--check") || !process.stdout.isTTY) {
+	if (options.booleans.has("--check") || !process.stdout.isTTY) {
 		process.stdout.write(`${formatSummary(run.chapters)}\n`);
 		return 0;
 	}
+
+	const preferencesPath = defaultPreferencesPath();
+	const preferences = await loadPreferences(preferencesPath);
+	const themeId = requestedTheme ?? preferences.themeId;
+	const transparentSurfaces =
+		options.booleans.has("--transparent-bg") || preferences.transparentBackground === true;
+	// The terminal has not reported its own background yet, so highlight against the theme the
+	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
+	const startupTheme = resolveTheme(themeId, null);
 
 	const [{ runApp }, { preparePatch }, { generateSemanticDiff }, { openFileStore }] =
 		await Promise.all([
@@ -525,14 +554,18 @@ async function cmdShow(args: string[]): Promise<number> {
 			import("./semantic.ts"),
 			import("./viewState.ts"),
 		]);
-	const diffFiles = await preparePatch(run.patch);
+	const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme);
 	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
 	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
 	const humanAuthor = resolveHumanAuthor(repositoryRootForRun(directory));
 	await runApp(run.chapters, {
 		diffFiles,
-		loadSemanticDiff: (width) => generateSemanticDiff(run, width),
+		loadSemanticDiff: (width, palette) => generateSemanticDiff(run, width, palette),
 		initialViewState: store.get(),
+		resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance),
+		initialSyntaxTheme: startupTheme.syntaxTheme,
+		transparentSurfaces,
+		onThemeChange: (next) => savePreferences(preferencesPath, { ...preferences, themeId: next.id }),
 		initialThreads: threads,
 		threadActions: threadStore,
 		humanAuthor,

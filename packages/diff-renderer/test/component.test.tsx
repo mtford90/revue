@@ -1,9 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
+import { resolveTheme } from "@revue/theme";
 import { act } from "react";
 import { DiffBody, DiffFileHeader, parsePatch } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const theme = resolveTheme("catppuccin-mocha");
 
 const activeRenderers: Awaited<ReturnType<typeof renderOpenTui>>["renderer"][] = [];
 
@@ -36,6 +39,7 @@ test("focused ranges render visibly on only the exact requested line", async () 
 	const t = await testRender(
 		<DiffBody
 			file={file}
+			theme={theme}
 			layout="stack"
 			width={60}
 			decorations={[
@@ -74,6 +78,7 @@ test("stack context focus uses the requested side's visible highlight", async ()
 	const t = await testRender(
 		<DiffBody
 			file={file}
+			theme={theme}
 			layout="stack"
 			width={60}
 			decorations={[
@@ -96,10 +101,14 @@ test("stack context focus uses the requested side's visible highlight", async ()
 		.captureSpans()
 		.lines[contextIndex]?.spans.find((span) => span.text.includes("keep three"))?.bg;
 
+	const unfocusedIndex = lines.findIndex((line) => line.includes("keep one"));
+	const unfocusedBackground = t
+		.captureSpans()
+		.lines[unfocusedIndex]?.spans.find((span) => span.text.includes("keep one"))?.bg;
+
 	expect(lines[contextIndex]).toContain("▌");
-	expect(contextBackground?.r).toBeCloseTo(49 / 255);
-	expect(contextBackground?.g).toBeCloseTo(91 / 255);
-	expect(contextBackground?.b).toBeCloseTo(66 / 255);
+	expect(contextBackground).toBeDefined();
+	expect(contextBackground).not.toEqual(unfocusedBackground);
 });
 
 test("split rows keep one divider column at odd widths regardless of content length", async () => {
@@ -115,7 +124,7 @@ test("split rows keep one divider column at odd widths regardless of content len
 	const file = parsePatch(unevenPatch)[0];
 	if (!file) throw new Error("missing fixture");
 	const width = 41;
-	const t = await testRender(<DiffBody file={file} layout="split" width={width} />, {
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="split" width={width} />, {
 		width,
 		height: 8,
 	});
@@ -135,6 +144,7 @@ test("showLineNumbers false hides old and new number gutters in both layouts", a
 		const t = await testRender(
 			<DiffBody
 				file={file}
+				theme={theme}
 				layout={layout}
 				width={60}
 				showLineNumbers={false}
@@ -169,6 +179,7 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 	const t = await testRender(
 		<DiffBody
 			file={file}
+			theme={theme}
 			layout="stack"
 			width={60}
 			onRangeSelect={(range) => selections.push(range)}
@@ -216,6 +227,7 @@ test("dragging source text remains terminal text selection instead of range sele
 	const t = await testRender(
 		<DiffBody
 			file={file}
+			theme={theme}
 			layout="stack"
 			width={60}
 			onRangeSelect={(range) => selections.push(range)}
@@ -247,6 +259,7 @@ test("multiple inline attachments share an anchor and expose its gutter count", 
 	const t = await testRender(
 		<DiffBody
 			file={file}
+			theme={theme}
 			layout="stack"
 			width={60}
 			inlineAttachments={[
@@ -275,19 +288,22 @@ rename to new.ts
 `);
 	if (!binary || !rename) throw new Error("missing fixture");
 
-	const body = await testRender(<DiffBody file={binary} width={50} />, { width: 50, height: 2 });
+	const body = await testRender(<DiffBody file={binary} theme={theme} width={50} />, {
+		width: 50,
+		height: 2,
+	});
 	await body.renderOnce();
 	expect(body.captureCharFrame()).toContain("Binary file differs.");
 	expect(body.captureCharFrame()).not.toContain("No changes.");
 
-	const header = await testRender(<DiffFileHeader file={rename} width={50} />, {
+	const header = await testRender(<DiffFileHeader file={rename} theme={theme} width={50} />, {
 		width: 50,
 		height: 2,
 	});
 	await header.renderOnce();
 	expect(header.captureCharFrame()).toContain("old.ts -> new.ts");
 
-	const renameBody = await testRender(<DiffBody file={rename} width={50} />, {
+	const renameBody = await testRender(<DiffBody file={rename} theme={theme} width={50} />, {
 		width: 50,
 		height: 2,
 	});
@@ -305,7 +321,7 @@ test("line numbers stay in one column whether or not the content overflows", asy
 +short again
 `);
 	if (!file) throw new Error("missing fixture");
-	const t = await testRender(<DiffBody file={file} layout="stack" width={40} />, {
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={40} />, {
 		width: 40,
 		height: 8,
 	});
@@ -326,7 +342,7 @@ new file mode 100644
 +second
 `);
 	if (!added) throw new Error("missing fixture");
-	const t = await testRender(<DiffBody file={added} layout="stack" width={40} />, {
+	const t = await testRender(<DiffBody file={added} theme={theme} layout="stack" width={40} />, {
 		width: 40,
 		height: 6,
 	});

@@ -1,5 +1,6 @@
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { createDiffFile } from "@revue/diff-model";
+import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
 import { decorationAnchorId, findFocusedDecorationAnchor } from "./decorations.ts";
 import { buildDiffRows } from "./rows.ts";
@@ -17,29 +18,15 @@ import type {
 	RangeDecoration,
 } from "./types.ts";
 
-const palette = {
-	text: "#cdd6f4",
-	dim: "#6c7086",
-	panel: "#181825",
-	addition: "#1e3a2b",
-	deletion: "#452733",
-	focusAddition: "#315b42",
-	focusDeletion: "#6a3547",
-	selected: "#313244",
-	green: "#a6e3a1",
-	red: "#f38ba8",
-	accent: "#89b4fa",
-} as const;
-
 const lineNumber = (value: number | undefined, digits: number) =>
 	value === undefined ? " ".repeat(digits) : String(value).padStart(digits);
 
-function CellContent({ cell }: { cell: DiffCell }) {
+function CellContent({ cell, theme }: { cell: DiffCell; theme: Theme }) {
 	return (
 		<>
 			{cell.spans.map((span, index) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: immutable syntax spans have no independent identity.
-				<span key={`${index}:${span.text}`} fg={span.fg ?? palette.text}>
+				<span key={`${index}:${span.text}`} fg={span.fg ?? theme.text}>
 					{span.text}
 				</span>
 			))}
@@ -68,6 +55,7 @@ function Gutter({
 	showLineNumbers,
 	attachmentCount,
 	handlers,
+	theme,
 }: {
 	focused: boolean;
 	number: number | undefined;
@@ -75,10 +63,11 @@ function Gutter({
 	showLineNumbers: boolean;
 	attachmentCount: number;
 	handlers?: GutterHandlers;
+	theme: Theme;
 }) {
 	return (
 		<text
-			fg={focused ? palette.accent : palette.dim}
+			fg={focused ? theme.accent : theme.lineNumberFg}
 			wrapMode="none"
 			flexShrink={0}
 			selectable={false}
@@ -99,6 +88,7 @@ function SplitCell({
 	width,
 	attachmentCount,
 	handlers,
+	theme,
 }: {
 	cell: DiffCell;
 	side: DiffSide;
@@ -107,19 +97,20 @@ function SplitCell({
 	width: number;
 	attachmentCount: number;
 	handlers?: GutterHandlers;
+	theme: Theme;
 }) {
 	const focused = cell.focusedSides.includes(side);
 	const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
 	const sign = cell.kind === "addition" ? "+" : cell.kind === "deletion" ? "-" : " ";
 	const backgroundColor = focused
 		? side === "additions"
-			? palette.focusAddition
-			: palette.focusDeletion
+			? theme.addedContentBg
+			: theme.removedContentBg
 		: cell.kind === "addition"
-			? palette.addition
+			? theme.addedBg
 			: cell.kind === "deletion"
-				? palette.deletion
-				: undefined;
+				? theme.removedBg
+				: theme.contextBg;
 	return (
 		<box
 			width={width}
@@ -136,9 +127,10 @@ function SplitCell({
 				showLineNumbers={showLineNumbers}
 				attachmentCount={attachmentCount}
 				handlers={number === undefined ? undefined : handlers}
+				theme={theme}
 			/>
-			<text fg={palette.text} wrapMode="none" flexShrink={0} selectable>
-				{sign} <CellContent cell={cell} />
+			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable>
+				{sign} <CellContent cell={cell} theme={theme} />
 			</text>
 		</box>
 	);
@@ -151,6 +143,7 @@ function StackCell({
 	sides,
 	attachmentCounts,
 	interactions,
+	theme,
 }: {
 	cell: DiffCell;
 	digits: number;
@@ -158,19 +151,20 @@ function StackCell({
 	sides: DiffSide[];
 	attachmentCounts: AttachmentCounts;
 	interactions: CellInteractions;
+	theme: Theme;
 }) {
 	const oldFocused = cell.focusedSides.includes("deletions");
 	const newFocused = cell.focusedSides.includes("additions");
 	const sign = cell.kind === "addition" ? "+" : cell.kind === "deletion" ? "-" : " ";
 	const backgroundColor = oldFocused
-		? palette.focusDeletion
+		? theme.removedContentBg
 		: newFocused
-			? palette.focusAddition
+			? theme.addedContentBg
 			: cell.kind === "addition"
-				? palette.addition
+				? theme.addedBg
 				: cell.kind === "deletion"
-					? palette.deletion
-					: undefined;
+					? theme.removedBg
+					: theme.contextBg;
 	return (
 		<box
 			width="100%"
@@ -187,6 +181,7 @@ function StackCell({
 					showLineNumbers={showLineNumbers}
 					attachmentCount={attachmentCounts.deletions ?? 0}
 					handlers={cell.oldLineNumber === undefined ? undefined : interactions.deletions}
+					theme={theme}
 				/>
 			) : null}
 			{sides.includes("additions") ? (
@@ -197,10 +192,11 @@ function StackCell({
 					showLineNumbers={showLineNumbers}
 					attachmentCount={attachmentCounts.additions ?? 0}
 					handlers={cell.newLineNumber === undefined ? undefined : interactions.additions}
+					theme={theme}
 				/>
 			) : null}
-			<text fg={palette.text} wrapMode="none" flexShrink={0} selectable>
-				{sign} <CellContent cell={cell} />
+			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable>
+				{sign} <CellContent cell={cell} theme={theme} />
 			</text>
 		</box>
 	);
@@ -210,6 +206,7 @@ export interface DiffBodyProps {
 	file?: DiffFileInput;
 	layout?: DiffLayout;
 	width: number;
+	theme: Theme;
 	showLineNumbers?: boolean;
 	showHunkHeaders?: boolean;
 	selectedHunkIndex?: number;
@@ -247,6 +244,7 @@ export function DiffBody({
 	file,
 	layout = "split",
 	width,
+	theme,
 	showLineNumbers = true,
 	showHunkHeaders = true,
 	selectedHunkIndex = 0,
@@ -270,8 +268,14 @@ export function DiffBody({
 	const renderedFocusId = selectionDecoration?.id ?? focusedDecorationId;
 	const rows = useMemo(
 		() =>
-			normalized ? buildDiffRows(normalized, layout, renderedDecorations, renderedFocusId) : [],
-		[normalized, layout, renderedDecorations, renderedFocusId],
+			normalized
+				? buildDiffRows(normalized, layout, {
+						syntaxTheme: theme.syntaxTheme,
+						decorations: renderedDecorations,
+						focusedDecorationId: renderedFocusId,
+					})
+				: [],
+		[normalized, layout, theme.syntaxTheme, renderedDecorations, renderedFocusId],
 	);
 	const anchor = useMemo(
 		() =>
@@ -407,9 +411,9 @@ export function DiffBody({
 		};
 	};
 
-	if (!normalized) return <text fg={palette.dim}>No file selected.</text>;
+	if (!normalized) return <text fg={theme.muted}>No file selected.</text>;
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length) {
-		return <text fg={palette.dim}>{emptyBodyMessage(normalized)}</text>;
+		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
 	}
 
 	return (
@@ -423,8 +427,8 @@ export function DiffBody({
 			{rows.map((row) => {
 				if (row.type === "hunk-header") {
 					return showHunkHeaders ? (
-						<box key={row.key} width="100%" height={1} backgroundColor={palette.panel}>
-							<text fg={palette.accent} wrapMode="none" truncate>
+						<box key={row.key} width="100%" height={1} backgroundColor={theme.panel}>
+							<text fg={theme.accent} wrapMode="none" truncate>
 								{row.hunkIndex === selectedHunkIndex ? "▎" : " "}{" "}
 								{sanitizeTerminalLine(row.text).replaceAll("\t", "  ")}
 							</text>
@@ -443,7 +447,7 @@ export function DiffBody({
 								width="100%"
 								height={1}
 								flexDirection="row"
-								backgroundColor={selected ? palette.selected : undefined}
+								backgroundColor={selected ? theme.selectedHunk : undefined}
 							>
 								<SplitCell
 									cell={row.old}
@@ -453,8 +457,9 @@ export function DiffBody({
 									width={oldPaneWidth}
 									attachmentCount={counts.deletions ?? 0}
 									handlers={gutterHandlers(lineRange(row, "deletions"))}
+									theme={theme}
 								/>
-								<text fg={palette.dim}>│</text>
+								<text fg={theme.border}>│</text>
 								<SplitCell
 									cell={row.new}
 									side="additions"
@@ -463,6 +468,7 @@ export function DiffBody({
 									width={newPaneWidth}
 									attachmentCount={counts.additions ?? 0}
 									handlers={gutterHandlers(lineRange(row, "additions"))}
+									theme={theme}
 								/>
 							</box>
 							{attachments.map((attachment) => (
@@ -479,7 +485,7 @@ export function DiffBody({
 							id={id}
 							width="100%"
 							height={1}
-							backgroundColor={selected ? palette.selected : undefined}
+							backgroundColor={selected ? theme.selectedHunk : undefined}
 						>
 							<StackCell
 								cell={row.cell}
@@ -491,6 +497,7 @@ export function DiffBody({
 									deletions: gutterHandlers(lineRange(row, "deletions")),
 									additions: gutterHandlers(lineRange(row, "additions")),
 								}}
+								theme={theme}
 							/>
 						</box>
 						{attachments.map((attachment) => (
@@ -508,11 +515,12 @@ export function DiffBody({
 export interface DiffFileHeaderProps {
 	file: DiffFileInput;
 	width: number;
+	theme: Theme;
 	onSelect?: () => void;
 }
 
 /** Compact path and stats row used inside Revue's existing collapse shell. */
-export function DiffFileHeader({ file, width, onSelect }: DiffFileHeaderProps) {
+export function DiffFileHeader({ file, width, theme, onSelect }: DiffFileHeaderProps) {
 	const normalized = useMemo(() => createDiffFile(file), [file]);
 	const state =
 		normalized.metadata.type === "new"
@@ -532,17 +540,17 @@ export function DiffFileHeader({ file, width, onSelect }: DiffFileHeaderProps) {
 			paddingLeft={1}
 			flexDirection="row"
 			justifyContent="space-between"
-			backgroundColor={palette.panel}
+			backgroundColor={theme.panel}
 			onMouseUp={onSelect}
 		>
-			<text fg={palette.text} wrapMode="none" flexShrink={1} minWidth={0} truncate>
+			<text fg={theme.text} wrapMode="none" flexShrink={1} minWidth={0} truncate>
 				{sanitizeTerminalLine(path).replaceAll("\t", "  ")}
-				<span fg={palette.dim}>{state}</span>
+				<span fg={theme.muted}>{state}</span>
 			</text>
 			<text wrapMode="none" flexShrink={0} paddingLeft={1}>
-				<span fg={palette.green}>+{normalized.stats.additions}</span>
-				<span fg={palette.dim}> </span>
-				<span fg={palette.red}>-{normalized.stats.deletions}</span>
+				<span fg={theme.badgeAdded}>+{normalized.stats.additions}</span>
+				<span fg={theme.muted}> </span>
+				<span fg={theme.badgeRemoved}>-{normalized.stats.deletions}</span>
 				<span> </span>
 			</text>
 		</box>

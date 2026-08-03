@@ -8,7 +8,8 @@
 	},
 	"dependencies": {
 		"@pierre/diffs": "1.2.2",
-		"@revue/diff-model": "workspace:*"
+		"@revue/diff-model": "workspace:*",
+		"@revue/theme": "workspace:*"
 	},
 	"peerDependencies": {
 		"@opentui/core": "^0.1.89",

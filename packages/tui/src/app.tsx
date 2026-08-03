@@ -15,8 +15,16 @@ import {
 	type DiffLineRange,
 	decorationAnchorId,
 	findFocusedDecorationAnchor,
+	prepareSyntaxHighlighting,
 	type RangeDecoration,
 } from "@revue/diff-renderer";
+import {
+	type Appearance,
+	resolveTheme,
+	THEMES,
+	type Theme,
+	withTransparentSurfaces,
+} from "@revue/theme";
 import {
 	type Chapter,
 	emptyViewState,
@@ -42,8 +50,15 @@ import {
 } from "./layout.ts";
 import { Narration } from "./markdown.tsx";
 import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
-import { type SemanticDiffResult, terminalSafe } from "./semantic.ts";
-import { complexityColor, severityColor, theme } from "./theme.ts";
+import { type AnsiPalette, type SemanticDiffResult, terminalSafe } from "./semantic.ts";
+import {
+	complexityColor,
+	semanticAnsiPalette,
+	severityColor,
+	ThemeProvider,
+	useTheme,
+} from "./theme.ts";
+import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
 import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
 import {
 	chapterFilePaths,
@@ -89,6 +104,7 @@ const APP_KEYS = new Set([
 	"}",
 	"r",
 	"s",
+	"t",
 	"?",
 ]);
 // ── Page model ──────────────────────────────────────────────────────────────
@@ -124,6 +140,7 @@ function PageIndexRows({
 	vs: ViewState;
 	onSelect: (index: number) => void;
 }) {
+	const theme = useTheme();
 	return pages.map((page, index) => {
 		const active = index === current;
 		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
@@ -135,13 +152,13 @@ function PageIndexRows({
 				height={1}
 				width="100%"
 				flexDirection="row"
-				backgroundColor={active ? theme.surface : undefined}
+				backgroundColor={active ? theme.panelAlt : undefined}
 				onMouseDown={() => onSelect(index)}
 			>
-				<text flexShrink={0} fg={active ? theme.accent : theme.surface}>
+				<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
 					{active ? "▸" : " "}
 				</text>
-				<text flexShrink={0} fg={done ? theme.green : theme.dim}>
+				<text flexShrink={0} fg={done ? theme.badgeAdded : theme.muted}>
 					{page.kind === "chapter" ? `[${done ? "x" : " "}] ` : "    "}
 				</text>
 				<text
@@ -149,7 +166,7 @@ function PageIndexRows({
 					minWidth={0}
 					wrapMode="none"
 					truncate
-					fg={active ? theme.accent : done ? theme.green : theme.dim}
+					fg={active ? theme.accent : done ? theme.badgeAdded : theme.muted}
 				>
 					{label}
 				</text>
@@ -172,6 +189,7 @@ function PageIndex({
 	onSelect: (index: number) => void;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
 }) {
+	const theme = useTheme();
 	const rows = <PageIndexRows pages={pages} current={current} vs={vs} onSelect={onSelect} />;
 	if (pages.length <= PANEL_INDEX_MAX_ROWS) {
 		return (
@@ -188,7 +206,7 @@ function PageIndex({
 			width="100%"
 			paddingLeft={1}
 			scrollY
-			verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.surface } }}
+			verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.border } }}
 		>
 			{rows}
 		</scrollbox>
@@ -204,17 +222,18 @@ function NavButton({
 	enabled: boolean;
 	onPress: () => void;
 }) {
+	const theme = useTheme();
 	return (
 		<box
 			height={1}
 			flexShrink={0}
-			backgroundColor={enabled ? theme.surface : undefined}
+			backgroundColor={enabled ? theme.panelAlt : undefined}
 			onMouseDown={(event) => {
 				event.stopPropagation();
 				if (enabled) onPress();
 			}}
 		>
-			<text fg={enabled ? theme.accent : theme.dim}>{` ${label} `}</text>
+			<text fg={enabled ? theme.accent : theme.muted}>{` ${label} `}</text>
 		</box>
 	);
 }
@@ -241,6 +260,7 @@ function PageNavStrip({
 	onNavigatePage: (index: number) => void;
 	onToggleChapterReview: () => void;
 }) {
+	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
 	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
 	const compact = width < COMPACT_STRIP_WIDTH;
@@ -255,7 +275,7 @@ function PageNavStrip({
 				{chapter ? (
 					<text
 						flexShrink={0}
-						fg={chapterReviewed ? theme.green : theme.dim}
+						fg={chapterReviewed ? theme.badgeAdded : theme.muted}
 						onMouseDown={onToggleChapterReview}
 					>
 						[{chapterReviewed ? "x" : " "}]{" "}
@@ -265,7 +285,7 @@ function PageNavStrip({
 					{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
 				</text>
 			</box>
-			<text flexShrink={0} fg={theme.dim}>
+			<text flexShrink={0} fg={theme.muted}>
 				{`${reviewed}/${chapterCount}${compact ? "" : " reviewed"} `}
 			</text>
 			<NavButton
@@ -303,10 +323,11 @@ function ChapterBrief({
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
 }) {
+	const theme = useTheme();
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
-			<Narration text={chapter.summary} fg={theme.dim} />
+			<Narration text={chapter.summary} fg={theme.muted} />
 			<KeyChanges
 				chapter={chapter}
 				vs={vs}
@@ -371,6 +392,7 @@ function ChapterPanel({
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
 }) {
+	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
 	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
 	const compact = width < COMPACT_NAV_WIDTH;
@@ -379,7 +401,7 @@ function ChapterPanel({
 	return (
 		<box
 			border={["right"]}
-			borderColor={theme.surface}
+			borderColor={theme.border}
 			flexDirection="column"
 			width={width}
 			flexShrink={0}
@@ -392,7 +414,7 @@ function ChapterPanel({
 					revue
 				</text>
 				<box flexGrow={1} minWidth={0} />
-				<text flexShrink={0} fg={theme.dim}>
+				<text flexShrink={0} fg={theme.muted}>
 					{reviewed}/{chapterCount} reviewed
 				</text>
 			</box>
@@ -404,7 +426,7 @@ function ChapterPanel({
 				paddingRight={1}
 				onMouseDown={onToggleIndex}
 			>
-				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.mauve}>
+				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.heading}>
 					{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
 				</text>
 			</box>
@@ -417,7 +439,7 @@ function ChapterPanel({
 					scrollRef={indexScrollRef}
 				/>
 			) : null}
-			<text flexShrink={0} fg={theme.surface}>
+			<text flexShrink={0} fg={theme.border}>
 				{rule}
 			</text>
 			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
@@ -430,7 +452,7 @@ function ChapterPanel({
 					{chapter ? (
 						<text
 							flexShrink={0}
-							fg={chapterReviewed ? theme.green : theme.dim}
+							fg={chapterReviewed ? theme.badgeAdded : theme.muted}
 							onMouseDown={onToggleChapterReview}
 						>
 							[{chapterReviewed ? "x" : " "}]{" "}
@@ -477,8 +499,9 @@ function ChapterPanel({
 
 // ── Prologue ────────────────────────────────────────────────────────────────
 function Badge({ label, color }: { label: string; color: string }) {
+	const theme = useTheme();
 	return (
-		<text flexShrink={0} fg={theme.base} bg={color}>
+		<text flexShrink={0} fg={theme.background} bg={color}>
 			{` ${label} `}
 		</text>
 	);
@@ -515,9 +538,10 @@ function PrologueSection({
 	gap?: number;
 	children: ReactNode;
 }) {
+	const theme = useTheme();
 	return (
 		<box flexDirection="column" width="100%">
-			<text fg={theme.mauve} attributes={createTextAttributes({ bold: true })}>
+			<text fg={theme.heading} attributes={createTextAttributes({ bold: true })}>
 				{title.toUpperCase()}
 			</text>
 			<box flexDirection="column" width="100%" gap={gap} paddingTop={1}>
@@ -536,6 +560,7 @@ function PrologueChapters({
 	vs: ViewState;
 	onSelectPage: (index: number) => void;
 }) {
+	const theme = useTheme();
 	return pages.flatMap((page, index) =>
 		page.kind === "chapter"
 			? [
@@ -548,7 +573,7 @@ function PrologueChapters({
 					>
 						<text
 							flexShrink={0}
-							fg={isChapterReviewed(vs, page.chapter.id) ? theme.green : theme.dim}
+							fg={isChapterReviewed(vs, page.chapter.id) ? theme.badgeAdded : theme.muted}
 						>
 							{`[${isChapterReviewed(vs, page.chapter.id) ? "x" : " "}] ${page.chapter.order}. `}
 						</text>
@@ -572,21 +597,22 @@ function PrologueView({
 	vs: ViewState;
 	onSelectPage: (index: number) => void;
 }) {
+	const theme = useTheme();
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
 			{prologue.motivation ? <Narration text={prologue.motivation} fg={theme.text} /> : null}
 			{prologue.outcome ? (
-				<Hanging marker="→ " markerColor={theme.green}>
-					<Narration text={prologue.outcome} fg={theme.green} />
+				<Hanging marker="→ " markerColor={theme.badgeAdded}>
+					<Narration text={prologue.outcome} fg={theme.badgeAdded} />
 				</Hanging>
 			) : null}
 			<box flexDirection="row" width="100%">
 				<Badge
 					label={`complexity ${prologue.complexity.level}`}
-					color={complexityColor[prologue.complexity.level] ?? theme.surface}
+					color={complexityColor(theme, prologue.complexity.level)}
 				/>
 				<box flexGrow={1} minWidth={0} paddingLeft={1}>
-					<Narration text={prologue.complexity.reasoning} fg={theme.dim} />
+					<Narration text={prologue.complexity.reasoning} fg={theme.muted} />
 				</box>
 			</box>
 
@@ -595,7 +621,7 @@ function PrologueView({
 					{prologue.keyChanges.map((kc) => (
 						<Hanging key={kc.summary} marker="• " markerColor={theme.accent}>
 							<Narration text={kc.summary} fg={theme.text} />
-							<Narration text={kc.description} fg={theme.dim} />
+							<Narration text={kc.description} fg={theme.muted} />
 						</Hanging>
 					))}
 				</PrologueSection>
@@ -608,9 +634,9 @@ function PrologueView({
 							<box flexDirection="row" width="100%">
 								<Badge
 									label={fa.severity.toUpperCase()}
-									color={severityColor[fa.severity] ?? theme.surface}
+									color={severityColor(theme, fa.severity)}
 								/>
-								<text flexShrink={0} fg={theme.dim}>
+								<text flexShrink={0} fg={theme.muted}>
 									{` ${fa.type} `}
 								</text>
 								<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
@@ -618,7 +644,7 @@ function PrologueView({
 								</text>
 							</box>
 							<box paddingLeft={2} width="100%">
-								<Narration text={fa.description} fg={theme.dim} />
+								<Narration text={fa.description} fg={theme.muted} />
 							</box>
 						</box>
 					))}
@@ -626,8 +652,8 @@ function PrologueView({
 			) : null}
 
 			{prologue.diagram ? (
-				<box flexDirection="column" border borderColor={theme.surface} title=" diagram (mermaid) ">
-					<text fg={theme.dim}>{prologue.diagram}</text>
+				<box flexDirection="column" border borderColor={theme.border} title=" diagram (mermaid) ">
+					<text fg={theme.muted}>{prologue.diagram}</text>
 				</box>
 			) : null}
 
@@ -654,22 +680,23 @@ function FileList({
 	onSelect: (index: number) => void;
 	onToggleReview: (path: string) => void;
 }) {
+	const theme = useTheme();
 	const paths = chapterFilePaths(chapter);
 	return (
 		<box flexDirection="column">
-			<text fg={theme.mauve}>Files ({paths.length})</text>
+			<text fg={theme.heading}>Files ({paths.length})</text>
 			{paths.map((path, index) => {
 				const done = isFileReviewed(vs, chapter.id, path);
 				const active = index === selected;
 				const stat = stats.get(path);
 				return (
 					<box key={path} flexDirection="row" width="100%" height={1}>
-						<text flexShrink={0} fg={active ? theme.accent : theme.surface}>
+						<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
 							{active ? "▸" : " "}
 						</text>
 						<text
 							flexShrink={0}
-							fg={done ? theme.green : theme.dim}
+							fg={done ? theme.badgeAdded : theme.muted}
 							onMouseDown={() => onToggleReview(path)}
 						>
 							{`[${done ? "x" : " "}] `}
@@ -678,7 +705,7 @@ function FileList({
 							flexGrow={1}
 							flexShrink={1}
 							minWidth={0}
-							fg={active ? theme.accent : done ? theme.green : theme.dim}
+							fg={active ? theme.accent : done ? theme.badgeAdded : theme.muted}
 							wrapMode="none"
 							truncate
 							onMouseDown={() => onSelect(index)}
@@ -687,9 +714,9 @@ function FileList({
 						</text>
 						{stat ? (
 							<text flexShrink={0} paddingLeft={1}>
-								<span fg={theme.green}>+{stat.additions}</span>
+								<span fg={theme.badgeAdded}>+{stat.additions}</span>
 								<span> </span>
-								<span fg={theme.red}>-{stat.deletions}</span>
+								<span fg={theme.badgeRemoved}>-{stat.deletions}</span>
 							</text>
 						) : null}
 					</box>
@@ -750,21 +777,22 @@ function KeyChanges({
 	onFocus: (index: number) => void;
 	onToggle: (index: number) => void;
 }) {
+	const theme = useTheme();
 	if (!chapter.keyChanges.length) return null;
 	return (
 		<box flexDirection="column">
-			<text fg={theme.yellow}>What to review</text>
+			<text fg={theme.badgeModified}>What to review</text>
 			{chapter.keyChanges.map((kc, i) => {
 				const checked = isKeyChangeChecked(vs, chapter.id, i);
 				const active = i === selected;
 				return (
 					<box id={keyChangeId(chapter.id, i)} key={kc.content} flexDirection="row" width="100%">
-						<text flexShrink={0} fg={active ? theme.accent : theme.surface}>
+						<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
 							{active ? "▸" : " "}
 						</text>
 						<text
 							flexShrink={0}
-							fg={checked ? theme.green : theme.dim}
+							fg={checked ? theme.badgeAdded : theme.muted}
 							onMouseDown={(event) => {
 								event.stopPropagation();
 								onToggle(i);
@@ -775,7 +803,7 @@ function KeyChanges({
 						<box flexGrow={1} minWidth={0} onMouseDown={() => onFocus(i)}>
 							<Narration
 								text={`${i + 1}. ${kc.content}`}
-								fg={active ? theme.accent : checked ? theme.green : theme.text}
+								fg={active ? theme.accent : checked ? theme.badgeAdded : theme.text}
 							/>
 						</box>
 					</box>
@@ -806,16 +834,17 @@ function ThreadMessageView({
 	canDelete: boolean;
 	onDelete: (messageId: string) => void;
 }) {
+	const theme = useTheme();
 	return (
 		<box flexDirection="column">
-			<text fg={message.author.kind === THREAD_AUTHOR_KIND.AGENT ? theme.mauve : theme.accent}>
+			<text fg={message.author.kind === THREAD_AUTHOR_KIND.AGENT ? theme.heading : theme.accent}>
 				{message.author.kind === THREAD_AUTHOR_KIND.AGENT ? "Agent" : "Human"} ·{" "}
 				{message.author.name}
 			</text>
-			<text fg={dealtWith ? theme.dim : theme.text}>{message.body}</text>
+			<text fg={dealtWith ? theme.muted : theme.text}>{message.body}</text>
 			{canDelete ? (
 				<text
-					fg={theme.red}
+					fg={theme.badgeRemoved}
 					onMouseDown={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
@@ -844,16 +873,17 @@ function InlineThread({
 	onDeleteMessage: (threadId: string, messageId: string) => void;
 	onToggleStatus: (thread: ReviewThread) => void;
 }) {
+	const theme = useTheme();
 	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
 	return (
 		<box
 			flexDirection="column"
 			border={["left"]}
-			borderColor={dealtWith ? theme.green : theme.yellow}
+			borderColor={dealtWith ? theme.badgeAdded : theme.badgeModified}
 			paddingLeft={1}
 			marginLeft={2}
 		>
-			<text fg={dealtWith ? theme.green : theme.yellow}>
+			<text fg={dealtWith ? theme.badgeAdded : theme.badgeModified}>
 				{dealtWith ? "✓ Dealt with" : "! Open"} · Thread {thread.id}
 			</text>
 			{thread.messages.map((message, index) => (
@@ -890,7 +920,7 @@ function InlineThread({
 				</text>
 				<text> </text>
 				<text
-					fg={theme.red}
+					fg={theme.badgeRemoved}
 					onMouseDown={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
@@ -925,6 +955,7 @@ function ThreadComposer({
 	onSave: () => void;
 	onCancel: () => void;
 }) {
+	const theme = useTheme();
 	const cursorPositioned = useRef(false);
 	useEffect(() => {
 		if (cursorPositioned.current || !textareaRef.current) return;
@@ -955,8 +986,8 @@ function ThreadComposer({
 				focused
 				height={4}
 				placeholder="Write feedback…"
-				backgroundColor={theme.base}
-				focusedBackgroundColor={theme.base}
+				backgroundColor={theme.background}
+				focusedBackgroundColor={theme.background}
 				textColor={theme.text}
 				focusedTextColor={theme.text}
 				onContentChange={onContentChange}
@@ -972,13 +1003,13 @@ function ThreadComposer({
 					}
 				}}
 			/>
-			{notice ? <text fg={theme.red}>{notice}</text> : null}
+			{notice ? <text fg={theme.badgeRemoved}>{notice}</text> : null}
 			<box flexDirection="row">
-				<text fg={theme.green} onMouseDown={onSave}>
+				<text fg={theme.badgeAdded} onMouseDown={onSave}>
 					[Save Ctrl+Enter]
 				</text>
 				<text> </text>
-				<text fg={theme.dim} onMouseDown={onCancel}>
+				<text fg={theme.muted} onMouseDown={onCancel}>
 					[Cancel Escape]
 				</text>
 			</box>
@@ -991,6 +1022,7 @@ const fileHeaderId = (chapterId: string, index: number) =>
 
 function ChapterView({
 	chapter,
+	diffTheme,
 	diffFiles,
 	width,
 	diffPreference,
@@ -1014,6 +1046,7 @@ function ChapterView({
 	onToggleThreadStatus,
 }: {
 	chapter: Chapter;
+	diffTheme: Theme;
 	diffFiles: DiffFile[] | null;
 	width: number;
 	diffPreference: DiffLayoutPreference;
@@ -1036,6 +1069,7 @@ function ChapterView({
 	onDeleteThreadMessage: (threadId: string, messageId: string) => void;
 	onToggleThreadStatus: (thread: ReviewThread) => void;
 }) {
+	const theme = useTheme();
 	const chapterDiffFiles = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const paths = chapterFilePaths(chapter);
 	const focusedDecorationId = `key-change:${chapter.id}:${selectedKeyChange}`;
@@ -1090,7 +1124,7 @@ function ChapterView({
 						return (
 							<box key={diffFile.id} flexDirection="column" width="100%">
 								{streamIndex > 0 ? (
-									<text fg={theme.surface}>{"─".repeat(Math.max(1, width - 2))}</text>
+									<text fg={theme.border}>{"─".repeat(Math.max(1, width - 2))}</text>
 								) : null}
 								<box
 									id={fileHeaderId(chapter.id, fileIndex)}
@@ -1098,19 +1132,19 @@ function ChapterView({
 									height={1}
 									width="100%"
 								>
-									<text flexShrink={0} fg={focused ? theme.accent : theme.surface}>
+									<text flexShrink={0} fg={focused ? theme.accent : theme.panelAlt}>
 										{focused ? "▸" : " "}
 									</text>
 									<text
 										flexShrink={0}
-										fg={reviewed ? theme.green : theme.dim}
+										fg={reviewed ? theme.badgeAdded : theme.muted}
 										onMouseDown={() => onToggleFileReview(path)}
 									>
 										[{reviewed ? "x" : " "}]
 									</text>
 									<text
 										flexShrink={0}
-										fg={focused ? theme.accent : theme.dim}
+										fg={focused ? theme.accent : theme.muted}
 										onMouseDown={() => onToggleCollapse(path)}
 									>
 										{collapsed ? "▶" : "▼"}
@@ -1118,6 +1152,7 @@ function ChapterView({
 									<box flexGrow={1} minWidth={0}>
 										<DiffFileHeader
 											file={diffFile}
+											theme={diffTheme}
 											width={Math.max(1, width - 7)}
 											onSelect={() => onSelectFile(fileIndex)}
 										/>
@@ -1126,6 +1161,7 @@ function ChapterView({
 								{collapsed ? null : (
 									<DiffBody
 										file={diffFile}
+										theme={diffTheme}
 										layout={layoutForFile({
 											file: diffFile,
 											preference: diffPreference,
@@ -1179,6 +1215,7 @@ function SemanticChapterView({
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
 }) {
+	const theme = useTheme();
 	const paths = chapterFilePaths(chapter);
 	const files = paths.flatMap((path) => {
 		const file = semantic.files.find((candidate) => candidate.path === path);
@@ -1186,11 +1223,11 @@ function SemanticChapterView({
 	});
 	return (
 		<box flexDirection="column" gap={1}>
-			<text fg={theme.yellow}>
+			<text fg={theme.badgeModified}>
 				Read-only semantic view · key-change anchors, exact range highlights, and threads are
 				Patch-only
 			</text>
-			<text fg={theme.dim}>{semantic.version}</text>
+			<text fg={theme.muted}>{semantic.version}</text>
 			{files.map((file, streamIndex) => {
 				const fileIndex = paths.indexOf(file.path);
 				const focused = fileIndex === selectedFile;
@@ -1199,19 +1236,19 @@ function SemanticChapterView({
 				const lines = keyedSemanticLines(file.lines);
 				return (
 					<box key={file.path} flexDirection="column" width="100%">
-						{streamIndex > 0 ? <text fg={theme.surface}>{"─".repeat(20)}</text> : null}
+						{streamIndex > 0 ? <text fg={theme.border}>{"─".repeat(20)}</text> : null}
 						<box
 							id={fileHeaderId(chapter.id, fileIndex)}
 							flexDirection="row"
 							height={1}
 							width="100%"
 						>
-							<text flexShrink={0} fg={focused ? theme.accent : theme.surface}>
+							<text flexShrink={0} fg={focused ? theme.accent : theme.panelAlt}>
 								{focused ? "▸" : " "}
 							</text>
 							<text
 								flexShrink={0}
-								fg={reviewed ? theme.green : theme.dim}
+								fg={reviewed ? theme.badgeAdded : theme.muted}
 								onMouseDown={() => onToggleFileReview(file.path)}
 							>
 								[{reviewed ? "x" : " "}]
@@ -1221,7 +1258,7 @@ function SemanticChapterView({
 								minWidth={0}
 								wrapMode="none"
 								truncate
-								fg={focused ? theme.accent : theme.dim}
+								fg={focused ? theme.accent : theme.muted}
 								onMouseDown={() => onToggleCollapse(file.path)}
 							>
 								{collapsed ? "▶" : "▼"} {file.path}
@@ -1232,7 +1269,7 @@ function SemanticChapterView({
 								{lines.map(({ key, line }, index) => (
 									<text
 										key={`${file.path}:${key}`}
-										fg={index === 0 ? theme.mauve : theme.text}
+										fg={index === 0 ? theme.heading : theme.text}
 										wrapMode="none"
 										onMouseDown={() => onSelectFile(fileIndex)}
 									>
@@ -1299,7 +1336,10 @@ const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
 			"anchors, exact range highlights, and threads are Patch-only",
 		],
 	},
-	{ title: "Menus", lines: ["F10 · File, Navigate, View, Help", "? shortcuts · q/esc quit"] },
+	{
+		title: "Menus",
+		lines: ["t theme picker", "F10 · File, Navigate, View, Help", "? shortcuts · q/esc quit"],
+	},
 ];
 
 const SHORTCUT_ROWS = SHORTCUT_SECTIONS.reduce(
@@ -1320,6 +1360,7 @@ function HelpModal({
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
 	onClose: () => void;
 }) {
+	const theme = useTheme();
 	const width = Math.max(20, Math.min(HELP_MODAL_MAX_WIDTH, terminalWidth - 4));
 	const height = Math.max(5, Math.min(SHORTCUT_ROWS + 3, terminalHeight - 4));
 	return (
@@ -1347,7 +1388,7 @@ function HelpModal({
 				zIndex={70}
 				border
 				borderColor={theme.accent}
-				backgroundColor={theme.base}
+				backgroundColor={theme.background}
 				title=" Keyboard shortcuts "
 				flexDirection="column"
 				onMouseDown={(event) => event.stopPropagation()}
@@ -1360,11 +1401,11 @@ function HelpModal({
 					paddingLeft={1}
 					paddingRight={1}
 					scrollY
-					verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.surface } }}
+					verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.border } }}
 				>
 					{SHORTCUT_SECTIONS.map((section) => (
 						<box key={section.title} flexDirection="column" width="100%">
-							<text fg={theme.mauve}>{section.title}</text>
+							<text fg={theme.heading}>{section.title}</text>
 							{section.lines.map((line) => (
 								<text key={line} fg={theme.text} wrapMode="none" truncate>
 									{`  ${line}`}
@@ -1374,7 +1415,7 @@ function HelpModal({
 					))}
 				</scrollbox>
 				<box flexShrink={0} height={1} paddingLeft={1}>
-					<text fg={theme.dim}>? or Esc to close</text>
+					<text fg={theme.muted}>? or Esc to close</text>
 				</box>
 			</box>
 		</>
@@ -1404,22 +1445,36 @@ export function App({
 	diffFiles = null,
 	loadSemanticDiff,
 	initialViewState = emptyViewState(),
+	initialTheme = resolveTheme(undefined),
+	initialSyntaxTheme = initialTheme.syntaxTheme,
+	transparentSurfaces = false,
 	initialThreads = [],
 	threadActions,
 	humanAuthor = defaultHumanAuthor,
 	onViewStateChange,
+	onThemeChange,
 	onQuit,
 }: {
 	file: RevueChaptersFile;
 	diffFiles?: DiffFile[] | null;
-	loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
+	loadSemanticDiff?: (width: number, palette: AnsiPalette) => Promise<SemanticDiffResult>;
 	initialViewState?: ViewState;
+	initialTheme?: Theme;
+	/** The syntax theme the caller already prepared highlights for. */
+	initialSyntaxTheme?: string;
+	transparentSurfaces?: boolean;
 	initialThreads?: ReviewThread[];
 	threadActions?: ThreadActions;
 	humanAuthor?: ThreadAuthor;
 	onViewStateChange?: (next: ViewState) => void;
+	onThemeChange?: (next: Theme) => void;
 	onQuit?: () => void;
 }) {
+	const [chosenTheme, setChosenTheme] = useState(initialTheme);
+	const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
+	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
+	const shownTheme = previewTheme ?? chosenTheme;
+	const theme = transparentSurfaces ? withTransparentSurfaces(shownTheme) : shownTheme;
 	const pages = buildPages(file);
 	const chapters = pages.flatMap((candidate) =>
 		candidate.kind === "chapter" ? [candidate.chapter] : [],
@@ -1472,6 +1527,25 @@ export function App({
 	const page = pages[current];
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
+	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
+	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
+	const [preparedSyntaxTheme, setPreparedSyntaxTheme] = useState(initialSyntaxTheme);
+	const diffTheme =
+		preparedSyntaxTheme === theme.syntaxTheme
+			? theme
+			: { ...theme, syntaxTheme: preparedSyntaxTheme };
+
+	useEffect(() => {
+		if (!diffFiles || preparedSyntaxTheme === theme.syntaxTheme) return;
+		let current = true;
+		const syntaxTheme = theme.syntaxTheme;
+		prepareSyntaxHighlighting(diffFiles, syntaxTheme).then(() => {
+			if (current) setPreparedSyntaxTheme(syntaxTheme);
+		});
+		return () => {
+			current = false;
+		};
+	}, [diffFiles, preparedSyntaxTheme, theme.syntaxTheme]);
 
 	useEffect(() => {
 		const scroll = pageScroll.current;
@@ -1810,6 +1884,34 @@ export function App({
 	function showPatch() {
 		changeViewMode("patch");
 	}
+	function openThemePicker() {
+		const selected = Math.max(
+			0,
+			THEMES.findIndex((candidate) => candidate.id === chosenTheme.id),
+		);
+		setThemePicker({ selected });
+		setPreviewTheme(null);
+	}
+	function moveThemePreview(delta: number) {
+		if (!themePicker) return;
+		const selected = (themePicker.selected + delta + THEMES.length) % THEMES.length;
+		setThemePicker({ selected });
+		setPreviewTheme(THEMES[selected] ?? null);
+	}
+	function chooseTheme(index: number) {
+		const next = THEMES[index];
+		if (!next) return;
+		setChosenTheme(next);
+		setPreviewTheme(null);
+		setThemePicker(null);
+		// Difftastic's output was captured against the previous palette.
+		setSemantic(null);
+		onThemeChange?.(next);
+	}
+	function closeThemePicker() {
+		setThemePicker(null);
+		setPreviewTheme(null);
+	}
 	async function showSemantic() {
 		cancelThreadDraft();
 		if (semantic) {
@@ -1827,7 +1929,7 @@ export function App({
 		setSemanticLoading(true);
 		setSemanticNotice("Loading read-only semantic diff from pinned run snapshots...");
 		try {
-			const result = await loadSemanticDiff(contentWidth);
+			const result = await loadSemanticDiff(contentWidth, semanticAnsiPalette(theme));
 			setSemantic(result);
 			setSemanticNotice(null);
 			changeViewMode("semantic");
@@ -1863,6 +1965,8 @@ export function App({
 		toggleHelp: toggleShortcutHelp,
 		showPatch,
 		showSemantic: () => void showSemantic(),
+		chooseTheme: openThemePicker,
+		themeLabel: chosenTheme.label,
 	});
 	const menu = useMenuController(menus);
 	const threadComposer = threadDraft ? (
@@ -1908,9 +2012,17 @@ export function App({
 			return;
 		}
 
-		if (APP_KEYS.has(name) || menu.activeMenuId || (name && /^[1-9]$/.test(name))) {
+		if (APP_KEYS.has(name) || menu.activeMenuId || themePicker || (name && /^[1-9]$/.test(name))) {
 			key.preventDefault();
 			key.stopPropagation();
+		}
+
+		if (themePicker) {
+			if (name === "escape" || name === "q") closeThemePicker();
+			else if (name === "up" || name === "k") moveThemePreview(-1);
+			else if (name === "down" || name === "j") moveThemePreview(1);
+			else if (name === "return") chooseTheme(themePicker.selected);
+			return;
 		}
 
 		if (showHelp && !menu.activeMenuId) {
@@ -1947,6 +2059,8 @@ export function App({
 			toggleShortcutHelp();
 		} else if (name === "s") {
 			toggleSidebar();
+		} else if (name === "t") {
+			openThemePicker();
 		} else if (name === "q" || name === "escape") {
 			onQuit?.();
 		} else if (name === "pageup" || name === "pagedown") {
@@ -1998,192 +2112,222 @@ export function App({
 	const reviewed = reviewedChapterCount(vs, chapters);
 
 	return (
-		<box
-			flexDirection="column"
-			width="100%"
-			height="100%"
-			onMouseDrag={resizePanel}
-			onMouseDragEnd={finishPanelResize}
-			onMouseUp={finishPanelResize}
-		>
-			<MenuBar
-				activeMenuId={menu.activeMenuId}
-				terminalWidth={width}
-				viewMode={viewMode}
-				onHover={(id) => {
-					if (menu.activeMenuId) menu.open(id);
-				}}
-				onToggle={(id) => {
-					chapterNavigationPrefix.current = null;
-					menu.toggle(id);
-				}}
-				onClose={menu.close}
-			/>
-			{showChapterPanel ? null : (
-				<PageNavStrip
-					page={page}
-					pages={pages}
-					current={current}
-					chapterCount={chapters.length}
-					reviewed={reviewed}
-					width={width}
-					vs={vs}
-					onNavigatePage={goto}
-					onToggleChapterReview={toggleChapterReview}
+		<ThemeProvider value={theme}>
+			<box
+				flexDirection="column"
+				width="100%"
+				height="100%"
+				backgroundColor={theme.background}
+				onMouseDrag={resizePanel}
+				onMouseDragEnd={finishPanelResize}
+				onMouseUp={finishPanelResize}
+			>
+				<MenuBar
+					activeMenuId={menu.activeMenuId}
+					terminalWidth={width}
+					viewMode={viewMode}
+					onHover={(id) => {
+						if (menu.activeMenuId) menu.open(id);
+					}}
+					onToggle={(id) => {
+						chapterNavigationPrefix.current = null;
+						menu.toggle(id);
+					}}
+					onClose={menu.close}
 				/>
-			)}
-			<box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
-				{showChapterPanel ? (
-					<ChapterPanel
+				{showChapterPanel ? null : (
+					<PageNavStrip
 						page={page}
 						pages={pages}
 						current={current}
 						chapterCount={chapters.length}
-						width={panelWidth}
-						vs={vs}
-						indexExpanded={indexExpanded}
-						selectedFile={selectedFile}
-						selectedKeyChange={selectedKeyChange}
-						stats={stats}
 						reviewed={reviewed}
+						width={width}
+						vs={vs}
 						onNavigatePage={goto}
-						onToggleIndex={() => setIndexExpanded((expanded) => !expanded)}
-						onResizeStart={startPanelResize}
-						onSelectFile={selectFile}
-						onFocusKeyChange={focusKeyChange}
-						indexScrollRef={indexScroll}
-						scrollRef={panelScroll}
 						onToggleChapterReview={toggleChapterReview}
-						onToggleFileReview={toggleFileReview}
-						onToggleKeyChange={toggleSelectedKeyChange}
 					/>
-				) : null}
-				<scrollbox
-					id="chapter-viewport"
-					ref={pageScroll}
-					flexGrow={1}
-					flexShrink={1}
-					minHeight={0}
-					width="100%"
-					padding={1}
-					scrollY
-					viewportCulling
-					verticalScrollbarOptions={{
-						trackOptions: { foregroundColor: theme.surface },
-					}}
-				>
-					<box flexDirection="column" width="100%">
-						{semanticNotice ? <text fg={theme.yellow}>{semanticNotice}</text> : null}
-						{chapter && !showChapterPanel ? (
-							<box flexDirection="column" width="100%" paddingBottom={1}>
-								<ChapterBrief
-									chapter={chapter}
+				)}
+				<box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
+					{showChapterPanel ? (
+						<ChapterPanel
+							page={page}
+							pages={pages}
+							current={current}
+							chapterCount={chapters.length}
+							width={panelWidth}
+							vs={vs}
+							indexExpanded={indexExpanded}
+							selectedFile={selectedFile}
+							selectedKeyChange={selectedKeyChange}
+							stats={stats}
+							reviewed={reviewed}
+							onNavigatePage={goto}
+							onToggleIndex={() => setIndexExpanded((expanded) => !expanded)}
+							onResizeStart={startPanelResize}
+							onSelectFile={selectFile}
+							onFocusKeyChange={focusKeyChange}
+							indexScrollRef={indexScroll}
+							scrollRef={panelScroll}
+							onToggleChapterReview={toggleChapterReview}
+							onToggleFileReview={toggleFileReview}
+							onToggleKeyChange={toggleSelectedKeyChange}
+						/>
+					) : null}
+					<scrollbox
+						id="chapter-viewport"
+						ref={pageScroll}
+						flexGrow={1}
+						flexShrink={1}
+						minHeight={0}
+						width="100%"
+						padding={1}
+						scrollY
+						viewportCulling
+						verticalScrollbarOptions={{
+							trackOptions: { foregroundColor: theme.border },
+						}}
+					>
+						<box flexDirection="column" width="100%">
+							{semanticNotice ? <text fg={theme.badgeModified}>{semanticNotice}</text> : null}
+							{chapter && !showChapterPanel ? (
+								<box flexDirection="column" width="100%" paddingBottom={1}>
+									<ChapterBrief
+										chapter={chapter}
+										vs={vs}
+										selectedFile={selectedFile}
+										selectedKeyChange={selectedKeyChange}
+										stats={stats}
+										onSelectFile={selectFile}
+										onFocusKeyChange={focusKeyChange}
+										onToggleFileReview={toggleFileReview}
+										onToggleKeyChange={toggleSelectedKeyChange}
+									/>
+									<text fg={theme.border}>{"─".repeat(Math.max(1, contentWidth))}</text>
+								</box>
+							) : null}
+							{page?.kind === "prologue" ? (
+								<PrologueView prologue={page.prologue} pages={pages} vs={vs} onSelectPage={goto} />
+							) : null}
+							{page?.kind === "chapter" && viewMode === "patch" ? (
+								<ChapterView
+									chapter={page.chapter}
+									diffTheme={diffTheme}
+									diffFiles={diffFiles}
+									width={contentWidth}
+									diffPreference={diffPreference}
+									splitFits={splitFits}
 									vs={vs}
 									selectedFile={selectedFile}
+									selectedHunkIndex={selectedHunkIndex}
 									selectedKeyChange={selectedKeyChange}
-									stats={stats}
+									collapsedFiles={collapsedFiles}
+									threads={threads}
+									selectedThreadRange={
+										threadDraft?.kind === "thread" ? threadDraft.range : undefined
+									}
+									threadDraft={newThreadDraft}
+									replyDraft={replyDraft}
 									onSelectFile={selectFile}
-									onFocusKeyChange={focusKeyChange}
+									onToggleCollapse={toggleCollapsedFile}
 									onToggleFileReview={toggleFileReview}
-									onToggleKeyChange={toggleSelectedKeyChange}
+									onSelectThreadRange={selectThreadRange}
+									onReplyThread={startThreadReply}
+									onDeleteThread={deleteInlineThread}
+									onDeleteThreadMessage={deleteInlineThreadMessage}
+									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
-								<text fg={theme.surface}>{"─".repeat(Math.max(1, contentWidth))}</text>
-							</box>
-						) : null}
-						{page?.kind === "prologue" ? (
-							<PrologueView prologue={page.prologue} pages={pages} vs={vs} onSelectPage={goto} />
-						) : null}
-						{page?.kind === "chapter" && viewMode === "patch" ? (
-							<ChapterView
-								chapter={page.chapter}
-								diffFiles={diffFiles}
-								width={contentWidth}
-								diffPreference={diffPreference}
-								splitFits={splitFits}
-								vs={vs}
-								selectedFile={selectedFile}
-								selectedHunkIndex={selectedHunkIndex}
-								selectedKeyChange={selectedKeyChange}
-								collapsedFiles={collapsedFiles}
-								threads={threads}
-								selectedThreadRange={threadDraft?.kind === "thread" ? threadDraft.range : undefined}
-								threadDraft={newThreadDraft}
-								replyDraft={replyDraft}
-								onSelectFile={selectFile}
-								onToggleCollapse={toggleCollapsedFile}
-								onToggleFileReview={toggleFileReview}
-								onSelectThreadRange={selectThreadRange}
-								onReplyThread={startThreadReply}
-								onDeleteThread={deleteInlineThread}
-								onDeleteThreadMessage={deleteInlineThreadMessage}
-								onToggleThreadStatus={toggleInlineThreadStatus}
-							/>
-						) : null}
-						{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
-							<SemanticChapterView
-								chapter={page.chapter}
-								semantic={semantic}
-								vs={vs}
-								selectedFile={selectedFile}
-								collapsedFiles={collapsedFiles}
-								onSelectFile={selectFile}
-								onToggleCollapse={toggleCollapsedFile}
-								onToggleFileReview={toggleFileReview}
-							/>
-						) : null}
-					</box>
-				</scrollbox>
-			</box>
-			{menu.activeMenuId ? (
-				<>
-					<MenuBackdrop onClose={menu.close} />
-					<MenuDropdown
-						activeMenuId={menu.activeMenuId}
-						entries={menu.activeEntries}
-						selectedIndex={menu.activeItemIndex}
+							) : null}
+							{page?.kind === "chapter" && viewMode === "semantic" && semantic ? (
+								<SemanticChapterView
+									chapter={page.chapter}
+									semantic={semantic}
+									vs={vs}
+									selectedFile={selectedFile}
+									collapsedFiles={collapsedFiles}
+									onSelectFile={selectFile}
+									onToggleCollapse={toggleCollapsedFile}
+									onToggleFileReview={toggleFileReview}
+								/>
+							) : null}
+						</box>
+					</scrollbox>
+				</box>
+				{menu.activeMenuId ? (
+					<>
+						<MenuBackdrop onClose={menu.close} />
+						<MenuDropdown
+							activeMenuId={menu.activeMenuId}
+							entries={menu.activeEntries}
+							selectedIndex={menu.activeItemIndex}
+							terminalWidth={width}
+							onHover={menu.setActiveItemIndex}
+							onSelect={menu.activate}
+						/>
+					</>
+				) : null}
+				{showHelp ? (
+					<HelpModal
 						terminalWidth={width}
-						onHover={menu.setActiveItemIndex}
-						onSelect={menu.activate}
+						terminalHeight={height}
+						scrollRef={helpScroll}
+						onClose={() => setShowHelp(false)}
 					/>
-				</>
-			) : null}
-			{showHelp ? (
-				<HelpModal
-					terminalWidth={width}
-					terminalHeight={height}
-					scrollRef={helpScroll}
-					onClose={() => setShowHelp(false)}
-				/>
-			) : null}
-			{!threadDraft && threadNotice ? <text fg={theme.red}>{threadNotice}</text> : null}
-			<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
-				<text fg={theme.dim}>
-					{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
-				</text>
-				<text fg={theme.dim}>
-					{viewMode === "semantic"
-						? "Semantic is read-only · anchors/ranges/threads Patch-only · F10 View to switch"
-						: "click/drag gutter thread · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"}
-				</text>
+				) : null}
+				{themePicker ? (
+					<>
+						<ThemePickerBackdrop onClose={closeThemePicker} />
+						<ThemePicker
+							themes={THEMES}
+							selectedIndex={themePicker.selected}
+							activeThemeId={chosenTheme.id}
+							terminalWidth={width}
+							terminalHeight={height}
+							onPick={chooseTheme}
+						/>
+					</>
+				) : null}
+				{!threadDraft && threadNotice ? <text fg={theme.badgeRemoved}>{threadNotice}</text> : null}
+				<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
+					<text fg={theme.muted}>
+						{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
+					</text>
+					<text fg={theme.muted}>
+						{viewMode === "semantic"
+							? "Semantic is read-only · anchors/ranges/threads Patch-only · F10 View to switch"
+							: "click/drag gutter thread · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"}
+					</text>
+				</box>
 			</box>
-		</box>
+		</ThemeProvider>
 	);
 }
+
+const THEME_MODE_TIMEOUT_MS = 100;
 
 /** Boot the interactive TUI for a loaded chapters file. Resolves when the user quits. */
 export async function runApp(
 	file: RevueChaptersFile,
 	options: {
 		diffFiles?: DiffFile[] | null;
-		loadSemanticDiff?: (width: number) => Promise<SemanticDiffResult>;
+		loadSemanticDiff?: (width: number, palette: AnsiPalette) => Promise<SemanticDiffResult>;
 		initialViewState?: ViewState;
 		initialThreads?: ReviewThread[];
 		threadActions?: ThreadActions;
 		humanAuthor?: ThreadAuthor;
+		/** Resolve the startup theme once the terminal has reported its own background. */
+		resolveInitialTheme?: (appearance: Appearance | null) => Theme;
+		/** The syntax theme highlights were already prepared for, before the terminal replied. */
+		initialSyntaxTheme?: string;
+		transparentSurfaces?: boolean;
 		onViewStateChange?: (next: ViewState) => void;
+		onThemeChange?: (next: Theme) => void;
 	} = {},
 ): Promise<void> {
 	const renderer = await createCliRenderer({ exitOnCtrlC: true });
+	const themeMode = await renderer.waitForThemeMode(THEME_MODE_TIMEOUT_MS).catch(() => null);
+	const initialTheme =
+		options.resolveInitialTheme?.(themeMode) ?? resolveTheme(undefined, themeMode);
 	const root = createRoot(renderer);
 	let quit = () => {};
 	const quitting = new Promise<void>((resolve) => {
@@ -2197,10 +2341,14 @@ export async function runApp(
 				diffFiles={options.diffFiles ?? null}
 				loadSemanticDiff={options.loadSemanticDiff}
 				initialViewState={options.initialViewState}
+				initialTheme={initialTheme}
+				initialSyntaxTheme={options.initialSyntaxTheme}
+				transparentSurfaces={options.transparentSurfaces}
 				initialThreads={options.initialThreads}
 				threadActions={options.threadActions}
 				humanAuthor={options.humanAuthor}
 				onViewStateChange={options.onViewStateChange}
+				onThemeChange={options.onThemeChange}
 				onQuit={quit}
 			/>,
 		);

@@ -70,6 +70,13 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   and emits numbered hunks. Persistent rules run before session rules; both rename paths are tested,
   and every effective input and omission reason is pinned in the run. Local modes detect
   index/worktree races and fail rather than produce a mixed snapshot.
+- **Theme** — the single palette Revue paints with, derived from one bundled editor theme rather
+  than hand-picked: neutral surfaces, foregrounds, diff row tints, semantic status colours, and the
+  Shiki theme highlighted source uses. Derivation enforces WCAG contrast floors, so a theme stays
+  readable whatever surface it lands on. Selection is the reviewer's, not the run's: `--theme`
+  names one for a session, the in-app picker previews and accepts one, and the accepted id persists
+  to `.revue/preferences.json`. Without a named theme the terminal's own background chooses between
+  the light and dark defaults. Transparent mode drops the neutral surfaces while keeping diff tints.
 - **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
   chapters, pinned file metadata, review questions, authored threads, and optional local review
   progress. Full review is the default; prologue and one chapter by stable id/order are explicit
@@ -81,6 +88,11 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   `@revue/diff-model` owns Pierre parsing adaptation and stable file/hunk identities;
   `@revue/diff-renderer` owns split/stack rows, terminal presentation, exact inclusive old/new
   decorations, and focus anchors. `@pierre/diffs` is pinned directly to 1.2.2.
+- **One derived palette, not two hand-picked ones.** `@revue/theme` owns colour maths, the bundled
+  editor-theme table, and the derivation; the shell reads it through one React context and the
+  renderer takes it as a prop, so no package keeps a palette of its own. Highlighting is prepared
+  per syntax theme and the diff keeps the last prepared colours while a new theme is highlighting,
+  rather than dropping to unhighlighted text. Terminal background detection is OpenTUI's.
 - **Bounded Hunk adaptation.** The renderer adapts Hunk v0.15.3
   body/row/geometry/highlighting concepts; the TUI separately adapts its small menu chrome and
   controller concepts. Provenance and MIT terms live in each package’s `THIRD_PARTY_NOTICES.md`.

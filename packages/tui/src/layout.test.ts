@@ -1,13 +1,15 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
+import { resolveTheme } from "@revue/theme";
 import type { ChapterDiffFile } from "./diff.ts";
 import { preparePatch } from "./diff.ts";
 import { layoutForFile, resolveLayout } from "./layout.ts";
 
 const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
+const theme = resolveTheme("catppuccin-mocha");
 
 const chapterFile = async (path: string): Promise<ChapterDiffFile> => {
-	const files = await preparePatch(await readFile(PATCH, "utf8"));
+	const files = await preparePatch(await readFile(PATCH, "utf8"), theme.syntaxTheme);
 	const file = files.find((candidate) => candidate.path === path);
 	if (!file) throw new Error(`no ${path} in the sample patch`);
 	return { ...file, chapterPath: path };

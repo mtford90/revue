@@ -69,16 +69,22 @@ function headerText(hunk: DiffFile["metadata"]["hunks"][number]) {
 	);
 }
 
+export type DiffRowOptions = {
+	/** The prepared syntax theme to read spans for; raw text renders without one. */
+	syntaxTheme?: string;
+	decorations?: readonly RangeDecoration[];
+	focusedDecorationId?: string;
+};
+
 /** Expand Pierre metadata into stable split or stack rows with old/new identities. */
 export function buildDiffRows(
 	file: DiffFile,
 	layout: DiffLayout,
-	decorations: readonly RangeDecoration[] = [],
-	focusedDecorationId?: string,
+	{ syntaxTheme, decorations = [], focusedDecorationId }: DiffRowOptions = {},
 ): DiffRow[] {
 	const rows: DiffRow[] = [];
 	const ranges = applicableDecorations(file, decorations);
-	const highlighted = highlightedLines(file);
+	const highlighted = highlightedLines(file, syntaxTheme);
 
 	for (const [hunkIndex, hunk] of file.metadata.hunks.entries()) {
 		rows.push({

@@ -41,6 +41,7 @@ packages/
   diff-renderer/  Revue-owned OpenTUI presentation over the shared model
   prep/            Git scope resolution, immutable snapshots, filtering, and hunk formatting
   markdown-export/ Pure deterministic Markdown formatting with no OpenTUI dependency
+  theme/           Contrast-aware palettes derived from bundled editor themes
   types/           zod schemas for chapters, review state, and run manifests
   tui/             The CLI and OpenTUI chapter-navigation shell
 skills/
@@ -179,6 +180,31 @@ wide content widths and coloured inline output when narrow, translating its styl
 OpenTUI spans rather than emitting terminal escapes. A missing or incompatible executable leaves
 Patch active and shows a terminal-safe explanation.
 
+## Themes
+
+Every colour Revue paints comes from one theme, derived from one bundled editor theme: the shell,
+the diff body, and the highlighted source always agree. Press `t` (or **View → Theme**) to open the
+picker; arrow keys preview a palette live, `Enter` accepts, `Escape` cancels. The accepted theme is
+remembered in `.revue/preferences.json`.
+
+```bash
+# name a theme for this run
+bun run revue show examples/sample-run --theme catppuccin-mocha
+
+# list every available name
+bun run revue show examples/sample-run --theme list
+
+# let the terminal's own background choose between the light and dark defaults
+bun run revue show examples/sample-run --theme auto
+
+# keep the terminal background visible behind Revue's neutral surfaces
+bun run revue show examples/sample-run --transparent-bg
+```
+
+Without `--theme`, Revue uses the remembered theme, and otherwise asks the terminal for its
+background colour and picks the matching default. Derivation enforces WCAG contrast floors, so body
+text, status colours, and diff row tints stay readable on light and dark themes alike.
+
 ## Review ignore rules
 
 A repository may put review-only rules in `.revueignore` at its Git root. Rules use gitignore
@@ -240,11 +266,12 @@ chapter narration.
 - [x] Deterministic **Markdown export** for the full review, prologue, or one chapter
 - [x] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
 - [x] Authored inline **review threads** with replies and Revue-owned persistence/lifecycle
+- [x] **Themes** derived from bundled editor themes, with a live picker, `--theme`, and transparency
 - [ ] Decide static-file vs live agent-driven session
 - [ ] Mermaid prologue diagram rendering (ASCII)
 
 ## Credits
 
 Built with [@pierre/diffs](https://github.com/pierrecomputer/diffs), selectively adapted renderer
-concepts from [hunk](https://github.com/modem-dev/hunk) (MIT), and the chapter model + skill from
+and palette-derivation concepts from [hunk](https://github.com/modem-dev/hunk) (MIT), and the chapter model + skill from
 [stage-cli](https://github.com/ReviewStage/stage-cli) (MIT). Thanks to all three.

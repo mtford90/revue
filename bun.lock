@@ -23,6 +23,7 @@
       "dependencies": {
         "@pierre/diffs": "1.2.2",
         "@revue/diff-model": "workspace:*",
+        "@revue/theme": "workspace:*",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
@@ -51,6 +52,10 @@
         "zod": "^4.0.0",
       },
     },
+    "packages/theme": {
+      "name": "@revue/theme",
+      "version": "0.0.0",
+    },
     "packages/tui": {
       "name": "@revue/tui",
       "version": "0.0.0",
@@ -63,6 +68,7 @@
         "@revue/diff-renderer": "workspace:*",
         "@revue/markdown-export": "workspace:*",
         "@revue/prep": "workspace:*",
+        "@revue/theme": "workspace:*",
         "@revue/types": "workspace:*",
         "react": "^19.2.4",
         "zod": "^4.0.0",
@@ -183,6 +189,8 @@
     "@revue/markdown-export": ["@revue/markdown-export@workspace:packages/markdown-export"],
 
     "@revue/prep": ["@revue/prep@workspace:packages/prep"],
+
+    "@revue/theme": ["@revue/theme@workspace:packages/theme"],
 
     "@revue/tui": ["@revue/tui@workspace:packages/tui"],
 

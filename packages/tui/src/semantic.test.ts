@@ -3,10 +3,13 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadPreparedRun } from "@revue/prep";
+import { resolveTheme } from "@revue/theme";
 import { RUN_FILE_STATUS, RUN_OBJECT_KIND, type RunFile } from "@revue/types";
 import { generateSemanticDiff, SemanticDiffError } from "./semantic.ts";
+import { semanticAnsiPalette } from "./theme.ts";
 
 const sampleRun = resolve(import.meta.dir, "../../../examples/sample-run");
+const palette = semanticAnsiPalette(resolveTheme("catppuccin-mocha"));
 
 async function fakeDifftastic(directory: string): Promise<{ executable: string; log: string }> {
 	const executable = join(directory, "difft");
@@ -39,7 +42,7 @@ test("semantic diff preserves colour and compares only pinned run blobs", async 
 		const { executable, log } = await fakeDifftastic(temporary);
 		process.env.REVUE_TEST_DIFFT_LOG = log;
 		const run = await loadPreparedRun(sampleRun);
-		const result = await generateSemanticDiff(run, 92, executable);
+		const result = await generateSemanticDiff(run, 92, palette, executable);
 
 		expect(result.version).toBe("Difftastic 0.67.0");
 		expect(result.files).toHaveLength(run.manifest.files.length);
@@ -81,6 +84,7 @@ test("semantic diff preserves colour and compares only pinned run blobs", async 
 		await generateSemanticDiff(
 			{ ...run, manifest: { ...run.manifest, files: [modified] } },
 			60,
+			palette,
 			executable,
 		);
 		const narrowInvocation = (await readFile(log, "utf8")).trim().split("\n").at(-1);
@@ -114,6 +118,7 @@ echo "semantic leading path"
 		const result = await generateSemanticDiff(
 			{ ...run, manifest: { ...run.manifest, files: [{ ...source, path: "-leading.ts" }] } },
 			80,
+			palette,
 			executable,
 		);
 
@@ -168,6 +173,7 @@ test("semantic diff describes special file states and absent snapshot sides", as
 		const result = await generateSemanticDiff(
 			{ ...run, manifest: { ...run.manifest, files } },
 			80,
+			palette,
 			executable,
 		);
 		const text = result.files.flatMap((file) => file.lines.map((line) => line.text)).join("\n");
@@ -191,7 +197,7 @@ test("an incompatible executable is rejected before any snapshot is compared", a
 		await writeFile(executable, "#!/bin/sh\necho 'not Difftastic'\n");
 		await chmod(executable, 0o755);
 		const run = await loadPreparedRun(sampleRun);
-		await expect(generateSemanticDiff(run, 80, executable)).rejects.toThrow(
+		await expect(generateSemanticDiff(run, 80, palette, executable)).rejects.toThrow(
 			"not a compatible Difftastic executable",
 		);
 	} finally {
@@ -203,7 +209,7 @@ test("a missing executable produces a terminal-safe fallback explanation", async
 	const run = await loadPreparedRun(sampleRun);
 	const path = join(tmpdir(), `missing-difft-${crypto.randomUUID()}`);
 	try {
-		await generateSemanticDiff(run, 80, path);
+		await generateSemanticDiff(run, 80, palette, path);
 		expect.unreachable("a missing executable must fail");
 	} catch (error) {
 		expect(error).toBeInstanceOf(SemanticDiffError);

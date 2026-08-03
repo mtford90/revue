@@ -2,26 +2,21 @@
 
 ## Hunk
 
-This package selectively adapts menu-bar, dropdown geometry, keyboard traversal, menu-controller,
-and theme-selector concepts from [Hunk](https://github.com/modem-dev/hunk). The menu concepts use
-v0.15.3, commit `3a2ba1c4c0580f0056bf67b031fb25f2186f35a3`; the theme-selector concept uses v0.17.7.
+This package selectively adapts palette-derivation concepts from
+[Hunk](https://github.com/modem-dev/hunk) v0.17.7.
 
 Upstream concepts were studied in:
 
-- `src/ui/components/chrome/menu.ts`
-- `src/ui/components/chrome/MenuBar.tsx`
-- `src/ui/components/chrome/MenuDropdown.tsx`
-- `src/ui/hooks/useMenuController.ts`
-- `src/ui/lib/appMenus.ts`
-- `src/ui/components/chrome/ThemeSelectorDialog.tsx` (windowed list, live preview, accept/cancel)
+- `src/ui/lib/color.ts` (blend, WCAG relative luminance, contrast ratio)
+- `src/ui/lib/shikiThemes.ts` (the bundled editor-theme surface, foreground, and diff colours)
+- `src/ui/themes.ts` (deriving one complete palette from one editor theme under contrast floors)
 
-Local modifications reduce the menu model to Revue’s File/View chrome; add disabled items; drop Hunk’s
-app, controller, agent, editor, filter, and session actions; route every action to Revue-owned
-handlers; preserve narrow-terminal labels by omitting shortcut hints first; and isolate open menus
-from the chapter and diff surfaces beneath them. The theme selector is rebuilt on Revue’s own dialog
-chrome rather than Hunk’s modal frame, reads the palette from Revue’s theme context instead of a
-prop, and persists the accepted theme to Revue’s own preferences file. Hunk is not a runtime
-dependency.
+Local modifications reduce the palette to the colours Revue actually paints — dropping Hunk's moved
+line, note, git file-status, semantic syntax-remap, and line-number-background tokens; add a
+`badgeModified` token Hunk computes but exposes only as file-status colours, and a `heading` token
+for Revue's shell, which separates headings from focus where one editor theme does not; drop Hunk's
+config-defined custom themes and legacy theme aliases; and rely on OpenTUI's own terminal
+background detection rather than an OSC 11 prober. Hunk is not a runtime dependency.
 
 Hunk is distributed under the MIT License:
 

@@ -7,26 +7,10 @@ import { RUN_FILE_STATUS, RUN_OBJECT_KIND, type RunFile } from "@revue/types";
 
 const REQUIRED_HELP_OPTIONS = ["--color", "--display", "--width"];
 const SAFE_WIDTH_MINIMUM = 40;
-const SIDE_BY_SIDE_MINIMUM = 80;
-const ANSI_FOREGROUNDS: Record<number, string> = {
-	30: "#45475a",
-	31: "#f38ba8",
-	32: "#a6e3a1",
-	33: "#f9e2af",
-	34: "#89b4fa",
-	35: "#cba6f7",
-	36: "#94e2d5",
-	37: "#bac2de",
-	90: "#6c7086",
-	91: "#f38ba8",
-	92: "#a6e3a1",
-	93: "#f9e2af",
-	94: "#89b4fa",
-	95: "#cba6f7",
-	96: "#94e2d5",
-	97: "#cdd6f4",
-};
 
+/** Foreground colours by SGR code, so Difftastic's own styling follows the active theme. */
+export type AnsiPalette = Record<number, string>;
+const SIDE_BY_SIDE_MINIMUM = 80;
 export type SemanticDiffSpan = {
 	text: string;
 	fg?: string;
@@ -71,7 +55,11 @@ const SGR_SEQUENCE = /\x1b\[([0-9;]*)m/g;
 export const terminalSafe = (value: string): string =>
 	value.split("\n").map(sanitizeTerminalLine).join("\n").trim();
 
-const applySgr = (style: SemanticStyle, parameters: string): SemanticStyle => {
+const applySgr = (
+	style: SemanticStyle,
+	parameters: string,
+	palette: AnsiPalette,
+): SemanticStyle => {
 	const next = { ...style };
 	for (const value of (parameters || "0").split(";")) {
 		const code = Number(value);
@@ -84,19 +72,19 @@ const applySgr = (style: SemanticStyle, parameters: string): SemanticStyle => {
 		else if (code === 23) next.italic = false;
 		else if (code === 24) next.underline = false;
 		else if (code === 39) next.fg = undefined;
-		else if (ANSI_FOREGROUNDS[code]) next.fg = ANSI_FOREGROUNDS[code];
+		else if (palette[code]) next.fg = palette[code];
 	}
 	return next;
 };
 
-const styledLine = (value: string): SemanticDiffLine => {
+const styledLine = (value: string, palette: AnsiPalette): SemanticDiffLine => {
 	const spans: SemanticDiffSpan[] = [];
 	let cursor = 0;
 	let style = { ...DEFAULT_STYLE };
 	for (const match of value.matchAll(SGR_SEQUENCE)) {
 		const text = sanitizeTerminalLine(value.slice(cursor, match.index));
 		if (text) spans.push({ text, ...style });
-		style = applySgr(style, match[1] ?? "0");
+		style = applySgr(style, match[1] ?? "0", palette);
 		cursor = (match.index ?? cursor) + match[0].length;
 	}
 	const remainder = sanitizeTerminalLine(value.slice(cursor));
@@ -109,8 +97,8 @@ const plainLine = (text: string): SemanticDiffLine => ({
 	spans: text ? [{ text, ...DEFAULT_STYLE }] : [],
 });
 
-const styledOutput = (output: string): SemanticDiffLine[] => {
-	const lines = output.split("\n").map((line) => styledLine(line.replace(/\r$/, "")));
+const styledOutput = (output: string, palette: AnsiPalette): SemanticDiffLine[] => {
+	const lines = output.split("\n").map((line) => styledLine(line.replace(/\r$/, ""), palette));
 	const lastContent = lines.findLastIndex((line) => line.text.length > 0);
 	return lastContent < 0 ? [] : lines.slice(0, lastContent + 1);
 };
@@ -228,8 +216,8 @@ const semanticArgs = (
 	file.newMode ?? "000000",
 ];
 
-const outputLines = (file: RunFile, output: string): SemanticDiffLine[] => {
-	const styled = styledOutput(output);
+const outputLines = (file: RunFile, output: string, palette: AnsiPalette): SemanticDiffLine[] => {
+	const styled = styledOutput(output, palette);
 	return [
 		plainLine(statusHeader(file)),
 		...(file.status === RUN_FILE_STATUS.ADDED
@@ -257,6 +245,7 @@ const outputLines = (file: RunFile, output: string): SemanticDiffLine[] => {
 export async function generateSemanticDiff(
 	run: SemanticRun,
 	width: number,
+	palette: AnsiPalette,
 	executable = "difft",
 ): Promise<SemanticDiffResult> {
 	const version = await detectDifftastic(executable);
@@ -278,7 +267,7 @@ export async function generateSemanticDiff(
 					`Semantic diff unavailable: ${version} failed while comparing ${JSON.stringify(file.path)}${describeProcessFailure(result)}. Patch view remains active.`,
 				);
 			}
-			files.push({ path: file.path, lines: outputLines(file, result.stdout) });
+			files.push({ path: file.path, lines: outputLines(file, result.stdout, palette) });
 		}
 		return { files, version };
 	} finally {

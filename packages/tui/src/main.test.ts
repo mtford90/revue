@@ -359,3 +359,24 @@ test("prep prints only the run path and show validates that same run", async () 
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("show names its themes and refuses an unknown one before touching the run", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-theme-"));
+	try {
+		const directory = await copySampleRun(root);
+
+		const listed = await run(root, ["show", directory, "--theme", "list"]);
+		expect(listed.exitCode).toBe(0);
+		expect(listed.stdout.trim().split("\n")).toContain("github-dark-default");
+
+		const unknown = await run(root, ["show", directory, "--theme", "solarised-dark"]);
+		expect(unknown).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(unknown.stderr).toContain("unknown theme: solarised-dark");
+
+		const known = await run(root, ["show", directory, "--theme", "nord", "--check"]);
+		expect(known.exitCode).toBe(0);
+		expect(known.stdout).toContain("run is valid");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

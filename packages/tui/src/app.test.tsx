@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff-renderer";
+import { resolveTheme } from "@revue/theme";
 import {
 	type ReviewThread,
 	RevueChaptersFileSchema,
@@ -17,7 +18,9 @@ import { App } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
 
 const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
-const loadPatch = async (path: string) => preparePatch(await readFile(path, "utf8"));
+const theme = resolveTheme("catppuccin-mocha");
+const loadPatch = async (path: string) =>
+	preparePatch(await readFile(path, "utf8"), theme.syntaxTheme);
 const semanticLine = (text: string, fg?: string) => ({
 	text,
 	spans: [{ text, fg, bold: false, dim: false, italic: false, underline: false }],
@@ -819,4 +822,43 @@ test("initialViewState is reflected on first render", async () => {
 	);
 	await t.renderOnce();
 	expect(t.captureCharFrame()).toContain("1/3 reviewed");
+});
+
+test("the theme picker previews a palette, applies the accepted one, and reports the choice", async () => {
+	const chosen: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			initialTheme={resolveTheme("nord")}
+			onThemeChange={(next) => chosen.push(next.id)}
+		/>,
+		{ width: 110, height: 32 },
+	);
+	await t.renderOnce();
+	const background = () => t.captureSpans().lines[1]?.spans[0]?.bg;
+	const nordBackground = background();
+
+	await press(t, "t");
+	expect(t.captureCharFrame()).toContain("nord");
+
+	await arrow(t, "down");
+	expect(background()).not.toEqual(nordBackground);
+
+	// A lone escape byte needs a real terminal to disambiguate; q dismisses the same way.
+	await press(t, "q");
+	expect(background()).toEqual(nordBackground);
+	expect(chosen).toEqual([]);
+
+	await press(t, "t");
+	await arrow(t, "down");
+	await act(async () => {
+		t.mockInput.pressEnter();
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	expect(t.captureCharFrame()).not.toContain("preview · enter accept");
+	expect(background()).not.toEqual(nordBackground);
+	expect(chosen).toEqual(["one-dark-pro"]);
 });

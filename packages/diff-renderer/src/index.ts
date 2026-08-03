@@ -13,7 +13,7 @@ export {
 	rangeToHunkIndex,
 } from "./decorations.ts";
 export { highlightedLines, prepareSyntaxHighlighting } from "./highlight.ts";
-export { buildDiffRows } from "./rows.ts";
+export { buildDiffRows, type DiffRowOptions } from "./rows.ts";
 export { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
 export type {
 	DecorationAnchor,

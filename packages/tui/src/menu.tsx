@@ -3,7 +3,7 @@
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { useState } from "react";
 import type { DiffLayoutPreference, SidebarPreference } from "./layout.ts";
-import { theme } from "./theme.ts";
+import { useTheme } from "./theme.ts";
 
 export type MenuId = "file" | "navigate" | "view" | "help";
 
@@ -96,6 +96,8 @@ export const buildAppMenus = ({
 	toggleHelp,
 	showPatch,
 	showSemantic,
+	chooseTheme,
+	themeLabel,
 }: {
 	canMovePrevious: boolean;
 	canMoveNext: boolean;
@@ -118,6 +120,8 @@ export const buildAppMenus = ({
 	toggleHelp: () => void;
 	showPatch: () => void;
 	showSemantic: () => void;
+	chooseTheme: () => void;
+	themeLabel: string;
 }): Record<MenuId, MenuEntry[]> => ({
 	file: [{ kind: "item", label: "Quit", hint: "q", action: requestQuit }],
 	navigate: [
@@ -196,6 +200,12 @@ export const buildAppMenus = ({
 	help: [
 		{
 			kind: "item",
+			label: `Theme: ${themeLabel}`,
+			hint: "t",
+			action: chooseTheme,
+		},
+		{
+			kind: "item",
 			label: "Keyboard shortcuts",
 			hint: "?",
 			checked: showHelp,
@@ -267,6 +277,7 @@ export const MenuBar = ({
 	onToggle: (id: MenuId) => void;
 	onClose: () => void;
 }) => {
+	const theme = useTheme();
 	const viewLabel = VIEW_LABELS[viewMode];
 	// A passive indicator, not a third menu: only shown when it can sit against
 	// the right edge with a gap the menu titles can't close.
@@ -277,7 +288,7 @@ export const MenuBar = ({
 			width="100%"
 			flexShrink={0}
 			flexDirection="row"
-			backgroundColor={theme.surface}
+			backgroundColor={theme.panelAlt}
 			paddingLeft={1}
 			paddingRight={1}
 			zIndex={50}
@@ -294,7 +305,7 @@ export const MenuBar = ({
 						height={1}
 						width={spec.width}
 						flexShrink={0}
-						backgroundColor={active ? theme.accent : theme.surface}
+						backgroundColor={active ? theme.accent : theme.panelAlt}
 						onMouseDown={stopMouse}
 						onMouseUp={(event) => {
 							stopMouse(event);
@@ -302,13 +313,13 @@ export const MenuBar = ({
 						}}
 						onMouseOver={() => onHover(spec.id)}
 					>
-						<text fg={active ? theme.base : theme.text}>{` ${spec.label} `}</text>
+						<text fg={active ? theme.background : theme.text}>{` ${spec.label} `}</text>
 					</box>
 				);
 			})}
 			<box flexGrow={1} minWidth={0} height={1} flexDirection="row" justifyContent="flex-end">
 				{showViewLabel ? (
-					<text flexShrink={0} fg={theme.dim} wrapMode="none">
+					<text flexShrink={0} fg={theme.muted} wrapMode="none">
 						{viewLabel}
 					</text>
 				) : null}
@@ -345,6 +356,7 @@ export const MenuDropdown = ({
 	onHover: (index: number) => void;
 	onSelect: (entry: MenuEntry) => void;
 }) => {
+	const theme = useTheme();
 	const spec = menuSpecs.find((candidate) => candidate.id === activeMenuId) ?? menuSpecs[0];
 	if (!spec) return null;
 	const showHints = terminalWidth >= 60;
@@ -359,14 +371,14 @@ export const MenuDropdown = ({
 			height={entries.length + 2}
 			zIndex={40}
 			border
-			borderColor={theme.dim}
-			backgroundColor={theme.base}
+			borderColor={theme.muted}
+			backgroundColor={theme.background}
 			flexDirection="column"
 			onMouseDown={stopMouse}
 		>
 			{entries.map((entry, index) =>
 				entry.kind === "separator" ? (
-					<text key={`${activeMenuId}:separator:${entry.id}`} fg={theme.surface}>
+					<text key={`${activeMenuId}:separator:${entry.id}`} fg={theme.border}>
 						{"─".repeat(Math.max(1, width - 2))}
 					</text>
 				) : (
@@ -374,7 +386,7 @@ export const MenuDropdown = ({
 						key={`${activeMenuId}:${entry.label}`}
 						height={1}
 						width="100%"
-						backgroundColor={selectedIndex === index ? theme.surface : theme.base}
+						backgroundColor={selectedIndex === index ? theme.panelAlt : theme.background}
 						onMouseOver={() => {
 							if (!entry.disabled) onHover(index);
 						}}
@@ -383,7 +395,7 @@ export const MenuDropdown = ({
 							onSelect(entry);
 						}}
 					>
-						<text fg={entry.disabled ? theme.dim : theme.text} wrapMode="none" truncate>
+						<text fg={entry.disabled ? theme.muted : theme.text} wrapMode="none" truncate>
 							{itemText(entry, width - 2, showHints)}
 						</text>
 					</box>

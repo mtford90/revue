@@ -22,6 +22,7 @@ test("reviewer preferences round-trip theme, layout, and view choices", async ()
 		indexExpanded: false,
 		sidebarPreference: "hidden" as const,
 		diffPreference: "stacked" as const,
+		fileDisplay: "focused" as const,
 		viewMode: "semantic" as const,
 		panelWidth: 42,
 	};

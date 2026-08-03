@@ -65,7 +65,7 @@ import {
 	selectable,
 	useMenuController,
 } from "./menu.tsx";
-import type { Preferences } from "./preferences.ts";
+import type { FileDisplayPreference, Preferences } from "./preferences.ts";
 import { type SemanticDiffResult, type SemanticEmphasis, terminalSafe } from "./semantic.ts";
 import {
 	formatSourceLocation,
@@ -1087,6 +1087,7 @@ function ChapterView({
 	diffFiles,
 	width,
 	diffPreference,
+	fileDisplay,
 	splitFits,
 	vs,
 	selectedFile,
@@ -1112,6 +1113,7 @@ function ChapterView({
 	diffFiles: DiffFile[] | null;
 	width: number;
 	diffPreference: DiffLayoutPreference;
+	fileDisplay: FileDisplayPreference;
 	splitFits: boolean;
 	vs: ViewState;
 	selectedFile: number;
@@ -1135,6 +1137,10 @@ function ChapterView({
 	const theme = useTheme();
 	const chapterDiffFiles = diffFiles ? selectChapterFiles(chapter, diffFiles) : [];
 	const paths = chapterFilePaths(chapter);
+	const visibleDiffFiles =
+		fileDisplay === "focused"
+			? chapterDiffFiles.filter((file) => file.chapterPath === paths[selectedFile])
+			: chapterDiffFiles;
 	const focusedDecorationId = `key-change:${chapter.id}:${selectedKeyChange}`;
 	const decorations: RangeDecoration[] = (
 		chapter.keyChanges[selectedKeyChange]?.lineRefs ?? []
@@ -1176,9 +1182,9 @@ function ChapterView({
 
 	return (
 		<box flexDirection="column" gap={1}>
-			{chapterDiffFiles.length ? (
+			{visibleDiffFiles.length ? (
 				<box flexDirection="column" width="100%">
-					{chapterDiffFiles.map((diffFile, streamIndex) => {
+					{visibleDiffFiles.map((diffFile, streamIndex) => {
 						const path = diffFile.chapterPath;
 						const fileIndex = paths.indexOf(path);
 						const focused = fileIndex === selectedFile;
@@ -1300,6 +1306,7 @@ function SemanticChapterView({
 	diffFiles,
 	width,
 	diffPreference,
+	fileDisplay,
 	splitFits,
 	vs,
 	selectedFile,
@@ -1325,6 +1332,7 @@ function SemanticChapterView({
 	diffFiles: DiffFile[] | null;
 	width: number;
 	diffPreference: DiffLayoutPreference;
+	fileDisplay: FileDisplayPreference;
 	splitFits: boolean;
 	vs: ViewState;
 	selectedFile: number;
@@ -1346,7 +1354,9 @@ function SemanticChapterView({
 }) {
 	const theme = useTheme();
 	const paths = chapterFilePaths(chapter);
-	const files = paths.flatMap((path) => {
+	const visiblePaths =
+		fileDisplay === "focused" ? paths.slice(selectedFile, selectedFile + 1) : paths;
+	const files = visiblePaths.flatMap((path) => {
 		const file = semantic.files.find((candidate) => candidate.path === path);
 		return file ? [file] : [];
 	});
@@ -1767,6 +1777,9 @@ export function App({
 	const [diffPreference, setDiffPreferenceState] = useState<DiffLayoutPreference>(
 		initialPreferences.diffPreference ?? "auto",
 	);
+	const [fileDisplay, setFileDisplayState] = useState<FileDisplayPreference>(
+		initialPreferences.fileDisplay ?? "all",
+	);
 	const [viewMode, setViewModeState] = useState<"patch" | "semantic">("patch");
 	const [semantic, setSemantic] = useState<PreparedSemantic | null>(null);
 	const [semanticLoading, setSemanticLoading] = useState(false);
@@ -1829,6 +1842,11 @@ export function App({
 	function changeDiffPreference(next: DiffLayoutPreference) {
 		setDiffPreferenceState(next);
 		updatePreferences({ diffPreference: next });
+	}
+	function changeFileDisplay(next: FileDisplayPreference) {
+		setFileDisplayState(next);
+		updatePreferences({ fileDisplay: next });
+		requestFileFocus();
 	}
 	function changePanelWidth(next: number) {
 		setRequestedPanelWidthState(next);
@@ -2373,9 +2391,11 @@ export function App({
 		showHelp,
 		viewMode,
 		semanticLoading,
+		fileDisplay,
 		sidebarPreference,
 		diffPreference,
 		splitReachable,
+		setFileDisplay: changeFileDisplay,
 		setSidebarPreference: changeSidebarPreference,
 		setDiffPreference: changeDiffPreference,
 		requestQuit: quit,
@@ -2680,6 +2700,7 @@ export function App({
 									diffFiles={diffFiles}
 									width={contentWidth}
 									diffPreference={diffPreference}
+									fileDisplay={fileDisplay}
 									splitFits={splitFits}
 									vs={vs}
 									selectedFile={selectedFile}
@@ -2712,6 +2733,7 @@ export function App({
 									diffFiles={diffFiles ?? null}
 									width={contentWidth}
 									diffPreference={diffPreference}
+									fileDisplay={fileDisplay}
 									splitFits={splitFits}
 									vs={vs}
 									selectedFile={selectedFile}

@@ -145,8 +145,8 @@ with a local pipe alongside it for terminals that quietly drop the sequence.
 
 The top File/Navigate/View/Help menu makes the main actions discoverable with a mouse or keyboard.
 Press `F10` to open it, use arrow keys and `Enter`, and press `Escape` or click outside to close.
-Navigate walks pages and unreviewed chapters, View switches rendering and file collapse, and Help
-opens the keymap in a modal over the review.
+Navigate walks pages and unreviewed chapters, View switches rendering, file display, and file
+collapse, and Help opens the keymap in a modal over the review.
 
 The sidebar and a side-by-side diff compete for the same columns, so View settles both together.
 Diff layout is `auto`, `split` or `stacked`, and the sidebar is `auto`, `shown` or `hidden`. Under
@@ -155,14 +155,17 @@ is taking columns from the thing under review — and a split body is used only 
 sides of the file have changed lines. That threshold is measured against the panel's default width,
 so dragging the divider never makes it disappear under the pointer. Asking for `split` outranks an
 `auto` sidebar, which matters once the divider has been dragged wide, but an explicit sidebar
-preference is never overridden. Both preferences, along with the panel width and chosen diff view,
-are remembered across repositories in `~/.revue/preferences.json`; they do not belong to one run's
-view state.
+preference is never overridden. Both preferences, along with the panel width, chosen diff view, and file display, are remembered
+across repositories in `~/.revue/preferences.json`; they do not belong to one run's view state.
 
 Losing the sidebar never costs the chapter. The narrative it holds—title, summary, key changes and
 file list—stacks above the diff in a single column instead, the way the prologue already renders,
 and the panel's navigation row is replaced by a strip under the menu bar. Terminals wide enough for
 the panel are unaffected: they keep the two-column layout exactly as before.
+
+File display is **all** by default, stacking every chapter file in narrative order. **Focused**
+shows only the selected file; `Tab` / `Shift+Tab` and the sidebar file list replace it with the next
+selection. This choice applies equally to Patch and Semantic views.
 
 Patch is the default view. The View menu can lazily generate a read-only Semantic diff when a compatible
 [`difft`](https://difftastic.wilfred.me.uk/) executable is available; it compares only the verified
@@ -242,7 +245,8 @@ highlighted text · `Ctrl-y`/`Ctrl-g` copy the open thread's location/GitHub lin
 menu · `?` toggles shortcut help ·
 `q`/`esc` quits.
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
-change, and switching Patch/Semantic carries the reviewer's relative position through the chapter.
+or file display change, and switching Patch/Semantic carries the reviewer's relative position through
+the chapter.
 Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and review
 threads are Patch-only. Binary,
 symlink, mode-only, and content-identical metadata changes are described rather than passed off as

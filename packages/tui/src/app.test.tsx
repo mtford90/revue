@@ -267,6 +267,49 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	expect(t.captureCharFrame()).toContain("1/4");
 });
 
+test("View menu shows only the focused file and file navigation replaces it", async () => {
+	const combined = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				...file.chapters[0],
+				hunkRefs: [
+					{ filePath: "src/lib/backoff.ts", oldStart: 0 },
+					{ filePath: "src/lib/apiClient.ts", oldStart: 41 },
+				],
+			},
+		],
+	});
+	const preferences: Preferences[] = [];
+	const t = await testRender(
+		<App
+			file={combined}
+			diffFiles={await loadPatch(PATCH)}
+			initialPreferences={{ sidebarPreference: "hidden" }}
+			onPreferencesChange={(next) => preferences.push(next)}
+		/>,
+		{ width: 120, height: 60, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("MAX_RETRIES");
+	expect(t.captureCharFrame()).toContain("return fetch");
+
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "right");
+	await arrow(t, "down");
+	await arrow(t, "down");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain("MAX_RETRIES");
+	expect(t.captureCharFrame()).not.toContain("return fetch");
+	expect(preferences.at(-1)).toMatchObject({ fileDisplay: "focused" });
+
+	await press(t, "TAB");
+	expect(t.captureCharFrame()).toContain("return fetch");
+	expect(t.captureCharFrame()).not.toContain("MAX_RETRIES");
+});
+
 test("View menu toggles the semantic diff without losing the focused file", async () => {
 	const combined = RevueChaptersFileSchema.parse({
 		chapters: [
@@ -285,6 +328,7 @@ test("View menu toggles the semantic diff without losing the focused file", asyn
 		<App
 			file={combined}
 			diffFiles={diffFiles}
+			initialPreferences={{ fileDisplay: "focused" }}
 			loadSemanticDiff={async () => {
 				loads += 1;
 				return {
@@ -332,6 +376,7 @@ test("View menu toggles the semantic diff without losing the focused file", asyn
 	const semanticFrame = t.captureCharFrame();
 	expect(semanticFrame).toContain("Semantic view");
 	expect(semanticFrame).toContain("semantic retry loop");
+	expect(semanticFrame).not.toContain("semantic backoff");
 	expect(semanticFrame).toContain("modified: src/lib/apiClient.ts");
 	expect(semanticFrame).toContain("src/lib/apiClient.ts");
 	// The emphasis range covers chars 0-8, so "semantic" renders as its own restyled span.
@@ -348,6 +393,7 @@ test("View menu toggles the semantic diff without losing the focused file", asyn
 	const patchFrame = t.captureCharFrame();
 	expect(patchFrame).toContain("Patch view");
 	expect(patchFrame).toContain("return fetch");
+	expect(patchFrame).not.toContain("MAX_RETRIES");
 	expect(patchFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
 	expect(loads).toBe(1);
 });

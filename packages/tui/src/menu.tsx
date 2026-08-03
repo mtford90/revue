@@ -3,6 +3,7 @@
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { useState } from "react";
 import type { DiffLayoutPreference, SidebarPreference } from "./layout.ts";
+import type { FileDisplayPreference } from "./preferences.ts";
 import { useTheme } from "./theme.ts";
 
 export type MenuId = "file" | "navigate" | "view" | "help";
@@ -46,6 +47,11 @@ const DIFF_PREFERENCES: { preference: DiffLayoutPreference; label: string }[] = 
 	{ preference: "stacked", label: "Diff layout: stacked" },
 ];
 
+const FILE_DISPLAY_PREFERENCES: { preference: FileDisplayPreference; label: string }[] = [
+	{ preference: "all", label: "File display: all" },
+	{ preference: "focused", label: "File display: focused" },
+];
+
 const SIDEBAR_PREFERENCES: { preference: SidebarPreference; label: string }[] = [
 	{ preference: "auto", label: "Sidebar: auto" },
 	{ preference: "shown", label: "Sidebar: shown" },
@@ -83,9 +89,11 @@ export const buildAppMenus = ({
 	showHelp,
 	viewMode,
 	semanticLoading,
+	fileDisplay,
 	sidebarPreference,
 	diffPreference,
 	splitReachable,
+	setFileDisplay,
 	setSidebarPreference,
 	setDiffPreference,
 	requestQuit,
@@ -107,9 +115,11 @@ export const buildAppMenus = ({
 	showHelp: boolean;
 	viewMode: "patch" | "semantic";
 	semanticLoading: boolean;
+	fileDisplay: FileDisplayPreference;
 	sidebarPreference: SidebarPreference;
 	diffPreference: DiffLayoutPreference;
 	splitReachable: boolean;
+	setFileDisplay: (preference: FileDisplayPreference) => void;
 	setSidebarPreference: (preference: SidebarPreference) => void;
 	setDiffPreference: (preference: DiffLayoutPreference) => void;
 	requestQuit: () => void;
@@ -164,6 +174,15 @@ export const buildAppMenus = ({
 			action: showSemantic,
 		},
 		{ kind: "separator", id: "view-mode" },
+		...FILE_DISPLAY_PREFERENCES.map(
+			({ preference, label }): MenuEntry => ({
+				kind: "item",
+				label,
+				checked: fileDisplay === preference,
+				action: () => setFileDisplay(preference),
+			}),
+		),
+		{ kind: "separator", id: "file-display" },
 		...DIFF_PREFERENCES.map(
 			({ preference, label }): MenuEntry => ({
 				kind: "item",

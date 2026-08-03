@@ -47,6 +47,9 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   uses coloured side-by-side output when wide and coloured inline output when narrow; styling is
   translated into safe OpenTUI spans. Exact key-change anchors, range highlights, and threads are
   Patch-only; Difftastic output is never parsed into durable anchors.
+- **File display** — All (the default chapter stream) or Focused (only the selected file). The
+  reviewer moves the focused surface through the chapter with file navigation. It applies to both
+  diff views and persists machine-wide as a reviewer preference rather than per-run state.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes

@@ -43,5 +43,7 @@ test.skipIf(process.platform === "win32" || lacksPtyTools)(
 			await rm(directory, { recursive: true, force: true });
 		}
 	},
-	10_000,
+	// Generous because GitHub's Intel macOS runners start the TUI several times slower
+	// than Apple Silicon; a genuine hang still fails well before this.
+	30_000,
 );

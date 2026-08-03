@@ -16,7 +16,10 @@ import { act } from "react";
 import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
 import { App } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
+import type { Preferences } from "./preferences.ts";
 import type { PermalinkContext } from "./sourceLink.ts";
+import { createThread } from "./threads.ts";
+import type { ReviewSessionState } from "./viewState.ts";
 
 const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
 const theme = resolveTheme("catppuccin-mocha");
@@ -104,6 +107,60 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("1. Add a re"); // sidebar chapter label (single-line truncated)
 	expect(frame).toContain("Dashboards stay up during deploys now"); // prologue outcome
 	expect(frame).toContain("0/3 reviewed"); // none reviewed yet
+});
+
+test("reopening restores the page, collapsed files, scroll, and reviewer settings", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const sessions: ReviewSessionState[] = [];
+	const preferences: Preferences[] = [];
+	const initialSession: ReviewSessionState = {
+		pageId: "chapter-2",
+		pages: {
+			"chapter-2": {
+				selectedFile: 0,
+				selectedHunk: 0,
+				selectedKeyChange: 0,
+				collapsedFiles: ["src/lib/apiClient.ts"],
+				scrollTop: 0,
+				panelScrollTop: 0,
+			},
+		},
+	};
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			initialSessionState={initialSession}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "stacked" }}
+			onSessionStateChange={(next) => sessions.push(next)}
+			onPreferencesChange={(next) => preferences.push(next)}
+			onQuit={() => {}}
+		/>,
+		{ width: 130, height: 30 },
+	);
+	await t.renderOnce();
+
+	const reopened = t.captureCharFrame();
+	expect(reopened).toContain("3/4");
+	expect(reopened).toContain("▶ src/lib/apiClient.ts");
+	expect(reopened).not.toContain("Chapters (3)");
+
+	await press(t, "s");
+	await press(t, "q");
+
+	expect(preferences.at(-1)).toMatchObject({
+		sidebarPreference: "shown",
+		diffPreference: "stacked",
+	});
+	expect(sessions.at(-1)).toMatchObject({
+		pageId: "chapter-2",
+		pages: {
+			"chapter-2": {
+				collapsedFiles: ["src/lib/apiClient.ts"],
+				scrollTop: expect.any(Number),
+			},
+		},
+	});
 });
 
 test("the view indicator sits against the right edge, not beside the menu titles", async () => {
@@ -198,8 +255,12 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	const menuFrame = t.captureCharFrame();
 	expect(menuFrame).toContain("[x] Patch view");
 	expect(menuFrame).toContain("Semantic diff");
+	expect(menuFrame).toContain("Theme: ayu-dark");
 	expect(menuFrame).not.toContain("Next page"); // navigation lives in its own menu
 
+	await arrow(t, "right");
+	expect(t.captureCharFrame()).not.toContain("Theme: ayu-dark");
+	await arrow(t, "left");
 	await arrow(t, "left");
 	expect(t.captureCharFrame()).toContain("Next page");
 	await press(t, "RETURN"); // Previous page — reachable from chapter one because the prologue is a page
@@ -361,6 +422,63 @@ ${additions}
 	await arrow(t, "down");
 	await press(t, "RETURN");
 	expect(t.captureCharFrame()).not.toContain("semantic row 1 ");
+});
+
+test("reopening restores the exact scroll offset", async () => {
+	const scrollFile = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "restored-scroll",
+				order: 1,
+				title: "Restore the reader",
+				summary: "The diff is longer than the viewport.",
+				hunkRefs: [{ filePath: "restored.ts", oldStart: 1 }],
+				keyChanges: [],
+			},
+		],
+	});
+	const additions = Array.from({ length: 30 }, (_, index) => `+restored row ${index + 1}`).join(
+		"\n",
+	);
+	const diffFiles = parsePatch(`diff --git a/restored.ts b/restored.ts
+--- a/restored.ts
++++ b/restored.ts
+@@ -1 +1,30 @@
+-old row
+${additions}
+`);
+	const sessions: ReviewSessionState[] = [];
+	const t = await testRender(
+		<App
+			file={scrollFile}
+			diffFiles={diffFiles}
+			initialPreferences={{ sidebarPreference: "hidden" }}
+			initialSessionState={{
+				pageId: "restored-scroll",
+				pages: {
+					"restored-scroll": {
+						selectedFile: 0,
+						selectedHunk: 0,
+						selectedKeyChange: 0,
+						collapsedFiles: [],
+						scrollTop: 16,
+						panelScrollTop: 0,
+					},
+				},
+			}}
+			onSessionStateChange={(next) => sessions.push(next)}
+			onQuit={() => {}}
+		/>,
+		{ width: 100, height: 14 },
+	);
+	await t.renderOnce();
+	await act(async () => Bun.sleep(60));
+	await t.renderOnce();
+
+	expect(t.captureCharFrame()).not.toContain("restored row 1 ");
+	expect(t.captureCharFrame()).toContain("restored row");
+	await press(t, "q");
+	expect(sessions.at(-1)?.pages["restored-scroll"]?.scrollTop).toBe(16);
 });
 
 test("an unavailable semantic diff stays in Patch with a safe explanation", async () => {
@@ -765,16 +883,18 @@ test("inline threads show authors and compose new roots and replies", async () =
 		{ width: 100, height: 30, kittyKeyboard: true },
 	);
 	await t.renderOnce();
-	expect(t.captureCharFrame()).toContain("✓ Dealt with");
+	expect(t.captureCharFrame()).toContain("✓ Resolved");
 	expect(t.captureCharFrame()).toContain("Agent · Review agent");
 	let lifecycleLines = t.captureCharFrame().split("\n");
+	const initialStatusY = lifecycleLines.findIndex((line) => line.includes("✓ Resolved"));
+	expect(lifecycleLines[initialStatusY - 1]).toContain("┌");
 	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen]"));
 	await click(t, lifecycleLines[lifecycleY]?.indexOf("Reopen") ?? -1, lifecycleY);
 	expect(t.captureCharFrame()).toContain("! Open");
 	lifecycleLines = t.captureCharFrame().split("\n");
-	lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Mark dealt with]"));
-	await click(t, lifecycleLines[lifecycleY]?.indexOf("Mark dealt with") ?? -1, lifecycleY);
-	expect(t.captureCharFrame()).toContain("✓ Dealt with");
+	lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Resolve]"));
+	await click(t, lifecycleLines[lifecycleY]?.indexOf("Resolve") ?? -1, lifecycleY);
+	expect(t.captureCharFrame()).toContain("✓ Resolved");
 
 	const lines = t.captureCharFrame().split("\n");
 	const lineY = lines.findIndex((line) => line.includes("new value"));
@@ -783,13 +903,14 @@ test("inline threads show authors and compose new roots and replies", async () =
 	await click(t, gutterX, lineY);
 	const composerFrame = t.captureCharFrame();
 	expect(composerFrame).toContain("New review thread");
-	expect(composerFrame).toContain("thread.ts · additions · line 1");
+	expect(composerFrame).not.toContain("review unit oldStart");
 	const composerLines = composerFrame.split("\n");
 	const existingThreadActionsY = composerLines.findIndex((line) =>
 		line.includes("[Delete thread]"),
 	);
 	const composerY = composerLines.findIndex((line) => line.includes("New review thread"));
-	expect(composerY - 1).toBe(existingThreadActionsY + 1);
+	expect(composerLines[existingThreadActionsY + 1]).toContain("└");
+	expect(composerY).toBe(existingThreadActionsY + 3);
 
 	await act(async () => t.mockInput.typeText("Please adjust"));
 	let draftFrameLines = t.captureCharFrame().split("\n");
@@ -1173,7 +1294,28 @@ test("a highlight spanning lines carries its whole range into the pointer's verb
 
 test("commenting on a highlight anchors the thread to every line it covers", async () => {
 	const diffFiles = await loadPatch(PATCH);
-	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 160, height: 40 });
+	const anchors: ThreadAnchor[] = [];
+	const unavailable = () => {
+		throw new Error("unused thread action");
+	};
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			threadActions={{
+				create: (anchor, author, body) => {
+					anchors.push(anchor);
+					return createThread("0".repeat(64), anchor, author, body);
+				},
+				reply: unavailable,
+				delete: unavailable,
+				deleteMessage: unavailable,
+				markDealt: unavailable,
+				reopen: unavailable,
+			}}
+		/>,
+		{ width: 160, height: 40, kittyKeyboard: true },
+	);
 	await t.renderOnce();
 	await nextChapter(t);
 
@@ -1190,5 +1332,14 @@ test("commenting on a highlight anchors the thread to every line it covers", asy
 	const commentY = menu.findIndex((line) => line.includes("Comment on selection"));
 	await click(t, (menu[commentY]?.indexOf("Comment on selection") ?? -1) + 1, commentY);
 
-	expect(t.captureCharFrame()).toContain("src/lib/backoff.ts · additions · lines 1-3");
+	expect(t.captureCharFrame()).not.toContain("review unit oldStart");
+	await act(async () => t.mockInput.typeText("Review this range"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+	expect(anchors[0]).toMatchObject({
+		filePath: "src/lib/backoff.ts",
+		side: "additions",
+		startLine: 1,
+		endLine: 3,
+	});
 });

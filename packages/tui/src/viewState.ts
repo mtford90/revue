@@ -11,6 +11,7 @@ import {
 	viewStateFileId,
 	viewStateKeyChangeId,
 } from "@revue/types";
+import { z } from "zod";
 
 /** Distinct file paths a chapter touches, in first-seen order. */
 export function chapterFilePaths(chapter: Chapter): string[] {
@@ -95,9 +96,29 @@ export function defaultStatePath(): string {
 	return join(process.cwd(), ".revue", "state.json");
 }
 
+const ReviewPageStateSchema = z.object({
+	selectedFile: z.number().int().nonnegative(),
+	selectedHunk: z.number().int().nonnegative(),
+	selectedKeyChange: z.number().int().nonnegative(),
+	collapsedFiles: z.array(z.string()),
+	scrollTop: z.number().nonnegative(),
+	panelScrollTop: z.number().nonnegative(),
+});
+
+const ReviewSessionStateSchema = z.object({
+	pageId: z.string().optional(),
+	pages: z.record(z.string(), ReviewPageStateSchema).default({}),
+});
+
+export type ReviewSessionState = z.infer<typeof ReviewSessionStateSchema>;
+
+export const emptyReviewSessionState = (): ReviewSessionState => ({ pages: {} });
+
 export interface ViewStateStore {
 	get(): ViewState;
 	set(next: ViewState): void;
+	getSession(): ReviewSessionState;
+	setSession(next: ReviewSessionState): void;
 }
 
 /**
@@ -112,14 +133,26 @@ export async function loadViewState(path: string, key: string): Promise<ViewStat
 
 export async function openFileStore(path: string, key: string): Promise<ViewStateStore> {
 	const all = await readAllRuns(path);
-	let current = all[key] ? ViewStateSchema.parse(all[key]) : emptyViewState();
+	const stored = all[key];
+	let current = stored ? ViewStateSchema.parse(stored) : emptyViewState();
+	const storedSession =
+		stored && typeof stored === "object" ? (stored as { session?: unknown }).session : undefined;
+	let session = ReviewSessionStateSchema.parse(storedSession ?? {});
+	const save = () => {
+		all[key] = { ...current, session };
+		persist(path, all);
+	};
 
 	return {
 		get: () => current,
 		set: (next) => {
 			current = next;
-			all[key] = next;
-			persist(path, all);
+			save();
+		},
+		getSession: () => session,
+		setSession: (next) => {
+			session = ReviewSessionStateSchema.parse(next);
+			save();
 		},
 	};
 }

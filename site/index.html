@@ -8,18 +8,51 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<script>
+  const savedTheme = localStorage.getItem("revue-site-theme");
+  if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
+</script>
 <style>
   :root {
-    --stage: #171210;
-    --panel: #211915;
-    --panel-edge: #35291f;
-    --curtain: #b4372e;
-    --brass: #c9a15c;
-    --ink: #efe7db;
-    --muted: #94867a;
+    color-scheme: dark;
+    --stage: #10141c;
+    --panel: #171b24;
+    --panel-edge: #2d3542;
+    --curtain: #ffb454;
+    --brass: #59c2ff;
+    --ink: #bfbdb6;
+    --muted: #77808c;
+    --button-ink: #10141c;
+    --shadow: rgba(0, 0, 0, 0.5);
     --display: "Fraunces", serif;
     --body: "Instrument Sans", system-ui, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme]) {
+      color-scheme: light;
+      --stage: #fcfcfc;
+      --panel: #f3f4f5;
+      --panel-edge: #d8d9da;
+      --curtain: #a65d00;
+      --brass: #1471ad;
+      --ink: #5c6166;
+      --muted: #828c99;
+      --button-ink: #fcfcfc;
+      --shadow: rgba(92, 97, 102, 0.2);
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --stage: #fcfcfc;
+    --panel: #f3f4f5;
+    --panel-edge: #d8d9da;
+    --curtain: #a65d00;
+    --brass: #1471ad;
+    --ink: #5c6166;
+    --muted: #828c99;
+    --button-ink: #fcfcfc;
+    --shadow: rgba(92, 97, 102, 0.2);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }
@@ -43,6 +76,30 @@
   }
   code, pre { font-family: var(--mono); }
   .wrap { max-width: 60rem; margin: 0 auto; padding: 0 1.25rem; }
+  .theme-switcher {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    display: flex;
+    gap: 0.2rem;
+    padding: 0.25rem;
+    border: 1px solid var(--panel-edge);
+    border-radius: 6px;
+    background: var(--panel);
+  }
+  .theme-switcher button {
+    border: 0;
+    border-radius: 4px;
+    padding: 0.35rem 0.55rem;
+    color: var(--muted);
+    background: transparent;
+    font: 0.75rem var(--mono);
+    cursor: pointer;
+  }
+  .theme-switcher button[aria-pressed="true"] {
+    color: var(--ink);
+    background: var(--panel-edge);
+  }
 
   /* ── Masthead ──────────────────────────────────────────── */
   header { text-align: center; padding: 4.5rem 0 0; }
@@ -101,7 +158,7 @@
   .cta a.primary {
     border-color: var(--curtain);
     background: var(--curtain);
-    color: #fff4ec;
+    color: var(--button-ink);
   }
   .cta a:hover { text-decoration: none; border-color: var(--brass); }
 
@@ -113,7 +170,7 @@
     border-radius: 8px;
     overflow: hidden;
     background: var(--panel);
-    box-shadow: 0 30px 80px -30px rgba(180, 55, 46, 0.25), 0 20px 60px rgba(0,0,0,0.5);
+    box-shadow: 0 30px 80px -30px color-mix(in srgb, var(--curtain) 25%, transparent), 0 20px 60px var(--shadow);
   }
   .proscenium img { display: block; width: 100%; height: auto; }
   .stage figcaption {
@@ -233,6 +290,12 @@
 </style>
 </head>
 <body>
+
+<nav class="theme-switcher" aria-label="Colour theme">
+  <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+  <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+  <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+</nav>
 
 <header class="wrap">
   <p class="eyebrow">A branch, staged in chapters</p>
@@ -374,5 +437,25 @@ RUN=$(<span class="kw">bun</span> run revue prep)
   <div class="wrap">MIT · <a href="https://github.com/mtford90/revue">mtford90/revue</a></div>
 </footer>
 
+<script>
+  const themeButtons = [...document.querySelectorAll("[data-theme-choice]")];
+  const setTheme = (choice) => {
+    if (choice === "system") {
+      delete document.documentElement.dataset.theme;
+      localStorage.removeItem("revue-site-theme");
+    } else {
+      document.documentElement.dataset.theme = choice;
+      localStorage.setItem("revue-site-theme", choice);
+    }
+    themeButtons.forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.themeChoice === choice));
+    });
+  };
+  const initialTheme = document.documentElement.dataset.theme ?? "system";
+  setTheme(initialTheme);
+  themeButtons.forEach((button) => {
+    button.addEventListener("click", () => setTheme(button.dataset.themeChoice));
+  });
+</script>
 </body>
 </html>

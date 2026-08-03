@@ -197,14 +197,15 @@ export const buildAppMenus = ({
 			disabled: !canChangeFiles,
 			action: expandFiles,
 		},
-	],
-	help: [
+		{ kind: "separator", id: "theme" },
 		{
 			kind: "item",
 			label: `Theme: ${themeLabel}`,
 			hint: "t",
 			action: chooseTheme,
 		},
+	],
+	help: [
 		{
 			kind: "item",
 			label: "Keyboard shortcuts",

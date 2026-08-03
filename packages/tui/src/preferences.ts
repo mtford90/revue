@@ -1,19 +1,22 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
-// Preferences belong to the reviewer, not to one run, so they live beside review progress
-// rather than inside the `{ [runKey]: ViewState }` map that `state.json` holds.
 const PreferencesSchema = z.object({
 	themeId: z.string().optional(),
 	transparentBackground: z.boolean().optional(),
+	indexExpanded: z.boolean().optional(),
+	sidebarPreference: z.enum(["auto", "shown", "hidden"]).optional(),
+	diffPreference: z.enum(["auto", "split", "stacked"]).optional(),
+	viewMode: z.enum(["patch", "semantic"]).optional(),
+	panelWidth: z.number().int().positive().optional(),
 });
 
 export type Preferences = z.infer<typeof PreferencesSchema>;
 
-export const defaultPreferencesPath = (): string =>
-	join(process.cwd(), ".revue", "preferences.json");
+export const defaultPreferencesPath = (): string => join(homedir(), ".revue", "preferences.json");
 
 export async function loadPreferences(path: string): Promise<Preferences> {
 	try {

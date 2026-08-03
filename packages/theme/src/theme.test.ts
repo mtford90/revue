@@ -57,10 +57,13 @@ describe("derived themes", () => {
 });
 
 describe("resolveTheme", () => {
-	test("an unknown or automatic name falls back to the terminal's own appearance", () => {
+	test("an unknown or automatic name falls back to the Ayu theme for the terminal's appearance", () => {
+		expect(DEFAULT_LIGHT_THEME_ID).toBe("ayu-light");
+		expect(DEFAULT_DARK_THEME_ID).toBe("ayu-dark");
 		expect(resolveTheme("auto", "light").id).toBe(DEFAULT_LIGHT_THEME_ID);
 		expect(resolveTheme("auto", "dark").id).toBe(DEFAULT_DARK_THEME_ID);
 		expect(resolveTheme("not-a-theme", "light").id).toBe(DEFAULT_LIGHT_THEME_ID);
+		expect(resolveTheme(undefined, "light").id).toBe(DEFAULT_DARK_THEME_ID);
 		expect(resolveTheme(undefined, null).id).toBe(DEFAULT_DARK_THEME_ID);
 	});
 

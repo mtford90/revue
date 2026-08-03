@@ -573,10 +573,12 @@ async function cmdShow(args: string[]): Promise<number> {
 		diffFiles,
 		loadSemanticDiff: () => generateSemanticDiff(run),
 		initialViewState: store.get(),
+		initialSessionState: store.getSession(),
+		initialPreferences: preferences,
 		resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance),
 		initialSyntaxTheme: startupTheme.syntaxTheme,
 		transparentSurfaces,
-		onThemeChange: (next) => savePreferences(preferencesPath, { ...preferences, themeId: next.id }),
+		onPreferencesChange: (next) => savePreferences(preferencesPath, next),
 		initialThreads: threads,
 		threadActions: threadStore,
 		humanAuthor,
@@ -585,6 +587,7 @@ async function cmdShow(args: string[]): Promise<number> {
 			remoteUrl: originRemoteUrl(repositoryRoot),
 		}),
 		onViewStateChange: (next) => store.set(next),
+		onSessionStateChange: (next) => store.setSession(next),
 	});
 	return 0;
 }

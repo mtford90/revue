@@ -42,7 +42,7 @@ import {
 	type ThreadMessage,
 	type ViewState,
 } from "@revue/types";
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { copyToClipboard } from "./clipboard.ts";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import {
@@ -65,6 +65,7 @@ import {
 	selectable,
 	useMenuController,
 } from "./menu.tsx";
+import type { Preferences } from "./preferences.ts";
 import { type SemanticDiffResult, type SemanticEmphasis, terminalSafe } from "./semantic.ts";
 import {
 	formatSourceLocation,
@@ -82,6 +83,7 @@ import {
 	isFileReviewed,
 	isKeyChangeChecked,
 	nextUnreviewedChapter,
+	type ReviewSessionState,
 	reviewedChapterCount,
 	toggleChapter,
 	toggleFile,
@@ -143,6 +145,18 @@ function buildPages(file: RevueChaptersFile): Page[] {
 	}
 	return pages;
 }
+
+const pageId = (page: Page | undefined) =>
+	page?.kind === "chapter" ? page.chapter.id : "prologue";
+
+const emptyReviewPageState = () => ({
+	selectedFile: 0,
+	selectedHunk: 0,
+	selectedKeyChange: 0,
+	collapsedFiles: [] as string[],
+	scrollTop: 0,
+	panelScrollTop: 0,
+});
 
 const pageRowId = (index: number) => `page-index-row:${index}`;
 
@@ -895,13 +909,16 @@ function InlineThread({
 	return (
 		<box
 			flexDirection="column"
-			border={["left"]}
+			border
 			borderColor={dealtWith ? theme.badgeAdded : theme.badgeModified}
+			backgroundColor={theme.panel}
 			paddingLeft={1}
+			paddingRight={1}
 			marginLeft={2}
+			marginRight={1}
 		>
 			<text fg={dealtWith ? theme.badgeAdded : theme.badgeModified}>
-				{dealtWith ? "✓ Dealt with" : "! Open"} · Thread {thread.id}
+				{dealtWith ? "✓ Resolved" : "! Open"} · Thread {thread.id}
 			</text>
 			{thread.messages.map((message, index) => (
 				<ThreadMessageView
@@ -933,7 +950,7 @@ function InlineThread({
 						onToggleStatus(thread);
 					}}
 				>
-					[{dealtWith ? "Reopen" : "Mark dealt with"}]
+					[{dealtWith ? "Reopen" : "Resolve"}]
 				</text>
 				<text> </text>
 				<text
@@ -956,7 +973,6 @@ const COPY_NOTICE_MS = 2_500;
 
 function ThreadComposer({
 	title,
-	range,
 	body,
 	notice,
 	copyNotice,
@@ -969,7 +985,6 @@ function ThreadComposer({
 	onCopyLink,
 }: {
 	title: string;
-	range: DiffLineRange;
 	body: string;
 	notice: string | null;
 	copyNotice: string | null;
@@ -1000,13 +1015,6 @@ function ThreadComposer({
 			paddingRight={1}
 		>
 			<text fg={theme.accent}>{title}</text>
-			<text fg={theme.text}>
-				{range.filePath} · {range.side} ·{" "}
-				{range.startLine === range.endLine
-					? `line ${range.startLine}`
-					: `lines ${range.startLine}-${range.endLine}`}{" "}
-				· review unit oldStart {range.hunkOldStart}
-			</text>
 			<textarea
 				ref={textareaRef}
 				initialValue={body}
@@ -1682,6 +1690,8 @@ export function App({
 	diffFiles = null,
 	loadSemanticDiff,
 	initialViewState = emptyViewState(),
+	initialSessionState = { pages: {} },
+	initialPreferences = {},
 	initialTheme = resolveTheme(undefined),
 	initialSyntaxTheme = initialTheme.syntaxTheme,
 	transparentSurfaces = false,
@@ -1691,6 +1701,8 @@ export function App({
 	permalinks = null,
 	onCopy,
 	onViewStateChange,
+	onSessionStateChange,
+	onPreferencesChange,
 	onThemeChange,
 	onQuit,
 }: {
@@ -1698,6 +1710,8 @@ export function App({
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 	initialViewState?: ViewState;
+	initialSessionState?: ReviewSessionState;
+	initialPreferences?: Preferences;
 	initialTheme?: Theme;
 	/** The syntax theme the caller already prepared highlights for. */
 	initialSyntaxTheme?: string;
@@ -1709,34 +1723,51 @@ export function App({
 	permalinks?: PermalinkContext | null;
 	onCopy?: (text: string) => boolean;
 	onViewStateChange?: (next: ViewState) => void;
+	onSessionStateChange?: (next: ReviewSessionState) => void;
+	onPreferencesChange?: (next: Preferences) => void;
 	onThemeChange?: (next: Theme) => void;
 	onQuit?: () => void;
 }) {
 	const renderer = useRenderer();
+	const { width, height } = useTerminalDimensions();
 	const [chosenTheme, setChosenTheme] = useState(initialTheme);
 	const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
 	const shownTheme = previewTheme ?? chosenTheme;
 	const theme = transparentSurfaces ? withTransparentSurfaces(shownTheme) : shownTheme;
-	const pages = buildPages(file);
+	const pages = useMemo(() => buildPages(file), [file]);
 	const chapters = pages.flatMap((candidate) =>
 		candidate.kind === "chapter" ? [candidate.chapter] : [],
 	);
-	const [current, setCurrent] = useState(0);
-	const [selectedFile, setSelectedFile] = useState(0);
-	const [selectedHunkIndex, setSelectedHunkIndex] = useState(0);
-	const [selectedKeyChange, setSelectedKeyChange] = useState(0);
-	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(() => new Set());
+	const restoredPage = pages.findIndex(
+		(candidate) => pageId(candidate) === initialSessionState.pageId,
+	);
+	const initialCurrent = restoredPage >= 0 ? restoredPage : 0;
+	const initialPageState =
+		initialSessionState.pages[pageId(pages[initialCurrent])] ?? emptyReviewPageState();
+	const sessionRef = useRef(initialSessionState);
+	const preferencesRef = useRef(initialPreferences);
+	const [current, setCurrent] = useState(initialCurrent);
+	const [selectedFile, setSelectedFile] = useState(initialPageState.selectedFile);
+	const [selectedHunkIndex, setSelectedHunkIndex] = useState(initialPageState.selectedHunk);
+	const [selectedKeyChange, setSelectedKeyChange] = useState(initialPageState.selectedKeyChange);
+	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
+		() => new Set(initialPageState.collapsedFiles),
+	);
 	const [fileFocusRequest, setFileFocusRequest] = useState(0);
 	const [keyFocusRequest, setKeyFocusRequest] = useState(0);
 	const [diffAnchorTarget, setDiffAnchorTarget] = useState<{ id: string; request: number } | null>(
 		null,
 	);
 	const [showHelp, setShowHelp] = useState(false);
-	const [indexExpanded, setIndexExpanded] = useState(true);
-	const [sidebarPreference, setSidebarPreference] = useState<SidebarPreference>("auto");
-	const [diffPreference, setDiffPreference] = useState<DiffLayoutPreference>("auto");
-	const [viewMode, setViewMode] = useState<"patch" | "semantic">("patch");
+	const [indexExpanded, setIndexExpandedState] = useState(initialPreferences.indexExpanded ?? true);
+	const [sidebarPreference, setSidebarPreferenceState] = useState<SidebarPreference>(
+		initialPreferences.sidebarPreference ?? "auto",
+	);
+	const [diffPreference, setDiffPreferenceState] = useState<DiffLayoutPreference>(
+		initialPreferences.diffPreference ?? "auto",
+	);
+	const [viewMode, setViewModeState] = useState<"patch" | "semantic">("patch");
 	const [semantic, setSemantic] = useState<PreparedSemantic | null>(null);
 	const [semanticLoading, setSemanticLoading] = useState(false);
 	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
@@ -1755,9 +1786,11 @@ export function App({
 	const indexScroll = useRef<ScrollBoxRenderable>(null);
 	const helpScroll = useRef<ScrollBoxRenderable>(null);
 	const resizingPanel = useRef(false);
+	const startupViewRestored = useRef(false);
 	const chapterNavigationPrefix = useRef<"[" | "]" | null>(null);
-	const { width, height } = useTerminalDimensions();
-	const [requestedPanelWidth, setRequestedPanelWidth] = useState(() => defaultPanelWidth(width));
+	const [requestedPanelWidth, setRequestedPanelWidthState] = useState(
+		initialPreferences.panelWidth ?? defaultPanelWidth(width),
+	);
 	const {
 		showSidebar: showChapterPanel,
 		sidebarWidth: panelWidth,
@@ -1781,6 +1814,51 @@ export function App({
 			? theme
 			: { ...theme, syntaxTheme: preparedSyntaxTheme };
 
+	function updatePreferences(next: Partial<Preferences>) {
+		preferencesRef.current = { ...preferencesRef.current, ...next };
+		onPreferencesChange?.(preferencesRef.current);
+	}
+	function changeIndexExpanded(next: boolean) {
+		setIndexExpandedState(next);
+		updatePreferences({ indexExpanded: next });
+	}
+	function changeSidebarPreference(next: SidebarPreference) {
+		setSidebarPreferenceState(next);
+		updatePreferences({ sidebarPreference: next });
+	}
+	function changeDiffPreference(next: DiffLayoutPreference) {
+		setDiffPreferenceState(next);
+		updatePreferences({ diffPreference: next });
+	}
+	function changePanelWidth(next: number) {
+		setRequestedPanelWidthState(next);
+		updatePreferences({ panelWidth: next });
+	}
+	function saveCurrentSession(nextPageId = pageId(page)) {
+		const currentPageId = pageId(page);
+		const next: ReviewSessionState = {
+			...sessionRef.current,
+			pageId: nextPageId,
+			pages: {
+				...sessionRef.current.pages,
+				[currentPageId]: {
+					selectedFile,
+					selectedHunk: selectedHunkIndex,
+					selectedKeyChange,
+					collapsedFiles: [...collapsedFiles],
+					scrollTop: pageScroll.current?.scrollTop ?? 0,
+					panelScrollTop: panelScroll.current?.scrollTop ?? 0,
+				},
+			},
+		};
+		sessionRef.current = next;
+		onSessionStateChange?.(next);
+	}
+	function quit() {
+		saveCurrentSession();
+		onQuit?.();
+	}
+
 	useEffect(() => {
 		const highlightable = [...(diffFiles ?? []), ...semanticDiffFiles(semantic)];
 		if (!highlightable.length || preparedSyntaxTheme === theme.syntaxTheme) return;
@@ -1802,6 +1880,18 @@ export function App({
 		scroll.scrollTo(Math.round(maximum * pending.progress));
 		pendingViewProgress.current = null;
 	}, [viewMode]);
+
+	useEffect(() => {
+		const restored = sessionRef.current.pages[pageId(pages[current])];
+		if (!restored) return;
+		const restore = () => {
+			pageScroll.current?.scrollTo(restored.scrollTop);
+			panelScroll.current?.scrollTo(restored.panelScrollTop);
+		};
+		restore();
+		const retry = setTimeout(restore, 50);
+		return () => clearTimeout(retry);
+	}, [current, pages]);
 
 	useEffect(() => {
 		if (!indexExpanded) return;
@@ -2001,13 +2091,17 @@ export function App({
 	function goto(index: number) {
 		const next = Math.max(0, Math.min(index, pages.length - 1));
 		if (next === current) return;
-		pageScroll.current?.scrollTo(0);
+		const nextPageId = pageId(pages[next]);
+		saveCurrentSession(nextPageId);
+		const restored = sessionRef.current.pages[nextPageId] ?? emptyReviewPageState();
+		pageScroll.current?.scrollTo(restored.scrollTop);
+		panelScroll.current?.scrollTo(restored.panelScrollTop);
 		pendingViewProgress.current = null;
 		setCurrent(next);
-		setSelectedFile(0);
-		setSelectedHunkIndex(0);
-		setSelectedKeyChange(0);
-		setCollapsedFiles(new Set());
+		setSelectedFile(restored.selectedFile);
+		setSelectedHunkIndex(restored.selectedHunk);
+		setSelectedKeyChange(restored.selectedKeyChange);
+		setCollapsedFiles(new Set(restored.collapsedFiles));
 		setFileFocusRequest(0);
 		setKeyFocusRequest(0);
 		setDiffAnchorTarget(null);
@@ -2024,7 +2118,7 @@ export function App({
 	}
 	function resizePanel(event: OpenTUIMouseEvent) {
 		if (!resizingPanel.current) return;
-		setRequestedPanelWidth(resolvePanelWidth(width, event.x + 1));
+		changePanelWidth(resolvePanelWidth(width, event.x + 1));
 	}
 	function finishPanelResize() {
 		resizingPanel.current = false;
@@ -2159,7 +2253,7 @@ export function App({
 		if (target) gotoChapter(target);
 	}
 	function toggleSidebar() {
-		setSidebarPreference(showChapterPanel ? "hidden" : "shown");
+		changeSidebarPreference(showChapterPanel ? "hidden" : "shown");
 	}
 	function collapseFiles() {
 		if (!chapter) return;
@@ -2179,7 +2273,8 @@ export function App({
 			mode: next,
 			progress: maximum > 0 && scroll ? scroll.scrollTop / maximum : 0,
 		};
-		setViewMode(next);
+		setViewModeState(next);
+		updatePreferences({ viewMode: next });
 	}
 	function showPatch() {
 		changeViewMode("patch");
@@ -2204,6 +2299,7 @@ export function App({
 		setChosenTheme(next);
 		setPreviewTheme(null);
 		setThemePicker(null);
+		updatePreferences({ themeId: next.id });
 		onThemeChange?.(next);
 	}
 	function closeThemePicker() {
@@ -2235,11 +2331,38 @@ export function App({
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			setSemanticNotice(terminalSafe(detail));
-			setViewMode("patch");
+			setViewModeState("patch");
+			updatePreferences({ viewMode: "patch" });
 		} finally {
 			setSemanticLoading(false);
 		}
 	}
+
+	useEffect(() => {
+		if (startupViewRestored.current || initialPreferences.viewMode !== "semantic") return;
+		startupViewRestored.current = true;
+		if (!loadSemanticDiff) {
+			setSemanticNotice(
+				"Semantic diff unavailable: no Difftastic loader was supplied. Patch view remains active.",
+			);
+			return;
+		}
+		setSemanticLoading(true);
+		setSemanticNotice("Loading semantic diff from pinned run snapshots...");
+		loadSemanticDiff()
+			.then(prepareSemantic)
+			.then(async (result) => {
+				await prepareSyntaxHighlighting(semanticDiffFiles(result), theme.syntaxTheme);
+				setSemantic(result);
+				setSemanticNotice(null);
+				setViewModeState("semantic");
+			})
+			.catch((error) => {
+				const detail = error instanceof Error ? error.message : String(error);
+				setSemanticNotice(terminalSafe(detail));
+			})
+			.finally(() => setSemanticLoading(false));
+	}, [initialPreferences.viewMode, loadSemanticDiff, theme.syntaxTheme]);
 
 	const menus = buildAppMenus({
 		canMovePrevious: current > 0,
@@ -2253,9 +2376,9 @@ export function App({
 		sidebarPreference,
 		diffPreference,
 		splitReachable,
-		setSidebarPreference,
-		setDiffPreference,
-		requestQuit: () => onQuit?.(),
+		setSidebarPreference: changeSidebarPreference,
+		setDiffPreference: changeDiffPreference,
+		requestQuit: quit,
 		movePrevious: () => movePage(-1),
 		moveNext: () => movePage(1),
 		moveNextUnreviewed,
@@ -2284,7 +2407,6 @@ export function App({
 		<ThreadComposer
 			key={threadDraft.kind === "thread" ? "new-thread" : threadDraft.threadId}
 			title={threadDraft.kind === "thread" ? "New review thread" : "Reply to thread"}
-			range={threadDraft.range}
 			body={threadBody}
 			notice={threadNotice}
 			copyNotice={copyNotice?.text ?? null}
@@ -2404,7 +2526,7 @@ export function App({
 			const text = highlightedText();
 			if (text) copyText(text);
 		} else if (name === "q" || name === "escape") {
-			onQuit?.();
+			quit();
 		} else if (name === "pageup" || name === "pagedown") {
 			pageScroll.current?.scrollBy(name === "pageup" ? -1 : 1, "viewport");
 		} else if ((name === "f" || name === "b") && key.ctrl) {
@@ -2505,7 +2627,7 @@ export function App({
 							stats={stats}
 							reviewed={reviewed}
 							onNavigatePage={goto}
-							onToggleIndex={() => setIndexExpanded((expanded) => !expanded)}
+							onToggleIndex={() => changeIndexExpanded(!indexExpanded)}
 							onResizeStart={startPanelResize}
 							onSelectFile={selectFile}
 							onFocusKeyChange={focusKeyChange}
@@ -2696,6 +2818,8 @@ export async function runApp(
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 		initialViewState?: ViewState;
+		initialSessionState?: ReviewSessionState;
+		initialPreferences?: Preferences;
 		initialThreads?: ReviewThread[];
 		threadActions?: ThreadActions;
 		humanAuthor?: ThreadAuthor;
@@ -2706,6 +2830,8 @@ export async function runApp(
 		initialSyntaxTheme?: string;
 		transparentSurfaces?: boolean;
 		onViewStateChange?: (next: ViewState) => void;
+		onSessionStateChange?: (next: ReviewSessionState) => void;
+		onPreferencesChange?: (next: Preferences) => void;
 		onThemeChange?: (next: Theme) => void;
 	} = {},
 ): Promise<void> {
@@ -2726,6 +2852,8 @@ export async function runApp(
 				diffFiles={options.diffFiles ?? null}
 				loadSemanticDiff={options.loadSemanticDiff}
 				initialViewState={options.initialViewState}
+				initialSessionState={options.initialSessionState}
+				initialPreferences={options.initialPreferences}
 				initialTheme={initialTheme}
 				initialSyntaxTheme={options.initialSyntaxTheme}
 				transparentSurfaces={options.transparentSurfaces}
@@ -2734,6 +2862,8 @@ export async function runApp(
 				humanAuthor={options.humanAuthor}
 				permalinks={options.permalinks}
 				onViewStateChange={options.onViewStateChange}
+				onSessionStateChange={options.onSessionStateChange}
+				onPreferencesChange={options.onPreferencesChange}
 				onThemeChange={options.onThemeChange}
 				onQuit={quit}
 			/>,

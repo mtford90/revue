@@ -83,14 +83,13 @@ exports contain no threads.
 A **thread** is the official feedback concept. In Patch view, click a visible old/new line-number
 gutter to start one on a single line, or drag within one gutter to select an inclusive range in the
 same hunk and side. Dragging source code instead highlights the text itself, which the next section
-covers. The composer opens inline beneath the selected range and identifies its path, side, range, and review
-unit; use `Ctrl+Enter` or its pointer control to save and `Escape` to cancel. Any number of independent
-threads may share an exact anchor.
+covers. The composer opens inline beneath the selected range; use `Ctrl+Enter` or its pointer control
+to save and `Escape` to cancel. Any number of independent threads may share an exact anchor.
 
 Every root message and reply records an author kind (`human` or `agent`) and display name. Human TUI
 messages use the reviewed repository's `git config user.name`, falling back to the system login.
 Messages from the public agent CLI require an explicit author name. `[Reply]` opens an inline composer
-inside the owning thread. Open threads use an attention marker; dealt-with threads remain visible with
+inside the owning thread. Open threads use an attention marker; resolved threads remain visible with
 a green check and dimmed messages and can be reopened. Replies may be deleted individually, while the
 root message is deleted only by deleting its thread.
 
@@ -108,7 +107,7 @@ revue threads create "$RUN" \
   --author "Review agent" --body "Should this limit be lower?"
 revue threads reply "$RUN" <thread-id> --author "Fix agent" --body-file response.md
 revue threads list "$RUN" --json          # open threads only
-revue threads list "$RUN" --json --all    # include dealt-with threads
+revue threads list "$RUN" --json --all    # include resolved threads
 revue threads mark-dealt "$RUN" <thread-id>
 revue threads reopen "$RUN" <thread-id>
 revue threads delete-message "$RUN" <thread-id> <message-id>
@@ -156,7 +155,9 @@ is taking columns from the thing under review — and a split body is used only 
 sides of the file have changed lines. That threshold is measured against the panel's default width,
 so dragging the divider never makes it disappear under the pointer. Asking for `split` outranks an
 `auto` sidebar, which matters once the divider has been dragged wide, but an explicit sidebar
-preference is never overridden. Neither preference is written to view state.
+preference is never overridden. Both preferences, along with the panel width and chosen diff view,
+are remembered across repositories in `~/.revue/preferences.json`; they do not belong to one run's
+view state.
 
 Losing the sidebar never costs the chapter. The narrative it holds—title, summary, key changes and
 file list—stacks above the diff in a single column instead, the way the prologue already renders,
@@ -175,7 +176,7 @@ Patch active and shows a terminal-safe explanation.
 Every colour Revue paints comes from one theme, derived from one bundled editor theme: the shell,
 the diff body, and the highlighted source always agree. Press `t` (or **View → Theme**) to open the
 picker; arrow keys preview a palette live, `Enter` accepts, `Escape` cancels. The accepted theme is
-remembered in `.revue/preferences.json`.
+remembered machine-wide in `~/.revue/preferences.json`, alongside the reviewer's layout choices.
 
 ```bash
 # name a theme for this run
@@ -191,8 +192,9 @@ bun run revue show examples/sample-run --theme auto
 bun run revue show examples/sample-run --transparent-bg
 ```
 
-Without `--theme`, Revue uses the remembered theme, and otherwise asks the terminal for its
-background colour and picks the matching default. Derivation enforces WCAG contrast floors, so body
+Without `--theme`, Revue uses the remembered theme and otherwise starts with `ayu-dark`. Pass
+`--theme auto` to ask the terminal for its background colour and choose `ayu-light` or `ayu-dark`.
+Derivation enforces WCAG contrast floors, so body
 text, status colours, and diff row tints stay readable on light and dark themes alike.
 
 ## Review ignore rules
@@ -244,8 +246,10 @@ change, and switching Patch/Semantic carries the reviewer's relative position th
 Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and review
 threads are Patch-only. Binary,
 symlink, mode-only, and content-identical metadata changes are described rather than passed off as
-semantic source diffs. Progress persists to `.revue/state.json`, keyed by both the pinned run and its
-chapter narration.
+semantic source diffs. Progress and the reviewer's location persist to `.revue/state.json`, keyed by both the pinned run and
+its chapter narration. Reopening the same run restores the current page, focused file/hunk/question,
+collapsed files, and the main and chapter-panel scroll offsets. Saved threads load independently from
+`.revue/threads.json`; an unfinished composer draft is deliberately not restored.
 
 ## Roadmap
 

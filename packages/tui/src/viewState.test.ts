@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Chapter } from "@revue/types";
 import { emptyViewState } from "@revue/types";
 import {
+	emptyReviewSessionState,
 	isChapterReviewed,
 	isFileReviewed,
 	nextUnreviewedChapter,
@@ -69,22 +70,49 @@ test("runKey changes when either the pinned code or its narration changes", () =
 	expect(runKey("run-a", base)).not.toBe(runKey("run-b", base));
 });
 
-test("file store round-trips per run key and isolates runs", async () => {
+test("file store round-trips review progress and session position per run key", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "revue-vs-"));
 	tmpDirs.push(dir);
 	const path = join(dir, "state.json");
 
 	const store = await openFileStore(path, "runA");
 	store.set({ chapters: ["c1"], files: [], keyChanges: [] });
+	store.setSession({
+		pageId: "c1",
+		pages: {
+			c1: {
+				selectedFile: 2,
+				selectedHunk: 1,
+				selectedKeyChange: 3,
+				collapsedFiles: ["src/a.ts"],
+				scrollTop: 27,
+				panelScrollTop: 4,
+			},
+		},
+	});
 
 	// a second run in the same file must not see runA's progress
 	const other = await openFileStore(path, "runB");
 	expect(other.get()).toEqual(emptyViewState());
+	expect(other.getSession()).toEqual(emptyReviewSessionState());
 
-	// re-opening runA reads back what we wrote
 	const reopened = await openFileStore(path, "runA");
 	expect(reopened.get().chapters).toContain("c1");
+	expect(reopened.getSession()).toEqual({
+		pageId: "c1",
+		pages: {
+			c1: {
+				selectedFile: 2,
+				selectedHunk: 1,
+				selectedKeyChange: 3,
+				collapsedFiles: ["src/a.ts"],
+				scrollTop: 27,
+				panelScrollTop: 4,
+			},
+		},
+	});
 
 	const onDisk = JSON.parse(await readFile(path, "utf8"));
 	expect(onDisk.runA.chapters).toContain("c1");
+	expect(onDisk.runA.session.pages.c1.scrollTop).toBe(27);
 });

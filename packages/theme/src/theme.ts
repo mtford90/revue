@@ -50,8 +50,8 @@ export type Theme = {
 };
 
 export const TRANSPARENT = "transparent";
-export const DEFAULT_DARK_THEME_ID = "github-dark-default";
-export const DEFAULT_LIGHT_THEME_ID = "github-light-default";
+export const DEFAULT_DARK_THEME_ID = "ayu-dark";
+export const DEFAULT_LIGHT_THEME_ID = "ayu-light";
 
 const MIN_TEXT_CONTRAST = 4.5;
 const MIN_DIFF_SIGN_CONTRAST = 3;
@@ -195,14 +195,12 @@ const defaultTheme = (appearance: Appearance | null | undefined): Theme => {
 	return themeById(fallbackId) ?? (THEMES[0] as Theme);
 };
 
-/**
- * Resolve a requested theme name, falling back to the default for the terminal's own
- * background when the name is absent, unknown, or explicitly `auto`.
- */
+/** Resolve a named theme; absence uses Ayu Dark while `auto` follows the terminal. */
 export const resolveTheme = (
 	requested: string | undefined,
 	appearance?: Appearance | null,
 ): Theme => {
+	if (requested === undefined) return defaultTheme(null);
 	if (requested === "auto") return defaultTheme(appearance);
 	return themeById(requested) ?? defaultTheme(appearance);
 };

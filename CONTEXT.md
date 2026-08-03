@@ -51,6 +51,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes
   the chapter, and vice-versa. Persisted locally, keyed by **run key**.
+- **Review session state** — narration-sensitive location within one run: current page, focused
+  file/hunk/question, collapsed files, and scroll offsets. It is stored beside review progress under
+  the same run key in `.revue/state.json`. It restores a saved review rather than becoming part of
+  the immutable run. Unfinished thread drafts are deliberately excluded.
 - **Run** — an immutable directory under `.revue/runs/<runId>/` containing `run.json`, the pinned
   `diff.patch`, agent-facing `hunks.txt`, content-addressed old/new blobs, and the agent-written
   `chapters.json`. `show` consumes this directory and never recomputes Git state.
@@ -75,8 +79,9 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   Shiki theme highlighted source uses. Derivation enforces WCAG contrast floors, so a theme stays
   readable whatever surface it lands on. Selection is the reviewer's, not the run's: `--theme`
   names one for a session, the in-app picker previews and accepts one, and the accepted id persists
-  to `.revue/preferences.json`. Without a named theme the terminal's own background chooses between
-  the light and dark defaults. Transparent mode drops the neutral surfaces while keeping diff tints.
+  machine-wide to `~/.revue/preferences.json` with the reviewer's layout choices. Without a named
+  or remembered theme Revue uses `ayu-dark`; explicit `auto` asks the terminal to choose between
+  `ayu-light` and `ayu-dark`. Transparent mode drops the neutral surfaces while keeping diff tints.
 - **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
   chapters, pinned file metadata, review questions, authored threads, and optional local review
   progress. Full review is the default; prologue and one chapter by stable id/order are explicit

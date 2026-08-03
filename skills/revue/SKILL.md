@@ -205,13 +205,13 @@ revue threads reply "$RUN" <thread-id> \
   --body "Adjusted the retry cap and kept the interactive path within its budget."
 ```
 
-Only after the requested change has been made should that exact thread be marked dealt with:
+Only after the requested change has been made should that exact thread be resolved:
 
 ```bash
 revue threads mark-dealt "$RUN" <thread-id>
 ```
 
-Use `--all` when dealt-with history is relevant. Reopen feedback when it still applies or was marked
+Use `--all` when resolved history is relevant. Reopen feedback when it still applies or was marked
 prematurely:
 
 ```bash

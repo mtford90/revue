@@ -90,6 +90,24 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("0/3 reviewed"); // none reviewed yet
 });
 
+test("the view indicator sits against the right edge, not beside the menu titles", async () => {
+	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
+	await t.renderOnce();
+	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+
+	expect(bar.trimEnd().endsWith("Patch view")).toBe(true);
+	expect(bar.indexOf("Patch view") - bar.indexOf("View")).toBeGreaterThan(10);
+});
+
+test("the view indicator is dropped rather than crowding a narrow menu bar", async () => {
+	const t = await testRender(<App file={file} />, { width: 24, height: 32 });
+	await t.renderOnce();
+	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+
+	expect(bar).toContain("File");
+	expect(bar).not.toContain("Patch view");
+});
+
 test("the sidebar index walks back to the prologue from any chapter", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
 	await t.renderOnce();

@@ -195,6 +195,13 @@ const stopMouse = (event: OpenTUIMouseEvent) => {
 	event.stopPropagation();
 };
 
+const VIEW_LABELS: Record<"patch" | "semantic", string> = {
+	patch: "Patch view",
+	semantic: "Semantic view (read-only)",
+};
+
+const MENU_BAR_WIDTH = menuSpecs.reduce((total, spec) => total + spec.width, 0);
+
 export const MenuBar = ({
 	activeMenuId,
 	terminalWidth,
@@ -209,49 +216,56 @@ export const MenuBar = ({
 	onHover: (id: MenuId) => void;
 	onToggle: (id: MenuId) => void;
 	onClose: () => void;
-}) => (
-	<box
-		height={1}
-		width="100%"
-		flexShrink={0}
-		flexDirection="row"
-		backgroundColor={theme.surface}
-		paddingLeft={1}
-		paddingRight={1}
-		zIndex={50}
-		onMouseDown={(event) => {
-			stopMouse(event);
-			onClose();
-		}}
-	>
-		{menuSpecs.map((spec) => {
-			const active = activeMenuId === spec.id;
-			return (
-				<box
-					key={spec.id}
-					height={1}
-					width={spec.width}
-					backgroundColor={active ? theme.dim : theme.surface}
-					onMouseDown={stopMouse}
-					onMouseUp={(event) => {
-						stopMouse(event);
-						onToggle(spec.id);
-					}}
-					onMouseOver={() => onHover(spec.id)}
-				>
-					<text fg={active ? theme.text : theme.dim}>{` ${spec.label} `}</text>
-				</box>
-			);
-		})}
-		<box flexGrow={1} height={1} justifyContent="flex-end">
-			{terminalWidth >= 28 ? (
-				<text fg={theme.dim}>
-					{viewMode === "patch" ? "Patch view " : "Semantic view (read-only) "}
-				</text>
-			) : null}
+}) => {
+	const viewLabel = VIEW_LABELS[viewMode];
+	// A passive indicator, not a third menu: only shown when it can sit against
+	// the right edge with a gap the menu titles can't close.
+	const showViewLabel = terminalWidth - 2 - MENU_BAR_WIDTH >= viewLabel.length + 2;
+	return (
+		<box
+			height={1}
+			width="100%"
+			flexShrink={0}
+			flexDirection="row"
+			backgroundColor={theme.surface}
+			paddingLeft={1}
+			paddingRight={1}
+			zIndex={50}
+			onMouseDown={(event) => {
+				stopMouse(event);
+				onClose();
+			}}
+		>
+			{menuSpecs.map((spec) => {
+				const active = activeMenuId === spec.id;
+				return (
+					<box
+						key={spec.id}
+						height={1}
+						width={spec.width}
+						flexShrink={0}
+						backgroundColor={active ? theme.accent : theme.surface}
+						onMouseDown={stopMouse}
+						onMouseUp={(event) => {
+							stopMouse(event);
+							onToggle(spec.id);
+						}}
+						onMouseOver={() => onHover(spec.id)}
+					>
+						<text fg={active ? theme.base : theme.text}>{` ${spec.label} `}</text>
+					</box>
+				);
+			})}
+			<box flexGrow={1} minWidth={0} height={1} flexDirection="row" justifyContent="flex-end">
+				{showViewLabel ? (
+					<text flexShrink={0} fg={theme.dim} wrapMode="none">
+						{viewLabel}
+					</text>
+				) : null}
+			</box>
 		</box>
-	</box>
-);
+	);
+};
 
 const itemText = (
 	entry: Extract<MenuEntry, { kind: "item" }>,

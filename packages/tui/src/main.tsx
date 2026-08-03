@@ -571,7 +571,7 @@ async function cmdShow(args: string[]): Promise<number> {
 	const humanAuthor = resolveHumanAuthor(repositoryRoot);
 	await runApp(run.chapters, {
 		diffFiles,
-		loadSemanticDiff: (width, palette) => generateSemanticDiff(run, width, palette),
+		loadSemanticDiff: () => generateSemanticDiff(run),
 		initialViewState: store.get(),
 		resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance),
 		initialSyntaxTheme: startupTheme.syntaxTheme,

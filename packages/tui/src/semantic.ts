@@ -1,37 +1,32 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sanitizeTerminalLine } from "@revue/diff-renderer";
 import type { PreparedRun } from "@revue/prep";
 import { RUN_FILE_STATUS, RUN_OBJECT_KIND, type RunFile } from "@revue/types";
+import { z } from "zod";
 
-const REQUIRED_HELP_OPTIONS = ["--color", "--display", "--width"];
-const SAFE_WIDTH_MINIMUM = 40;
+const REQUIRED_HELP_OPTIONS = ["--display", "json"];
+const CONTEXT_LINES = 3;
 
-/** Foreground colours by SGR code, so Difftastic's own styling follows the active theme. */
-export type AnsiPalette = Record<number, string>;
-const SIDE_BY_SIDE_MINIMUM = 80;
-export type SemanticDiffSpan = {
-	text: string;
-	fg?: string;
-	bold: boolean;
-	dim: boolean;
-	italic: boolean;
-	underline: boolean;
+export type SemanticEmphasisRange = { start: number; end: number };
+
+export type SemanticEmphasis = {
+	deletions: Map<number, SemanticEmphasisRange[]>;
+	additions: Map<number, SemanticEmphasisRange[]>;
 };
 
-export type SemanticDiffLine = {
-	text: string;
-	spans: SemanticDiffSpan[];
-};
-
-export type SemanticDiffFile = {
+export type SemanticFileDiff = {
 	path: string;
-	lines: SemanticDiffLine[];
+	/** A unified patch following Difftastic's alignment; null when only the notes apply. */
+	patch: string | null;
+	notes: string[];
+	/** Char-exact novel ranges per 1-based line, keyed by diff side. */
+	emphasis: SemanticEmphasis;
 };
 
 export type SemanticDiffResult = {
-	files: SemanticDiffFile[];
+	files: SemanticFileDiff[];
 	version: string;
 };
 
@@ -40,68 +35,31 @@ export class SemanticDiffError extends Error {}
 type SemanticRun = Pick<PreparedRun, "directory" | "manifest">;
 
 type ProcessResult = { exitCode: number; stdout: string; stderr: string };
-type SemanticStyle = Omit<SemanticDiffSpan, "text">;
 
-const DEFAULT_STYLE: SemanticStyle = {
-	bold: false,
-	dim: false,
-	italic: false,
-	underline: false,
-};
+const changeSchema = z.object({
+	start: z.number().int().min(0),
+	end: z.number().int().min(0),
+});
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: Difftastic styling arrives as SGR sequences.
-const SGR_SEQUENCE = /\x1b\[([0-9;]*)m/g;
+const sideSchema = z.object({
+	line_number: z.number().int().min(0),
+	changes: z.array(changeSchema),
+});
+
+const fileReportSchema = z.object({
+	status: z.string(),
+	chunks: z
+		.array(z.array(z.object({ lhs: sideSchema.optional(), rhs: sideSchema.optional() })))
+		.optional(),
+	aligned_lines: z
+		.array(z.tuple([z.number().int().nullable(), z.number().int().nullable()]))
+		.optional(),
+});
+
+type FileReport = z.infer<typeof fileReportSchema>;
 
 export const terminalSafe = (value: string): string =>
 	value.split("\n").map(sanitizeTerminalLine).join("\n").trim();
-
-const applySgr = (
-	style: SemanticStyle,
-	parameters: string,
-	palette: AnsiPalette,
-): SemanticStyle => {
-	const next = { ...style };
-	for (const value of (parameters || "0").split(";")) {
-		const code = Number(value);
-		if (code === 0) Object.assign(next, DEFAULT_STYLE, { fg: undefined });
-		else if (code === 1) next.bold = true;
-		else if (code === 2) next.dim = true;
-		else if (code === 3) next.italic = true;
-		else if (code === 4) next.underline = true;
-		else if (code === 22) Object.assign(next, { bold: false, dim: false });
-		else if (code === 23) next.italic = false;
-		else if (code === 24) next.underline = false;
-		else if (code === 39) next.fg = undefined;
-		else if (palette[code]) next.fg = palette[code];
-	}
-	return next;
-};
-
-const styledLine = (value: string, palette: AnsiPalette): SemanticDiffLine => {
-	const spans: SemanticDiffSpan[] = [];
-	let cursor = 0;
-	let style = { ...DEFAULT_STYLE };
-	for (const match of value.matchAll(SGR_SEQUENCE)) {
-		const text = sanitizeTerminalLine(value.slice(cursor, match.index));
-		if (text) spans.push({ text, ...style });
-		style = applySgr(style, match[1] ?? "0", palette);
-		cursor = (match.index ?? cursor) + match[0].length;
-	}
-	const remainder = sanitizeTerminalLine(value.slice(cursor));
-	if (remainder) spans.push({ text: remainder, ...style });
-	return { text: spans.map((span) => span.text).join(""), spans };
-};
-
-const plainLine = (text: string): SemanticDiffLine => ({
-	text,
-	spans: text ? [{ text, ...DEFAULT_STYLE }] : [],
-});
-
-const styledOutput = (output: string, palette: AnsiPalette): SemanticDiffLine[] => {
-	const lines = output.split("\n").map((line) => styledLine(line.replace(/\r$/, ""), palette));
-	const lastContent = lines.findLastIndex((line) => line.text.length > 0);
-	return lastContent < 0 ? [] : lines.slice(0, lastContent + 1);
-};
 
 const describeProcessFailure = (result: ProcessResult): string => {
 	const detail = terminalSafe(result.stderr || result.stdout)
@@ -114,7 +72,7 @@ async function runProcess(executable: string, args: string[]): Promise<ProcessRe
 	let child: ReturnType<typeof Bun.spawn>;
 	try {
 		child = Bun.spawn([executable, ...args], {
-			env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
+			env: { ...process.env, NO_COLOR: "1", TERM: "dumb", DFT_UNSTABLE: "yes" },
 			stdout: "pipe",
 			stderr: "pipe",
 		});
@@ -164,79 +122,329 @@ const statusHeader = (file: RunFile): string => {
 
 const modeDescription = (mode: string | null): string => (mode ? mode : "absent");
 
-const metadataOnlyLines = (file: RunFile): SemanticDiffLine[] | null => {
-	const header = plainLine(statusHeader(file));
+const metadataOnlyNotes = (file: RunFile): string[] | null => {
+	const header = statusHeader(file);
 	if (file.isBinary) {
-		return [header, plainLine("Binary snapshots cannot be represented as a semantic source diff.")];
+		return [header, "Binary snapshots cannot be represented as a semantic source diff."];
 	}
 	if (file.oldKind === RUN_OBJECT_KIND.SYMLINK || file.newKind === RUN_OBJECT_KIND.SYMLINK) {
 		return [
 			header,
-			plainLine(
-				"Symlink snapshots are not parsed as source code; review the link-target change in Patch view.",
-			),
+			"Symlink snapshots are not parsed as source code; review the link-target change in Patch view.",
 		];
 	}
 	if (file.status === RUN_FILE_STATUS.MODE_CHANGED) {
 		return [
 			header,
-			plainLine(
-				`File mode changed ${modeDescription(file.oldMode)} -> ${modeDescription(file.newMode)}; there is no semantic content change.`,
-			),
+			`File mode changed ${modeDescription(file.oldMode)} -> ${modeDescription(file.newMode)}; there is no semantic content change.`,
 		];
 	}
 	if (file.oldBlob === file.newBlob) {
 		return [
 			header,
-			plainLine("Pinned old and new contents are identical; there is no semantic content change."),
+			"Pinned old and new contents are identical; there is no semantic content change.",
 		];
 	}
 	return null;
 };
 
-const blobPath = (run: SemanticRun, hash: string | null, emptyPath: string): string =>
-	hash ? join(run.directory, "blobs", hash) : emptyPath;
+const emptyEmphasis = (): SemanticEmphasis => ({
+	deletions: new Map(),
+	additions: new Map(),
+});
 
-const semanticArgs = (
-	run: SemanticRun,
+const splitLines = (content: string): string[] => {
+	const lines = content.split("\n").map((line) => line.replace(/\r$/, ""));
+	if (lines.at(-1) === "") lines.pop();
+	return lines;
+};
+
+/** Difftastic reports UTF-8 byte offsets; spans render per char, so convert against the raw line. */
+const byteRangeToCharRange = (
+	line: string,
+	range: { start: number; end: number },
+): SemanticEmphasisRange | null => {
+	const bytes = Buffer.from(line, "utf8");
+	const start = bytes.subarray(0, Math.min(range.start, bytes.length)).toString("utf8").length;
+	const end = bytes.subarray(0, Math.min(range.end, bytes.length)).toString("utf8").length;
+	return end > start ? { start, end } : null;
+};
+
+const mergedRanges = (ranges: SemanticEmphasisRange[]): SemanticEmphasisRange[] => {
+	const sorted = [...ranges].sort((left, right) => left.start - right.start);
+	const merged: SemanticEmphasisRange[] = [];
+	for (const range of sorted) {
+		const last = merged.at(-1);
+		if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+		else merged.push({ ...range });
+	}
+	return merged;
+};
+
+type NovelLines = {
+	deletions: Map<number, SemanticEmphasisRange[]>;
+	additions: Map<number, SemanticEmphasisRange[]>;
+};
+
+/** Flatten Difftastic's unordered chunk entries into per-side novel-line maps keyed by 0-based line. */
+const novelLines = (report: FileReport, oldLines: string[], newLines: string[]): NovelLines => {
+	const deletions = new Map<number, SemanticEmphasisRange[]>();
+	const additions = new Map<number, SemanticEmphasisRange[]>();
+	const record = (
+		target: Map<number, SemanticEmphasisRange[]>,
+		lines: string[],
+		side: z.infer<typeof sideSchema>,
+	) => {
+		const line = lines[side.line_number];
+		if (line === undefined) return;
+		const ranges = side.changes.flatMap((change) => byteRangeToCharRange(line, change) ?? []);
+		target.set(
+			side.line_number,
+			mergedRanges([...(target.get(side.line_number) ?? []), ...ranges]),
+		);
+	};
+	for (const entry of (report.chunks ?? []).flat()) {
+		if (entry.lhs) record(deletions, oldLines, entry.lhs);
+		if (entry.rhs) record(additions, newLines, entry.rhs);
+	}
+	return { deletions, additions };
+};
+
+type AlignedPair = { old: number | null; new: number | null };
+
+const displayablePairs = (
+	report: FileReport,
+	oldLines: string[],
+	newLines: string[],
+): AlignedPair[] =>
+	(report.aligned_lines ?? [])
+		.map(([oldIndex, newIndex]) => ({
+			old: oldIndex !== null && oldIndex < oldLines.length ? oldIndex : null,
+			new: newIndex !== null && newIndex < newLines.length ? newIndex : null,
+		}))
+		.filter((pair) => pair.old !== null || pair.new !== null);
+
+/**
+ * Difftastic's judgement decides what counts as a change: a pair it aligned without
+ * novel tokens is semantically unchanged even when the text differs (whitespace,
+ * reformatting), and renders as context.
+ */
+const pairIsChanged = (pair: AlignedPair, novel: NovelLines): boolean => {
+	if (pair.old === null || pair.new === null) return true;
+	return novel.deletions.has(pair.old) || novel.additions.has(pair.new);
+};
+
+type HunkGroup = { start: number; end: number };
+
+/** Indexes into the aligned pairs covering each changed run plus its context, merged on overlap. */
+const hunkGroups = (changed: boolean[]): HunkGroup[] => {
+	const groups: HunkGroup[] = [];
+	for (const [index, isChanged] of changed.entries()) {
+		if (!isChanged) continue;
+		const start = Math.max(0, index - CONTEXT_LINES);
+		const end = Math.min(changed.length - 1, index + CONTEXT_LINES);
+		const last = groups.at(-1);
+		if (last && start <= last.end + 1) last.end = end;
+		else groups.push({ start, end });
+	}
+	return groups;
+};
+
+/** One maximal streak of pairs sharing a shape, so deletions precede their paired additions. */
+const pairShape = (pair: AlignedPair): "both" | "deletion" | "addition" =>
+	pair.old !== null && pair.new !== null ? "both" : pair.old !== null ? "deletion" : "addition";
+
+function hunkBody(
+	pairs: AlignedPair[],
+	changed: boolean[],
+	group: HunkGroup,
+	oldLines: string[],
+	newLines: string[],
+): string[] {
+	const body: string[] = [];
+	let cursor = group.start;
+	while (cursor <= group.end) {
+		const pair = pairs[cursor];
+		if (!pair) break;
+		if (!changed[cursor]) {
+			// Context rows show the post-image, matching Difftastic's whitespace-blind alignment.
+			body.push(` ${newLines[pair.new ?? -1] ?? oldLines[pair.old ?? -1] ?? ""}`);
+			cursor += 1;
+			continue;
+		}
+		const shape = pairShape(pair);
+		const streak: AlignedPair[] = [];
+		while (
+			cursor <= group.end &&
+			changed[cursor] &&
+			pairs[cursor] &&
+			pairShape(pairs[cursor] as AlignedPair) === shape
+		) {
+			streak.push(pairs[cursor] as AlignedPair);
+			cursor += 1;
+		}
+		for (const entry of streak) {
+			if (entry.old !== null) body.push(`-${oldLines[entry.old] ?? ""}`);
+		}
+		for (const entry of streak) {
+			if (entry.new !== null) body.push(`+${newLines[entry.new] ?? ""}`);
+		}
+	}
+	return body;
+}
+
+const hunkCounts = (body: string[]): { deletions: number; additions: number } => ({
+	deletions: body.filter((line) => !line.startsWith("+")).length,
+	additions: body.filter((line) => !line.startsWith("-")).length,
+});
+
+const firstLineNumbers = (pairs: AlignedPair[], group: HunkGroup): { old: number; new: number } => {
+	let old: number | undefined;
+	let added: number | undefined;
+	for (let index = group.start; index <= group.end; index += 1) {
+		const pair = pairs[index];
+		if (!pair) continue;
+		if (old === undefined && pair.old !== null) old = pair.old + 1;
+		if (added === undefined && pair.new !== null) added = pair.new + 1;
+	}
+	return { old: old ?? 1, new: added ?? 1 };
+};
+
+function synthesisedPatch(
 	file: RunFile,
-	emptyPath: string,
-	width: number,
-): string[] => [
-	"--color=always",
-	width >= SIDE_BY_SIDE_MINIMUM ? "--display=side-by-side" : "--display=inline",
-	`--width=${Math.max(SAFE_WIDTH_MINIMUM, Math.floor(width))}`,
+	pairs: AlignedPair[],
+	changed: boolean[],
+	oldLines: string[],
+	newLines: string[],
+): string | null {
+	const groups = hunkGroups(changed);
+	if (!groups.length) return null;
+	const oldPath = file.previousPath ?? file.path;
+	const header = [`--- a/${oldPath}`, `+++ b/${file.path}`];
+	const hunks = groups.map((group) => {
+		const body = hunkBody(pairs, changed, group, oldLines, newLines);
+		const counts = hunkCounts(body);
+		const start = firstLineNumbers(pairs, group);
+		return [
+			`@@ -${start.old},${counts.deletions} +${start.new},${counts.additions} @@`,
+			...body,
+		].join("\n");
+	});
+	return `${[...header, ...hunks].join("\n")}\n`;
+}
+
+const wholeFilePatch = (
+	file: RunFile,
+	lines: string[],
+	kind: "created" | "deleted",
+): string | null => {
+	if (!lines.length) return null;
+	const marked = lines.map((line) => `${kind === "created" ? "+" : "-"}${line}`);
+	const header =
+		kind === "created"
+			? ["--- /dev/null", `+++ b/${file.path}`, `@@ -0,0 +1,${lines.length} @@`]
+			: [
+					`--- a/${file.previousPath ?? file.path}`,
+					"+++ /dev/null",
+					`@@ -1,${lines.length} +0,0 @@`,
+				];
+	return `${[...header, ...marked].join("\n")}\n`;
+};
+
+/** Shift a novel-line map from 0-based file lines to the 1-based numbering anchors use. */
+const oneBased = (
+	map: Map<number, SemanticEmphasisRange[]>,
+): Map<number, SemanticEmphasisRange[]> =>
+	new Map([...map.entries()].map(([line, ranges]) => [line + 1, ranges]));
+
+async function blobLines(run: SemanticRun, hash: string | null): Promise<string[]> {
+	if (!hash) return [];
+	try {
+		return splitLines(await readFile(join(run.directory, "blobs", hash), "utf8"));
+	} catch (error) {
+		throw new SemanticDiffError(
+			`Semantic diff unavailable: could not read pinned blob ${JSON.stringify(hash)} (${terminalSafe(error instanceof Error ? error.message : String(error))}).`,
+		);
+	}
+}
+
+const parseReport = (file: RunFile, version: string, stdout: string): FileReport => {
+	let value: unknown;
+	try {
+		value = JSON.parse(stdout);
+	} catch {
+		throw new SemanticDiffError(
+			`Semantic diff unavailable: ${version} did not produce JSON for ${JSON.stringify(file.path)}. Patch view remains active.`,
+		);
+	}
+	const parsed = fileReportSchema.safeParse(value);
+	if (!parsed.success) {
+		throw new SemanticDiffError(
+			`Semantic diff unavailable: ${version} produced an unsupported JSON layout for ${JSON.stringify(file.path)}. Patch view remains active.`,
+		);
+	}
+	return parsed.data;
+};
+
+function changedFileDiff(
+	file: RunFile,
+	report: FileReport,
+	oldLines: string[],
+	newLines: string[],
+): SemanticFileDiff {
+	const novel = novelLines(report, oldLines, newLines);
+	const pairs = displayablePairs(report, oldLines, newLines);
+	const changed = pairs.map((pair) => pairIsChanged(pair, novel));
+	const patch = synthesisedPatch(file, pairs, changed, oldLines, newLines);
+	return {
+		path: file.path,
+		patch,
+		notes: patch
+			? []
+			: [statusHeader(file), "Difftastic found only whitespace or formatting differences."],
+		emphasis: {
+			deletions: oneBased(novel.deletions),
+			additions: oneBased(novel.additions),
+		},
+	};
+}
+
+function reportedFileDiff(
+	file: RunFile,
+	report: FileReport,
+	oldLines: string[],
+	newLines: string[],
+): SemanticFileDiff {
+	if (report.status === "changed") return changedFileDiff(file, report, oldLines, newLines);
+	if (report.status === "created" || report.status === "deleted") {
+		const lines = report.status === "created" ? newLines : oldLines;
+		const patch = wholeFilePatch(file, lines, report.status);
+		return {
+			path: file.path,
+			patch,
+			notes: patch ? [] : [statusHeader(file), "The pinned snapshot is empty."],
+			emphasis: emptyEmphasis(),
+		};
+	}
+	return {
+		path: file.path,
+		patch: null,
+		notes: [statusHeader(file), "Difftastic found no semantic content changes."],
+		emphasis: emptyEmphasis(),
+	};
+}
+
+const semanticArgs = (run: SemanticRun, file: RunFile, emptyPath: string): string[] => [
+	"--display=json",
 	"--",
 	file.path,
-	blobPath(run, file.oldBlob, emptyPath),
+	file.oldBlob ? join(run.directory, "blobs", file.oldBlob) : emptyPath,
 	file.oldBlob ?? "0000000",
 	file.oldMode ?? "000000",
-	blobPath(run, file.newBlob, emptyPath),
+	file.newBlob ? join(run.directory, "blobs", file.newBlob) : emptyPath,
 	file.newBlob ?? "0000000",
 	file.newMode ?? "000000",
 ];
-
-const outputLines = (file: RunFile, output: string, palette: AnsiPalette): SemanticDiffLine[] => {
-	const styled = styledOutput(output, palette);
-	return [
-		plainLine(statusHeader(file)),
-		...(file.status === RUN_FILE_STATUS.ADDED
-			? [
-					plainLine(
-						"Old snapshot is absent; comparing an empty pre-image with the pinned new snapshot.",
-					),
-				]
-			: []),
-		...(file.status === RUN_FILE_STATUS.DELETED
-			? [
-					plainLine(
-						"New snapshot is absent; comparing the pinned old snapshot with an empty post-image.",
-					),
-				]
-			: []),
-		...(styled.length ? styled : [plainLine("Difftastic found no semantic content changes.")]),
-	];
-};
 
 /**
  * Run Difftastic only against the verified blob files inside a prepared run.
@@ -244,8 +452,6 @@ const outputLines = (file: RunFile, output: string, palette: AnsiPalette): Seman
  */
 export async function generateSemanticDiff(
 	run: SemanticRun,
-	width: number,
-	palette: AnsiPalette,
 	executable = "difft",
 ): Promise<SemanticDiffResult> {
 	const version = await detectDifftastic(executable);
@@ -254,20 +460,25 @@ export async function generateSemanticDiff(
 	await writeFile(emptyPath, new Uint8Array());
 
 	try {
-		const files: SemanticDiffFile[] = [];
+		const files: SemanticFileDiff[] = [];
 		for (const file of run.manifest.files) {
-			const metadata = metadataOnlyLines(file);
-			if (metadata) {
-				files.push({ path: file.path, lines: metadata });
+			const notes = metadataOnlyNotes(file);
+			if (notes) {
+				files.push({ path: file.path, patch: null, notes, emphasis: emptyEmphasis() });
 				continue;
 			}
-			const result = await runProcess(executable, semanticArgs(run, file, emptyPath, width));
+			const result = await runProcess(executable, semanticArgs(run, file, emptyPath));
 			if (result.exitCode !== 0) {
 				throw new SemanticDiffError(
 					`Semantic diff unavailable: ${version} failed while comparing ${JSON.stringify(file.path)}${describeProcessFailure(result)}. Patch view remains active.`,
 				);
 			}
-			files.push({ path: file.path, lines: outputLines(file, result.stdout, palette) });
+			const report = parseReport(file, version, result.stdout);
+			const [oldLines, newLines] = await Promise.all([
+				blobLines(run, file.oldBlob),
+				blobLines(run, file.newBlob),
+			]);
+			files.push(reportedFileDiff(file, report, oldLines, newLines));
 		}
 		return { files, version };
 	} finally {

@@ -1,5 +1,4 @@
-import type { DiffLayout } from "@revue/diff-renderer";
-import type { ChapterDiffFile } from "./diff.ts";
+import type { DiffFileInput, DiffLayout } from "@revue/diff-renderer";
 
 export type SidebarPreference = "auto" | "shown" | "hidden";
 export type DiffLayoutPreference = "auto" | "split" | "stacked";
@@ -111,7 +110,7 @@ export const layoutForFile = ({
 	preference,
 	splitFits,
 }: {
-	file: ChapterDiffFile;
+	file: DiffFileInput;
 	preference: DiffLayoutPreference;
 	splitFits: boolean;
 }): DiffLayout => {

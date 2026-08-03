@@ -1,4 +1,4 @@
-import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
+import { type MouseEvent as OpenTUIMouseEvent, TextAttributes } from "@opentui/core";
 import { createDiffFile } from "@revue/diff-model";
 import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
@@ -17,6 +17,7 @@ import type {
 	DiffRow,
 	DiffSide,
 	RangeDecoration,
+	SpanEmphasis,
 } from "./types.ts";
 
 const RIGHT_MOUSE_BUTTON = 2;
@@ -28,8 +29,14 @@ function CellContent({ cell, theme }: { cell: DiffCell; theme: Theme }) {
 	return (
 		<>
 			{cell.spans.map((span, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: immutable syntax spans have no independent identity.
-				<span key={`${index}:${span.text}`} fg={span.fg ?? theme.text}>
+				<span
+					// biome-ignore lint/suspicious/noArrayIndexKey: immutable syntax spans have no independent identity.
+					key={`${index}:${span.text}`}
+					fg={span.fg ?? theme.text}
+					attributes={
+						(span.bold ? TextAttributes.BOLD : 0) | (span.dim ? TextAttributes.DIM : 0) || undefined
+					}
+				>
 					{span.text}
 				</span>
 			))}
@@ -239,6 +246,13 @@ export interface DiffBodyProps {
 	focusedDecorationId?: string;
 	selectedRange?: DiffLineRange;
 	inlineAttachments?: readonly DiffInlineAttachment[];
+	/** Char-exact restyling of novel tokens, e.g. from a semantic diff. */
+	emphasis?: SpanEmphasis;
+	/**
+	 * Overrides the hunk lookup behind each line's range, so a body whose own hunks
+	 * are display-only can emit ranges anchored to the authoritative patch.
+	 */
+	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
 	onRangeSelect?: (range: DiffLineRange) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
 }
@@ -277,6 +291,8 @@ export function DiffBody({
 	focusedDecorationId,
 	selectedRange,
 	inlineAttachments = [],
+	emphasis,
+	resolveRange,
 	onRangeSelect,
 	onRangeContextMenu,
 }: DiffBodyProps) {
@@ -299,9 +315,10 @@ export function DiffBody({
 						syntaxTheme: theme.syntaxTheme,
 						decorations: renderedDecorations,
 						focusedDecorationId: renderedFocusId,
+						emphasis,
 					})
 				: [],
-		[normalized, layout, theme.syntaxTheme, renderedDecorations, renderedFocusId],
+		[normalized, layout, theme.syntaxTheme, renderedDecorations, renderedFocusId, emphasis],
 	);
 	const anchor = useMemo(
 		() =>
@@ -339,8 +356,10 @@ export function DiffBody({
 		if (!normalized || row.type === "hunk-header") return null;
 		const cell = row.type === "split-line" ? (side === "deletions" ? row.old : row.new) : row.cell;
 		const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
+		if (number === undefined) return null;
+		if (resolveRange) return resolveRange(side, number);
 		const hunk = normalized.metadata.hunks[row.hunkIndex];
-		if (number === undefined || !hunk) return null;
+		if (!hunk) return null;
 		return {
 			filePath: normalized.path,
 			hunkOldStart: hunk.deletionStart,
@@ -442,17 +461,14 @@ export function DiffBody({
 			: undefined;
 	const rowAttachments = (row: DiffRow): DiffInlineAttachment[] => {
 		if (!normalized || row.type === "hunk-header") return [];
-		const hunk = normalized.metadata.hunks[row.hunkIndex];
-		if (!hunk) return [];
 		return inlineAttachments.filter((attachment) => {
-			if (
-				attachment.anchor.filePath !== normalized.path ||
-				attachment.anchor.hunkOldStart !== hunk.deletionStart
-			) {
-				return false;
-			}
 			const range = lineRange(row, attachment.anchor.side);
-			return range?.endLine === attachment.anchor.endLine;
+			return (
+				range !== null &&
+				range.filePath === attachment.anchor.filePath &&
+				range.hunkOldStart === attachment.anchor.hunkOldStart &&
+				range.endLine === attachment.anchor.endLine
+			);
 		});
 	};
 	const cancelActiveRange = () => {

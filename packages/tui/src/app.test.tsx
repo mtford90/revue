@@ -22,9 +22,21 @@ const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
 const theme = resolveTheme("catppuccin-mocha");
 const loadPatch = async (path: string) =>
 	preparePatch(await readFile(path, "utf8"), theme.syntaxTheme);
-const semanticLine = (text: string, fg?: string) => ({
-	text,
-	spans: [{ text, fg, bold: false, dim: false, italic: false, underline: false }],
+const semanticFile = (
+	path: string,
+	patch: string | null,
+	{
+		notes = [],
+		additions = new Map<number, { start: number; end: number }[]>(),
+	}: {
+		notes?: string[];
+		additions?: Map<number, { start: number; end: number }[]>;
+	} = {},
+) => ({
+	path,
+	patch,
+	notes,
+	emphasis: { deletions: new Map<number, { start: number; end: number }[]>(), additions },
 });
 
 // React's act() needs this flag to flush state updates from mocked key presses.
@@ -185,7 +197,7 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	await arrow(t, "right");
 	const menuFrame = t.captureCharFrame();
 	expect(menuFrame).toContain("[x] Patch view");
-	expect(menuFrame).toContain("Semantic diff (read-only)");
+	expect(menuFrame).toContain("Semantic diff");
 	expect(menuFrame).not.toContain("Next page"); // navigation lives in its own menu
 
 	await arrow(t, "left");
@@ -194,7 +206,7 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	expect(t.captureCharFrame()).toContain("1/4");
 });
 
-test("View menu toggles a read-only semantic diff without losing the focused file", async () => {
+test("View menu toggles the semantic diff without losing the focused file", async () => {
 	const combined = RevueChaptersFileSchema.parse({
 		chapters: [
 			{
@@ -217,17 +229,28 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 				return {
 					version: "Difftastic 0.67.0",
 					files: [
-						{
-							path: "src/lib/backoff.ts",
-							lines: [semanticLine("added: src/lib/backoff.ts"), semanticLine("semantic backoff")],
-						},
-						{
-							path: "src/lib/apiClient.ts",
-							lines: [
-								semanticLine("modified: src/lib/apiClient.ts"),
-								semanticLine("semantic retry loop", "#a6e3a1"),
-							],
-						},
+						semanticFile(
+							"src/lib/backoff.ts",
+							`--- /dev/null
++++ b/src/lib/backoff.ts
+@@ -0,0 +1,1 @@
++semantic backoff
+`,
+							{ notes: ["added: src/lib/backoff.ts"] },
+						),
+						semanticFile(
+							"src/lib/apiClient.ts",
+							`--- a/src/lib/apiClient.ts
++++ b/src/lib/apiClient.ts
+@@ -41,1 +41,1 @@
+-old retry loop
++semantic retry loop
+`,
+							{
+								notes: ["modified: src/lib/apiClient.ts"],
+								additions: new Map([[41, [{ start: 0, end: 8 }]]]),
+							},
+						),
 					],
 				};
 			}}
@@ -246,15 +269,16 @@ test("View menu toggles a read-only semantic diff without losing the focused fil
 	await act(async () => Promise.resolve());
 	await t.renderOnce();
 	const semanticFrame = t.captureCharFrame();
-	expect(semanticFrame).toContain("Semantic view (read-only)");
+	expect(semanticFrame).toContain("Semantic view");
 	expect(semanticFrame).toContain("semantic retry loop");
-	expect(semanticFrame).toContain("anchors/ranges/threads Patch-only");
-	expect(semanticFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
-	const semanticRow = t
+	expect(semanticFrame).toContain("modified: src/lib/apiClient.ts");
+	expect(semanticFrame).toContain("src/lib/apiClient.ts");
+	// The emphasis range covers chars 0-8, so "semantic" renders as its own restyled span.
+	const emphasised = t
 		.captureSpans()
 		.lines.flatMap((line) => line.spans)
-		.find((span) => span.text.includes("semantic retry loop"));
-	expect(semanticRow?.fg.g).toBeCloseTo(227 / 255);
+		.find((span) => span.text === "semantic");
+	expect(emphasised).toBeDefined();
 
 	await press(t, "F10");
 	await arrow(t, "right");
@@ -288,16 +312,22 @@ test("switching views preserves relative progress through the chapter", async ()
 -old row
 ${additions}
 `);
-	const semanticLines = Array.from({ length: 30 }, (_, index) =>
-		semanticLine(`semantic row ${index + 1}`),
-	);
+	const semanticAdditions = Array.from(
+		{ length: 30 },
+		(_, index) => `+semantic row ${index + 1}`,
+	).join("\n");
 	const t = await testRender(
 		<App
 			file={scrollFile}
 			diffFiles={diffFiles}
 			loadSemanticDiff={async () => ({
 				version: "Difftastic 0.67.0",
-				files: [{ path: "scroll.ts", lines: semanticLines }],
+				files: [
+					semanticFile(
+						"scroll.ts",
+						`--- a/scroll.ts\n+++ b/scroll.ts\n@@ -1,1 +1,30 @@\n-old row\n${semanticAdditions}\n`,
+					),
+				],
 			})}
 		/>,
 		{ width: 100, height: 14, kittyKeyboard: true },
@@ -314,7 +344,7 @@ ${additions}
 	await act(async () => Promise.resolve());
 	await t.renderOnce();
 	const semanticFrame = t.captureCharFrame();
-	expect(semanticFrame).toContain("Semantic view (read-only)");
+	expect(semanticFrame).toContain("Semantic view");
 	expect(semanticFrame).toContain("semantic row");
 	expect(semanticFrame).not.toContain("semantic row 1 ");
 	for (let index = 0; index < 4; index += 1) await press(t, "j");

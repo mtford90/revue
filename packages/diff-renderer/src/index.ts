@@ -27,6 +27,8 @@ export type {
 	DiffRow,
 	DiffSide,
 	DiffStats,
+	EmphasisRange,
 	RangeDecoration,
 	RenderSpan,
+	SpanEmphasis,
 } from "./types.ts";

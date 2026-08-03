@@ -158,7 +158,7 @@ export const buildAppMenus = ({
 		},
 		{
 			kind: "item",
-			label: semanticLoading ? "Semantic diff (loading...)" : "Semantic diff (read-only)",
+			label: semanticLoading ? "Semantic diff (loading...)" : "Semantic diff",
 			checked: viewMode === "semantic",
 			disabled: semanticLoading,
 			action: showSemantic,
@@ -258,7 +258,7 @@ const stopMouse = (event: OpenTUIMouseEvent) => {
 
 const VIEW_LABELS: Record<"patch" | "semantic", string> = {
 	patch: "Patch view",
-	semantic: "Semantic view (read-only)",
+	semantic: "Semantic view",
 };
 
 const MENU_BAR_WIDTH = menuSpecs.reduce((total, spec) => total + spec.width, 0);

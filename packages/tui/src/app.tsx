@@ -13,11 +13,14 @@ import {
 	DiffFileHeader,
 	type DiffInlineAttachment,
 	type DiffLineRange,
+	type DiffSide,
 	decorationAnchorId,
 	diffRangeWithin,
 	findFocusedDecorationAnchor,
+	parsePatch,
 	prepareSyntaxHighlighting,
 	type RangeDecoration,
+	type SpanEmphasis,
 } from "@revue/diff-renderer";
 import {
 	type Appearance,
@@ -62,7 +65,7 @@ import {
 	selectable,
 	useMenuController,
 } from "./menu.tsx";
-import { type AnsiPalette, type SemanticDiffResult, terminalSafe } from "./semantic.ts";
+import { type SemanticDiffResult, type SemanticEmphasis, terminalSafe } from "./semantic.ts";
 import {
 	formatSourceLocation,
 	type PermalinkContext,
@@ -70,13 +73,7 @@ import {
 	permalinkFor,
 	sourceRangeFor,
 } from "./sourceLink.ts";
-import {
-	complexityColor,
-	semanticAnsiPalette,
-	severityColor,
-	ThemeProvider,
-	useTheme,
-} from "./theme.ts";
+import { complexityColor, severityColor, ThemeProvider, useTheme } from "./theme.ts";
 import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
 import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
 import {
@@ -1245,34 +1242,99 @@ function ChapterView({
 	);
 }
 
-// ── Read-only semantic view ────────────────────────────────────────────────
-const keyedSemanticLines = (lines: SemanticDiffResult["files"][number]["lines"]) => {
-	const occurrences = new Map<string, number>();
-	return lines.map((line) => {
-		const occurrence = occurrences.get(line.text) ?? 0;
-		occurrences.set(line.text, occurrence + 1);
-		return { key: `${line.text}:${occurrence}`, line };
-	});
+// ── Semantic view ──────────────────────────────────────────────────────────
+type SemanticPreparedFile = {
+	path: string;
+	file: DiffFile | null;
+	notes: string[];
+	emphasis: SemanticEmphasis;
 };
+
+type PreparedSemantic = { version: string; files: SemanticPreparedFile[] };
+
+const prepareSemantic = (result: SemanticDiffResult): PreparedSemantic => ({
+	version: result.version,
+	files: result.files.map((file) => ({
+		path: file.path,
+		file: file.patch ? (parsePatch(file.patch, `semantic:${file.path}`)[0] ?? null) : null,
+		notes: file.notes,
+		emphasis: file.emphasis,
+	})),
+});
+
+const semanticDiffFiles = (semantic: PreparedSemantic | null): DiffFile[] =>
+	semantic?.files.flatMap((file) => (file.file ? [file.file] : [])) ?? [];
+
+/** Anchors emitted from semantic rows resolve against the authoritative patch hunks. */
+const gitRangeResolver =
+	(diffFiles: DiffFile[] | null, path: string) =>
+	(side: DiffSide, line: number): DiffLineRange | null => {
+		const hunks = diffFiles?.find((candidate) => candidate.path === path)?.metadata.hunks ?? [];
+		const hunk = hunks.find((candidate) => {
+			const start = side === "additions" ? candidate.additionStart : candidate.deletionStart;
+			const count = side === "additions" ? candidate.additionCount : candidate.deletionCount;
+			return count > 0 && line >= start && line < start + count;
+		});
+		if (!hunk) return null;
+		return {
+			filePath: path,
+			hunkOldStart: hunk.deletionStart,
+			side,
+			startLine: line,
+			endLine: line,
+		};
+	};
 
 function SemanticChapterView({
 	chapter,
 	semantic,
+	diffTheme,
+	diffFiles,
+	width,
+	diffPreference,
+	splitFits,
 	vs,
 	selectedFile,
+	selectedKeyChange,
 	collapsedFiles,
+	threads,
+	selectedThreadRange,
+	threadDraft,
+	replyDraft,
 	onSelectFile,
 	onToggleCollapse,
 	onToggleFileReview,
+	onSelectThreadRange,
+	onRangeContextMenu,
+	onReplyThread,
+	onDeleteThread,
+	onDeleteThreadMessage,
+	onToggleThreadStatus,
 }: {
 	chapter: Chapter;
-	semantic: SemanticDiffResult;
+	semantic: PreparedSemantic;
+	diffTheme: Theme;
+	diffFiles: DiffFile[] | null;
+	width: number;
+	diffPreference: DiffLayoutPreference;
+	splitFits: boolean;
 	vs: ViewState;
 	selectedFile: number;
+	selectedKeyChange: number;
 	collapsedFiles: Set<string>;
+	threads: ReviewThread[];
+	selectedThreadRange: DiffLineRange | undefined;
+	threadDraft: DiffInlineAttachment | undefined;
+	replyDraft: { threadId: string; content: ReactNode } | undefined;
 	onSelectFile: (index: number) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
+	onSelectThreadRange: (range: DiffLineRange) => void;
+	onRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
+	onReplyThread: (thread: ReviewThread) => void;
+	onDeleteThread: (id: string) => void;
+	onDeleteThreadMessage: (threadId: string, messageId: string) => void;
+	onToggleThreadStatus: (thread: ReviewThread) => void;
 }) {
 	const theme = useTheme();
 	const paths = chapterFilePaths(chapter);
@@ -1280,22 +1342,61 @@ function SemanticChapterView({
 		const file = semantic.files.find((candidate) => candidate.path === path);
 		return file ? [file] : [];
 	});
+	const focusedDecorationId = `key-change:${chapter.id}:${selectedKeyChange}`;
+	const decorations: RangeDecoration[] = (
+		chapter.keyChanges[selectedKeyChange]?.lineRefs ?? []
+	).map((ref, refIndex) => ({
+		...ref,
+		id: `${focusedDecorationId}:${refIndex}`,
+		focusId: focusedDecorationId,
+	}));
+	const chapterThreads = threads.filter((thread) => paths.includes(thread.anchor.filePath));
+	const inlineAttachments: DiffInlineAttachment[] = [
+		...chapterThreads.map((thread) => ({
+			id: thread.id,
+			anchor: {
+				filePath: thread.anchor.filePath,
+				hunkOldStart: thread.anchor.oldStart,
+				side: thread.anchor.side,
+				startLine: thread.anchor.startLine,
+				endLine: thread.anchor.endLine,
+			},
+			content: (
+				<InlineThread
+					thread={thread}
+					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
+					onReply={onReplyThread}
+					onDeleteThread={onDeleteThread}
+					onDeleteMessage={onDeleteThreadMessage}
+					onToggleStatus={onToggleThreadStatus}
+				/>
+			),
+		})),
+		...(threadDraft ? [threadDraft] : []),
+	];
+
 	return (
 		<box flexDirection="column" gap={1}>
-			<text fg={theme.badgeModified}>
-				Read-only semantic view · key-change anchors, exact range highlights, and threads are
-				Patch-only
-			</text>
-			<text fg={theme.muted}>{semantic.version}</text>
-			{files.map((file, streamIndex) => {
-				const fileIndex = paths.indexOf(file.path);
+			<text fg={theme.muted}>{semantic.version} · semantic view</text>
+			{files.map((semanticFile, streamIndex) => {
+				const fileIndex = paths.indexOf(semanticFile.path);
 				const focused = fileIndex === selectedFile;
-				const collapsed = collapsedFiles.has(file.path);
-				const reviewed = isFileReviewed(vs, chapter.id, file.path);
-				const lines = keyedSemanticLines(file.lines);
+				const collapsed = collapsedFiles.has(semanticFile.path);
+				const reviewed = isFileReviewed(vs, chapter.id, semanticFile.path);
+				const emphasis: SpanEmphasis = {
+					rangesFor: (side, line) =>
+						(side === "deletions"
+							? semanticFile.emphasis.deletions
+							: semanticFile.emphasis.additions
+						).get(line),
+					deletionsFg: theme.badgeRemoved,
+					additionsFg: theme.badgeAdded,
+				};
 				return (
-					<box key={file.path} flexDirection="column" width="100%">
-						{streamIndex > 0 ? <text fg={theme.border}>{"─".repeat(20)}</text> : null}
+					<box key={semanticFile.path} flexDirection="column" width="100%">
+						{streamIndex > 0 ? (
+							<text fg={theme.border}>{"─".repeat(Math.max(1, width - 2))}</text>
+						) : null}
 						<box
 							id={fileHeaderId(chapter.id, fileIndex)}
 							flexDirection="row"
@@ -1308,44 +1409,70 @@ function SemanticChapterView({
 							<text
 								flexShrink={0}
 								fg={reviewed ? theme.badgeAdded : theme.muted}
-								onMouseDown={() => onToggleFileReview(file.path)}
+								onMouseDown={() => onToggleFileReview(semanticFile.path)}
 							>
 								[{reviewed ? "x" : " "}]
 							</text>
 							<text
-								flexShrink={1}
-								minWidth={0}
-								wrapMode="none"
-								truncate
+								flexShrink={0}
 								fg={focused ? theme.accent : theme.muted}
-								onMouseDown={() => onToggleCollapse(file.path)}
+								onMouseDown={() => onToggleCollapse(semanticFile.path)}
 							>
-								{collapsed ? "▶" : "▼"} {file.path}
+								{collapsed ? "▶" : "▼"}
 							</text>
+							{semanticFile.file ? (
+								<box flexGrow={1} minWidth={0}>
+									<DiffFileHeader
+										file={semanticFile.file}
+										theme={diffTheme}
+										width={Math.max(1, width - 7)}
+										onSelect={() => onSelectFile(fileIndex)}
+									/>
+								</box>
+							) : (
+								<text
+									flexShrink={1}
+									minWidth={0}
+									wrapMode="none"
+									truncate
+									fg={focused ? theme.accent : theme.muted}
+									onMouseDown={() => onSelectFile(fileIndex)}
+								>
+									{" "}
+									{semanticFile.path}
+								</text>
+							)}
 						</box>
 						{collapsed ? null : (
-							<box flexDirection="column" paddingLeft={1}>
-								{lines.map(({ key, line }, index) => (
-									<text
-										key={`${file.path}:${key}`}
-										fg={index === 0 ? theme.heading : theme.text}
-										wrapMode="none"
-										onMouseDown={() => onSelectFile(fileIndex)}
-									>
-										{line.spans.length
-											? line.spans.map((span, spanIndex) => (
-													<span
-														// biome-ignore lint/suspicious/noArrayIndexKey: immutable output spans have no independent identity.
-														key={`${spanIndex}:${span.text}`}
-														fg={span.fg}
-														attributes={createTextAttributes(span)}
-													>
-														{span.text}
-													</span>
-												))
-											: " "}
+							<box flexDirection="column" width="100%">
+								{semanticFile.notes.map((note) => (
+									<text key={note} fg={theme.muted} wrapMode="none" truncate>
+										{note}
 									</text>
 								))}
+								{semanticFile.file ? (
+									<DiffBody
+										file={semanticFile.file}
+										theme={diffTheme}
+										layout={layoutForFile({
+											file: semanticFile.file,
+											preference: diffPreference,
+											splitFits,
+										})}
+										width={width}
+										showLineNumbers
+										showHunkHeaders={false}
+										selectedHunkIndex={-1}
+										decorations={decorations}
+										focusedDecorationId={focusedDecorationId}
+										selectedRange={selectedThreadRange}
+										inlineAttachments={inlineAttachments}
+										emphasis={emphasis}
+										resolveRange={gitRangeResolver(diffFiles, semanticFile.path)}
+										onRangeSelect={onSelectThreadRange}
+										onRangeContextMenu={onRangeContextMenu}
+									/>
+								) : null}
 							</box>
 						)}
 					</box>
@@ -1569,7 +1696,7 @@ export function App({
 }: {
 	file: RevueChaptersFile;
 	diffFiles?: DiffFile[] | null;
-	loadSemanticDiff?: (width: number, palette: AnsiPalette) => Promise<SemanticDiffResult>;
+	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 	initialViewState?: ViewState;
 	initialTheme?: Theme;
 	/** The syntax theme the caller already prepared highlights for. */
@@ -1610,7 +1737,7 @@ export function App({
 	const [sidebarPreference, setSidebarPreference] = useState<SidebarPreference>("auto");
 	const [diffPreference, setDiffPreference] = useState<DiffLayoutPreference>("auto");
 	const [viewMode, setViewMode] = useState<"patch" | "semantic">("patch");
-	const [semantic, setSemantic] = useState<SemanticDiffResult | null>(null);
+	const [semantic, setSemantic] = useState<PreparedSemantic | null>(null);
 	const [semanticLoading, setSemanticLoading] = useState(false);
 	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
 	const [vs, setVs] = useState(initialViewState);
@@ -1655,16 +1782,17 @@ export function App({
 			: { ...theme, syntaxTheme: preparedSyntaxTheme };
 
 	useEffect(() => {
-		if (!diffFiles || preparedSyntaxTheme === theme.syntaxTheme) return;
+		const highlightable = [...(diffFiles ?? []), ...semanticDiffFiles(semantic)];
+		if (!highlightable.length || preparedSyntaxTheme === theme.syntaxTheme) return;
 		let current = true;
 		const syntaxTheme = theme.syntaxTheme;
-		prepareSyntaxHighlighting(diffFiles, syntaxTheme).then(() => {
+		prepareSyntaxHighlighting(highlightable, syntaxTheme).then(() => {
 			if (current) setPreparedSyntaxTheme(syntaxTheme);
 		});
 		return () => {
 			current = false;
 		};
-	}, [diffFiles, preparedSyntaxTheme, theme.syntaxTheme]);
+	}, [diffFiles, semantic, preparedSyntaxTheme, theme.syntaxTheme]);
 
 	useEffect(() => {
 		const scroll = pageScroll.current;
@@ -2076,8 +2204,6 @@ export function App({
 		setChosenTheme(next);
 		setPreviewTheme(null);
 		setThemePicker(null);
-		// Difftastic's output was captured against the previous palette.
-		setSemantic(null);
 		onThemeChange?.(next);
 	}
 	function closeThemePicker() {
@@ -2099,9 +2225,10 @@ export function App({
 			return;
 		}
 		setSemanticLoading(true);
-		setSemanticNotice("Loading read-only semantic diff from pinned run snapshots...");
+		setSemanticNotice("Loading semantic diff from pinned run snapshots...");
 		try {
-			const result = await loadSemanticDiff(contentWidth, semanticAnsiPalette(theme));
+			const result = prepareSemantic(await loadSemanticDiff());
+			await prepareSyntaxHighlighting(semanticDiffFiles(result), theme.syntaxTheme);
 			setSemantic(result);
 			setSemanticNotice(null);
 			changeViewMode("semantic");
@@ -2459,12 +2586,31 @@ export function App({
 								<SemanticChapterView
 									chapter={page.chapter}
 									semantic={semantic}
+									diffTheme={diffTheme}
+									diffFiles={diffFiles ?? null}
+									width={contentWidth}
+									diffPreference={diffPreference}
+									splitFits={splitFits}
 									vs={vs}
 									selectedFile={selectedFile}
+									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}
+									threads={threads}
+									selectedThreadRange={
+										contextMenu?.range ??
+										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
+									}
+									threadDraft={newThreadDraft}
+									replyDraft={replyDraft}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
 									onToggleFileReview={toggleFileReview}
+									onSelectThreadRange={selectThreadRange}
+									onRangeContextMenu={openRangeContextMenu}
+									onReplyThread={startThreadReply}
+									onDeleteThread={deleteInlineThread}
+									onDeleteThreadMessage={deleteInlineThreadMessage}
+									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
 						</box>
@@ -2531,9 +2677,9 @@ export function App({
 						{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
 					</text>
 					<text fg={theme.muted}>
-						{viewMode === "semantic"
-							? "Semantic is read-only · anchors/ranges/threads Patch-only · F10 View to switch"
-							: "drag gutter thread · drag code + y copy · right-click menu · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"}
+						{
+							"drag gutter thread · drag code + y copy · right-click menu · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"
+						}
 					</text>
 				</box>
 			</box>
@@ -2548,7 +2694,7 @@ export async function runApp(
 	file: RevueChaptersFile,
 	options: {
 		diffFiles?: DiffFile[] | null;
-		loadSemanticDiff?: (width: number, palette: AnsiPalette) => Promise<SemanticDiffResult>;
+		loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 		initialViewState?: ViewState;
 		initialThreads?: ReviewThread[];
 		threadActions?: ThreadActions;

@@ -7,12 +7,75 @@ import type {
 	DiffLayout,
 	DiffRow,
 	DiffSide,
+	EmphasisRange,
 	RangeDecoration,
 	RenderSpan,
+	SpanEmphasis,
 } from "./types.ts";
 
 const cleanLine = (line: string | undefined) =>
 	sanitizeTerminalLine((line ?? "").replace(/\r?\n$/, "")).replaceAll("\t", "  ");
+
+/** Rendering doubles tabs, so shift raw-text offsets by the tabs preceding them. */
+const tabAdjusted = (raw: string, range: EmphasisRange): EmphasisRange => {
+	const extra = (upTo: number) => raw.slice(0, upTo).match(/\t/g)?.length ?? 0;
+	return { start: range.start + extra(range.start), end: range.end + extra(range.end) };
+};
+
+/** Novel ranges glow in the side's colour while the rest of the line falls back to a dim base. */
+const emphasiseSpans = (
+	spans: RenderSpan[],
+	ranges: readonly EmphasisRange[],
+	fg: string,
+): RenderSpan[] => {
+	const result: RenderSpan[] = [];
+	let offset = 0;
+	for (const span of spans) {
+		const end = offset + span.text.length;
+		let cursor = offset;
+		for (const range of ranges) {
+			const from = Math.max(range.start, cursor);
+			const to = Math.min(range.end, end);
+			if (to <= from) continue;
+			if (from > cursor)
+				result.push({ ...span, text: span.text.slice(cursor - offset, from - offset), dim: true });
+			result.push({ text: span.text.slice(from - offset, to - offset), fg, bold: true });
+			cursor = to;
+		}
+		if (cursor < end) result.push({ ...span, text: span.text.slice(cursor - offset), dim: true });
+		offset = end;
+	}
+	return result;
+};
+
+const applyEmphasis = ({
+	spans,
+	kind,
+	raw,
+	oldLineNumber,
+	newLineNumber,
+	emphasis,
+}: {
+	spans: RenderSpan[];
+	kind: DiffCell["kind"];
+	raw: string;
+	oldLineNumber?: number;
+	newLineNumber?: number;
+	emphasis?: SpanEmphasis;
+}): RenderSpan[] => {
+	if (!emphasis) return spans;
+	const side: DiffSide | null =
+		kind === "deletion" ? "deletions" : kind === "addition" ? "additions" : null;
+	const line = side === "deletions" ? oldLineNumber : newLineNumber;
+	if (!side || line === undefined) return spans;
+	const ranges = emphasis.rangesFor(side, line);
+	if (!ranges?.length) return spans;
+	return emphasiseSpans(
+		spans,
+		ranges.map((range) => tabAdjusted(raw, range)),
+		side === "deletions" ? emphasis.deletionsFg : emphasis.additionsFg,
+	);
+};
 
 function makeCell({
 	kind,
@@ -22,6 +85,7 @@ function makeCell({
 	newLineNumber,
 	decorations,
 	focusedDecorationId,
+	emphasis,
 }: {
 	kind: DiffCell["kind"];
 	text?: string;
@@ -30,6 +94,7 @@ function makeCell({
 	newLineNumber?: number;
 	decorations: readonly RangeDecoration[];
 	focusedDecorationId?: string;
+	emphasis?: SpanEmphasis;
 }): DiffCell {
 	const oldRanges = decorationsAtLine(decorations, "deletions", oldLineNumber);
 	const newRanges = decorationsAtLine(decorations, "additions", newLineNumber);
@@ -37,10 +102,22 @@ function makeCell({
 		focusedDecorationId !== undefined &&
 		(range.id === focusedDecorationId || range.focusId === focusedDecorationId);
 	const safeText = cleanLine(text);
+	const baseSpans = spans?.length
+		? sanitizeTerminalSpans(spans)
+		: safeText
+			? [{ text: safeText }]
+			: [];
 	return {
 		kind,
 		text: safeText,
-		spans: spans?.length ? sanitizeTerminalSpans(spans) : safeText ? [{ text: safeText }] : [],
+		spans: applyEmphasis({
+			spans: baseSpans,
+			kind,
+			raw: (text ?? "").replace(/\r?\n$/, ""),
+			oldLineNumber,
+			newLineNumber,
+			emphasis,
+		}),
 		oldLineNumber,
 		newLineNumber,
 		decorations: {
@@ -74,13 +151,14 @@ export type DiffRowOptions = {
 	syntaxTheme?: string;
 	decorations?: readonly RangeDecoration[];
 	focusedDecorationId?: string;
+	emphasis?: SpanEmphasis;
 };
 
 /** Expand Pierre metadata into stable split or stack rows with old/new identities. */
 export function buildDiffRows(
 	file: DiffFile,
 	layout: DiffLayout,
-	{ syntaxTheme, decorations = [], focusedDecorationId }: DiffRowOptions = {},
+	{ syntaxTheme, decorations = [], focusedDecorationId, emphasis }: DiffRowOptions = {},
 ): DiffRow[] {
 	const rows: DiffRow[] = [];
 	const ranges = applicableDecorations(file, decorations);
@@ -109,6 +187,7 @@ export function buildDiffRows(
 						newLineNumber: newLine + offset,
 						decorations: ranges,
 						focusedDecorationId,
+						emphasis,
 					};
 					if (layout === "split") {
 						rows.push({
@@ -149,6 +228,7 @@ export function buildDiffRows(
 										oldLineNumber: oldLine + offset,
 										decorations: ranges,
 										focusedDecorationId,
+										emphasis,
 									})
 								: emptyCell(),
 						new:
@@ -160,6 +240,7 @@ export function buildDiffRows(
 										newLineNumber: newLine + offset,
 										decorations: ranges,
 										focusedDecorationId,
+										emphasis,
 									})
 								: emptyCell(),
 					});
@@ -177,6 +258,7 @@ export function buildDiffRows(
 							oldLineNumber: oldLine + offset,
 							decorations: ranges,
 							focusedDecorationId,
+							emphasis,
 						}),
 					});
 				}
@@ -192,6 +274,7 @@ export function buildDiffRows(
 							newLineNumber: newLine + offset,
 							decorations: ranges,
 							focusedDecorationId,
+							emphasis,
 						}),
 					});
 				}

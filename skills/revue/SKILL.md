@@ -1,15 +1,15 @@
 ---
-name: revue-chapters
-description: Generate revue chapters for the current local git branch and open them in a terminal UI for review.
+name: revue
+description: Review any git diff — a branch, a pull request, two refs, staged, or the working tree — as narrated chapters in the revue terminal UI.
 user-invocable: true
 ---
 
-# revue-chapters
+# revue
 
-Generates a Revue chapter run for local Git changes and opens it in the terminal UI. `revue prep`
-freezes the review scope; the agent reads its numbered hunks, clusters them into narrative
-**chapters** and a **prologue**, writes `chapters.json` into the run, and hands that same run to
-`revue show`.
+Turns any Git diff into a Revue chapter run and opens it in the terminal UI. `revue prep`
+freezes the review scope — a branch, someone's pull request, any two refs, or local changes; the
+agent reads its numbered hunks, clusters them into narrative **chapters** and a **prologue**,
+writes `chapters.json` into the run, and hands that same run to `revue show`.
 
 This skill is adapted from ReviewStage/stage-cli's `stage-chapters` skill (MIT). The clustering,
 narration, and prologue rules remain the same. Revue differs by preserving one immutable patch and
@@ -47,6 +47,18 @@ RUN=$(revue prep --ref staged)
 RUN=$(revue prep --ref unstaged)
 RUN=$(revue prep --ref work)
 ```
+
+To review a pull request — including someone else's — use `--pr`, which fetches the PR head and
+compares it against the detected base (override with `--base`):
+
+```bash
+RUN=$(revue prep --pr 123)                                    # PR on the origin remote
+RUN=$(revue prep --pr https://github.com/owner/repo/pull/123) # PR anywhere on GitHub
+```
+
+The URL form fetches directly from that repository, so it works from any local clone that shares
+history with the PR's target. For other diff sources, fetch the relevant refs first and pass them
+to prep as ordinary refs.
 
 If prep exits non-zero, relay its error and stop. Do not edit `run.json`, `diff.patch`, `hunks.txt`,
 or `blobs/`; they are one immutable input.
@@ -189,7 +201,7 @@ human-readable role name; do not impersonate the repository's Git user:
 
 ```bash
 revue threads reply "$RUN" <thread-id> \
-  --author "revue-chapters agent" \
+  --author "revue agent" \
   --body "Adjusted the retry cap and kept the interactive path within its budget."
 ```
 

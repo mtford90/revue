@@ -84,7 +84,7 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 
 ## Key decisions
 
-- **The CLI owns the skill text; the skills CLI owns distribution.** The `revue-chapters` skill
+- **The CLI owns the skill text; the skills CLI owns distribution.** The `revue` skill
   is embedded in the CLI at build time and stamped with the CLI version, so an installed binary
   always distributes its matching skill. `revue skill install` hands that stamped copy to the
   open skills CLI (vercel-labs/skills) via npx/pnpm/bunx/yarn, which detects installed coding

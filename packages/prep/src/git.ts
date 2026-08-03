@@ -145,6 +145,16 @@ const resolveBaseRef = async (
 	}
 };
 
+// FETCH_HEAD is resolved immediately after the fetch, so the pinned SHA cannot be
+// displaced by any later fetch in the same repository.
+const fetchPullRequestHead = async (
+	context: GitContext,
+	pullRequest: NonNullable<ScopeRequest["pullRequest"]>,
+): Promise<string> => {
+	await gitText(context, ["fetch", "--quiet", pullRequest.source, pullRequest.ref]);
+	return resolveCommit(context, "FETCH_HEAD");
+};
+
 export async function resolveScopePlan(
 	request: ScopeRequest,
 	directory?: string,
@@ -153,9 +163,12 @@ export async function resolveScopePlan(
 	const mode = await resolveMode(context, request);
 	if (mode !== RUN_SCOPE_MODE.COMMITTED) await rejectUnmerged(context);
 	const baseRef = await resolveBaseRef(context, request, mode);
+	const pulledSha = request.pullRequest
+		? await fetchPullRequestHead(context, request.pullRequest)
+		: undefined;
 	const [baseSha, headSha] = await Promise.all([
 		resolveCommit(context, baseRef),
-		resolveCommit(context, request.headRef),
+		pulledSha ?? resolveCommit(context, request.headRef),
 	]);
 	const mergeBaseSha = (await gitText(context, ["merge-base", baseSha, headSha])).trim();
 	const base = { ref: baseRef, sha: baseSha };

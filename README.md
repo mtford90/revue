@@ -39,11 +39,17 @@ bun run revue show examples/sample-run
 
 # review your own changes
 RUN=$(bun run revue prep)     # freeze the current diff into an immutable run
-                              # → ask your agent to run the revue-chapters skill on "$RUN"
+                              # → ask your agent to run the revue skill on "$RUN"
 bun run revue show "$RUN"     # open the interactive reviewer
 ```
 
-`revue prep` supports committed, staged, unstaged, and working-tree scopes.
+`revue prep` supports committed, staged, unstaged, and working-tree scopes, any two refs
+(`revue prep main..feature`), and pull requests — including someone else's:
+
+```bash
+RUN=$(revue prep --pr 123)                                    # PR on the origin remote
+RUN=$(revue prep --pr https://github.com/owner/repo/pull/123) # any GitHub PR
+```
 
 ## Export
 

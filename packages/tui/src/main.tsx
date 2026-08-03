@@ -52,14 +52,14 @@ Usage:
   revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
   revue comments <operation>           compatibility alias for revue threads
-  revue skill install [--user]         install the bundled revue-chapters skill via the skills CLI
+  revue skill install [--user]         install the bundled revue skill via the skills CLI
   revue skill print                    write the bundled skill to stdout for manual installation
   revue doctor                         check required and optional dependencies
   revue --version                      print the CLI version
 
 Prep modes: committed, staged, unstaged, work. Without explicit scope, prep reviews local
 working-tree changes when present and otherwise compares HEAD with the detected main/master base.
-The revue-chapters skill reads hunks.txt and writes chapters.json inside the printed run directory.
+The revue skill reads hunks.txt and writes chapters.json inside the printed run directory.
 `;
 
 const SHOW_HELP = `usage: revue show <run-directory> [--check]
@@ -80,6 +80,7 @@ const THREADS_HELP = `usage: revue threads list <run-directory> --json [--all]
        revue threads reopen <run-directory> <thread-id>`;
 const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main...feature]
                   [--base <ref>] [--compare <ref>]
+                  [--pr <number | github-pull-request-url>]
                   [--ref committed|staged|unstaged|work]
                   [--ignore <gitignore-pattern>]... [--show-ignored]`;
 
@@ -591,15 +592,15 @@ async function cmdShow(args: string[]): Promise<number> {
 const SKILL_HELP = `usage: revue skill install [--user]
        revue skill print
 
-install  hand the bundled revue-chapters skill, stamped with this CLI's version, to the
+install  hand the bundled revue skill, stamped with this CLI's version, to the
          open skills CLI (vercel-labs/skills), which detects the coding agents on this
          machine and installs it for each; --user targets user-level skill directories
 print    write the stamped skill to stdout for manual installation`;
 
 const NO_RUNNER_INSTRUCTIONS = `No package runner found for the skills CLI (looked for npx, pnpm, bunx, and yarn).
 Either install one and re-run \`revue skill install\`, or place the skill manually:
-  mkdir -p .claude/skills/revue-chapters
-  revue skill print > .claude/skills/revue-chapters/SKILL.md
+  mkdir -p .claude/skills/revue
+  revue skill print > .claude/skills/revue/SKILL.md
 That path serves Claude Code at project scope; other agents read different skill
 directories — see https://github.com/vercel-labs/skills for the full list.`;
 
@@ -628,7 +629,7 @@ async function cmdSkill(args: string[]): Promise<number> {
 			return 1;
 		}
 		process.stderr.write(
-			`Handing the revue-chapters skill (${REVUE_VERSION}) to the skills CLI via ${runner.label}…\n`,
+			`Handing the revue skill (${REVUE_VERSION}) to the skills CLI via ${runner.label}…\n`,
 		);
 		return await installSkill(options.booleans.has("--user") ? "user" : "project", runner);
 	} catch (error) {

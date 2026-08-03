@@ -391,8 +391,8 @@ const fakeSkillsRunner = async (root: string): Promise<{ executable: string; log
 		executable,
 		`#!/bin/sh
 printf '%s\\n' "$@" > ${JSON.stringify(log)}
-mkdir -p .claude/skills/revue-chapters
-cp "$2/SKILL.md" .claude/skills/revue-chapters/SKILL.md
+mkdir -p .claude/skills/revue
+cp "$2/SKILL.md" .claude/skills/revue/SKILL.md
 `,
 	);
 	await chmod(executable, 0o755);
@@ -412,11 +412,9 @@ test("skill install hands a version-stamped skill to the skills CLI runner", asy
 		expect(runnerArgs[0]).toBe("add");
 		expect(runnerArgs.slice(2)).toEqual(["--copy", "-y"]);
 
-		const contents = await Bun.file(
-			join(root, ".claude", "skills", "revue-chapters", "SKILL.md"),
-		).text();
+		const contents = await Bun.file(join(root, ".claude", "skills", "revue", "SKILL.md")).text();
 		expect(contents).toMatch(/^---\nrevue-version: \d+\.\d+\.\d+\n/);
-		expect(contents).toContain("# revue-chapters");
+		expect(contents).toContain("# revue");
 
 		const userScope = await run(root, ["skill", "install", "--user"], {
 			REVUE_SKILL_RUNNER: executable,
@@ -450,7 +448,7 @@ test("skill print writes the stamped skill to stdout", async () => {
 		const printed = await run(root, ["skill", "print"]);
 		expect(printed).toMatchObject({ exitCode: 0, stderr: "" });
 		expect(printed.stdout).toMatch(/^---\nrevue-version: \d+\.\d+\.\d+\n/);
-		expect(printed.stdout).toContain("# revue-chapters");
+		expect(printed.stdout).toContain("# revue");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -470,6 +468,40 @@ test("doctor reports dependency and skill state and exits by git availability", 
 		const after = await run(root, ["doctor"]);
 		expect(after.exitCode).toBe(0);
 		expect(after.stdout).toMatch(/skill project: ok \(\d+\.\d+\.\d+\)/);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("prep --pr fetches a pull request head from the remote and pins it as the compare ref", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-prep-pr-"));
+	try {
+		const upstream = join(root, "upstream");
+		await mkdir(upstream);
+		await git(upstream, "init", "-b", "main");
+		await git(upstream, "config", "user.email", "revue@example.com");
+		await git(upstream, "config", "user.name", "Revue Test");
+		await writeFile(join(upstream, "value.txt"), "one\n");
+		await git(upstream, "add", "-A");
+		await git(upstream, "commit", "-m", "Baseline");
+		await git(upstream, "checkout", "-b", "feature");
+		await writeFile(join(upstream, "value.txt"), "two\n");
+		await git(upstream, "add", "-A");
+		await git(upstream, "commit", "-m", "Change value");
+		await git(upstream, "update-ref", "refs/pull/1/head", "feature");
+		await git(upstream, "checkout", "main");
+
+		const clone = join(root, "clone");
+		await git(root, "clone", "--quiet", upstream, clone);
+
+		const prepped = await run(clone, ["prep", "--pr", "1"]);
+		expect(prepped.exitCode).toBe(0);
+		expect(prepped.stderr).toContain("head  pull/1/head");
+		const runDirectory = prepped.stdout.trim();
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+		expect(manifest.scope.mode).toBe("committed");
+		expect(manifest.scope.head.ref).toBe("pull/1/head");
+		expect(manifest.totals.files).toBe(1);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

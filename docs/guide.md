@@ -30,14 +30,14 @@ packages/
   types/           zod schemas for chapters, review state, and run manifests
   tui/             The CLI and OpenTUI chapter-navigation shell
 skills/
-  revue-chapters/  The chapter-generating agent skill (adapted from stage-chapters)
+  revue/           The chapter-generating agent skill (adapted from stage-chapters)
 examples/
   sample-run/      A complete prepared run that works without a Git repository
 ```
 
 ## Installing the agent skill
 
-The CLI is the source of truth for the bundled `revue-chapters` skill and stamps it with its own
+The CLI is the source of truth for the bundled `revue` skill and stamps it with its own
 version. `revue skill install` hands that stamped copy to the open skills CLI
 ([vercel-labs/skills](https://github.com/vercel-labs/skills)) through the first available runner
 (npx, pnpm, bunx, or yarn); the skills CLI detects the coding agents on the machine and writes

@@ -2,10 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import skillSource from "../../../skills/revue-chapters/SKILL.md" with { type: "text" };
+import skillSource from "../../../skills/revue/SKILL.md" with { type: "text" };
 import { REVUE_VERSION } from "./version.ts";
 
-export const SKILL_NAME = "revue-chapters";
+export const SKILL_NAME = "revue";
 
 export type SkillScope = "project" | "user";
 

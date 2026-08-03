@@ -15,7 +15,7 @@ export async function loadReviewRun(directory: string): Promise<ReviewRun> {
 	return { ...prepared, chapters };
 }
 
-/** Read, JSON-parse and validate a chapters file written by the revue-chapters skill. */
+/** Read, JSON-parse and validate a chapters file written by the revue skill. */
 export async function loadChaptersFile(path: string): Promise<RevueChaptersFile> {
 	let raw: string;
 	try {

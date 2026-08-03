@@ -25,7 +25,7 @@ import {
 import { runDoctor } from "./doctor.ts";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
-import { installSkill } from "./skill.ts";
+import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
 import { formatSummary } from "./summary.ts";
 import {
@@ -52,7 +52,8 @@ Usage:
   revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
   revue comments <operation>           compatibility alias for revue threads
-  revue skill install [--user]         write the bundled revue-chapters skill to .claude/skills
+  revue skill install [--user]         install the bundled revue-chapters skill via the skills CLI
+  revue skill print                    write the bundled skill to stdout for manual installation
   revue doctor                         check required and optional dependencies
   revue --version                      print the CLI version
 
@@ -588,18 +589,32 @@ async function cmdShow(args: string[]): Promise<number> {
 }
 
 const SKILL_HELP = `usage: revue skill install [--user]
+       revue skill print
 
-Writes the bundled revue-chapters skill, stamped with this CLI's version, to
-.claude/skills/revue-chapters/SKILL.md at the current repository root, or under
-~/.claude/skills with --user. Re-run after upgrading revue.`;
+install  hand the bundled revue-chapters skill, stamped with this CLI's version, to the
+         open skills CLI (vercel-labs/skills), which detects the coding agents on this
+         machine and installs it for each; --user targets user-level skill directories
+print    write the stamped skill to stdout for manual installation`;
 
-function cmdSkill(args: string[]): number {
+const NO_RUNNER_INSTRUCTIONS = `No package runner found for the skills CLI (looked for npx, pnpm, bunx, and yarn).
+Either install one and re-run \`revue skill install\`, or place the skill manually:
+  mkdir -p .claude/skills/revue-chapters
+  revue skill print > .claude/skills/revue-chapters/SKILL.md
+That path serves Claude Code at project scope; other agents read different skill
+directories — see https://github.com/vercel-labs/skills for the full list.`;
+
+async function cmdSkill(args: string[]): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(`${SKILL_HELP}\n`);
 		return 0;
 	}
 	const [operation, ...rest] = args;
 	try {
+		if (operation === "print") {
+			if (rest.length > 0) throw new Error("skill print takes no arguments");
+			process.stdout.write(stampedSkill());
+			return 0;
+		}
 		if (operation !== "install") {
 			throw new Error(operation ? `unknown skill operation: ${operation}` : "missing operation");
 		}
@@ -607,10 +622,15 @@ function cmdSkill(args: string[]): number {
 		if (options.positionals.length > 0) {
 			throw new Error("skill install takes no positional arguments");
 		}
-		const result = installSkill(options.booleans.has("--user") ? "user" : "project");
-		const outcome = result.outcome === "unchanged" ? "already up to date" : result.outcome;
-		process.stdout.write(`revue-chapters skill ${outcome} (${REVUE_VERSION}) at ${result.path}\n`);
-		return 0;
+		const runner = resolveSkillRunner();
+		if (!runner) {
+			process.stderr.write(`${NO_RUNNER_INSTRUCTIONS}\n`);
+			return 1;
+		}
+		process.stderr.write(
+			`Handing the revue-chapters skill (${REVUE_VERSION}) to the skills CLI via ${runner.label}…\n`,
+		);
+		return await installSkill(options.booleans.has("--user") ? "user" : "project", runner);
 	} catch (error) {
 		process.stderr.write(
 			`${error instanceof Error ? error.message : String(error)}\n${SKILL_HELP}\n`,

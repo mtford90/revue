@@ -75,12 +75,15 @@ bun run revue show "$RUN"
 
 ## Installing the agent skill
 
-The CLI is the source of truth for the bundled `revue-chapters` skill. `revue skill install`
-writes it to `.claude/skills/revue-chapters/` at the current repository root (`--user` targets
-`~/.claude/skills/` instead), stamped with the CLI version that produced it. Re-run it after
-upgrading revue; `revue doctor` reports a stale or missing skill alongside the required Git and
-optional Difftastic dependencies. The skill itself only ever advises how to install the CLI — it
-never downloads or installs binaries.
+The CLI is the source of truth for the bundled `revue-chapters` skill and stamps it with its own
+version. `revue skill install` hands that stamped copy to the open skills CLI
+([vercel-labs/skills](https://github.com/vercel-labs/skills)) through the first available runner
+(npx, pnpm, bunx, or yarn); the skills CLI detects the coding agents on the machine and writes
+the skill into each one's directory, so new harnesses are supported without changes to revue.
+`--user` installs at user scope. Without a package runner, `revue skill print` emits the stamped
+skill for manual placement. Re-run install after upgrading revue; `revue doctor` reports a stale
+or missing skill alongside the required Git and optional Difftastic dependencies. The skill
+itself only ever advises how to install the CLI — it never downloads or installs binaries.
 
 ## Markdown export
 

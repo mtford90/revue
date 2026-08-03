@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -15,9 +15,10 @@ import { runKey } from "./viewState.ts";
 const mainPath = resolve(import.meta.dir, "main.tsx");
 const sampleRun = resolve(import.meta.dir, "../../../examples/sample-run");
 
-const run = async (cwd: string, args: string[]) => {
-	const child = Bun.spawn(["bun", mainPath, ...args], {
+const run = async (cwd: string, args: string[], env?: Record<string, string>) => {
+	const child = Bun.spawn([process.execPath, mainPath, ...args], {
 		cwd,
+		env: env ? { ...process.env, ...env } : undefined,
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -381,26 +382,75 @@ test("show names its themes and refuses an unknown one before touching the run",
 	}
 });
 
-test("skill install writes a version-stamped copy at the repository root and is idempotent", async () => {
+// Stands in for the skills CLI (vercel-labs/skills): records its arguments and copies the
+// handed-over skill where a real run would install it for Claude Code at project scope.
+const fakeSkillsRunner = async (root: string): Promise<{ executable: string; log: string }> => {
+	const executable = join(root, "fake-skills");
+	const log = join(root, "runner-args.log");
+	await writeFile(
+		executable,
+		`#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(log)}
+mkdir -p .claude/skills/revue-chapters
+cp "$2/SKILL.md" .claude/skills/revue-chapters/SKILL.md
+`,
+	);
+	await chmod(executable, 0o755);
+	return { executable, log };
+};
+
+test("skill install hands a version-stamped skill to the skills CLI runner", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-skill-"));
 	try {
 		await git(root, "init", "-b", "main");
-		const nested = join(root, "packages");
-		await mkdir(nested);
+		const { executable, log } = await fakeSkillsRunner(root);
 
-		const installed = await run(nested, ["skill", "install"]);
-		expect(installed).toMatchObject({ exitCode: 0, stderr: "" });
-		expect(installed.stdout).toContain("skill installed");
+		const installed = await run(root, ["skill", "install"], { REVUE_SKILL_RUNNER: executable });
+		expect(installed.exitCode).toBe(0);
 
-		const skillPath = join(root, ".claude", "skills", "revue-chapters", "SKILL.md");
-		const contents = await Bun.file(skillPath).text();
+		const runnerArgs = (await Bun.file(log).text()).trim().split("\n");
+		expect(runnerArgs[0]).toBe("add");
+		expect(runnerArgs.slice(2)).toEqual(["--copy", "-y"]);
+
+		const contents = await Bun.file(
+			join(root, ".claude", "skills", "revue-chapters", "SKILL.md"),
+		).text();
 		expect(contents).toMatch(/^---\nrevue-version: \d+\.\d+\.\d+\n/);
 		expect(contents).toContain("# revue-chapters");
 
-		const repeated = await run(nested, ["skill", "install"]);
-		expect(repeated).toMatchObject({ exitCode: 0, stderr: "" });
-		expect(repeated.stdout).toContain("already up to date");
-		expect(await Bun.file(skillPath).text()).toBe(contents);
+		const userScope = await run(root, ["skill", "install", "--user"], {
+			REVUE_SKILL_RUNNER: executable,
+		});
+		expect(userScope.exitCode).toBe(0);
+		expect((await Bun.file(log).text()).trim().split("\n").slice(2)).toEqual([
+			"--copy",
+			"-y",
+			"-g",
+		]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("skill install without any package runner prints manual instructions and fails", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-skill-norunner-"));
+	try {
+		const missing = await run(root, ["skill", "install"], { PATH: "/var/empty" });
+		expect(missing.exitCode).toBe(1);
+		expect(missing.stderr).toContain("No package runner found");
+		expect(missing.stderr).toContain("revue skill print");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("skill print writes the stamped skill to stdout", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-skill-print-"));
+	try {
+		const printed = await run(root, ["skill", "print"]);
+		expect(printed).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(printed.stdout).toMatch(/^---\nrevue-version: \d+\.\d+\.\d+\n/);
+		expect(printed.stdout).toContain("# revue-chapters");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -415,7 +465,8 @@ test("doctor reports dependency and skill state and exits by git availability", 
 		expect(before.stdout).toContain("git: ok");
 		expect(before.stdout).toContain("skill project: not installed");
 
-		await run(root, ["skill", "install"]);
+		const { executable } = await fakeSkillsRunner(root);
+		await run(root, ["skill", "install"], { REVUE_SKILL_RUNNER: executable });
 		const after = await run(root, ["doctor"]);
 		expect(after.exitCode).toBe(0);
 		expect(after.stdout).toMatch(/skill project: ok \(\d+\.\d+\.\d+\)/);

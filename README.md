@@ -117,8 +117,8 @@ exports contain no threads.
 
 A **thread** is the official feedback concept. In Patch view, click a visible old/new line-number
 gutter to start one on a single line, or drag within one gutter to select an inclusive range in the
-same hunk and side. Dragging source code remains ordinary terminal text selection for copying. The
-composer opens inline beneath the selected range and identifies its path, side, range, and review
+same hunk and side. Dragging source code instead highlights the text itself, which the next section
+covers. The composer opens inline beneath the selected range and identifies its path, side, range, and review
 unit; use `Ctrl+Enter` or its pointer control to save and `Escape` to cancel. Any number of independent
 threads may share an exact anchor.
 
@@ -128,6 +128,29 @@ Messages from the public agent CLI require an explicit author name. `[Reply]` op
 inside the owning thread. Open threads use an attention marker; dealt-with threads remain visible with
 a green check and dimmed messages and can be reopened. Replies may be deleted individually, while the
 root message is deleted only by deleting its thread.
+
+## Copying
+
+The lines a thread anchors to are also the lines you want to quote elsewhere, so the same selection
+answers to more than one verb. Right-clicking anywhere on a line — its gutter or its code — opens a
+menu at the pointer offering copy `path:line`, copy GitHub link, and comment. Every verb acts on the
+whole selection rather than the one line under the pointer, whether that selection came from a gutter
+drag or from dragging across the code. While a composer is open the same two copies are on `Ctrl+Y`
+and `Ctrl+G` and in its footer, and neither disturbs the draft.
+
+Dragging across source code highlights the text itself, which `y` copies verbatim and the pointer
+menu offers as its first entry while a highlight exists. Change markers are chrome rather than code,
+so no `+` or `-` is ever caught in a drag. Because mouse reporting is on, this is Revue's own
+selection rather than the terminal's; reach the terminal's with whichever modifier it uses (usually
+<kbd>Option</kbd> or <kbd>Shift</kbd>). Opening the pointer menu redraws the lines under it and so
+drops the highlight, but the menu keeps both the text and the lines it covered.
+
+A deleted-side range is numbered and linked under the path and commit it had then, so a rename
+resolves to the old file rather than the new one. A permalink needs a `github.com` `origin` remote
+and a side backed by a commit: in `unstaged` and `work` runs the new side is the working tree, which
+no commit holds, so the link verb is disabled and says why instead of handing over a URL that
+resolves to different content. Copying is delivered by OSC 52 so it survives ssh and a multiplexer,
+with a local pipe alongside it for terminals that quietly drop the sequence.
 
 Threads are stored atomically under `.revue/threads.json` at the reviewed repository root, located
 from the supplied run directory and keyed by immutable `runId`. Every mutation takes a cross-process
@@ -252,8 +275,10 @@ Navigation follows Vim/less conventions: `j`/`k` (or `↑`/`↓`) scroll by line
 `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
 scroll by page · `g`/`G` jump to the top/bottom · `]c`/`[c` move between chapters · `{`/`}` focus key
 changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e` collapse/expand
-all diffs · `a` jumps to the next unreviewed chapter · `s` shows/hides the sidebar · `F10` opens the
-menu · `?` toggles shortcut help · `q`/`esc` quits.
+all diffs · `a` jumps to the next unreviewed chapter · `s` shows/hides the sidebar · `y` copies the
+highlighted text · `Ctrl-y`/`Ctrl-g` copy the open thread's location/GitHub link · `F10` opens the
+menu · `?` toggles shortcut help ·
+`q`/`esc` quits.
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
 change, and switching Patch/Semantic carries the reviewer’s relative position through the chapter.
 Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and review

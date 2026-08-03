@@ -16,6 +16,7 @@ import { act } from "react";
 import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
 import { App } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
+import type { PermalinkContext } from "./sourceLink.ts";
 
 const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
 const theme = resolveTheme("catppuccin-mocha");
@@ -861,4 +862,303 @@ test("the theme picker previews a palette, applies the accepted one, and reports
 	expect(t.captureCharFrame()).not.toContain("preview · enter accept");
 	expect(background()).not.toEqual(nordBackground);
 	expect(chosen).toEqual(["one-dark-pro"]);
+});
+
+const NEW_SHA = "b".repeat(40);
+const OLD_SHA = "a".repeat(40);
+const permalinks = (additions: string | null): PermalinkContext => ({
+	remote: { owner: "mtford", repo: "revue" },
+	shas: { additions, deletions: OLD_SHA },
+});
+
+/** The line-number cell of backoff.ts's first added line, past the sidebar divider. */
+const backoffGutter = (t: Awaited<ReturnType<typeof testRender>>) => {
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes("Exponential backoff with a ceiling"));
+	const line = lines[y] ?? "";
+	return { x: line.indexOf("1", line.indexOf("│")), y };
+};
+
+/** The same line's source text, well clear of its gutter. */
+const backoffCode = (t: Awaited<ReturnType<typeof testRender>>) => {
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes("Exponential backoff with a ceiling"));
+	return { x: (lines[y] ?? "").indexOf("Exponential"), y };
+};
+
+async function rightClick(t: Awaited<ReturnType<typeof testRender>>, x: number, y: number) {
+	await act(async () => {
+		await t.mockMouse.click(x, y, 2);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+}
+
+test("right-clicking the gutter offers the range's verbs without opening a composer", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t); // chapter 1 covers backoff.ts, a new file
+
+	const gutter = backoffGutter(t);
+	await rightClick(t, gutter.x, gutter.y);
+	const menu = t.captureCharFrame();
+	expect(menu).toContain("Copy path:line");
+	expect(menu).toContain("Copy GitHub link");
+	expect(menu).toContain("Comment on selection");
+	expect(menu).not.toContain("New review thread"); // the composer stayed shut
+
+	const menuLines = menu.split("\n");
+	const linkY = menuLines.findIndex((line) => line.includes("Copy GitHub link"));
+	await click(t, (menuLines[linkY]?.indexOf("Copy GitHub link") ?? -1) + 1, linkY);
+
+	expect(copied).toEqual([`https://github.com/mtford/revue/blob/${NEW_SHA}/src/lib/backoff.ts#L1`]);
+	const closed = t.captureCharFrame();
+	expect(closed).not.toContain("Comment on selection");
+	expect(closed).toContain("Copied link:");
+});
+
+test("an uncommitted side reports why it has no link rather than handing over a wrong one", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(null)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const gutter = backoffGutter(t);
+	await rightClick(t, gutter.x, gutter.y);
+	expect(t.captureCharFrame()).toContain("Copy GitHub link (side is not committed)");
+
+	// The disabled entry is skipped, so the keyboard lands on the verb that still works.
+	await arrow(t, "down");
+	await act(async () => {
+		t.mockInput.pressEnter();
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	expect(copied).toEqual([]);
+	expect(t.captureCharFrame()).toContain("New review thread");
+});
+
+test("an open thread copies the range it is anchored to without losing the draft", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const gutter = backoffGutter(t);
+	await click(t, gutter.x, gutter.y);
+	expect(t.captureCharFrame()).toContain("New review thread");
+
+	await act(async () => t.mockInput.typeText("Needs a cap"));
+	await act(async () => {
+		t.mockInput.pressKey("y", { ctrl: true });
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	expect(copied).toEqual(["src/lib/backoff.ts:1"]);
+	const lines = t.captureCharFrame().split("\n");
+	const noticeY = lines.findIndex((line) => line.includes("Copied location: src/lib/backoff.ts:1"));
+	// Inside the composer's own border, beside the draft, rather than down in the status bar.
+	expect(lines[noticeY]).toContain("│");
+	expect(lines.at(-2)).not.toContain("Copied location");
+	expect(lines.join("\n")).toContain("Needs a cap"); // the draft survived the copy
+});
+
+test("right-clicking the code offers the same verbs as its gutter", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const code = backoffCode(t);
+	await rightClick(t, code.x, code.y);
+	const menu = t.captureCharFrame().split("\n");
+	const pathY = menu.findIndex((line) => line.includes("Copy path:line"));
+	expect(pathY).toBeGreaterThan(-1);
+	await click(t, (menu[pathY]?.indexOf("Copy path:line") ?? -1) + 1, pathY);
+
+	expect(copied).toEqual(["src/lib/backoff.ts:1"]);
+});
+
+test("dragging over code copies what was highlighted rather than the line's range", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const code = backoffCode(t);
+	await act(async () => {
+		await t.mockMouse.drag(code.x, code.y, code.x + 11, code.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	await press(t, "y");
+	expect(copied).toEqual(["Exponential"]);
+	expect(t.captureCharFrame()).toContain("Copied 1 selected line");
+});
+
+test("the pointer menu offers the highlight, and only while there is one", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const code = backoffCode(t);
+	await rightClick(t, code.x, code.y);
+	expect(t.captureCharFrame()).toContain("Copy path:line");
+	expect(t.captureCharFrame()).not.toContain("Copy selected text");
+	await press(t, "ESCAPE");
+
+	await act(async () => {
+		await t.mockMouse.drag(code.x, code.y, code.x + 11, code.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	await rightClick(t, code.x, code.y);
+	const menu = t.captureCharFrame().split("\n");
+	const textY = menu.findIndex((line) => line.includes("Copy selected text"));
+	expect(textY).toBeGreaterThan(-1);
+	await click(t, (menu[textY]?.indexOf("Copy selected text") ?? -1) + 1, textY);
+
+	expect(copied).toEqual(["Exponential"]);
+});
+
+test("a highlight spanning lines carries its whole range into the pointer's verbs", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const code = backoffCode(t);
+	await act(async () => {
+		await t.mockMouse.drag(code.x, code.y, code.x + 6, code.y + 2);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	// The change markers are chrome, so no + survives into what was dragged over.
+	expect(copied).toEqual([]);
+	await press(t, "y");
+	expect(copied[0]).not.toContain("+");
+	expect(copied[0]?.split("\n")).toHaveLength(3);
+
+	await rightClick(t, code.x, code.y + 1);
+	const menu = t.captureCharFrame().split("\n");
+	const pathY = menu.findIndex((line) => line.includes("Copy path:line"));
+	await click(t, (menu[pathY]?.indexOf("Copy path:line") ?? -1) + 1, pathY);
+	expect(copied.at(-1)).toBe("src/lib/backoff.ts:1-3");
+});
+
+test("commenting on a highlight anchors the thread to every line it covers", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 160, height: 40 });
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const code = backoffCode(t);
+	await act(async () => {
+		await t.mockMouse.drag(code.x, code.y, code.x + 6, code.y + 2);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	await rightClick(t, code.x, code.y + 1);
+
+	const menu = t.captureCharFrame().split("\n");
+	const commentY = menu.findIndex((line) => line.includes("Comment on selection"));
+	await click(t, (menu[commentY]?.indexOf("Comment on selection") ?? -1) + 1, commentY);
+
+	expect(t.captureCharFrame()).toContain("src/lib/backoff.ts · additions · lines 1-3");
 });

@@ -6,7 +6,7 @@ import {
 	type ScrollBoxRenderable,
 	type TextareaRenderable,
 } from "@opentui/core";
-import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
 	DiffBody,
 	type DiffFile,
@@ -14,6 +14,7 @@ import {
 	type DiffInlineAttachment,
 	type DiffLineRange,
 	decorationAnchorId,
+	diffRangeWithin,
 	findFocusedDecorationAnchor,
 	prepareSyntaxHighlighting,
 	type RangeDecoration,
@@ -39,6 +40,7 @@ import {
 	type ViewState,
 } from "@revue/types";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { copyToClipboard } from "./clipboard.ts";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import {
 	type DiffLayoutPreference,
@@ -49,8 +51,25 @@ import {
 	type SidebarPreference,
 } from "./layout.ts";
 import { Narration } from "./markdown.tsx";
-import { buildAppMenus, MenuBackdrop, MenuBar, MenuDropdown, useMenuController } from "./menu.tsx";
+import {
+	buildAppMenus,
+	ContextMenu,
+	MenuBackdrop,
+	MenuBar,
+	MenuDropdown,
+	type MenuEntry,
+	nextMenuItemIndex,
+	selectable,
+	useMenuController,
+} from "./menu.tsx";
 import { type AnsiPalette, type SemanticDiffResult, terminalSafe } from "./semantic.ts";
+import {
+	formatSourceLocation,
+	type PermalinkContext,
+	permalinkBlocker,
+	permalinkFor,
+	sourceRangeFor,
+} from "./sourceLink.ts";
 import {
 	complexityColor,
 	semanticAnsiPalette,
@@ -105,6 +124,7 @@ const APP_KEYS = new Set([
 	"r",
 	"s",
 	"t",
+	"y",
 	"?",
 ]);
 // ── Page model ──────────────────────────────────────────────────────────────
@@ -935,25 +955,35 @@ function InlineThread({
 }
 
 const THREAD_COMPOSER_ID = "inline-thread-composer";
+const COPY_NOTICE_MS = 2_500;
 
 function ThreadComposer({
 	title,
 	range,
 	body,
 	notice,
+	copyNotice,
+	linkBlocker,
 	textareaRef,
 	onContentChange,
 	onSave,
 	onCancel,
+	onCopyLocation,
+	onCopyLink,
 }: {
 	title: string;
 	range: DiffLineRange;
 	body: string;
 	notice: string | null;
+	copyNotice: string | null;
+	/** Why a permalink is unavailable for this range, or null when one is. */
+	linkBlocker: string | null;
 	textareaRef: RefObject<TextareaRenderable | null>;
 	onContentChange: () => void;
 	onSave: () => void;
 	onCancel: () => void;
+	onCopyLocation: () => void;
+	onCopyLink: () => void;
 }) {
 	const theme = useTheme();
 	const cursorPositioned = useRef(false);
@@ -1000,13 +1030,39 @@ function ThreadComposer({
 						key.preventDefault();
 						key.stopPropagation();
 						onSave();
+					} else if (key.name === "y" && key.ctrl) {
+						key.preventDefault();
+						key.stopPropagation();
+						onCopyLocation();
+					} else if (key.name === "g" && key.ctrl) {
+						key.preventDefault();
+						key.stopPropagation();
+						if (!linkBlocker) onCopyLink();
 					}
 				}}
 			/>
 			{notice ? <text fg={theme.badgeRemoved}>{notice}</text> : null}
-			<box flexDirection="row">
+			{copyNotice ? (
+				<text fg={theme.badgeAdded} wrapMode="none" truncate>
+					{copyNotice}
+				</text>
+			) : null}
+			<box flexDirection="row" flexWrap="wrap">
 				<text fg={theme.badgeAdded} onMouseDown={onSave}>
 					[Save Ctrl+Enter]
+				</text>
+				<text> </text>
+				<text fg={theme.text} onMouseDown={onCopyLocation}>
+					[Copy path Ctrl+Y]
+				</text>
+				<text> </text>
+				<text
+					fg={linkBlocker ? theme.muted : theme.text}
+					onMouseDown={() => {
+						if (!linkBlocker) onCopyLink();
+					}}
+				>
+					[Copy link Ctrl+G]
 				</text>
 				<text> </text>
 				<text fg={theme.muted} onMouseDown={onCancel}>
@@ -1040,6 +1096,7 @@ function ChapterView({
 	onToggleCollapse,
 	onToggleFileReview,
 	onSelectThreadRange,
+	onRangeContextMenu,
 	onReplyThread,
 	onDeleteThread,
 	onDeleteThreadMessage,
@@ -1064,6 +1121,7 @@ function ChapterView({
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
 	onSelectThreadRange: (range: DiffLineRange) => void;
+	onRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
 	onReplyThread: (thread: ReviewThread) => void;
 	onDeleteThread: (id: string) => void;
 	onDeleteThreadMessage: (threadId: string, messageId: string) => void;
@@ -1175,6 +1233,7 @@ function ChapterView({
 										selectedRange={selectedThreadRange}
 										inlineAttachments={inlineAttachments}
 										onRangeSelect={onSelectThreadRange}
+										onRangeContextMenu={onRangeContextMenu}
 									/>
 								)}
 							</box>
@@ -1328,6 +1387,15 @@ const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
 		],
 	},
 	{
+		title: "Copying",
+		lines: [
+			"drag over code to select it · y copies the selection",
+			"right-click a line for copy text, copy path, copy link, comment",
+			"ctrl-y path:line · ctrl-g GitHub link, while a thread is open",
+			"links need a GitHub remote and a committed side",
+		],
+	},
+	{
 		title: "Views",
 		lines: [
 			"s show/hide the sidebar; its narrative stacks above the diff",
@@ -1427,6 +1495,48 @@ type ThreadDraft =
 	| { kind: "thread"; range: DiffLineRange }
 	| { kind: "reply"; threadId: string; range: DiffLineRange };
 
+type ContextMenuState = {
+	range: DiffLineRange;
+	position: { x: number; y: number };
+	selected: number;
+	/** Whatever was dragged over when the menu opened, so the entry survives the menu taking focus. */
+	selectedText: string | null;
+};
+
+/** The verbs a selected range answers to, shared by the pointer menu and the composer footer. */
+const buildRangeMenu = ({
+	selectedText,
+	linkBlocker,
+	copyText,
+	copyLocation,
+	copyLink,
+	comment,
+}: {
+	selectedText: string | null;
+	linkBlocker: string | null;
+	copyText: () => void;
+	copyLocation: () => void;
+	copyLink: () => void;
+	comment: () => void;
+}): MenuEntry[] => [
+	...(selectedText
+		? ([
+				{ kind: "item", label: "Copy selected text", hint: "y", action: copyText },
+				{ kind: "separator", id: "text" },
+			] as MenuEntry[])
+		: []),
+	{ kind: "item", label: "Copy path:line", hint: "Ctrl+Y", action: copyLocation },
+	{
+		kind: "item",
+		label: linkBlocker ? `Copy GitHub link (${linkBlocker})` : "Copy GitHub link",
+		hint: "Ctrl+G",
+		disabled: Boolean(linkBlocker),
+		action: copyLink,
+	},
+	{ kind: "separator", id: "copy" },
+	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
+];
+
 const defaultHumanAuthor: ThreadAuthor = {
 	kind: THREAD_AUTHOR_KIND.HUMAN,
 	name: "Reviewer",
@@ -1451,6 +1561,8 @@ export function App({
 	initialThreads = [],
 	threadActions,
 	humanAuthor = defaultHumanAuthor,
+	permalinks = null,
+	onCopy,
 	onViewStateChange,
 	onThemeChange,
 	onQuit,
@@ -1466,10 +1578,14 @@ export function App({
 	initialThreads?: ReviewThread[];
 	threadActions?: ThreadActions;
 	humanAuthor?: ThreadAuthor;
+	/** Where the reviewed lines live on GitHub; absent when no GitHub remote is configured. */
+	permalinks?: PermalinkContext | null;
+	onCopy?: (text: string) => boolean;
 	onViewStateChange?: (next: ViewState) => void;
 	onThemeChange?: (next: Theme) => void;
 	onQuit?: () => void;
 }) {
+	const renderer = useRenderer();
 	const [chosenTheme, setChosenTheme] = useState(initialTheme);
 	const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
@@ -1502,6 +1618,9 @@ export function App({
 	const [threadDraft, setThreadDraft] = useState<ThreadDraft | null>(null);
 	const [threadBody, setThreadBody] = useState("");
 	const [threadNotice, setThreadNotice] = useState<string | null>(null);
+	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+	// The nonce re-arms the timeout when the same text is copied twice running.
+	const [copyNotice, setCopyNotice] = useState<{ text: string; nonce: number } | null>(null);
 	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
 	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
@@ -1593,6 +1712,12 @@ export function App({
 	}, [diffAnchorTarget]);
 
 	useEffect(() => {
+		if (!copyNotice) return;
+		const clear = setTimeout(() => setCopyNotice(null), COPY_NOTICE_MS);
+		return () => clearTimeout(clear);
+	}, [copyNotice]);
+
+	useEffect(() => {
 		if (!threadDraft) return;
 		const revealThreadComposer = () => pageScroll.current?.scrollChildIntoView(THREAD_COMPOSER_ID);
 		revealThreadComposer();
@@ -1600,6 +1725,53 @@ export function App({
 		return () => clearTimeout(retry);
 	}, [threadDraft]);
 
+	function previousPathFor(filePath: string) {
+		return diffFiles?.find((candidate) => candidate.path === filePath)?.previousPath;
+	}
+	function copy({ text, notice }: { text: string; notice: string }) {
+		const copied = onCopy ? onCopy(text) : copyToClipboard(renderer, text);
+		setCopyNotice((current) => ({
+			text: copied ? notice : "Could not reach the clipboard",
+			nonce: (current?.nonce ?? 0) + 1,
+		}));
+	}
+	function copyLocation(range: DiffLineRange) {
+		const text = formatSourceLocation(sourceRangeFor(range, previousPathFor(range.filePath)));
+		copy({ text, notice: `Copied location: ${text}` });
+	}
+	function copyLink(range: DiffLineRange) {
+		const text = permalinkFor({
+			context: permalinks,
+			range,
+			previousPath: previousPathFor(range.filePath),
+		});
+		if (text) copy({ text, notice: `Copied link: ${text}` });
+	}
+	/** The text the reader dragged over, which OpenTUI tracks separately from the gutter's range. */
+	function highlightedText() {
+		return renderer.getSelection()?.getSelectedText() || null;
+	}
+	/** The lines that text runs across, so the pointer's verbs act on the drag rather than one row. */
+	function highlightedRange(anchor: DiffLineRange) {
+		const selected = renderer.getSelection()?.selectedRenderables ?? [];
+		return diffRangeWithin(
+			anchor,
+			selected.map((renderable) => renderable.id),
+		);
+	}
+	function copyText(text: string) {
+		const lines = text.split("\n").length;
+		copy({ text, notice: `Copied ${lines} selected ${lines === 1 ? "line" : "lines"}` });
+	}
+	function openRangeContextMenu(range: DiffLineRange, position: { x: number; y: number }) {
+		setCopyNotice(null);
+		setContextMenu({
+			range: highlightedRange(range) ?? range,
+			position,
+			selected: 0,
+			selectedText: highlightedText(),
+		});
+	}
 	function selectThreadRange(range: DiffLineRange) {
 		setThreadDraft({ kind: "thread", range });
 		setThreadBody("");
@@ -1969,6 +2141,18 @@ export function App({
 		themeLabel: chosenTheme.label,
 	});
 	const menu = useMenuController(menus);
+	const contextMenuEntries = contextMenu
+		? buildRangeMenu({
+				selectedText: contextMenu.selectedText,
+				linkBlocker: permalinkBlocker({ context: permalinks, side: contextMenu.range.side }),
+				copyText: () => {
+					if (contextMenu.selectedText) copyText(contextMenu.selectedText);
+				},
+				copyLocation: () => copyLocation(contextMenu.range),
+				copyLink: () => copyLink(contextMenu.range),
+				comment: () => selectThreadRange(contextMenu.range),
+			})
+		: [];
 	const threadComposer = threadDraft ? (
 		<ThreadComposer
 			key={threadDraft.kind === "thread" ? "new-thread" : threadDraft.threadId}
@@ -1976,10 +2160,14 @@ export function App({
 			range={threadDraft.range}
 			body={threadBody}
 			notice={threadNotice}
+			copyNotice={copyNotice?.text ?? null}
+			linkBlocker={permalinkBlocker({ context: permalinks, side: threadDraft.range.side })}
 			textareaRef={textareaRef}
 			onContentChange={() => setThreadBody(textareaRef.current?.editBuffer.getText() ?? "")}
 			onSave={saveThreadDraft}
 			onCancel={cancelThreadDraft}
+			onCopyLocation={() => copyLocation(threadDraft.range)}
+			onCopyLink={() => copyLink(threadDraft.range)}
 		/>
 	) : undefined;
 	const newThreadDraft: DiffInlineAttachment | undefined =
@@ -1995,9 +2183,32 @@ export function App({
 			? { threadId: threadDraft.threadId, content: threadComposer }
 			: undefined;
 
+	function moveContextMenu(delta: number) {
+		setContextMenu((current) =>
+			current
+				? { ...current, selected: nextMenuItemIndex(contextMenuEntries, current.selected, delta) }
+				: current,
+		);
+	}
+	function activateContextMenu(entry = contextMenuEntries[contextMenu?.selected ?? 0]) {
+		if (!selectable(entry)) return;
+		setContextMenu(null);
+		entry.action();
+	}
+
 	useKeyboard((key) => {
 		const name = key.name;
 		const paths = chapter ? chapterFilePaths(chapter) : [];
+
+		if (contextMenu) {
+			key.preventDefault();
+			key.stopPropagation();
+			if (name === "escape" || name === "q") setContextMenu(null);
+			else if (name === "up" || name === "k") moveContextMenu(-1);
+			else if (name === "down" || name === "j") moveContextMenu(1);
+			else if (name === "return") activateContextMenu();
+			return;
+		}
 
 		if (threadDraft) {
 			if (name === "escape") {
@@ -2054,6 +2265,7 @@ export function App({
 			return;
 		}
 		if (handleChapterChord(name)) return;
+		if (copyNotice) setCopyNotice(null);
 
 		if (name === "?") {
 			toggleShortcutHelp();
@@ -2061,6 +2273,9 @@ export function App({
 			toggleSidebar();
 		} else if (name === "t") {
 			openThemePicker();
+		} else if (name === "y") {
+			const text = highlightedText();
+			if (text) copyText(text);
 		} else if (name === "q" || name === "escape") {
 			onQuit?.();
 		} else if (name === "pageup" || name === "pagedown") {
@@ -2224,7 +2439,8 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										threadDraft?.kind === "thread" ? threadDraft.range : undefined
+										contextMenu?.range ??
+										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
 									}
 									threadDraft={newThreadDraft}
 									replyDraft={replyDraft}
@@ -2232,6 +2448,7 @@ export function App({
 									onToggleCollapse={toggleCollapsedFile}
 									onToggleFileReview={toggleFileReview}
 									onSelectThreadRange={selectThreadRange}
+									onRangeContextMenu={openRangeContextMenu}
 									onReplyThread={startThreadReply}
 									onDeleteThread={deleteInlineThread}
 									onDeleteThreadMessage={deleteInlineThreadMessage}
@@ -2266,6 +2483,22 @@ export function App({
 						/>
 					</>
 				) : null}
+				{contextMenu ? (
+					<>
+						<MenuBackdrop onClose={() => setContextMenu(null)} />
+						<ContextMenu
+							entries={contextMenuEntries}
+							selectedIndex={contextMenu.selected}
+							position={contextMenu.position}
+							terminalWidth={width}
+							terminalHeight={height}
+							onHover={(index) =>
+								setContextMenu((current) => (current ? { ...current, selected: index } : current))
+							}
+							onSelect={activateContextMenu}
+						/>
+					</>
+				) : null}
 				{showHelp ? (
 					<HelpModal
 						terminalWidth={width}
@@ -2288,6 +2521,11 @@ export function App({
 					</>
 				) : null}
 				{!threadDraft && threadNotice ? <text fg={theme.badgeRemoved}>{threadNotice}</text> : null}
+				{copyNotice && !threadDraft ? (
+					<text fg={theme.badgeAdded} wrapMode="none" truncate>
+						{copyNotice.text}
+					</text>
+				) : null}
 				<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
 					<text fg={theme.muted}>
 						{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
@@ -2295,7 +2533,7 @@ export function App({
 					<text fg={theme.muted}>
 						{viewMode === "semantic"
 							? "Semantic is read-only · anchors/ranges/threads Patch-only · F10 View to switch"
-							: "click/drag gutter thread · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"}
+							: "drag gutter thread · drag code + y copy · right-click menu · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"}
 					</text>
 				</box>
 			</box>
@@ -2315,6 +2553,7 @@ export async function runApp(
 		initialThreads?: ReviewThread[];
 		threadActions?: ThreadActions;
 		humanAuthor?: ThreadAuthor;
+		permalinks?: PermalinkContext | null;
 		/** Resolve the startup theme once the terminal has reported its own background. */
 		resolveInitialTheme?: (appearance: Appearance | null) => Theme;
 		/** The syntax theme highlights were already prepared for, before the terminal replied. */
@@ -2347,6 +2586,7 @@ export async function runApp(
 				initialThreads={options.initialThreads}
 				threadActions={options.threadActions}
 				humanAuthor={options.humanAuthor}
+				permalinks={options.permalinks}
 				onViewStateChange={options.onViewStateChange}
 				onThemeChange={options.onThemeChange}
 				onQuit={quit}

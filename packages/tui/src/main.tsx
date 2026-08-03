@@ -26,12 +26,14 @@ import { runDoctor } from "./doctor.ts";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill } from "./skill.ts";
+import { permalinkContextFor } from "./sourceLink.ts";
 import { formatSummary } from "./summary.ts";
 import {
 	createThread,
 	defaultThreadsPath,
 	loadValidatedThreads,
 	openThreadStore,
+	originRemoteUrl,
 	repositoryRootForRun,
 	resolveHumanAuthor,
 	ThreadStoreError,
@@ -563,7 +565,8 @@ async function cmdShow(args: string[]): Promise<number> {
 	const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme);
 	const store = await openFileStore(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
 	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
-	const humanAuthor = resolveHumanAuthor(repositoryRootForRun(directory));
+	const repositoryRoot = repositoryRootForRun(directory);
+	const humanAuthor = resolveHumanAuthor(repositoryRoot);
 	await runApp(run.chapters, {
 		diffFiles,
 		loadSemanticDiff: (width, palette) => generateSemanticDiff(run, width, palette),
@@ -575,6 +578,10 @@ async function cmdShow(args: string[]): Promise<number> {
 		initialThreads: threads,
 		threadActions: threadStore,
 		humanAuthor,
+		permalinks: permalinkContextFor({
+			scope: run.manifest.scope,
+			remoteUrl: originRemoteUrl(repositoryRoot),
+		}),
 		onViewStateChange: (next) => store.set(next),
 	});
 	return 0;

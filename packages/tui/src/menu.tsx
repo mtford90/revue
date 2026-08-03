@@ -52,10 +52,11 @@ const SIDEBAR_PREFERENCES: { preference: SidebarPreference; label: string }[] = 
 	{ preference: "hidden", label: "Sidebar: hidden" },
 ];
 
-const selectable = (entry: MenuEntry | undefined): entry is Extract<MenuEntry, { kind: "item" }> =>
-	entry?.kind === "item" && !entry.disabled;
+export const selectable = (
+	entry: MenuEntry | undefined,
+): entry is Extract<MenuEntry, { kind: "item" }> => entry?.kind === "item" && !entry.disabled;
 
-const nextMenuItemIndex = (entries: MenuEntry[], current: number, delta: number) => {
+export const nextMenuItemIndex = (entries: MenuEntry[], current: number, delta: number) => {
 	if (!entries.length) return 0;
 	for (let distance = 1; distance <= entries.length; distance += 1) {
 		const candidate = (current + distance * delta + entries.length) % entries.length;
@@ -341,31 +342,32 @@ const itemText = (
 	return `${prefix}${label}${hint ? ` ${hint}` : ""}`;
 };
 
-export const MenuDropdown = ({
-	activeMenuId,
+const MenuPanel = ({
 	entries,
 	selectedIndex,
-	terminalWidth,
+	keyPrefix,
+	top,
+	left,
+	width,
+	showHints,
 	onHover,
 	onSelect,
 }: {
-	activeMenuId: MenuId;
 	entries: MenuEntry[];
 	selectedIndex: number;
-	terminalWidth: number;
+	keyPrefix: string;
+	top: number;
+	left: number;
+	width: number;
+	showHints: boolean;
 	onHover: (index: number) => void;
 	onSelect: (entry: MenuEntry) => void;
 }) => {
 	const theme = useTheme();
-	const spec = menuSpecs.find((candidate) => candidate.id === activeMenuId) ?? menuSpecs[0];
-	if (!spec) return null;
-	const showHints = terminalWidth >= 60;
-	const width = Math.min(menuWidth(entries, showHints), Math.max(8, terminalWidth - 2));
-	const left = Math.max(1, Math.min(spec.left, terminalWidth - width - 1));
 	return (
 		<box
 			position="absolute"
-			top={1}
+			top={top}
 			left={left}
 			width={width}
 			height={entries.length + 2}
@@ -378,12 +380,12 @@ export const MenuDropdown = ({
 		>
 			{entries.map((entry, index) =>
 				entry.kind === "separator" ? (
-					<text key={`${activeMenuId}:separator:${entry.id}`} fg={theme.border}>
+					<text key={`${keyPrefix}:separator:${entry.id}`} fg={theme.border}>
 						{"─".repeat(Math.max(1, width - 2))}
 					</text>
 				) : (
 					<box
-						key={`${activeMenuId}:${entry.label}`}
+						key={`${keyPrefix}:${entry.label}`}
 						height={1}
 						width="100%"
 						backgroundColor={selectedIndex === index ? theme.panelAlt : theme.background}
@@ -402,6 +404,76 @@ export const MenuDropdown = ({
 				),
 			)}
 		</box>
+	);
+};
+
+export const MenuDropdown = ({
+	activeMenuId,
+	entries,
+	selectedIndex,
+	terminalWidth,
+	onHover,
+	onSelect,
+}: {
+	activeMenuId: MenuId;
+	entries: MenuEntry[];
+	selectedIndex: number;
+	terminalWidth: number;
+	onHover: (index: number) => void;
+	onSelect: (entry: MenuEntry) => void;
+}) => {
+	const spec = menuSpecs.find((candidate) => candidate.id === activeMenuId) ?? menuSpecs[0];
+	if (!spec) return null;
+	const showHints = terminalWidth >= 60;
+	const width = Math.min(menuWidth(entries, showHints), Math.max(8, terminalWidth - 2));
+	return (
+		<MenuPanel
+			entries={entries}
+			selectedIndex={selectedIndex}
+			keyPrefix={activeMenuId}
+			top={1}
+			left={Math.max(1, Math.min(spec.left, terminalWidth - width - 1))}
+			width={width}
+			showHints={showHints}
+			onHover={onHover}
+			onSelect={onSelect}
+		/>
+	);
+};
+
+/** The same entry list as a menu-bar dropdown, seated wherever the pointer opened it. */
+export const ContextMenu = ({
+	entries,
+	selectedIndex,
+	position,
+	terminalWidth,
+	terminalHeight,
+	onHover,
+	onSelect,
+}: {
+	entries: MenuEntry[];
+	selectedIndex: number;
+	position: { x: number; y: number };
+	terminalWidth: number;
+	terminalHeight: number;
+	onHover: (index: number) => void;
+	onSelect: (entry: MenuEntry) => void;
+}) => {
+	const showHints = terminalWidth >= 60;
+	const width = Math.min(menuWidth(entries, showHints), Math.max(8, terminalWidth - 2));
+	const height = entries.length + 2;
+	return (
+		<MenuPanel
+			entries={entries}
+			selectedIndex={selectedIndex}
+			keyPrefix="context"
+			top={Math.max(1, Math.min(position.y, terminalHeight - height))}
+			left={Math.max(0, Math.min(position.x, terminalWidth - width))}
+			width={width}
+			showHints={showHints}
+			onHover={onHover}
+			onSelect={onSelect}
+		/>
 	);
 };
 

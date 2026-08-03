@@ -85,6 +85,19 @@ const gitAuthorName = (repositoryRoot: string | null): string | null => {
 	}
 };
 
+export const originRemoteUrl = (repositoryRoot: string | null): string | null => {
+	if (!repositoryRoot) return null;
+	try {
+		const url = execFileSync("git", ["-C", repositoryRoot, "remote", "get-url", "origin"], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return url || null;
+	} catch {
+		return null;
+	}
+};
+
 export const resolveHumanAuthor = (repositoryRoot: string | null): ThreadAuthor => {
 	const candidates = [gitAuthorName(repositoryRoot), userInfo().username];
 	for (const name of candidates) {

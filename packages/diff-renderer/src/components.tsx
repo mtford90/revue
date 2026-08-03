@@ -3,6 +3,7 @@ import { createDiffFile } from "@revue/diff-model";
 import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
 import { decorationAnchorId, findFocusedDecorationAnchor } from "./decorations.ts";
+import { diffLineId } from "./lineIds.ts";
 import { buildDiffRows } from "./rows.ts";
 import { sanitizeTerminalLine } from "./terminalText.ts";
 import type {
@@ -18,6 +19,8 @@ import type {
 	RangeDecoration,
 } from "./types.ts";
 
+const RIGHT_MOUSE_BUTTON = 2;
+
 const lineNumber = (value: number | undefined, digits: number) =>
 	value === undefined ? " ".repeat(digits) : String(value).padStart(digits);
 
@@ -30,6 +33,21 @@ function CellContent({ cell, theme }: { cell: DiffCell; theme: Theme }) {
 					{span.text}
 				</span>
 			))}
+		</>
+	);
+}
+
+/** The change marker is chrome rather than code, so it stays out of anything the reader drags over. */
+function LineContent({ cell, lineId, theme }: { cell: DiffCell; lineId?: string; theme: Theme }) {
+	const sign = cell.kind === "addition" ? "+" : cell.kind === "deletion" ? "-" : " ";
+	return (
+		<>
+			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable={false}>
+				{sign}{" "}
+			</text>
+			<text id={lineId} fg={theme.text} wrapMode="none" flexShrink={0} selectable>
+				<CellContent cell={cell} theme={theme} />
+			</text>
 		</>
 	);
 }
@@ -88,6 +106,8 @@ function SplitCell({
 	width,
 	attachmentCount,
 	handlers,
+	lineId,
+	onContextMenu,
 	theme,
 }: {
 	cell: DiffCell;
@@ -97,11 +117,12 @@ function SplitCell({
 	width: number;
 	attachmentCount: number;
 	handlers?: GutterHandlers;
+	lineId?: string;
+	onContextMenu?: (event: OpenTUIMouseEvent) => void;
 	theme: Theme;
 }) {
 	const focused = cell.focusedSides.includes(side);
 	const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
-	const sign = cell.kind === "addition" ? "+" : cell.kind === "deletion" ? "-" : " ";
 	const backgroundColor = focused
 		? side === "additions"
 			? theme.addedContentBg
@@ -112,6 +133,7 @@ function SplitCell({
 				? theme.removedBg
 				: theme.contextBg;
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: a right click anywhere on the line acts on that line.
 		<box
 			width={width}
 			flexShrink={0}
@@ -119,6 +141,7 @@ function SplitCell({
 			overflow="hidden"
 			backgroundColor={backgroundColor}
 			flexDirection="row"
+			onMouseDown={onContextMenu}
 		>
 			<Gutter
 				focused={focused}
@@ -129,9 +152,7 @@ function SplitCell({
 				handlers={number === undefined ? undefined : handlers}
 				theme={theme}
 			/>
-			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable>
-				{sign} <CellContent cell={cell} theme={theme} />
-			</text>
+			<LineContent cell={cell} lineId={lineId} theme={theme} />
 		</box>
 	);
 }
@@ -143,6 +164,8 @@ function StackCell({
 	sides,
 	attachmentCounts,
 	interactions,
+	lineId,
+	onContextMenu,
 	theme,
 }: {
 	cell: DiffCell;
@@ -151,11 +174,12 @@ function StackCell({
 	sides: DiffSide[];
 	attachmentCounts: AttachmentCounts;
 	interactions: CellInteractions;
+	lineId?: string;
+	onContextMenu?: (event: OpenTUIMouseEvent) => void;
 	theme: Theme;
 }) {
 	const oldFocused = cell.focusedSides.includes("deletions");
 	const newFocused = cell.focusedSides.includes("additions");
-	const sign = cell.kind === "addition" ? "+" : cell.kind === "deletion" ? "-" : " ";
 	const backgroundColor = oldFocused
 		? theme.removedContentBg
 		: newFocused
@@ -166,12 +190,14 @@ function StackCell({
 					? theme.removedBg
 					: theme.contextBg;
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: a right click anywhere on the line acts on that line.
 		<box
 			width="100%"
 			height={1}
 			overflow="hidden"
 			backgroundColor={backgroundColor}
 			flexDirection="row"
+			onMouseDown={onContextMenu}
 		>
 			{sides.includes("deletions") ? (
 				<Gutter
@@ -195,9 +221,7 @@ function StackCell({
 					theme={theme}
 				/>
 			) : null}
-			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable>
-				{sign} <CellContent cell={cell} theme={theme} />
-			</text>
+			<LineContent cell={cell} lineId={lineId} theme={theme} />
 		</box>
 	);
 }
@@ -216,6 +240,7 @@ export interface DiffBodyProps {
 	selectedRange?: DiffLineRange;
 	inlineAttachments?: readonly DiffInlineAttachment[];
 	onRangeSelect?: (range: DiffLineRange) => void;
+	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
 }
 
 function rowHasAnchor(row: DiffRow, anchor: DecorationAnchor): boolean {
@@ -253,6 +278,7 @@ export function DiffBody({
 	selectedRange,
 	inlineAttachments = [],
 	onRangeSelect,
+	onRangeContextMenu,
 }: DiffBodyProps) {
 	const normalized = useMemo(() => (file ? createDiffFile(file) : undefined), [file]);
 	const activeStart = useRef<DiffLineRange | null>(null);
@@ -323,6 +349,12 @@ export function DiffBody({
 			endLine: number,
 		};
 	};
+	const lineId = (range: DiffLineRange | null) => (range ? diffLineId(range) : undefined);
+	/** A stacked row shows one line, so a click away from the gutters means the side that line lives on. */
+	const stackRange = (row: Extract<DiffRow, { type: "stack-line" }>): DiffLineRange | null =>
+		row.cell.kind === "deletion"
+			? lineRange(row, "deletions")
+			: (lineRange(row, "additions") ?? lineRange(row, "deletions"));
 	const updateRange = (target: DiffLineRange): DiffLineRange | null => {
 		const start = activeStart.current;
 		if (
@@ -350,10 +382,35 @@ export function DiffBody({
 		setDragRange(null);
 		if (completed) onRangeSelect?.(completed);
 	};
+	/** A right click inside the highlighted selection acts on all of it, not the one line under it. */
+	const contextRange = (target: DiffLineRange): DiffLineRange =>
+		displayedRange &&
+		displayedRange.filePath === target.filePath &&
+		displayedRange.side === target.side &&
+		displayedRange.startLine <= target.startLine &&
+		target.endLine <= displayedRange.endLine
+			? displayedRange
+			: target;
+	const openContextMenu = (target: DiffLineRange, event: OpenTUIMouseEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		onRangeContextMenu?.(contextRange(target), { x: event.x, y: event.y });
+	};
+	/** Backs the gutter's own handler so the whole line answers to a right click, not just its number. */
+	const contextHandler = (target: DiffLineRange | null) =>
+		target && onRangeContextMenu
+			? (event: OpenTUIMouseEvent) => {
+					if (event.button === RIGHT_MOUSE_BUTTON) openContextMenu(target, event);
+				}
+			: undefined;
 	const gutterHandlers = (target: DiffLineRange | null): GutterHandlers | undefined =>
-		target && onRangeSelect
+		target && (onRangeSelect || onRangeContextMenu)
 			? {
 					onMouseDown: (event) => {
+						if (event.button === RIGHT_MOUSE_BUTTON) {
+							openContextMenu(target, event);
+							return;
+						}
 						if (event.button !== 0) return;
 						event.preventDefault();
 						event.stopPropagation();
@@ -457,6 +514,8 @@ export function DiffBody({
 									width={oldPaneWidth}
 									attachmentCount={counts.deletions ?? 0}
 									handlers={gutterHandlers(lineRange(row, "deletions"))}
+									lineId={lineId(lineRange(row, "deletions"))}
+									onContextMenu={contextHandler(lineRange(row, "deletions"))}
 									theme={theme}
 								/>
 								<text fg={theme.border}>│</text>
@@ -468,6 +527,8 @@ export function DiffBody({
 									width={newPaneWidth}
 									attachmentCount={counts.additions ?? 0}
 									handlers={gutterHandlers(lineRange(row, "additions"))}
+									lineId={lineId(lineRange(row, "additions"))}
+									onContextMenu={contextHandler(lineRange(row, "additions"))}
 									theme={theme}
 								/>
 							</box>
@@ -497,6 +558,8 @@ export function DiffBody({
 									deletions: gutterHandlers(lineRange(row, "deletions")),
 									additions: gutterHandlers(lineRange(row, "additions")),
 								}}
+								lineId={lineId(stackRange(row))}
+								onContextMenu={contextHandler(stackRange(row))}
 								theme={theme}
 							/>
 						</box>

@@ -9,10 +9,14 @@ const lacksPtyTools = !Bun.which("bash") || !Bun.which("script");
 
 const scriptCommand = () => {
 	const revue = "bun run revue show examples/sample-run";
+	// q is re-sent every second because a keypress delivered before the TUI enables raw
+	// mode is flushed with the cooked-mode buffer; one early q would never arrive and the
+	// app would wait for input forever. The loop dies on SIGPIPE once script exits.
+	const keys = "for _ in $(seq 1 25); do sleep 1; printf q; done";
 	if (process.platform === "linux") {
-		return `(sleep 1; printf q) | script -q -c '${revue}' "$TRANSCRIPT" >/dev/null`;
+		return `(${keys}) | script -q -c '${revue}' "$TRANSCRIPT" >/dev/null`;
 	}
-	return `(sleep 1; printf q) | script -q "$TRANSCRIPT" ${revue} >/dev/null`;
+	return `(${keys}) | script -q "$TRANSCRIPT" ${revue} >/dev/null`;
 };
 
 test.skipIf(process.platform === "win32" || lacksPtyTools)(

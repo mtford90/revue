@@ -24,11 +24,17 @@ fi
 
 transcript="$(mktemp -d)/typescript"
 export TERM=xterm-256color
+# q is re-sent every second: a keypress that lands before the TUI enables raw mode is
+# flushed with the cooked-mode buffer, so a single early q would hang the session on
+# runners with slow TUI startup. The loop dies on SIGPIPE once script exits.
+send_quit() { for _ in $(seq 1 25); do sleep 1; printf q; done; }
+set +o pipefail
 if [ "$(uname)" = "Linux" ]; then
-	(sleep 2; printf q) | script -q -e -c "$BIN show examples/sample-run" "$transcript" >/dev/null
+	send_quit | script -q -e -c "$BIN show examples/sample-run" "$transcript" >/dev/null
 else
-	(sleep 2; printf q) | script -q "$transcript" "$BIN" show examples/sample-run >/dev/null
+	send_quit | script -q "$transcript" "$BIN" show examples/sample-run >/dev/null
 fi
+set -o pipefail
 
 # The TUI must have entered and cleanly left the alternate screen (mode 1049).
 enable=$'\033[?1049h'

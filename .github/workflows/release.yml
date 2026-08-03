@@ -31,7 +31,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
-      - run: bun test
+      # The Intel macOS runner starts processes several times slower than the other
+      # platforms; spawn-heavy CLI tests need more than bun's five-second default.
+      - run: bun test --timeout 30000
       - name: Stamp the CLI version from the tag
         run: |
           version="${GITHUB_REF_NAME#v}"

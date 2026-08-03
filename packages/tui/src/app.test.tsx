@@ -439,11 +439,17 @@ test("s hides and restores the sidebar, giving its columns to the diff", async (
 	await nextChapter(t);
 	expect(t.captureCharFrame()).toContain("Chapters (3)");
 
+	// Wide enough for the panel, so navigation stays inside it and no strip appears.
+	const shown = t.captureCharFrame().split("\n");
+	expect(shown[1]).not.toContain("Prev");
+	expect(shown.some((line) => line.includes("◀ Prev") && line.includes("│"))).toBe(true);
+
 	await press(t, "s");
 	const hidden = t.captureCharFrame();
 	expect(hidden).not.toContain("Chapters (3)");
 	expect(hidden).toContain("MAX_RETRIES"); // the diff took the freed columns
 	expect(hidden).toContain("Add a reusable backoff helper"); // the narrative stacked above it
+	expect(hidden.split("\n")[1]).toContain("◀ Prev"); // the strip stands in for the panel's row
 
 	await press(t, "s");
 	expect(t.captureCharFrame()).toContain("Chapters (3)");

@@ -58,6 +58,7 @@ import {
 } from "./viewState.ts";
 
 const PANEL_INDEX_MAX_ROWS = 8;
+const COMPACT_NAV_WIDTH = 34;
 const COMPACT_STRIP_WIDTH = 60;
 const APP_KEYS = new Set([
 	"f10",
@@ -218,7 +219,7 @@ function NavButton({
 	);
 }
 
-/** Where the reviewer is, and how to leave. Present whether or not the panel is. */
+/** Stands in for the panel's own navigation row on terminals too narrow for it. */
 function PageNavStrip({
 	page,
 	pages,
@@ -336,6 +337,7 @@ function ChapterPanel({
 	selectedFile,
 	selectedKeyChange,
 	stats,
+	reviewed,
 	onNavigatePage,
 	onToggleIndex,
 	onResizeStart,
@@ -343,6 +345,7 @@ function ChapterPanel({
 	onFocusKeyChange,
 	indexScrollRef,
 	scrollRef,
+	onToggleChapterReview,
 	onToggleFileReview,
 	onToggleKeyChange,
 }: {
@@ -356,6 +359,7 @@ function ChapterPanel({
 	selectedFile: number;
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
+	reviewed: number;
 	onNavigatePage: (index: number) => void;
 	onToggleIndex: () => void;
 	onResizeStart: (event: OpenTUIMouseEvent) => void;
@@ -363,10 +367,13 @@ function ChapterPanel({
 	onFocusKeyChange: (index: number) => void;
 	indexScrollRef: RefObject<ScrollBoxRenderable | null>;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
+	onToggleChapterReview: () => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
 }) {
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
+	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
+	const compact = width < COMPACT_NAV_WIDTH;
 	const rule = "─".repeat(Math.max(1, width - 1));
 
 	return (
@@ -380,6 +387,15 @@ function ChapterPanel({
 				if (event.x === width - 1) onResizeStart(event);
 			}}
 		>
+			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
+				<text flexShrink={0} fg={theme.accent}>
+					revue
+				</text>
+				<box flexGrow={1} minWidth={0} />
+				<text flexShrink={0} fg={theme.dim}>
+					{reviewed}/{chapterCount} reviewed
+				</text>
+			</box>
 			<box
 				flexDirection="row"
 				height={1}
@@ -388,9 +404,6 @@ function ChapterPanel({
 				paddingRight={1}
 				onMouseDown={onToggleIndex}
 			>
-				<text flexShrink={0} fg={theme.accent}>
-					revue{"  "}
-				</text>
 				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.mauve}>
 					{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
 				</text>
@@ -407,6 +420,32 @@ function ChapterPanel({
 			<text flexShrink={0} fg={theme.surface}>
 				{rule}
 			</text>
+			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
+				<NavButton
+					label={compact ? "◀" : "◀ Prev"}
+					enabled={current > 0}
+					onPress={() => onNavigatePage(current - 1)}
+				/>
+				<box flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center">
+					{chapter ? (
+						<text
+							flexShrink={0}
+							fg={chapterReviewed ? theme.green : theme.dim}
+							onMouseDown={onToggleChapterReview}
+						>
+							[{chapterReviewed ? "x" : " "}]{" "}
+						</text>
+					) : null}
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.text}>
+						{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
+					</text>
+				</box>
+				<NavButton
+					label={compact ? "▶" : "Next ▶"}
+					enabled={current < pages.length - 1}
+					onPress={() => onNavigatePage(current + 1)}
+				/>
+			</box>
 			{chapter ? (
 				<scrollbox
 					ref={scrollRef}
@@ -1980,17 +2019,19 @@ export function App({
 				}}
 				onClose={menu.close}
 			/>
-			<PageNavStrip
-				page={page}
-				pages={pages}
-				current={current}
-				chapterCount={chapters.length}
-				reviewed={reviewed}
-				width={width}
-				vs={vs}
-				onNavigatePage={goto}
-				onToggleChapterReview={toggleChapterReview}
-			/>
+			{showChapterPanel ? null : (
+				<PageNavStrip
+					page={page}
+					pages={pages}
+					current={current}
+					chapterCount={chapters.length}
+					reviewed={reviewed}
+					width={width}
+					vs={vs}
+					onNavigatePage={goto}
+					onToggleChapterReview={toggleChapterReview}
+				/>
+			)}
 			<box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
 				{showChapterPanel ? (
 					<ChapterPanel
@@ -2004,6 +2045,7 @@ export function App({
 						selectedFile={selectedFile}
 						selectedKeyChange={selectedKeyChange}
 						stats={stats}
+						reviewed={reviewed}
 						onNavigatePage={goto}
 						onToggleIndex={() => setIndexExpanded((expanded) => !expanded)}
 						onResizeStart={startPanelResize}
@@ -2011,6 +2053,7 @@ export function App({
 						onFocusKeyChange={focusKeyChange}
 						indexScrollRef={indexScroll}
 						scrollRef={panelScroll}
+						onToggleChapterReview={toggleChapterReview}
 						onToggleFileReview={toggleFileReview}
 						onToggleKeyChange={toggleSelectedKeyChange}
 					/>

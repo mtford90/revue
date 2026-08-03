@@ -168,9 +168,9 @@ so dragging the divider never makes it disappear under the pointer. Asking for `
 preference is never overridden. Neither preference is written to view state.
 
 Losing the sidebar never costs the chapter. The narrative it holds—title, summary, key changes and
-file list—stacks above the diff in a single column instead, the way the prologue already renders.
-Page navigation and review progress live in a strip under the menu bar that is present at every
-width, so the panel is a layout choice rather than the only way to move through a review.
+file list—stacks above the diff in a single column instead, the way the prologue already renders,
+and the panel's navigation row is replaced by a strip under the menu bar. Terminals wide enough for
+the panel are unaffected: they keep the two-column layout exactly as before.
 
 Patch is the default view. The View menu can lazily generate a read-only Semantic diff when a compatible
 [`difft`](https://difftastic.wilfred.me.uk/) executable is available; it compares only the verified

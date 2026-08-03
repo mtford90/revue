@@ -18,3 +18,31 @@ bun run typecheck
 bun run lint
 bun test
 ```
+
+## Running the reviewer
+
+```bash
+bun run revue show examples/sample-run
+```
+
+`examples/sample-run` is committed and always works. Prefer a larger run for anything touching
+layout or navigation — a seven-chapter run of a real pull request may exist locally at
+`~/Playground/carewell/stage-demo-pr135/revue-run`. Most rendering faults only surface with long
+paths, wide diffs, and enough chapters to scroll the sidebar.
+
+## Seeing the TUI
+
+A tool call cannot eyeball an OpenTUI shell. Drive it under tmux at a fixed size and capture the
+pane instead. Vary the size: 160x45 and 100x36 expose different layout faults.
+
+```bash
+tmux new-session -d -s revue -x 160 -y 45 "bun run revue show examples/sample-run"
+sleep 4
+tmux send-keys -t revue "]"; sleep 0.5; tmux send-keys -t revue "c"   # into chapter one
+tmux capture-pane -t revue -p        # -e keeps the colour escapes
+tmux kill-session -t revue
+```
+
+Capture with `-e` whenever the change is a colour or a background. A plain capture cannot tell a
+disabled control from an enabled one, and both `bun test` and a plain pane read as passing while
+the shell is unreadable.

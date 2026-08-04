@@ -1338,6 +1338,52 @@ async function rightClick(t: Awaited<ReturnType<typeof testRender>>, x: number, 
 	});
 }
 
+test("y flashes a Visual-mode text selection before clearing it", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes("export function backoff"));
+	const x = lines[y]?.indexOf("export") ?? -1;
+	await act(async () => t.mockMouse.drag(x, y, x + 23, y));
+	await t.renderOnce();
+	const activeBackground = t
+		.captureSpans()
+		.lines[y]?.spans.find((span) => span.text.includes("export function backoff"))
+		?.bg.toString();
+
+	await press(t, "y");
+	const flashedLine = t.captureCharFrame().split("\n");
+	const flashedY = flashedLine.findIndex((line) => line.includes("export function backoff"));
+	const flashedBackground = t
+		.captureSpans()
+		.lines[flashedY]?.spans.find((span) => span.text.includes("export function backoff"))
+		?.bg.toString();
+
+	expect(copied).toEqual(["export function backoff"]);
+	expect(t.renderer.getSelection()).not.toBeNull();
+	expect(flashedBackground).toBeDefined();
+	expect(flashedBackground).not.toBe(activeBackground);
+
+	await act(async () => {
+		await Bun.sleep(200);
+		await t.renderOnce();
+	});
+	expect(t.renderer.getSelection()).toBeNull();
+});
+
 test("right-clicking the gutter offers the range's verbs without opening a composer", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const copied: string[] = [];

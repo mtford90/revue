@@ -1,10 +1,12 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI pointer handlers use text renderables.
 import {
+	type CliRenderer,
 	createCliRenderer,
 	createTextAttributes,
 	type MouseEvent as OpenTUIMouseEvent,
 	type ScrollBoxRenderable,
 	type TextareaRenderable,
+	TextRenderable,
 } from "@opentui/core";
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
@@ -1283,6 +1285,52 @@ function InlineThread({
 
 const THREAD_COMPOSER_ID = "inline-thread-composer";
 const COPY_NOTICE_MS = 2_500;
+const SELECTION_FLASH_MS = 150;
+
+const flashTextSelection = ({
+	renderer,
+	theme,
+	onFinish,
+}: {
+	renderer: CliRenderer;
+	theme: Theme;
+	onFinish: () => void;
+}): (() => void) | null => {
+	const selection = renderer.getSelection();
+	if (!selection) return null;
+	const renderables = selection.selectedRenderables.filter(
+		(renderable): renderable is TextRenderable => renderable instanceof TextRenderable,
+	);
+	const previous = renderables.map((renderable) => ({
+		renderable,
+		background: renderable.selectionBg,
+		foreground: renderable.selectionFg,
+	}));
+	for (const { renderable } of previous) {
+		renderable.selectionBg = theme.badgeAdded;
+		renderable.selectionFg = theme.panelAlt;
+	}
+	let active = true;
+	const finish = () => {
+		if (!active) return;
+		active = false;
+		renderer.clearSelection();
+		for (const { renderable, background, foreground } of previous) {
+			if (!renderable.isDestroyed) {
+				renderable.selectionBg = background;
+				renderable.selectionFg = foreground;
+			}
+		}
+		onFinish();
+	};
+	const timeout = setTimeout(finish, SELECTION_FLASH_MS);
+	return () => {
+		if (!active) return;
+		active = false;
+		clearTimeout(timeout);
+		onFinish();
+	};
+};
 
 function ThreadComposer({
 	title,
@@ -2279,6 +2327,7 @@ export function App({
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 	// The nonce re-arms the timeout when the same text is copied twice running.
 	const [copyNotice, setCopyNotice] = useState<{ text: string; nonce: number } | null>(null);
+	const selectionFlashCleanup = useRef<(() => void) | null>(null);
 	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
 	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
@@ -2653,6 +2702,8 @@ export function App({
 		return () => clearTimeout(clear);
 	}, [copyNotice]);
 
+	useEffect(() => () => selectionFlashCleanup.current?.(), []);
+
 	useEffect(() => {
 		if (!threadDraft) return;
 		const anchor =
@@ -2687,12 +2738,13 @@ export function App({
 	function previousPathFor(filePath: string) {
 		return diffFiles?.find((candidate) => candidate.path === filePath)?.previousPath;
 	}
-	function copy({ text, notice }: { text: string; notice: string }) {
+	function copy({ text, notice }: { text: string; notice: string }): boolean {
 		const copied = onCopy ? onCopy(text) : copyToClipboard(renderer, text);
 		setCopyNotice((current) => ({
 			text: copied ? notice : "Could not reach the clipboard",
 			nonce: (current?.nonce ?? 0) + 1,
 		}));
+		return copied;
 	}
 	function copyLocation(range: DiffLineRange) {
 		const text = formatSourceLocation(sourceRangeFor(range, previousPathFor(range.filePath)));
@@ -2720,7 +2772,18 @@ export function App({
 	}
 	function copyText(text: string) {
 		const lines = text.split("\n").length;
-		copy({ text, notice: `Copied ${lines} selected ${lines === 1 ? "line" : "lines"}` });
+		const copied = copy({
+			text,
+			notice: `Copied ${lines} selected ${lines === 1 ? "line" : "lines"}`,
+		});
+		if (!copied || !renderer.hasSelection || selectionFlashCleanup.current) return;
+		selectionFlashCleanup.current = flashTextSelection({
+			renderer,
+			theme,
+			onFinish: () => {
+				selectionFlashCleanup.current = null;
+			},
+		});
 	}
 	function openRangeContextMenu(range: DiffLineRange, position: { x: number; y: number }) {
 		setCopyNotice(null);

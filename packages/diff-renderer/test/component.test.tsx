@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { resolveTheme } from "@revue/theme";
 import { act } from "react";
-import { DiffBody, DiffFileHeader, parsePatch } from "../src/index.ts";
+import { DiffBody, DiffFileHeader, parsePatch, prepareSyntaxHighlighting } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -281,6 +281,39 @@ test("dragging source text remains terminal text selection instead of range sele
 
 	expect(selections).toEqual([]);
 	expect(t.renderer.getSelection()?.getSelectedText()).toContain("new");
+});
+
+test("syntax-highlighted text uses one solid Visual-mode selection", async () => {
+	const [file] = parsePatch(`diff --git a/visual.ts b/visual.ts
+--- a/visual.ts
++++ b/visual.ts
+@@ -1 +1 @@
+-const oldValue = 1;
++const newValue = 2;
+`);
+	if (!file) throw new Error("missing fixture");
+	await prepareSyntaxHighlighting([file], theme.syntaxTheme);
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={60} />, {
+		width: 60,
+		height: 8,
+	});
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes("const newValue"));
+	const x = lines[y]?.indexOf("const") ?? -1;
+	await act(async () => t.mockMouse.drag(x, y, x + 15, y));
+	await t.renderOnce();
+
+	const selectedText = t.renderer.getSelection()?.getSelectedText() ?? "";
+	const spans = t.captureSpans().lines[y]?.spans ?? [];
+	const characters = spans.flatMap((span) =>
+		[...span.text].map(() => ({ bg: span.bg.toString(), fg: span.fg.toString() })),
+	);
+	const selected = characters.slice(x, x + selectedText.length);
+
+	expect(selectedText).toBe("const newValue ");
+	expect(new Set(selected.map(({ bg }) => bg)).size).toBe(1);
+	expect(new Set(selected.map(({ fg }) => fg)).size).toBe(1);
 });
 
 test("multiple inline attachments share an anchor and expose its gutter count", async () => {

@@ -52,7 +52,15 @@ function LineContent({ cell, lineId, theme }: { cell: DiffCell; lineId?: string;
 			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable={false}>
 				{sign}{" "}
 			</text>
-			<text id={lineId} fg={theme.text} wrapMode="none" flexShrink={0} selectable>
+			<text
+				id={lineId}
+				fg={theme.text}
+				selectionBg={theme.badgeModified}
+				selectionFg={theme.panelAlt}
+				wrapMode="none"
+				flexShrink={0}
+				selectable
+			>
 				<CellContent cell={cell} theme={theme} />
 			</text>
 		</>

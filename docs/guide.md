@@ -127,10 +127,12 @@ whole selection rather than the one line under the pointer, whether that selecti
 drag or from dragging across the code. While a composer is open the same two copies are on `Ctrl+Y`
 and `Ctrl+G` and in its footer, and neither disturbs the draft.
 
-Dragging across source code highlights the text itself, which `y` copies verbatim and the pointer
-menu offers as its first entry while a highlight exists. Change markers are chrome rather than code,
-so no `+` or `-` is ever caught in a drag. Because mouse reporting is on, this is Revue's own
-selection rather than the terminal's; reach the terminal's with whichever modifier it uses (usually
+Dragging across source code highlights the text itself in one theme-matched Visual-mode colour,
+which `y` copies verbatim and the pointer menu offers as its first entry while a highlight exists. A
+successful yank flashes in the theme's success colour, then clears the selection as Vim leaves Visual
+mode. Change markers are chrome rather than code, so no `+` or `-` is ever caught in a drag. Because
+mouse reporting is on, this is Revue's own selection rather than the terminal's; reach the terminal's
+with whichever modifier it uses (usually
 <kbd>Option</kbd> or <kbd>Shift</kbd>). Opening the pointer menu redraws the lines under it and so
 drops the highlight, but the menu keeps both the text and the lines it covered.
 

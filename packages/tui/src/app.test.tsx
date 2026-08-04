@@ -187,6 +187,30 @@ test("the menu bar's Story and Files buttons switch surfaces with the pointer", 
 	expect(t.captureCharFrame()).toContain("Chapters (3)");
 });
 
+test("the surface tabs abbreviate to initials when full labels no longer fit", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 50, height: 44 });
+	await t.renderOnce();
+	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+	expect(bar).not.toContain("Story");
+	expect(bar.trimEnd()).toMatch(/ S {2}F {2}C$/);
+
+	await click(t, bar.lastIndexOf(" F ") + 1, 0);
+	expect(t.captureCharFrame()).toContain("Files (3)");
+});
+
+test("the surface tabs centre on the terminal, not the space left by the menus", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const width = 130;
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width, height: 44 });
+	await t.renderOnce();
+	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+
+	const tabsStart = bar.indexOf("Story") - 1;
+	const tabsEnd = bar.indexOf("Comments") + "Comments".length + 1;
+	expect(Math.abs((tabsStart + tabsEnd) / 2 - width / 2)).toBeLessThanOrEqual(1);
+});
+
 async function settle(t: Awaited<ReturnType<typeof testRender>>) {
 	await act(async () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1313,6 +1337,15 @@ test("o opens the Comments surface and Enter jumps back into the owning chapter"
 			},
 		],
 	};
+	const narrow = await testRender(
+		<App file={threadFile} diffFiles={[diffFile]} initialThreads={[openThread, resolvedThread]} />,
+		{ width: 58, height: 30 },
+	);
+	await narrow.renderOnce();
+	const narrowBar = narrow.captureCharFrame().split("\n")[0] ?? "";
+	expect(narrowBar).toContain("Comments"); // too tight for the count, so it sheds the suffix
+	expect(narrowBar).not.toContain("·");
+
 	const t = await testRender(
 		<App file={threadFile} diffFiles={[diffFile]} initialThreads={[openThread, resolvedThread]} />,
 		{ width: 100, height: 30, kittyKeyboard: true },

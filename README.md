@@ -7,8 +7,6 @@ tour of the change rather than a wall of files. Your agent writes the narrative;
 in the TUI, leave comments on exact lines as you go, and hand them straight back to the agent
 to address. Everything happens on your machine.
 
-> **Status: early scaffold**, but the full loop below works today.
-
 ## Install
 
 ```bash
@@ -33,30 +31,28 @@ revue doctor                 # check the skill and dependencies
 
 ## Review anything, narrated
 
+You don't drive the pipeline yourself — your agent does. Ask it for a review:
+
+> *"review my branch against main with revue"*
+> *"give me a revue tour of PR 123"*
+> *"revue what I've got staged"*
+
+The skill freezes the scope into an immutable run, writes the chapters, and hands you back one
+command to open the reviewer:
+
 ```bash
-RUN=$(revue prep)   # freeze the diff into an immutable run
-                    # → ask your agent to run the revue skill on "$RUN"
-revue show "$RUN"   # take the tour
+revue show <run-directory>
 ```
 
-Any diff can be narrated:
-
-| Scenario | Command |
-| --- | --- |
-| Whatever you're working on | `revue prep` — local changes if any, else the branch against its base |
-| This branch against main | `revue prep main` |
-| A GitHub PR — including someone else's | `revue prep --pr 123` · `revue prep --pr <github-pr-url>` |
-| Staged + unstaged vs the last commit | `revue prep --ref work` |
-| Staged only vs the last commit | `revue prep --ref staged` |
-| Unstaged only (worktree vs index) | `revue prep --ref unstaged` |
-
-From a checkout, tour the bundled sample without touching a repository:
+Anything Git can diff can be narrated — a branch, someone's GitHub PR, staged, unstaged, or the
+working tree. From a checkout, tour the bundled sample without touching a repository:
 `bun run revue show examples/sample-run`.
 
 ## Just the diff
 
-No agent handy? `revue diff` takes the same scopes and opens immediately as a flat,
-file-by-file diff — same reviewer, no narration.
+No agent handy? `revue diff` opens the same scopes immediately as a flat, file-by-file diff —
+`revue diff main`, `revue diff --pr 123`, `revue diff --ref staged`. No narration, but the rest
+of the reviewer comes with it: inline comment threads, review progress, copying, themes.
 
 ## While you review
 

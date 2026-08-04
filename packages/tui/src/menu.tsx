@@ -329,7 +329,14 @@ const SURFACES: { id: ReviewSurface; label: string }[] = [
 	{ id: "files", label: "Files" },
 	{ id: "comments", label: "Comments" },
 ];
-const SURFACE_BAR_WIDTH = SURFACES.reduce((total, { label }) => total + label.length + 2, 0);
+
+/** The Comments tab wears its open-thread count so triage state reads from anywhere. */
+const surfaceTabs = (openThreads: number): { id: ReviewSurface; label: string }[] =>
+	SURFACES.map(({ id, label }) =>
+		id === "comments" && openThreads > 0
+			? { id, label: `${label} · ${openThreads}` }
+			: { id, label },
+	);
 
 const MENU_BAR_WIDTH = menuSpecs.reduce((total, spec) => total + spec.width, 0);
 
@@ -338,6 +345,7 @@ export const MenuBar = ({
 	terminalWidth,
 	surface,
 	canSwitchSurface,
+	openThreads,
 	onSelectSurface,
 	onHover,
 	onToggle,
@@ -347,14 +355,17 @@ export const MenuBar = ({
 	terminalWidth: number;
 	surface: ReviewSurface;
 	canSwitchSurface: boolean;
+	openThreads: number;
 	onSelectSurface: (surface: ReviewSurface) => void;
 	onHover: (id: MenuId) => void;
 	onToggle: (id: MenuId) => void;
 	onClose: () => void;
 }) => {
 	const theme = useTheme();
+	const tabs = surfaceTabs(openThreads);
+	const surfaceBarWidth = tabs.reduce((total, { label }) => total + label.length + 2, 0);
 	const showSurfaces =
-		canSwitchSurface && terminalWidth - 2 - MENU_BAR_WIDTH >= SURFACE_BAR_WIDTH + 2;
+		canSwitchSurface && terminalWidth - 2 - MENU_BAR_WIDTH >= surfaceBarWidth + 2;
 	return (
 		<box
 			height={1}
@@ -392,7 +403,7 @@ export const MenuBar = ({
 			})}
 			<box flexGrow={1} minWidth={0} height={1} flexDirection="row" justifyContent="center">
 				{showSurfaces
-					? SURFACES.map(({ id, label }) => {
+					? tabs.map(({ id, label }) => {
 							const active = surface === id;
 							return (
 								<box

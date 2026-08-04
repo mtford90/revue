@@ -3750,6 +3750,7 @@ export function App({
 		{ total: 0, reviewed: 0 },
 	);
 	const filesSurface = page?.kind === "files";
+	const openThreadCount = threads.filter((thread) => thread.status === THREAD_STATUS.OPEN).length;
 	const statusContext =
 		page?.kind === "chapter"
 			? `Ch ${page.chapter.order}/${chapters.length} · ${page.chapter.title}`
@@ -3780,6 +3781,7 @@ export function App({
 						page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story"
 					}
 					canSwitchSurface={Boolean(file)}
+					openThreads={openThreadCount}
 					onSelectSurface={selectSurface}
 					onHover={(id) => {
 						if (menu.activeMenuId) menu.open(id);
@@ -4028,7 +4030,7 @@ export function App({
 					context={statusContext}
 					reviewedFiles={filesSurface ? reviewedFiles : storyProgress.reviewed}
 					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
-					openThreads={threads.filter((t) => t.status === THREAD_STATUS.OPEN).length}
+					openThreads={openThreadCount}
 					viewMode={viewMode}
 					notice={statusNotice}
 					terminalWidth={width}

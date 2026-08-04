@@ -1318,6 +1318,7 @@ test("o opens the Comments surface and Enter jumps back into the owning chapter"
 		{ width: 100, height: 30, kittyKeyboard: true },
 	);
 	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("Comments · 1"); // the tab wears the open count
 
 	await press(t, "o");
 	const listFrame = t.captureCharFrame();

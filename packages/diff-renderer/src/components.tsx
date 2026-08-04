@@ -364,23 +364,27 @@ export function DiffBody({
 	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
 	const displayedRange = dragRange ?? selectedRange;
 	const selectionDecoration: RangeDecoration | null = displayedRange
-		? { ...displayedRange, id: "diff-pointer-selection" }
+		? {
+				...displayedRange,
+				id: "diff-pointer-selection",
+				active: true,
+				backgroundColor: theme.selectedHunk,
+			}
 		: null;
 	const renderedDecorations = selectionDecoration
-		? [...decorations, selectionDecoration]
+		? [selectionDecoration, ...decorations]
 		: decorations;
-	const renderedFocusId = selectionDecoration?.id ?? focusedDecorationId;
 	const rows = useMemo(
 		() =>
 			normalized
 				? buildDiffRows(normalized, layout, {
 						syntaxTheme: theme.syntaxTheme,
 						decorations: renderedDecorations,
-						focusedDecorationId: renderedFocusId,
+						focusedDecorationId,
 						emphasis,
 					})
 				: [],
-		[normalized, layout, theme.syntaxTheme, renderedDecorations, renderedFocusId, emphasis],
+		[normalized, layout, theme.syntaxTheme, renderedDecorations, focusedDecorationId, emphasis],
 	);
 	const anchor = useMemo(
 		() =>

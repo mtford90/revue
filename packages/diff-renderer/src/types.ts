@@ -21,6 +21,8 @@ export interface RangeDecoration {
 	side: DiffSide;
 	startLine: number;
 	endLine: number;
+	/** Paint this range independently of the host's navigation focus. */
+	active?: boolean;
 	backgroundColor?: string;
 	showGutterMarker?: boolean;
 }

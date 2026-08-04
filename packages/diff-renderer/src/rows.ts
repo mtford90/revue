@@ -99,8 +99,9 @@ function makeCell({
 	const oldRanges = decorationsAtLine(decorations, "deletions", oldLineNumber);
 	const newRanges = decorationsAtLine(decorations, "additions", newLineNumber);
 	const isFocused = (range: RangeDecoration) =>
-		focusedDecorationId !== undefined &&
-		(range.id === focusedDecorationId || range.focusId === focusedDecorationId);
+		range.active === true ||
+		(focusedDecorationId !== undefined &&
+			(range.id === focusedDecorationId || range.focusId === focusedDecorationId));
 	const oldFocus = oldRanges.find(isFocused);
 	const newFocus = newRanges.find(isFocused);
 	const safeText = cleanLine(text);

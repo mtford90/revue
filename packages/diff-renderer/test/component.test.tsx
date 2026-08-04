@@ -101,6 +101,63 @@ test("review ranges use their tint without looking like a gutter selection", asy
 	expect(background?.toInts()).toEqual([85, 34, 68, 255]);
 });
 
+test("gutter selection preserves review tints and stays neutral across diff sides", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const backgrounds: { selected?: number[]; review?: number[] }[] = [];
+	for (const side of ["deletions", "additions"] as const) {
+		const t = await testRender(
+			<DiffBody
+				file={file}
+				theme={theme}
+				layout="stack"
+				width={60}
+				decorations={[
+					{
+						id: "review-new-two",
+						focusId: "review-hint",
+						filePath: "a.ts",
+						side: "additions",
+						startLine: 2,
+						endLine: 2,
+						backgroundColor: "#552244",
+						showGutterMarker: false,
+					},
+				]}
+				focusedDecorationId="review-hint"
+				selectedRange={{
+					filePath: "a.ts",
+					hunkOldStart: 1,
+					side,
+					startLine: 1,
+					endLine: 1,
+				}}
+			/>,
+			{ width: 60, height: 10 },
+		);
+		await t.renderOnce();
+		const selectedText = side === "deletions" ? "old one" : "new one";
+		const lines = t.captureCharFrame().split("\n");
+		const selectedY = lines.findIndex((line) => line.includes(selectedText));
+		const reviewY = lines.findIndex((line) => line.includes("new two"));
+		backgrounds.push({
+			selected: t
+				.captureSpans()
+				.lines[selectedY]?.spans.find((span) => span.text.includes(selectedText))
+				?.bg.toInts(),
+			review: t
+				.captureSpans()
+				.lines[reviewY]?.spans.find((span) => span.text.includes("new two"))
+				?.bg.toInts(),
+		});
+	}
+
+	expect(backgrounds).toEqual([
+		{ selected: [85, 79, 78, 255], review: [85, 34, 68, 255] },
+		{ selected: [85, 79, 78, 255], review: [85, 34, 68, 255] },
+	]);
+});
+
 test("stack context focus uses the requested side's visible highlight", async () => {
 	const [file] = parsePatch(`diff --git a/context.ts b/context.ts
 --- a/context.ts

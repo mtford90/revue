@@ -75,6 +75,7 @@ import {
 	MenuDropdown,
 	type MenuEntry,
 	nextMenuItemIndex,
+	type ReviewSurface,
 	selectable,
 	useMenuController,
 } from "./menu.tsx";
@@ -207,6 +208,7 @@ const APP_KEYS = new Set([
 	"x",
 	"f",
 	"a",
+	"o",
 	"[",
 	"]",
 	"{",
@@ -227,10 +229,13 @@ const APP_KEYS = new Set([
 type Page =
 	| { kind: "prologue"; label: string; prologue: Prologue }
 	| { kind: "chapter"; label: string; chapter: Chapter }
-	| { kind: "files"; label: string; chapter: Chapter };
+	| { kind: "files"; label: string; chapter: Chapter }
+	| { kind: "comments"; label: string };
 
 export const ALL_FILES_CHAPTER_ID = "__files__";
 const ALL_FILES_LABEL = "All files";
+const COMMENTS_PAGE_ID = "__comments__";
+const COMMENTS_PAGE: Page = { kind: "comments", label: "Comments" };
 
 /** The whole diff as one synthetic chapter, so the flat page reuses the chapter pipeline. */
 const allFilesChapter = (diffFiles: DiffFile[] | null, order: number): Chapter => ({
@@ -258,8 +263,10 @@ function buildPages(file: RevueChaptersFile): Page[] {
 	return pages;
 }
 
-const pageId = (page: Page | undefined) =>
-	page && page.kind !== "prologue" ? page.chapter.id : "prologue";
+const pageId = (page: Page | undefined) => {
+	if (!page || page.kind === "prologue") return "prologue";
+	return page.kind === "comments" ? COMMENTS_PAGE_ID : page.chapter.id;
+};
 
 const emptyReviewPageState = () => ({
 	selectedFile: 0,
@@ -286,7 +293,7 @@ function PageIndexRows({
 	const theme = useTheme();
 	return pages.map((page, index) => {
 		const active = index === current;
-		const done = page.kind !== "prologue" && isChapterReviewed(vs, page.chapter.id);
+		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
 		const label = page.kind === "chapter" ? `${page.chapter.order}. ${page.label}` : page.label;
 		return (
 			<box
@@ -544,7 +551,7 @@ function ChapterPanel({
 }) {
 	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
-	const briefChapter = page && page.kind !== "prologue" ? page.chapter : null;
+	const briefChapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	// The Files surface deliberately drops all story chrome so it reads as its own screen.
 	const filesSurface = page?.kind === "files";
 	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
@@ -1283,6 +1290,107 @@ function InlineThread({
 	);
 }
 
+const commentRowId = (index: number) => `comment-row:${index}`;
+
+const threadLocation = (thread: ReviewThread) =>
+	`${thread.anchor.filePath}:${thread.anchor.startLine}${
+		thread.anchor.endLine === thread.anchor.startLine ? "" : `-${thread.anchor.endLine}`
+	}`;
+
+function CommentRow({
+	thread,
+	index,
+	active,
+	onJump,
+}: {
+	thread: ReviewThread;
+	index: number;
+	active: boolean;
+	onJump: (thread: ReviewThread) => void;
+}) {
+	const theme = useTheme();
+	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
+	const root = thread.messages[0];
+	const replies = thread.messages.length - 1;
+	const snippet = root?.body.split("\n")[0] ?? "";
+	return (
+		<box
+			id={commentRowId(index)}
+			height={1}
+			width="100%"
+			flexDirection="row"
+			backgroundColor={active ? theme.panelAlt : undefined}
+			onMouseDown={() => onJump(thread)}
+		>
+			<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
+				{active ? "▸" : " "}
+			</text>
+			<text flexShrink={0} fg={dealtWith ? theme.badgeAdded : theme.badgeModified}>
+				{dealtWith ? "✓ " : "! "}
+			</text>
+			<text flexShrink={0} wrapMode="none" fg={active ? theme.accent : theme.text}>
+				{threadLocation(thread)}
+			</text>
+			<text flexShrink={0} fg={theme.muted}>{` ${root?.author.name ?? ""} `}</text>
+			<text
+				flexGrow={1}
+				minWidth={0}
+				wrapMode="none"
+				truncate
+				fg={dealtWith ? theme.muted : theme.text}
+			>
+				{snippet}
+			</text>
+			{replies > 0 ? (
+				<text flexShrink={0} fg={theme.muted}>
+					{` · ${replies} ${replies === 1 ? "reply" : "replies"}`}
+				</text>
+			) : null}
+		</box>
+	);
+}
+
+/** Every thread in the run at a glance; Enter re-enters the chapter that owns it. */
+function CommentsView({
+	threads,
+	selected,
+	onJump,
+}: {
+	threads: ReviewThread[];
+	selected: number;
+	onJump: (thread: ReviewThread) => void;
+}) {
+	const theme = useTheme();
+	const open = threads.filter((thread) => thread.status === THREAD_STATUS.OPEN).length;
+	if (!threads.length) {
+		return (
+			<box flexDirection="column" width="100%" gap={1}>
+				<text fg={theme.text}>No comments in this review yet.</text>
+				<text fg={theme.muted}>
+					Select diff lines and press Enter to start a thread; it will appear here.
+				</text>
+			</box>
+		);
+	}
+	return (
+		<box flexDirection="column" width="100%">
+			<text fg={theme.muted}>
+				{`${open} open · ${threads.length - open} resolved — Enter opens a comment in its chapter`}
+			</text>
+			<box height={1} />
+			{threads.map((thread, index) => (
+				<CommentRow
+					key={thread.id}
+					thread={thread}
+					index={index}
+					active={index === selected}
+					onJump={onJump}
+				/>
+			))}
+		</box>
+	);
+}
+
 const THREAD_COMPOSER_ID = "inline-thread-composer";
 const COPY_NOTICE_MS = 2_500;
 const SELECTION_FLASH_MS = 150;
@@ -1936,6 +2044,7 @@ const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
 		lines: [
 			"]c/[c next/previous page (prologue is page one)",
 			"w All files: the whole diff without the story",
+			"o Comments: every thread in one list · enter jumps to it",
 			"a next unreviewed chapter",
 			"pointer: the strip under the menu bar, or the sidebar index",
 		],
@@ -2279,6 +2388,12 @@ export function App({
 	const preferencesRef = useRef(initialPreferences);
 	const [current, setCurrent] = useState(initialCurrent);
 	const [allFiles, setAllFiles] = useState(initialAllFiles);
+	const [commentsSurface, setCommentsSurface] = useState(false);
+	const [selectedThread, setSelectedThread] = useState(0);
+	const [threadFocusTarget, setThreadFocusTarget] = useState<{
+		threadId: string;
+		request: number;
+	} | null>(null);
 	const [selectedFile, setSelectedFile] = useState(initialPageState.selectedFile);
 	const [selectedHunkIndex, setSelectedHunkIndex] = useState(initialPageState.selectedHunk);
 	const [selectedKeyChange, setSelectedKeyChange] = useState(initialPageState.selectedKeyChange);
@@ -2352,8 +2467,8 @@ export function App({
 		sidebar: sidebarPreference,
 		diff: diffPreference,
 	});
-	const page = allFiles ? filesPage : pages[current];
-	const chapter = page && page.kind !== "prologue" ? page.chapter : null;
+	const page = commentsSurface ? COMMENTS_PAGE : allFiles ? filesPage : pages[current];
+	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
@@ -2453,6 +2568,17 @@ export function App({
 			),
 		);
 	}, [chapter, threads, viewMode]);
+	const orderedThreads = useMemo(
+		() =>
+			[...threads].sort(
+				(left, right) =>
+					left.anchor.filePath.localeCompare(right.anchor.filePath) ||
+					left.anchor.startLine - right.anchor.startLine ||
+					left.createdAt.localeCompare(right.createdAt) ||
+					left.id.localeCompare(right.id),
+			),
+		[threads],
+	);
 	const attachmentAnchors = useMemo<DiffInlineAttachment[]>(
 		() => [
 			...chapterThreadList.map((thread) => ({
@@ -2497,6 +2623,8 @@ export function App({
 	chapterSegmentsRef.current = chapterSegments;
 	const viewportFilesRef = useRef(viewportFiles);
 	viewportFilesRef.current = viewportFiles;
+	const threadsRef = useRef(threads);
+	threadsRef.current = threads;
 	function noteAttachmentNode(id: string, node: { height: number } | null) {
 		if (node) attachmentNodes.current.set(id, node);
 		else attachmentNodes.current.delete(id);
@@ -2695,6 +2823,36 @@ export function App({
 			clearTimeout(lateRetry);
 		};
 	}, [diffAnchorTarget]);
+
+	useEffect(() => {
+		if (!threadFocusTarget) return;
+		const anchor = threadAnchorRange(
+			threadsRef.current.find((thread) => thread.id === threadFocusTarget.threadId),
+		);
+		const file = anchor
+			? viewportFilesRef.current.find((candidate) => candidate.path === anchor.filePath)
+			: undefined;
+		if (file && anchor) {
+			const row = attachmentRowIndex(file, anchor);
+			const offset =
+				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
+			if (offset !== null) {
+				centreContentOffset({
+					scroll: pageScroll.current,
+					leadingHeight: leadingContent.current?.height ?? 0,
+					offset,
+					span: ESTIMATED_ATTACHMENT_HEIGHT,
+				});
+			}
+		}
+		const revealThread = () => pageScroll.current?.scrollChildIntoView(threadFocusTarget.threadId);
+		const retry = setTimeout(revealThread, 50);
+		const lateRetry = setTimeout(revealThread, 150);
+		return () => {
+			clearTimeout(retry);
+			clearTimeout(lateRetry);
+		};
+	}, [threadFocusTarget]);
 
 	useEffect(() => {
 		if (!copyNotice) return;
@@ -2922,9 +3080,10 @@ export function App({
 	}
 	function goto(index: number) {
 		const next = Math.max(0, Math.min(index, pages.length - 1));
-		if (next === current && !allFiles) return;
+		if (next === current && !allFiles && !commentsSurface) return;
 		const nextPageId = pageId(pages[next]);
 		saveCurrentSession(nextPageId);
+		setCommentsSurface(false);
 		setAllFiles(false);
 		setCurrent(next);
 		restorePageFocus(nextPageId);
@@ -2934,8 +3093,71 @@ export function App({
 		if (!file) return;
 		const nextPageId = pageId(allFiles ? pages[current] : filesPage);
 		saveCurrentSession(nextPageId);
+		setCommentsSurface(false);
 		setAllFiles(!allFiles);
 		restorePageFocus(nextPageId);
+	}
+	/** The centralised thread list — a surface over the review, not a page in it. */
+	function toggleComments() {
+		selectSurface(commentsSurface ? (allFiles ? "files" : "story") : "comments");
+	}
+	function selectSurface(target: ReviewSurface) {
+		if (!file) return;
+		const active =
+			page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story";
+		if (target === active) return;
+		if (target === "comments") {
+			saveCurrentSession(COMMENTS_PAGE_ID);
+			setCommentsSurface(true);
+			setSelectedThread(0);
+			return;
+		}
+		const nextPageId = pageId(target === "files" ? filesPage : pages[current]);
+		saveCurrentSession(nextPageId);
+		setCommentsSurface(false);
+		setAllFiles(target === "files");
+		restorePageFocus(nextPageId);
+	}
+	function moveThreadSelection(delta: number) {
+		if (!orderedThreads.length) return;
+		const next = Math.max(0, Math.min(selectedThread + delta, orderedThreads.length - 1));
+		setSelectedThread(next);
+		pageScroll.current?.scrollChildIntoView(commentRowId(next));
+	}
+	function jumpToThread(thread: ReviewThread) {
+		const chapterIndex = pages.findIndex(
+			(candidate) =>
+				candidate.kind === "chapter" &&
+				candidate.chapter.hunkRefs.some(
+					(reference) =>
+						reference.filePath === thread.anchor.filePath &&
+						reference.oldStart === thread.anchor.oldStart,
+				),
+		);
+		const nextPage = chapterIndex >= 0 ? pages[chapterIndex] : filesPage;
+		const nextPageId = pageId(nextPage);
+		saveCurrentSession(nextPageId);
+		setCommentsSurface(false);
+		setAllFiles(chapterIndex < 0);
+		if (chapterIndex >= 0) setCurrent(chapterIndex);
+		restorePageFocus(nextPageId);
+		const targetChapter =
+			nextPage?.kind === "chapter" || nextPage?.kind === "files" ? nextPage.chapter : null;
+		if (targetChapter) {
+			const fileIndex = chapterFilePaths(targetChapter).indexOf(thread.anchor.filePath);
+			if (fileIndex >= 0) {
+				setSelectedFile(fileIndex);
+				setSelectedHunkIndex(0);
+			}
+		}
+		setCollapsedFiles(
+			(currentCollapsed) =>
+				new Set([...currentCollapsed].filter((entry) => entry !== thread.anchor.filePath)),
+		);
+		setThreadFocusTarget((currentTarget) => ({
+			threadId: thread.id,
+			request: (currentTarget?.request ?? 0) + 1,
+		}));
 	}
 	function expandContext(
 		path: string,
@@ -3268,9 +3490,11 @@ export function App({
 		canChangeFiles: Boolean(chapter),
 		canMoveNextUnreviewed:
 			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate.id)),
-		allFiles: allFiles || !file,
+		allFiles: (allFiles && !commentsSurface) || !file,
 		canToggleAllFiles: Boolean(file),
 		toggleAllFiles,
+		commentsSurface,
+		toggleComments,
 		showHelp,
 		viewMode,
 		semanticLoading,
@@ -3429,12 +3653,31 @@ export function App({
 		if (handleChapterChord(name)) return;
 		if (copyNotice) setCopyNotice(null);
 
+		if (page?.kind === "comments") {
+			if (name === "q" || name === "escape") quit();
+			else if (name === "?") toggleShortcutHelp();
+			else if (name === "t") openThemePicker();
+			else if (name === "o") toggleComments();
+			else if (name === "w") selectSurface("files");
+			else if (name === "j" || name === "down") moveThreadSelection(1);
+			else if (name === "k" || name === "up") moveThreadSelection(-1);
+			else if (name === "g") moveThreadSelection(-orderedThreads.length);
+			else if (name === "G") moveThreadSelection(orderedThreads.length);
+			else if (name === "return") {
+				const thread = orderedThreads[selectedThread];
+				if (thread) jumpToThread(thread);
+			}
+			return;
+		}
+
 		if (name === "?") {
 			toggleShortcutHelp();
 		} else if (name === "s") {
 			toggleSidebar();
 		} else if (name === "w") {
 			toggleAllFiles();
+		} else if (name === "o") {
+			toggleComments();
 		} else if (name === "p") {
 			changePathDisplay(nextPathDisplayMode(pathDisplay));
 		} else if (name === "t") {
@@ -3533,11 +3776,11 @@ export function App({
 				<MenuBar
 					activeMenuId={menu.activeMenuId}
 					terminalWidth={width}
-					surface={page?.kind === "files" ? "files" : "story"}
+					surface={
+						page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story"
+					}
 					canSwitchSurface={Boolean(file)}
-					onSelectSurface={(target) => {
-						if (target !== (page?.kind === "files" ? "files" : "story")) toggleAllFiles();
-					}}
+					onSelectSurface={selectSurface}
 					onHover={(id) => {
 						if (menu.activeMenuId) menu.open(id);
 					}}
@@ -3547,7 +3790,7 @@ export function App({
 					}}
 					onClose={menu.close}
 				/>
-				{showChapterPanel ? null : (
+				{showChapterPanel || page?.kind === "comments" ? null : (
 					<PageNavStrip
 						page={page}
 						pages={pages}
@@ -3560,7 +3803,7 @@ export function App({
 					/>
 				)}
 				<box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
-					{showChapterPanel ? (
+					{showChapterPanel && page?.kind !== "comments" ? (
 						<ChapterPanel
 							page={page}
 							pages={pages}
@@ -3637,6 +3880,13 @@ export function App({
 									vs={vs}
 									onSelectPage={goto}
 									onSelectFocusArea={focusPrologueArea}
+								/>
+							) : null}
+							{page?.kind === "comments" ? (
+								<CommentsView
+									threads={orderedThreads}
+									selected={selectedThread}
+									onJump={jumpToThread}
 								/>
 							) : null}
 							{chapter && viewMode === "patch" ? (

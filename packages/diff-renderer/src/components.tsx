@@ -618,6 +618,7 @@ export function DiffBody({
 							{attachments.map((attachment) => (
 								<box
 									key={attachment.id}
+									id={attachment.id}
 									width="100%"
 									flexDirection="column"
 									ref={(node) => onAttachmentNode?.(attachment.id, node)}
@@ -654,6 +655,7 @@ export function DiffBody({
 						{attachments.map((attachment) => (
 							<box
 								key={attachment.id}
+								id={attachment.id}
 								width="100%"
 								flexDirection="column"
 								ref={(node) => onAttachmentNode?.(attachment.id, node)}

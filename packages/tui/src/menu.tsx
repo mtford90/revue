@@ -96,6 +96,8 @@ export const buildAppMenus = ({
 	allFiles,
 	canToggleAllFiles,
 	toggleAllFiles,
+	commentsSurface,
+	toggleComments,
 	showHelp,
 	viewMode,
 	semanticLoading,
@@ -127,6 +129,8 @@ export const buildAppMenus = ({
 	allFiles: boolean;
 	canToggleAllFiles: boolean;
 	toggleAllFiles: () => void;
+	commentsSurface: boolean;
+	toggleComments: () => void;
 	showHelp: boolean;
 	viewMode: "patch" | "semantic";
 	semanticLoading: boolean;
@@ -183,6 +187,14 @@ export const buildAppMenus = ({
 			checked: allFiles,
 			disabled: !canToggleAllFiles,
 			action: toggleAllFiles,
+		},
+		{
+			kind: "item",
+			label: "Comments",
+			hint: "o",
+			checked: commentsSurface,
+			disabled: !canToggleAllFiles,
+			action: toggleComments,
 		},
 	],
 	view: [
@@ -311,10 +323,11 @@ const stopMouse = (event: OpenTUIMouseEvent) => {
 	event.stopPropagation();
 };
 
-export type ReviewSurface = "story" | "files";
+export type ReviewSurface = "story" | "files" | "comments";
 const SURFACES: { id: ReviewSurface; label: string }[] = [
 	{ id: "story", label: "Story" },
 	{ id: "files", label: "Files" },
+	{ id: "comments", label: "Comments" },
 ];
 const SURFACE_BAR_WIDTH = SURFACES.reduce((total, { label }) => total + label.length + 2, 0);
 

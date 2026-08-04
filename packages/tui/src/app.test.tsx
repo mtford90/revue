@@ -738,7 +738,9 @@ test("next unreviewed is unavailable when every chapter is reviewed", async () =
 	await press(t, "F10");
 	await arrow(t, "right");
 	// On the last page Next page and Next unreviewed chapter are both spent, so focus
-	// skips them: down reaches All files, and a second down wraps back to Previous page.
+	// skips them: down reaches All files, then Comments, and a third down wraps back
+	// to Previous page.
+	await arrow(t, "down");
 	await arrow(t, "down");
 	await arrow(t, "down");
 	await press(t, "RETURN");
@@ -1244,6 +1246,108 @@ test("inline threads show authors and compose new roots and replies", async () =
 		body: "Human follow-up",
 	});
 	expect(t.captureCharFrame()).toContain("Human · Matt Reviewer");
+});
+
+test("o opens the Comments surface and Enter jumps back into the owning chapter", async () => {
+	const threadFile = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "thread-chapter",
+				order: 1,
+				title: "Review the value",
+				summary: "A focused thread fixture.",
+				hunkRefs: [{ filePath: "thread.ts", oldStart: 1 }],
+				keyChanges: [],
+			},
+		],
+	});
+	const [diffFile] = parsePatch(`diff --git a/thread.ts b/thread.ts
+--- a/thread.ts
++++ b/thread.ts
+@@ -1 +1 @@
+-old value
++new value
+`);
+	if (!diffFile) throw new Error("missing diff fixture");
+	const runId = "a".repeat(64);
+	const anchor: ThreadAnchor = {
+		filePath: "thread.ts",
+		oldStart: 1,
+		side: "additions",
+		startLine: 1,
+		endLine: 1,
+	};
+	const openThread: ReviewThread = {
+		id: "00000000-0000-4000-8000-000000000010",
+		runId,
+		anchor,
+		status: THREAD_STATUS.OPEN,
+		createdAt: "2026-08-02T10:00:00.000Z",
+		messages: [
+			{
+				id: "00000000-0000-4000-8000-000000000011",
+				author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Matt Reviewer" },
+				body: "Rename this value",
+				createdAt: "2026-08-02T10:00:00.000Z",
+			},
+		],
+	};
+	const resolvedThread: ReviewThread = {
+		id: "00000000-0000-4000-8000-000000000012",
+		runId,
+		anchor,
+		status: THREAD_STATUS.DEALT_WITH,
+		createdAt: "2026-08-02T10:01:00.000Z",
+		messages: [
+			{
+				id: "00000000-0000-4000-8000-000000000013",
+				author: { kind: THREAD_AUTHOR_KIND.AGENT, name: "Review agent" },
+				body: "Already addressed",
+				createdAt: "2026-08-02T10:01:00.000Z",
+			},
+			{
+				id: "00000000-0000-4000-8000-000000000014",
+				author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Matt Reviewer" },
+				body: "Confirmed",
+				createdAt: "2026-08-02T10:02:00.000Z",
+			},
+		],
+	};
+	const t = await testRender(
+		<App file={threadFile} diffFiles={[diffFile]} initialThreads={[openThread, resolvedThread]} />,
+		{ width: 100, height: 30, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+
+	await press(t, "o");
+	const listFrame = t.captureCharFrame();
+	expect(statusLine(t)).toContain("Comments");
+	expect(listFrame).toContain("1 open · 1 resolved");
+	expect(listFrame).toContain("thread.ts:1");
+	expect(listFrame).toContain("Rename this value");
+	expect(listFrame).toContain("Already addressed");
+	expect(listFrame).toContain("1 reply");
+	expect(listFrame).not.toContain("new value"); // the list replaces the diff
+
+	await press(t, "RETURN");
+	const chapterFrame = t.captureCharFrame();
+	expect(statusLine(t)).toContain("Ch 1/1");
+	expect(chapterFrame).toContain("new value");
+	expect(chapterFrame).toContain("Rename this value"); // the jumped-to thread is on screen
+});
+
+test("the Comments surface explains itself when the run has no threads", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {
+		width: 120,
+		height: 40,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await press(t, "o");
+	expect(t.captureCharFrame()).toContain("No comments in this review yet.");
+	await press(t, "o"); // toggles back to the story
+	expect(statusLine(t)).not.toContain("Comments");
 });
 
 test("number keys check a chapter's key changes", async () => {

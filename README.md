@@ -13,6 +13,13 @@ to address. Everything happens on your machine.
 brew install mtford90/tap/revue
 ```
 
+Or without Homebrew — downloads the right executable, verifies its checksum, and installs to
+`~/.local/bin`:
+
+```bash
+curl -fsSL https://revue.mtford.co.uk/install.sh | sh
+```
+
 Prebuilt executables for macOS (arm64 and x64) and Linux x64, with checksums, are on the
 [releases page](https://github.com/mtford90/revue/releases). Git is required for `revue prep`;
 [difftastic](https://difftastic.wilfred.me.uk/) is optional and enables the Semantic view

@@ -247,8 +247,8 @@ menu · `?` toggles shortcut help ·
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
 or file display change, and switching Patch/Semantic carries the reviewer's relative position through
 the chapter.
-Semantic mode is intentionally read-only: key-change anchors, exact range highlights, and review
-threads are Patch-only. Binary,
+Semantic mode is intentionally read-only. Key-change anchors and severity-tinted exact ranges work
+in both views by source line number; Difftastic rows never become durable review anchors. Binary,
 symlink, mode-only, and content-identical metadata changes are described rather than passed off as
 semantic source diffs. Progress and the reviewer's location persist to `.revue/state.json`, keyed by both the pinned run and
 its chapter narration. Reopening the same run restores the current page, focused file/hunk/question,

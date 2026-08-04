@@ -47,6 +47,7 @@ const chapters: RevueChaptersFile = {
 			keyChanges: [
 				{
 					content: "Is this the right public boundary?",
+					severity: "info",
 					lineRefs: [
 						{
 							filePath: "src/core.ts",

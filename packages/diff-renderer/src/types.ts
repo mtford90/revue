@@ -21,6 +21,8 @@ export interface RangeDecoration {
 	side: DiffSide;
 	startLine: number;
 	endLine: number;
+	backgroundColor?: string;
+	showGutterMarker?: boolean;
 }
 
 /** The first concrete rendered line to which focus/navigation can scroll. */
@@ -66,6 +68,8 @@ export interface DiffCell {
 	/** Exact decoration ids for each side of this cell. */
 	decorations: Partial<Record<DiffSide, string[]>>;
 	focusedSides: DiffSide[];
+	focusedBackgrounds: Partial<Record<DiffSide, string>>;
+	gutterFocusedSides: DiffSide[];
 }
 
 export type DiffRow =

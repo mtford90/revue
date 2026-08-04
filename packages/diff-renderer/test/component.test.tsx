@@ -64,6 +64,43 @@ test("focused ranges render visibly on only the exact requested line", async () 
 	expect(newTwo).toContain("▌");
 });
 
+test("review ranges use their tint without looking like a gutter selection", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const tint = "#552244";
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			decorations={[
+				{
+					id: "review-new-two",
+					focusId: "review-hint",
+					filePath: "a.ts",
+					side: "additions",
+					startLine: 2,
+					endLine: 2,
+					backgroundColor: tint,
+					showGutterMarker: false,
+				},
+			]}
+			focusedDecorationId="review-hint"
+		/>,
+		{ width: 60, height: 10 },
+	);
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const targetY = lines.findIndex((line) => line.includes("new two"));
+	const background = t
+		.captureSpans()
+		.lines[targetY]?.spans.find((span) => span.text.includes("new two"))?.bg;
+
+	expect(lines[targetY]).not.toContain("▌");
+	expect(background?.toInts()).toEqual([85, 34, 68, 255]);
+});
+
 test("stack context focus uses the requested side's visible highlight", async () => {
 	const [file] = parsePatch(`diff --git a/context.ts b/context.ts
 --- a/context.ts

@@ -96,7 +96,13 @@ import {
 	sourceRangeFor,
 } from "./sourceLink.ts";
 import { StatusBar, type StatusNotice } from "./statusBar.tsx";
-import { complexityColor, severityColor, ThemeProvider, useTheme } from "./theme.ts";
+import {
+	complexityColor,
+	severityBackgroundColor,
+	severityColor,
+	ThemeProvider,
+	useTheme,
+} from "./theme.ts";
 import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
 import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
 import {
@@ -155,6 +161,24 @@ const revealContentOffset = ({
 	else if (top + span > scroll.scrollTop + viewportHeight) {
 		scroll.scrollTo(Math.max(0, top + span - viewportHeight));
 	}
+};
+
+const centreContentOffset = ({
+	scroll,
+	leadingHeight,
+	offset,
+	span = 1,
+}: {
+	scroll: ScrollBoxRenderable | null;
+	leadingHeight: number;
+	offset: number;
+	span?: number;
+}) => {
+	if (!scroll) return;
+	const top = offset + leadingHeight + VIEWPORT_TOP_PADDING;
+	const maximum = Math.max(0, scroll.scrollHeight - scroll.viewport.height);
+	const centred = top - Math.floor((scroll.viewport.height - span) / 2);
+	scroll.scrollTo(Math.max(0, Math.min(centred, maximum)));
 };
 const COMPACT_NAV_WIDTH = 34;
 const COMPACT_STRIP_WIDTH = 60;
@@ -722,11 +746,13 @@ function PrologueView({
 	pages,
 	vs,
 	onSelectPage,
+	onSelectFocusArea,
 }: {
 	prologue: Prologue;
 	pages: Page[];
 	vs: ViewState;
 	onSelectPage: (index: number) => void;
+	onSelectFocusArea: (locations: string[]) => void;
 }) {
 	const theme = useTheme();
 	return (
@@ -761,7 +787,12 @@ function PrologueView({
 			{prologue.focusAreas.length ? (
 				<PrologueSection title="Worth a look">
 					{prologue.focusAreas.map((fa) => (
-						<box key={fa.title} flexDirection="column" width="100%">
+						<box
+							key={fa.title}
+							flexDirection="column"
+							width="100%"
+							onMouseDown={() => onSelectFocusArea(fa.locations)}
+						>
 							<box flexDirection="row" width="100%">
 								<Badge
 									label={fa.severity.toUpperCase()}
@@ -970,6 +1001,40 @@ const findKeyChangeTarget = ({
 	return null;
 };
 
+type FocusAreaTarget = {
+	pageIndex: number;
+	chapter: Chapter;
+	path: string;
+	fileIndex: number;
+	keyChangeIndex?: number;
+};
+
+const findFocusAreaTarget = (pages: Page[], locations: string[]): FocusAreaTarget | null => {
+	const candidates = pages.flatMap((page, pageIndex) =>
+		page.kind === "chapter" ? [{ pageIndex, chapter: page.chapter }] : [],
+	);
+	const anchored = locations.flatMap((path) =>
+		candidates.flatMap(({ pageIndex, chapter }) => {
+			const keyChangeIndex = chapter.keyChanges.findIndex((keyChange) =>
+				keyChange.lineRefs.some((ref) => ref.filePath === path),
+			);
+			const fileIndex = chapterFilePaths(chapter).indexOf(path);
+			return keyChangeIndex >= 0 && fileIndex >= 0
+				? [{ pageIndex, chapter, path, fileIndex, keyChangeIndex }]
+				: [];
+		}),
+	)[0];
+	if (anchored) return anchored;
+	return (
+		locations.flatMap((path) =>
+			candidates.flatMap(({ pageIndex, chapter }) => {
+				const fileIndex = chapterFilePaths(chapter).indexOf(path);
+				return fileIndex >= 0 ? [{ pageIndex, chapter, path, fileIndex }] : [];
+			}),
+		)[0] ?? null
+	);
+};
+
 const semanticViewportFiles = ({
 	chapter,
 	semantic,
@@ -1062,7 +1127,15 @@ function KeyChanges({
 						</text>
 						<box flexGrow={1} minWidth={0} onMouseDown={() => onFocus(i)}>
 							<Narration
-								text={`${i + 1}. ${kc.content}`}
+								prefix={
+									<>
+										<span fg={theme.background} bg={severityColor(theme, kc.severity)}>
+											{` ${kc.severity.toUpperCase()} `}
+										</span>
+										<span>{` ${i + 1}. `}</span>
+									</>
+								}
+								text={kc.content}
 								fg={active ? theme.accent : checked ? theme.badgeAdded : theme.text}
 							/>
 						</box>
@@ -1399,15 +1472,16 @@ function ChapterView({
 	// Stable identities matter here: DiffBody memoises row building on its file
 	// and decoration props, so rebuilding these per render would re-derive every
 	// diff on unrelated state changes (e.g. dragging the sidebar divider).
-	const decorations: RangeDecoration[] = useMemo(
-		() =>
-			(chapter.keyChanges[selectedKeyChange]?.lineRefs ?? []).map((ref, refIndex) => ({
-				...ref,
-				id: `${focusedDecorationId}:${refIndex}`,
-				focusId: focusedDecorationId,
-			})),
-		[chapter, selectedKeyChange, focusedDecorationId],
-	);
+	const decorations: RangeDecoration[] = useMemo(() => {
+		const keyChange = chapter.keyChanges[selectedKeyChange];
+		return (keyChange?.lineRefs ?? []).map((ref, refIndex) => ({
+			...ref,
+			id: `${focusedDecorationId}:${refIndex}`,
+			focusId: focusedDecorationId,
+			backgroundColor: severityBackgroundColor(theme, keyChange?.severity),
+			showGutterMarker: false,
+		}));
+	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
 	const chapterThreads = threads.filter((thread) =>
 		chapter.hunkRefs.some(
 			(reference) =>
@@ -1634,15 +1708,16 @@ function SemanticChapterView({
 	const paths = chapterFilePaths(chapter);
 	const focusedDecorationId = `key-change:${chapter.id}:${selectedKeyChange}`;
 	// Stable identity keeps DiffBody's row memo intact across unrelated renders.
-	const decorations: RangeDecoration[] = useMemo(
-		() =>
-			(chapter.keyChanges[selectedKeyChange]?.lineRefs ?? []).map((ref, refIndex) => ({
-				...ref,
-				id: `${focusedDecorationId}:${refIndex}`,
-				focusId: focusedDecorationId,
-			})),
-		[chapter, selectedKeyChange, focusedDecorationId],
-	);
+	const decorations: RangeDecoration[] = useMemo(() => {
+		const keyChange = chapter.keyChanges[selectedKeyChange];
+		return (keyChange?.lineRefs ?? []).map((ref, refIndex) => ({
+			...ref,
+			id: `${focusedDecorationId}:${refIndex}`,
+			focusId: focusedDecorationId,
+			backgroundColor: severityBackgroundColor(theme, keyChange?.severity),
+			showGutterMarker: false,
+		}));
+	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
 	const chapterThreads = threads.filter((thread) => paths.includes(thread.anchor.filePath));
 	const inlineAttachments: DiffInlineAttachment[] = [
 		...chapterThreads.map((thread) => ({
@@ -1849,7 +1924,7 @@ const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
 			"p cycle path display: smart, tree, full",
 			"F10 → View toggles Patch / read-only Semantic",
 			"F10 → View sets diff layout: auto, split or stacked",
-			"anchors, exact range highlights, and threads are Patch-only",
+			"key-change anchors work in both views; Semantic remains read-only",
 		],
 	},
 	{
@@ -2555,7 +2630,7 @@ export function App({
 			const offset =
 				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
 			if (offset !== null) {
-				revealContentOffset({
+				centreContentOffset({
 					scroll: pageScroll.current,
 					leadingHeight: leadingContent.current?.height ?? 0,
 					offset,
@@ -2937,23 +3012,48 @@ export function App({
 			requestFileFocus();
 		}
 	}
-	function focusKeyChange(index: number) {
-		if (!chapter || index < 0 || index >= chapter.keyChanges.length) return;
+	function focusChapterKeyChange(targetChapter: Chapter, index: number) {
+		if (index < 0 || index >= targetChapter.keyChanges.length) return;
 		setSelectedKeyChange(index);
 		requestKeyFocus();
-		if (viewMode !== "patch" || !diffFiles) return;
-		const target = findKeyChangeTarget({ chapter, diffFiles, index });
-		if (!target) return;
-		setSelectedFile(target.fileIndex);
-		setSelectedHunkIndex(target.hunkIndex);
-		const path = chapterFilePaths(chapter)[target.fileIndex];
+		const activeFiles = viewMode === "semantic" ? semanticDiffFiles(semantic) : diffFiles;
+		const target = activeFiles
+			? findKeyChangeTarget({ chapter: targetChapter, diffFiles: activeFiles, index })
+			: null;
+		const fallbackPath = targetChapter.keyChanges[index]?.lineRefs[0]?.filePath;
+		const fallbackIndex = fallbackPath ? chapterFilePaths(targetChapter).indexOf(fallbackPath) : -1;
+		const fileIndex = target?.fileIndex ?? fallbackIndex;
+		if (fileIndex < 0) return;
+		const path = chapterFilePaths(targetChapter)[fileIndex];
+		setSelectedFile(fileIndex);
+		setSelectedHunkIndex(target?.hunkIndex ?? 0);
+		setCollapsedFiles((current) => new Set([...current].filter((entry) => entry !== path)));
+		if (!target) {
+			requestFileFocus();
+			return;
+		}
 		setDiffAnchorTarget((current) => ({
 			id: target.anchorId,
 			path: path ?? target.anchor.filePath,
 			anchor: target.anchor,
 			request: (current?.request ?? 0) + 1,
 		}));
-		setCollapsedFiles((current) => new Set([...current].filter((entry) => entry !== path)));
+	}
+	function focusKeyChange(index: number) {
+		if (chapter) focusChapterKeyChange(chapter, index);
+	}
+	function focusPrologueArea(locations: string[]) {
+		const target = findFocusAreaTarget(pages, locations);
+		if (!target) return;
+		goto(target.pageIndex);
+		if (target.keyChangeIndex !== undefined) {
+			focusChapterKeyChange(target.chapter, target.keyChangeIndex);
+			return;
+		}
+		setSelectedFile(target.fileIndex);
+		setSelectedHunkIndex(0);
+		setCollapsedFiles((current) => new Set([...current].filter((entry) => entry !== target.path)));
+		requestFileFocus();
 	}
 	function moveKeyChangeFocus(delta: number) {
 		if (!chapter?.keyChanges.length) return;
@@ -3468,7 +3568,13 @@ export function App({
 								) : null}
 							</box>
 							{page?.kind === "prologue" ? (
-								<PrologueView prologue={page.prologue} pages={pages} vs={vs} onSelectPage={goto} />
+								<PrologueView
+									prologue={page.prologue}
+									pages={pages}
+									vs={vs}
+									onSelectPage={goto}
+									onSelectFocusArea={focusPrologueArea}
+								/>
 							) : null}
 							{chapter && viewMode === "patch" ? (
 								<ChapterView

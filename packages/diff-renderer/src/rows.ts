@@ -101,6 +101,8 @@ function makeCell({
 	const isFocused = (range: RangeDecoration) =>
 		focusedDecorationId !== undefined &&
 		(range.id === focusedDecorationId || range.focusId === focusedDecorationId);
+	const oldFocus = oldRanges.find(isFocused);
+	const newFocus = newRanges.find(isFocused);
 	const safeText = cleanLine(text);
 	const baseSpans = spans?.length
 		? sanitizeTerminalSpans(spans)
@@ -124,9 +126,16 @@ function makeCell({
 			deletions: oldRanges.map((range) => range.id),
 			additions: newRanges.map((range) => range.id),
 		},
-		focusedSides: [
-			oldRanges.some(isFocused) ? "deletions" : undefined,
-			newRanges.some(isFocused) ? "additions" : undefined,
+		focusedSides: [oldFocus ? "deletions" : undefined, newFocus ? "additions" : undefined].filter(
+			Boolean,
+		) as DiffSide[],
+		focusedBackgrounds: {
+			deletions: oldFocus?.backgroundColor,
+			additions: newFocus?.backgroundColor,
+		},
+		gutterFocusedSides: [
+			oldFocus?.showGutterMarker !== false && oldFocus ? "deletions" : undefined,
+			newFocus?.showGutterMarker !== false && newFocus ? "additions" : undefined,
 		].filter(Boolean) as DiffSide[],
 	};
 }
@@ -137,6 +146,8 @@ const emptyCell = (): DiffCell => ({
 	spans: [],
 	decorations: {},
 	focusedSides: [],
+	focusedBackgrounds: {},
+	gutterFocusedSides: [],
 });
 
 function headerText(hunk: DiffFile["metadata"]["hunks"][number]) {

@@ -1,4 +1,5 @@
 import { createTextAttributes } from "@opentui/core";
+import type { ReactNode } from "react";
 import { useTheme } from "./theme.ts";
 
 // Narration is authored as prose with light Markdown emphasis. The terminal has
@@ -30,15 +31,21 @@ const spanAttributes = (style: InlineStyle | undefined) =>
 	createTextAttributes({ bold: style === "bold", italic: style === "italic" });
 
 /** One paragraph of narration with `code`, **bold** and *italic* runs styled. */
-export function Narration({ text, fg }: { text: string; fg?: string }) {
+export function Narration({ text, fg, prefix }: { text: string; fg?: string; prefix?: ReactNode }) {
 	const theme = useTheme();
 	const color = fg ?? theme.text;
 	const spans = parseInline(text);
 	if (spans.length <= 1 && !spans[0]?.style) {
-		return <text fg={color}>{text}</text>;
+		return (
+			<text fg={color}>
+				{prefix}
+				{text}
+			</text>
+		);
 	}
 	return (
 		<text fg={color}>
+			{prefix}
 			{spans.map((span, index) => (
 				<span
 					// biome-ignore lint/suspicious/noArrayIndexKey: repeated emphasis runs have no independent identity.

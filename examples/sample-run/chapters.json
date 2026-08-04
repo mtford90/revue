@@ -44,6 +44,7 @@
 			"keyChanges": [
 				{
 					"content": "Is a 100ms base with a 5s cap the right shape for our request volume, or should the cap be lower?",
+					"severity": "info",
 					"lineRefs": [
 						{ "filePath": "src/lib/backoff.ts", "side": "additions", "startLine": 4, "endLine": 9 }
 					]
@@ -59,6 +60,7 @@
 			"keyChanges": [
 				{
 					"content": "Should retries be capped per-request, or share a global budget so an outage can't multiply load?",
+					"severity": "medium",
 					"lineRefs": [
 						{
 							"filePath": "src/lib/apiClient.ts",

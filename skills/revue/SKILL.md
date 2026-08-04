@@ -113,8 +113,10 @@ Every review unit in `hunks.txt` must appear in **exactly one** chapter — no o
 Key changes are **judgment calls only a human can make** — things needing product context, team
 conventions, or knowledge of intent. Skip anything a linter, type checker, or review bot would catch.
 Frame each as a **question**. Return an **empty array** when nothing needs human input — do not invent
-items. Each key change has `lineRefs`: one tight range per spot the question depends on
-(`side: "additions"` → new-side line numbers; `side: "deletions"` → old-side).
+items. Give each key change a `severity`: `critical` or `high` for serious problems, `medium` for a
+meaningful risk, and `info` for a point of interest. Each key change has `lineRefs`: one tight range
+per spot the question depends on (`side: "additions"` → new-side line numbers; `side: "deletions"` →
+old-side).
 
 Good: "Should `retryCount` reset when the user switches orgs?"
 Bad: "Check that the auth logic is correct." (verifiable by reading the code)
@@ -155,6 +157,7 @@ cat > "$RUN/chapters.json" << 'EOF'
       "keyChanges": [
         {
           "content": "A judgment-call question for the reviewer.",
+          "severity": "medium",
           "lineRefs": [
             { "filePath": "path/to/file.ts", "side": "additions", "startLine": 50, "endLine": 55 }
           ]
@@ -167,8 +170,9 @@ EOF
 ```
 
 Field constraints: `order` is a positive 1-indexed integer; `hunkRefs[].oldStart` is a non-negative
-integer copied from `hunks.txt`; every `keyChanges[].lineRefs` has ≥ 1 entry with positive
-`startLine ≤ endLine`; `prologue` is optional, so the minimal skeleton omits it. When included, obey
+integer copied from `hunks.txt`; every `keyChanges[].severity` is `critical`, `high`, `medium`, or
+`info`; every `keyChanges[].lineRefs` has ≥ 1 entry with positive `startLine ≤ endLine`; `prologue`
+is optional, so the minimal skeleton omits it. When included, obey
 Step 4’s key-change and focus-area cardinalities. See `examples/sample-run/chapters.json` for a full
 valid example and `packages/types/src/` for the authoritative zod schema.
 

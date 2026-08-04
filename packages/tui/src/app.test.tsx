@@ -338,6 +338,22 @@ test("the prologue's chapter list opens the chapter it names", async () => {
 	expect(statusLine(t)).toContain("Ch 2/3");
 });
 
+test("a prologue focus area opens its matching review hint", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {
+		width: 110,
+		height: 60,
+	});
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const focusY = lines.findIndex((line) => line.includes("Retry budget"));
+	expect(focusY).toBeGreaterThan(0);
+	await click(t, (lines[focusY]?.indexOf("Retry budget") ?? -1) + 1, focusY);
+
+	expect(statusLine(t)).toContain("Ch 2/3");
+	expect(t.captureCharFrame()).toContain("attempt += 1");
+});
+
 test("a new file is rendered unified so no pane sits empty", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 160, height: 40 });
@@ -914,18 +930,23 @@ test("key change content navigates while only its checkbox toggles review", asyn
 	const lines = t.captureCharFrame().split("\n");
 	const keyChangeY = lines.findIndex((line) => line.includes("Is a 100ms base"));
 	const keyChangeLine = lines[keyChangeY] ?? "";
-	await click(t, keyChangeLine.indexOf("Is a 100ms base"), keyChangeY);
+	const questionX = keyChangeLine.indexOf("Is a 100ms base");
+	const tagX = keyChangeLine.indexOf("INFO");
+	const continuationLine = lines.find((line) => line.includes("with a 5s cap")) ?? "";
+	expect(tagX).toBeGreaterThan(0);
+	expect(continuationLine.indexOf("with a 5s cap")).toBeLessThanOrEqual(tagX);
+	await click(t, questionX, keyChangeY);
 	expect(seen).toHaveLength(0);
 	const focusedFrame = t.captureCharFrame();
 	expect(focusedFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
-	expect(focusedFrame.split("\n").find((line) => line.includes("return fetch"))).toContain("▌");
-	expect(focusedFrame.split("\n").find((line) => line.includes("attempt += 1"))).toContain("▌");
+	expect(focusedFrame.split("\n").find((line) => line.includes("return fetch"))).not.toContain("▌");
+	expect(focusedFrame.split("\n").find((line) => line.includes("attempt += 1"))).not.toContain("▌");
 
 	await click(t, keyChangeLine.indexOf("[ ]") + 1, keyChangeY);
 	expect(seen.at(-1)?.keyChanges).toContain("chapter-1#0");
 });
 
-test("key-change focus scrolls the exact anchored diff row into view", async () => {
+test("clicking a key change centres its exact anchored diff row", async () => {
 	const anchoredFile = RevueChaptersFileSchema.parse({
 		chapters: [
 			{
@@ -965,11 +986,86 @@ ${additions}
 	});
 	await t.renderOnce();
 	expect(t.captureCharFrame()).not.toContain("exact row 25");
+	const hintLines = t.captureCharFrame().split("\n");
+	const hintY = hintLines.findIndex((line) => line.includes("Review the exact deep line"));
+	await click(t, (hintLines[hintY]?.indexOf("Review the exact deep line") ?? -1) + 1, hintY);
 
-	await press(t, "}");
 	const visibleLines = t.captureCharFrame().split("\n");
-	expect(visibleLines.find((line) => line.includes("exact row 25"))).toContain("▌");
+	const targetY = visibleLines.findIndex((line) => line.includes("exact row 25"));
+	expect(targetY).toBeGreaterThanOrEqual(4);
+	expect(targetY).toBeLessThanOrEqual(9);
 	expect(visibleLines.some((line) => line.includes("exact row 1 "))).toBe(false);
+});
+
+test("clicking a key change centres its matching semantic row", async () => {
+	const semanticChapters = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "semantic-anchor",
+				order: 1,
+				title: "Anchor semantic rows",
+				summary: "The semantic diff is longer than the viewport.",
+				hunkRefs: [{ filePath: "semantic.ts", oldStart: 1 }],
+				keyChanges: [
+					{
+						content: "Review the semantic target",
+						lineRefs: [
+							{
+								filePath: "semantic.ts",
+								side: "additions",
+								startLine: 25,
+								endLine: 25,
+							},
+						],
+					},
+				],
+			},
+		],
+	});
+	const patchRows = Array.from({ length: 30 }, (_, index) => `+patch row ${index + 1}`).join("\n");
+	const semanticRows = Array.from({ length: 30 }, (_, index) => `+semantic row ${index + 1}`).join(
+		"\n",
+	);
+	const diffFiles = parsePatch(`diff --git a/semantic.ts b/semantic.ts
+--- a/semantic.ts
++++ b/semantic.ts
+@@ -1 +1,30 @@
+-old row
+${patchRows}
+`);
+	const t = await testRender(
+		<App
+			file={semanticChapters}
+			diffFiles={diffFiles}
+			loadSemanticDiff={async () => ({
+				version: "Difftastic 0.67.0",
+				files: [
+					semanticFile(
+						"semantic.ts",
+						`--- a/semantic.ts\n+++ b/semantic.ts\n@@ -1,1 +1,30 @@\n-old row\n${semanticRows}\n`,
+					),
+				],
+			})}
+		/>,
+		{ width: 100, height: 14, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "right");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+	await act(async () => Promise.resolve());
+	await t.renderOnce();
+	expect(t.captureCharFrame()).not.toContain("semantic row 25");
+	const hintLines = t.captureCharFrame().split("\n");
+	const hintY = hintLines.findIndex((line) => line.includes("Review the semantic target"));
+	await click(t, (hintLines[hintY]?.indexOf("Review the semantic target") ?? -1) + 1, hintY);
+
+	const visibleLines = t.captureCharFrame().split("\n");
+	const targetY = visibleLines.findIndex((line) => line.includes("semantic row 25"));
+	expect(targetY).toBeGreaterThanOrEqual(4);
+	expect(targetY).toBeLessThanOrEqual(9);
 });
 
 test("inline threads show authors and compose new roots and replies", async () => {

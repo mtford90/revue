@@ -25,8 +25,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   agent copies these from `hunks.txt` rather than inventing them. Textual hunks use their pre-image
   start. A file with no textual hunk (pure rename, mode-only change, or empty file) receives one
   explicit metadata review unit with `oldStart: 0`.
-- **Key change** — a judgment-call *question* for a human reviewer (not code, not a changelog line),
-  anchored to tight `lineRefs`. Empty when nothing needs human input.
+- **Key change** — a severity-tagged judgment-call *question* for a human reviewer (not code, not a
+  changelog line), anchored to tight `lineRefs`. Empty when nothing needs human input. Severity is
+  explicit on the question so its inline chapter tag and exact diff-range tint cannot drift from
+  broad prologue guidance.
 - **Line ref** — `(filePath, side, startLine, endLine)`. `side` is `additions` (new-side line
   numbers) or `deletions` (old-side).
 - **Thread** — the official mutable feedback aggregate, independently identified and anchored by
@@ -45,8 +47,8 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   lazy, read-only Difftastic rendering of the same run's pinned old/new blobs). Chapter/file focus
   survives switching and the reviewer’s relative chapter position transfers between modes. Semantic
   uses coloured side-by-side output when wide and coloured inline output when narrow; styling is
-  translated into safe OpenTUI spans. Exact key-change anchors, range highlights, and threads are
-  Patch-only; Difftastic output is never parsed into durable anchors.
+  translated into safe OpenTUI spans. Key-change anchors navigate and carry severity-tinted exact
+  ranges in both views by source line number; Difftastic output is never parsed into durable anchors.
 - **File display** — All (the default chapter stream) or Focused (only the selected file). The
   reviewer moves the focused surface through the chapter with file navigation. It applies to both
   diff views and persists machine-wide as a reviewer preference rather than per-run state.

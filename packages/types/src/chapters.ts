@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FOCUS_AREA_SEVERITY } from "./prologue.ts";
 
 // Ported from ReviewStage/stage-cli, MIT. This is the *agent-side* schema — the strict
 // shape the chapter-generating skill is required to emit (see stage-cli's
@@ -39,6 +40,7 @@ export type LineRef = z.infer<typeof lineRefSchema>;
 /** A judgment-call question for a human reviewer — not source code, not a changelog line. */
 export const keyChangeSchema = z.strictObject({
 	content: z.string().min(1),
+	severity: z.enum(FOCUS_AREA_SEVERITY).default(FOCUS_AREA_SEVERITY.INFO),
 	lineRefs: z.array(lineRefSchema).min(1),
 });
 export type KeyChange = z.infer<typeof keyChangeSchema>;

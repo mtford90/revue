@@ -129,11 +129,11 @@ function SplitCell({
 	theme: Theme;
 }) {
 	const focused = cell.focusedSides.includes(side);
+	const gutterFocused = cell.gutterFocusedSides.includes(side);
 	const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
 	const backgroundColor = focused
-		? side === "additions"
-			? theme.addedContentBg
-			: theme.removedContentBg
+		? (cell.focusedBackgrounds[side] ??
+			(side === "additions" ? theme.addedContentBg : theme.removedContentBg))
 		: cell.kind === "addition"
 			? theme.addedBg
 			: cell.kind === "deletion"
@@ -151,7 +151,7 @@ function SplitCell({
 			onMouseDown={onContextMenu}
 		>
 			<Gutter
-				focused={focused}
+				focused={gutterFocused}
 				number={number}
 				digits={digits}
 				showLineNumbers={showLineNumbers}
@@ -188,9 +188,9 @@ function StackCell({
 	const oldFocused = cell.focusedSides.includes("deletions");
 	const newFocused = cell.focusedSides.includes("additions");
 	const backgroundColor = oldFocused
-		? theme.removedContentBg
+		? (cell.focusedBackgrounds.deletions ?? theme.removedContentBg)
 		: newFocused
-			? theme.addedContentBg
+			? (cell.focusedBackgrounds.additions ?? theme.addedContentBg)
 			: cell.kind === "addition"
 				? theme.addedBg
 				: cell.kind === "deletion"
@@ -208,7 +208,7 @@ function StackCell({
 		>
 			{sides.includes("deletions") ? (
 				<Gutter
-					focused={oldFocused}
+					focused={cell.gutterFocusedSides.includes("deletions")}
 					number={cell.oldLineNumber}
 					digits={digits}
 					showLineNumbers={showLineNumbers}
@@ -219,7 +219,7 @@ function StackCell({
 			) : null}
 			{sides.includes("additions") ? (
 				<Gutter
-					focused={newFocused}
+					focused={cell.gutterFocusedSides.includes("additions")}
 					number={cell.newLineNumber}
 					digits={digits}
 					showLineNumbers={showLineNumbers}

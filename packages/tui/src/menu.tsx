@@ -338,6 +338,17 @@ const surfaceTabs = (openThreads: number): { id: ReviewSurface; label: string }[
 			: { id, label },
 	);
 
+const surfaceTabsWidth = (tabs: { label: string }[]) =>
+	tabs.reduce((total, { label }) => total + label.length + 2, 0);
+
+/** Narrow terminals shed detail in stages: first the thread count, then down to initials. */
+const fitSurfaceTabs = (openThreads: number, available: number) =>
+	[
+		surfaceTabs(openThreads),
+		surfaceTabs(0),
+		SURFACES.map(({ id, label }) => ({ id, label: label.slice(0, 1) })),
+	].find((tabs) => available >= surfaceTabsWidth(tabs) + 2);
+
 const MENU_BAR_WIDTH = menuSpecs.reduce((total, spec) => total + spec.width, 0);
 
 export const MenuBar = ({
@@ -362,10 +373,16 @@ export const MenuBar = ({
 	onClose: () => void;
 }) => {
 	const theme = useTheme();
-	const tabs = surfaceTabs(openThreads);
-	const surfaceBarWidth = tabs.reduce((total, { label }) => total + label.length + 2, 0);
-	const showSurfaces =
-		canSwitchSurface && terminalWidth - 2 - MENU_BAR_WIDTH >= surfaceBarWidth + 2;
+	const tabs = canSwitchSurface
+		? (fitSurfaceTabs(openThreads, terminalWidth - 2 - MENU_BAR_WIDTH) ?? [])
+		: [];
+	const surfaceBarWidth = surfaceTabsWidth(tabs);
+	const showSurfaces = tabs.length > 0;
+	const surfaceSlack = terminalWidth - 2 - MENU_BAR_WIDTH - surfaceBarWidth;
+	const surfacePad = Math.min(
+		Math.max(0, Math.floor((terminalWidth - surfaceBarWidth) / 2) - 1 - MENU_BAR_WIDTH),
+		surfaceSlack,
+	);
 	return (
 		<box
 			height={1}
@@ -401,7 +418,8 @@ export const MenuBar = ({
 					</box>
 				);
 			})}
-			<box flexGrow={1} minWidth={0} height={1} flexDirection="row" justifyContent="center">
+			<box flexGrow={1} minWidth={0} height={1} flexDirection="row">
+				{showSurfaces ? <box height={1} width={surfacePad} flexShrink={0} /> : null}
 				{showSurfaces
 					? tabs.map(({ id, label }) => {
 							const active = surface === id;

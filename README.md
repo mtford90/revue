@@ -31,22 +31,25 @@ revue doctor                 # check the skill and dependencies
 
 ## Review anything, narrated
 
-You don't drive the pipeline yourself — your agent does. Ask it for a review:
+You don't drive the pipeline yourself — your agent does. In Claude Code, Codex, or any agent
+with the skill installed:
 
-> *"review my branch against main with revue"*
-> *"give me a revue tour of PR 123"*
-> *"revue what I've got staged"*
+```text
+> /revue this branch against main
 
-The skill freezes the scope into an immutable run, writes the chapters, and hands you back one
-command to open the reviewer:
+⏺ revue prep main                        # freezes the scope into an immutable run
+⏺ reading hunks, writing chapters…       # the agent clusters and narrates the diff
+⏺ revue show --check ✓                   # validates coverage before handing over
 
-```bash
-revue show <run-directory>
+  The review is ready — run this in your terminal:
+
+    revue show .revue/runs/a1b2c3d4e5f6
 ```
 
-Anything Git can diff can be narrated — a branch, someone's GitHub PR, staged, unstaged, or the
-working tree. From a checkout, tour the bundled sample without touching a repository:
-`bun run revue show examples/sample-run`.
+The reviewer is a full-screen TUI, so that last command runs in your own terminal, not the
+agent's — copy it out and take the tour. Anything Git can diff can be narrated: a branch,
+someone's GitHub PR, staged, unstaged, or the working tree. From a checkout, tour the bundled
+sample without touching a repository: `bun run revue show examples/sample-run`.
 
 ## Just the diff
 

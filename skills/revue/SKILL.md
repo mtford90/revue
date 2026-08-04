@@ -66,8 +66,9 @@ patterns and omissions.
 
 When the user wants a quick look without narration, skip this skill's chapter steps entirely:
 `revue diff [scope…]` accepts the same scope forms as prep and opens the result immediately as a
-flat file-by-file diff — no chapters. It prints the run directory to stderr, so review threads
-(Step 7) can still be targeted against it.
+flat file-by-file diff — no chapters. It launches the full-screen TUI, so like `revue show` it is
+a command to hand to the user, never one to run yourself. It prints the run directory to stderr,
+so review threads (Step 7) can still be targeted against it.
 
 If prep exits non-zero, relay its error and stop. Do not edit `run.json`, `diff.patch`, `hunks.txt`,
 or `blobs/`; they are one immutable input.
@@ -185,25 +186,33 @@ is optional, so the minimal skeleton omits it. When included, obey
 Step 4’s key-change and focus-area cardinalities. See `examples/sample-run/chapters.json` for a full
 valid example and `packages/types/src/` for the authoritative zod schema.
 
-## Step 6 — Display
+## Step 6 — Validate, then hand over
 
 ```bash
-revue show "$RUN"
+revue show "$RUN" --check
 ```
 
-`revue show` verifies the run hashes, validates `chapters.json`, requires every prepared review unit
-exactly once, checks key-change ranges against their chapter hunks, and opens the pinned patch without
-touching Git. Run `revue show "$RUN" --check` to validate and print a plain-text summary without
-launching the UI. Show accepts `--theme <name>`, `--theme auto`, `--theme list`, and
-`--transparent-bg`; without a flag it uses the reviewer's remembered theme.
+`--check` verifies the run hashes, validates `chapters.json`, requires every prepared review unit
+exactly once, checks key-change ranges against their chapter hunks, and prints a plain-text
+summary without launching the UI. A run with no `chapters.json` opens as a flat file-by-file diff
+rather than erroring — so a missing chapters file is not caught here; confirm Step 5 wrote it
+before treating a flat display as intentional.
 
-A run with no `chapters.json` opens as a flat file-by-file diff rather than erroring — so a
-missing chapters file is not caught by show. Confirm Step 5 wrote the file before treating a flat
-display as intentional.
+The reviewer itself is a full-screen TUI and cannot run inside an agent harness — not through
+your shell tool, and not through an inline-shell prefix like Claude Code's `!`. Never launch
+`revue show "$RUN"` yourself and never suggest launching it that way. Once `--check` passes, hand
+the user the exact command to run in their own terminal:
+
+```
+revue show <run-directory>
+```
+
+Show accepts `--theme <name>`, `--theme auto`, `--theme list`, and `--transparent-bg`; without a
+flag it uses the reviewer's remembered theme.
 
 ## Step 7 — Act on review threads
 
-After `revue show "$RUN"` exits, retrieve open threads through Revue's public JSON interface. Do not
+Once the user has finished reviewing, retrieve open threads through Revue's public JSON interface. Do not
 scrape terminal output and do not read or edit `.revue/threads.json` directly.
 
 ```bash

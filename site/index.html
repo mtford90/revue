@@ -407,11 +407,12 @@
   <a href="https://github.com/mtford90/revue#install">checkout</a> with Bun.</p>
   <pre><code><span class="cmt"># install</span>
 <span class="kw">brew</span> install mtford90/tap/revue
-<span class="kw">revue</span> skill install           <span class="cmt"># give your coding agent the revue skill</span>
+<span class="kw">revue</span> skill install               <span class="cmt"># give your coding agent the revue skill</span>
 
-<span class="cmt"># then ask your agent: "review my branch against main with revue"</span>
-<span class="cmt"># it preps the scope, writes the chapters, and hands you back:</span>
-<span class="kw">revue</span> show <span class="cmt">&lt;run-directory&gt;</span>
+<span class="cmt"># in Claude Code, Codex, or any agent with the skill:</span>
+<span class="kw">&gt;</span> /revue this branch against main
+<span class="cmt">  ⏺ prep · chapters · check ✓ — the agent hands you back:</span>
+<span class="kw">revue</span> show .revue/runs/a1b2c3d4e5f6   <span class="cmt"># run in your own terminal — it's a full-screen TUI</span>
 
 <span class="cmt"># no agent handy? flat diff, threads and all</span>
 <span class="kw">revue</span> diff main</code></pre>

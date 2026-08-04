@@ -1,4 +1,5 @@
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "@revue/diff-model";
+export { anchorRowIndex, attachmentsForRow, rowLineRange } from "./attachments.ts";
 export {
 	DiffBody,
 	type DiffBodyProps,

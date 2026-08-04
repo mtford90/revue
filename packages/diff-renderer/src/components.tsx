@@ -2,12 +2,12 @@ import { type MouseEvent as OpenTUIMouseEvent, TextAttributes } from "@opentui/c
 import { createDiffFile } from "@revue/diff-model";
 import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
+import { attachmentsForRow, rowHasAnchor, rowLineRange } from "./attachments.ts";
 import { decorationAnchorId, findFocusedDecorationAnchor } from "./decorations.ts";
 import { diffLineId } from "./lineIds.ts";
 import { buildDiffRows } from "./rows.ts";
 import { sanitizeTerminalLine } from "./terminalText.ts";
 import type {
-	DecorationAnchor,
 	DiffCell,
 	DiffFile,
 	DiffFileInput,
@@ -261,6 +261,17 @@ export interface DiffBodyProps {
 		actionsFor: (boundary: number) => readonly ExpandDirection[];
 		onExpand: (boundary: number, action: ExpandDirection) => void;
 	};
+	/**
+	 * Mounts only the given row range (end exclusive), for hosts that window a
+	 * large diff; the host owns the spacers standing in for unmounted rows. The
+	 * trailing expander band counts as a pseudo-row at index rows.length.
+	 */
+	window?: { start: number; end: number };
+	/**
+	 * Reports the renderable behind each mounted inline attachment (null on
+	 * unmount), letting a windowing host measure real attachment heights.
+	 */
+	onAttachmentNode?: (id: string, node: { height: number } | null) => void;
 	onRangeSelect?: (range: DiffLineRange) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
 }
@@ -309,18 +320,6 @@ function ExpanderBand({
 	);
 }
 
-function rowHasAnchor(row: DiffRow, anchor: DecorationAnchor): boolean {
-	if (row.type === "hunk-header" || row.hunkIndex !== anchor.hunkIndex) return false;
-	if (row.type === "split-line") {
-		return anchor.side === "deletions"
-			? row.old.oldLineNumber === anchor.lineNumber
-			: row.new.newLineNumber === anchor.lineNumber;
-	}
-	return anchor.side === "deletions"
-		? row.cell.oldLineNumber === anchor.lineNumber
-		: row.cell.newLineNumber === anchor.lineNumber;
-}
-
 function emptyBodyMessage(file: DiffFile): string {
 	if (file.isTooLarge) return "Diff too large to display.";
 	if (file.isBinary) return "Binary file differs.";
@@ -346,6 +345,8 @@ export function DiffBody({
 	emphasis,
 	resolveRange,
 	expanders,
+	window: rowWindow,
+	onAttachmentNode,
 	onRangeSelect,
 	onRangeContextMenu,
 }: DiffBodyProps) {
@@ -405,22 +406,8 @@ export function DiffBody({
 	const oldPaneWidth = Math.floor(splitContentWidth / 2);
 	const newPaneWidth = splitContentWidth - oldPaneWidth;
 
-	const lineRange = (row: DiffRow, side: DiffSide): DiffLineRange | null => {
-		if (!normalized || row.type === "hunk-header") return null;
-		const cell = row.type === "split-line" ? (side === "deletions" ? row.old : row.new) : row.cell;
-		const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
-		if (number === undefined) return null;
-		if (resolveRange) return resolveRange(side, number);
-		const hunk = normalized.metadata.hunks[row.hunkIndex];
-		if (!hunk) return null;
-		return {
-			filePath: normalized.path,
-			hunkOldStart: hunk.deletionStart,
-			side,
-			startLine: number,
-			endLine: number,
-		};
-	};
+	const lineRange = (row: DiffRow, side: DiffSide): DiffLineRange | null =>
+		normalized ? rowLineRange({ file: normalized, row, side, resolveRange }) : null;
 	const lineId = (range: DiffLineRange | null) => (range ? diffLineId(range) : undefined);
 	/** A stacked row shows one line, so a click away from the gutters means the side that line lives on. */
 	const stackRange = (row: Extract<DiffRow, { type: "stack-line" }>): DiffLineRange | null =>
@@ -512,18 +499,10 @@ export function DiffBody({
 					},
 				}
 			: undefined;
-	const rowAttachments = (row: DiffRow): DiffInlineAttachment[] => {
-		if (!normalized || row.type === "hunk-header") return [];
-		return inlineAttachments.filter((attachment) => {
-			const range = lineRange(row, attachment.anchor.side);
-			return (
-				range !== null &&
-				range.filePath === attachment.anchor.filePath &&
-				range.hunkOldStart === attachment.anchor.hunkOldStart &&
-				range.endLine === attachment.anchor.endLine
-			);
-		});
-	};
+	const rowAttachments = (row: DiffRow): DiffInlineAttachment[] =>
+		normalized
+			? attachmentsForRow({ file: normalized, row, attachments: inlineAttachments, resolveRange })
+			: [];
 	const cancelActiveRange = () => {
 		activeStart.current = null;
 		activeRange.current = null;
@@ -542,8 +521,12 @@ export function DiffBody({
 		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
 	}
 
+	const visibleRows = rowWindow ? rows.slice(rowWindow.start, rowWindow.end) : rows;
+	// A windowing host models the trailing band as a pseudo-row at index
+	// rows.length, so the band mounts only when the window covers that index.
+	const windowReachesEnd = !rowWindow || rowWindow.end > rows.length;
 	const trailingBoundary = normalized.metadata.hunks.length;
-	const trailingActions = expanders?.actionsFor(trailingBoundary) ?? [];
+	const trailingActions = windowReachesEnd ? (expanders?.actionsFor(trailingBoundary) ?? []) : [];
 
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: the body clears incomplete gutter drags outside a selectable line.
@@ -553,7 +536,7 @@ export function DiffBody({
 			onMouseUp={cancelActiveRange}
 			onMouseDragEnd={cancelActiveRange}
 		>
-			{rows.map((row) => {
+			{visibleRows.map((row) => {
 				if (row.type === "hunk-header") {
 					const actions = expanders?.actionsFor(row.hunkIndex) ?? [];
 					const band =
@@ -621,7 +604,12 @@ export function DiffBody({
 								/>
 							</box>
 							{attachments.map((attachment) => (
-								<box key={attachment.id} width="100%" flexDirection="column">
+								<box
+									key={attachment.id}
+									width="100%"
+									flexDirection="column"
+									ref={(node) => onAttachmentNode?.(attachment.id, node)}
+								>
 									{attachment.content}
 								</box>
 							))}
@@ -652,7 +640,12 @@ export function DiffBody({
 							/>
 						</box>
 						{attachments.map((attachment) => (
-							<box key={attachment.id} width="100%" flexDirection="column">
+							<box
+								key={attachment.id}
+								width="100%"
+								flexDirection="column"
+								ref={(node) => onAttachmentNode?.(attachment.id, node)}
+							>
 								{attachment.content}
 							</box>
 						))}

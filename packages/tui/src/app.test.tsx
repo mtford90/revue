@@ -798,14 +798,32 @@ test("the keymap floats over the review instead of replacing it", async () => {
 	expect(quits).toBe(0);
 });
 
-test("a chapter shows its file list", async () => {
+test("a chapter shows its file list with the shared directory hoisted", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 40 });
 	await t.renderOnce();
 	await nextChapter(t); // into chapter 1
 	const frame = t.captureCharFrame();
 
-	expect(frame).toContain("Files (1)");
-	expect(frame).toContain("src/lib/backoff.ts");
+	expect(frame).toContain("Files (1) · in src/lib/");
+	expect(frame).toContain("backoff.ts");
+});
+
+test("p cycles path display through tree and full", async () => {
+	const t = await testRender(<App file={file} />, { width: 110, height: 40 });
+	await t.renderOnce();
+	await nextChapter(t); // into chapter 1
+
+	await press(t, "p"); // tree
+	const tree = t.captureCharFrame();
+	expect(tree).toContain("src/lib/");
+	expect(tree).toContain("backoff.ts");
+	expect(tree).not.toContain("· in src/lib/");
+
+	await press(t, "p"); // full
+	expect(t.captureCharFrame()).toContain("src/lib/backoff.ts");
+
+	await press(t, "p"); // back to smart
+	expect(t.captureCharFrame()).toContain("Files (1) · in src/lib/");
 });
 
 test("with a patch, a chapter renders its real diff body and per-file stats", async () => {

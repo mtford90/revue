@@ -76,6 +76,15 @@ import {
 	selectable,
 	useMenuController,
 } from "./menu.tsx";
+import {
+	abbreviatePath,
+	buildPathTree,
+	commonDirPrefix,
+	formatDisplayPath,
+	nextPathDisplayMode,
+	type PathDisplayMode,
+	type PathTreeRow,
+} from "./pathDisplay.ts";
 import type { FileDisplayPreference, Preferences } from "./preferences.ts";
 import { useScrollWindow } from "./scrollWindow.ts";
 import { type SemanticDiffResult, type SemanticEmphasis, terminalSafe } from "./semantic.ts";
@@ -176,6 +185,7 @@ const APP_KEYS = new Set([
 	"]",
 	"{",
 	"}",
+	"p",
 	"r",
 	"s",
 	"t",
@@ -421,6 +431,8 @@ function ChapterBrief({
 	selectedFile,
 	selectedKeyChange,
 	stats,
+	pathDisplay,
+	width,
 	onSelectFile,
 	onFocusKeyChange,
 	onToggleFileReview,
@@ -431,6 +443,8 @@ function ChapterBrief({
 	selectedFile: number;
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
+	pathDisplay: PathDisplayMode;
+	width: number;
 	onSelectFile: (index: number) => void;
 	onFocusKeyChange: (index: number) => void;
 	onToggleFileReview: (path: string) => void;
@@ -453,6 +467,8 @@ function ChapterBrief({
 				vs={vs}
 				selected={selectedFile}
 				stats={stats}
+				pathDisplay={pathDisplay}
+				width={width}
 				onSelect={onSelectFile}
 				onToggleReview={onToggleFileReview}
 			/>
@@ -471,6 +487,7 @@ function ChapterPanel({
 	selectedFile,
 	selectedKeyChange,
 	stats,
+	pathDisplay,
 	progressLabel,
 	onNavigatePage,
 	onToggleIndex,
@@ -493,6 +510,7 @@ function ChapterPanel({
 	selectedFile: number;
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
+	pathDisplay: PathDisplayMode;
 	progressLabel: string;
 	onNavigatePage: (index: number) => void;
 	onToggleIndex: () => void;
@@ -606,6 +624,8 @@ function ChapterPanel({
 						selectedFile={selectedFile}
 						selectedKeyChange={selectedKeyChange}
 						stats={stats}
+						pathDisplay={pathDisplay}
+						width={Math.max(20, width - 4)}
 						onSelectFile={onSelectFile}
 						onFocusKeyChange={onFocusKeyChange}
 						onToggleFileReview={onToggleFileReview}
@@ -787,11 +807,72 @@ function PrologueView({
 }
 
 // ── Chapter file list (review state belongs to Revue's shell) ─────────────────
+const FILE_ROW_CHROME = 5; // marker column plus "[x] "
+
+const fileRowLabelWidth = (width: number, stat: FileStat | undefined): number => {
+	const statsWidth = stat ? `+${stat.additions} -${stat.deletions}`.length + 1 : 0;
+	return Math.max(1, width - FILE_ROW_CHROME - statsWidth);
+};
+
+function FileRow({
+	path,
+	label,
+	done,
+	active,
+	stat,
+	onSelect,
+	onToggleReview,
+}: {
+	path: string;
+	label: string;
+	done: boolean;
+	active: boolean;
+	stat: FileStat | undefined;
+	onSelect: () => void;
+	onToggleReview: (path: string) => void;
+}) {
+	const theme = useTheme();
+	return (
+		<box flexDirection="row" width="100%" height={1}>
+			<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
+				{active ? "▸" : " "}
+			</text>
+			<text
+				flexShrink={0}
+				fg={done ? theme.badgeAdded : theme.muted}
+				onMouseDown={() => onToggleReview(path)}
+			>
+				{`[${done ? "x" : " "}] `}
+			</text>
+			<text
+				flexGrow={1}
+				flexShrink={1}
+				minWidth={0}
+				fg={active ? theme.accent : done ? theme.badgeAdded : theme.muted}
+				wrapMode="none"
+				truncate
+				onMouseDown={onSelect}
+			>
+				{label}
+			</text>
+			{stat ? (
+				<text flexShrink={0} paddingLeft={1}>
+					<span fg={theme.badgeAdded}>+{stat.additions}</span>
+					<span> </span>
+					<span fg={theme.badgeRemoved}>-{stat.deletions}</span>
+				</text>
+			) : null}
+		</box>
+	);
+}
+
 function FileList({
 	chapter,
 	vs,
 	selected,
 	stats,
+	pathDisplay,
+	width,
 	onSelect,
 	onToggleReview,
 }: {
@@ -799,49 +880,57 @@ function FileList({
 	vs: ViewState;
 	selected: number;
 	stats: Map<string, FileStat>;
+	pathDisplay: PathDisplayMode;
+	width: number;
 	onSelect: (index: number) => void;
 	onToggleReview: (path: string) => void;
 }) {
 	const theme = useTheme();
 	const paths = chapterFilePaths(chapter);
+	const prefix = pathDisplay === "smart" ? commonDirPrefix(paths) : "";
+	const rows =
+		pathDisplay === "tree"
+			? buildPathTree(paths)
+			: paths.map(
+					(path): PathTreeRow => ({
+						kind: "file",
+						depth: 0,
+						label: pathDisplay === "smart" ? path.slice(prefix.length) : path,
+						path,
+					}),
+				);
 	return (
 		<box flexDirection="column">
-			<text fg={theme.heading}>Files ({paths.length})</text>
-			{paths.map((path, index) => {
-				const done = isFileReviewed(vs, chapter.id, path);
-				const active = index === selected;
-				const stat = stats.get(path);
+			<text fg={theme.heading} wrapMode="none" truncate>
+				Files ({paths.length}){prefix ? <span fg={theme.muted}> · in {prefix}</span> : null}
+			</text>
+			{rows.map((row) => {
+				const indent = "  ".repeat(row.depth);
+				if (row.kind === "dir") {
+					return (
+						<text key={`dir:${row.depth}:${row.label}`} fg={theme.muted} wrapMode="none" truncate>
+							{`     ${indent}${row.label}`}
+						</text>
+					);
+				}
+				const index = paths.indexOf(row.path);
+				const stat = stats.get(row.path);
+				const bare = `${indent}${row.label}`;
+				const label =
+					pathDisplay === "smart"
+						? abbreviatePath({ path: bare, width: fileRowLabelWidth(width, stat) })
+						: bare;
 				return (
-					<box key={path} flexDirection="row" width="100%" height={1}>
-						<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
-							{active ? "▸" : " "}
-						</text>
-						<text
-							flexShrink={0}
-							fg={done ? theme.badgeAdded : theme.muted}
-							onMouseDown={() => onToggleReview(path)}
-						>
-							{`[${done ? "x" : " "}] `}
-						</text>
-						<text
-							flexGrow={1}
-							flexShrink={1}
-							minWidth={0}
-							fg={active ? theme.accent : done ? theme.badgeAdded : theme.muted}
-							wrapMode="none"
-							truncate
-							onMouseDown={() => onSelect(index)}
-						>
-							{path}
-						</text>
-						{stat ? (
-							<text flexShrink={0} paddingLeft={1}>
-								<span fg={theme.badgeAdded}>+{stat.additions}</span>
-								<span> </span>
-								<span fg={theme.badgeRemoved}>-{stat.deletions}</span>
-							</text>
-						) : null}
-					</box>
+					<FileRow
+						key={row.path}
+						path={row.path}
+						label={label}
+						done={isFileReviewed(vs, chapter.id, row.path)}
+						active={index === selected}
+						stat={stat}
+						onSelect={() => onSelect(index)}
+						onToggleReview={onToggleReview}
+					/>
 				);
 			})}
 		</box>
@@ -1229,6 +1318,10 @@ function ThreadComposer({
 	);
 }
 
+// Story headers have no tree to draw, so tree mode reads as smart there.
+const headerPathFormatter = (mode: PathDisplayMode) =>
+	mode === "full" ? undefined : (path: string, width: number) => formatDisplayPath({ path, width });
+
 const fileHeaderId = (chapterId: string, index: number) =>
 	`chapter-file-header:${chapterId}:${index}`;
 
@@ -1248,6 +1341,7 @@ function ChapterView({
 	diffPreference,
 	splitFits,
 	vs,
+	pathDisplay,
 	selectedFile,
 	selectedHunkIndex,
 	selectedKeyChange,
@@ -1277,6 +1371,7 @@ function ChapterView({
 	diffPreference: DiffLayoutPreference;
 	splitFits: boolean;
 	vs: ViewState;
+	pathDisplay: PathDisplayMode;
 	selectedFile: number;
 	selectedHunkIndex: number;
 	selectedKeyChange: number;
@@ -1397,6 +1492,7 @@ function ChapterView({
 									file={diffFile}
 									theme={diffTheme}
 									width={Math.max(1, width - 7)}
+									formatPath={headerPathFormatter(pathDisplay)}
 									onSelect={() => onSelectFile(fileIndex)}
 								/>
 							</box>
@@ -1487,6 +1583,7 @@ function SemanticChapterView({
 	diffPreference,
 	splitFits,
 	vs,
+	pathDisplay,
 	selectedFile,
 	selectedKeyChange,
 	collapsedFiles,
@@ -1514,6 +1611,7 @@ function SemanticChapterView({
 	diffPreference: DiffLayoutPreference;
 	splitFits: boolean;
 	vs: ViewState;
+	pathDisplay: PathDisplayMode;
 	selectedFile: number;
 	selectedKeyChange: number;
 	collapsedFiles: Set<string>;
@@ -1638,6 +1736,7 @@ function SemanticChapterView({
 										file={semanticFile.file}
 										theme={diffTheme}
 										width={Math.max(1, width - 7)}
+										formatPath={headerPathFormatter(pathDisplay)}
 										onSelect={() => onSelectFile(fileIndex)}
 									/>
 								</box>
@@ -1747,6 +1846,7 @@ const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
 		title: "Views",
 		lines: [
 			"s show/hide the sidebar; its narrative stacks above the diff",
+			"p cycle path display: smart, tree, full",
 			"F10 → View toggles Patch / read-only Semantic",
 			"F10 → View sets diff layout: auto, split or stacked",
 			"anchors, exact range highlights, and threads are Patch-only",
@@ -2004,6 +2104,9 @@ export function App({
 	const [fileDisplay, setFileDisplayState] = useState<FileDisplayPreference>(
 		initialPreferences.fileDisplay ?? "all",
 	);
+	const [pathDisplay, setPathDisplayState] = useState<PathDisplayMode>(
+		initialPreferences.pathDisplay ?? "smart",
+	);
 	const [viewMode, setViewModeState] = useState<"patch" | "semantic">("patch");
 	const [semantic, setSemantic] = useState<PreparedSemantic | null>(null);
 	const [semanticLoading, setSemanticLoading] = useState(false);
@@ -2228,6 +2331,10 @@ export function App({
 		setFileDisplayState(next);
 		updatePreferences({ fileDisplay: next });
 		requestFileFocus();
+	}
+	function changePathDisplay(next: PathDisplayMode) {
+		setPathDisplayState(next);
+		updatePreferences({ pathDisplay: next });
 	}
 	function saveCurrentSession(nextPageId = pageId(page)) {
 		const currentPageId = pageId(page);
@@ -2908,10 +3015,12 @@ export function App({
 		viewMode,
 		semanticLoading,
 		fileDisplay,
+		pathDisplay,
 		sidebarPreference,
 		diffPreference,
 		splitReachable,
 		setFileDisplay: changeFileDisplay,
+		setPathDisplay: changePathDisplay,
 		setSidebarPreference: changeSidebarPreference,
 		setDiffPreference: changeDiffPreference,
 		requestQuit: quit,
@@ -3058,6 +3167,8 @@ export function App({
 			toggleSidebar();
 		} else if (name === "w") {
 			toggleAllFiles();
+		} else if (name === "p") {
+			changePathDisplay(nextPathDisplayMode(pathDisplay));
 		} else if (name === "t") {
 			openThemePicker();
 		} else if (name === "y") {
@@ -3176,6 +3287,7 @@ export function App({
 							selectedFile={selectedFile}
 							selectedKeyChange={selectedKeyChange}
 							stats={stats}
+							pathDisplay={pathDisplay}
 							progressLabel={progressLabel}
 							onNavigatePage={goto}
 							onToggleIndex={() => changeIndexExpanded(!indexExpanded)}
@@ -3223,6 +3335,8 @@ export function App({
 											selectedFile={selectedFile}
 											selectedKeyChange={selectedKeyChange}
 											stats={stats}
+											pathDisplay={pathDisplay}
+											width={contentWidth}
 											onSelectFile={selectFile}
 											onFocusKeyChange={focusKeyChange}
 											onToggleFileReview={toggleFileReview}
@@ -3248,6 +3362,7 @@ export function App({
 									onAttachmentNode={noteAttachmentNode}
 									splitFits={splitFits}
 									vs={vs}
+									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
 									selectedHunkIndex={selectedHunkIndex}
 									selectedKeyChange={selectedKeyChange}
@@ -3282,6 +3397,7 @@ export function App({
 									onAttachmentNode={noteAttachmentNode}
 									splitFits={splitFits}
 									vs={vs}
+									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
 									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}

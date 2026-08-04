@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { PATH_DISPLAY_MODES } from "./pathDisplay.ts";
 
 export type FileDisplayPreference = "all" | "focused";
 
@@ -13,6 +14,7 @@ const PreferencesSchema = z.object({
 	sidebarPreference: z.enum(["auto", "shown", "hidden"]).optional(),
 	diffPreference: z.enum(["auto", "split", "stacked"]).optional(),
 	fileDisplay: z.enum(["all", "focused"]).optional(),
+	pathDisplay: z.enum(PATH_DISPLAY_MODES).optional(),
 	viewMode: z.enum(["patch", "semantic"]).optional(),
 	panelWidth: z.number().int().positive().optional(),
 });

@@ -668,11 +668,12 @@ export interface DiffFileHeaderProps {
 	file: DiffFileInput;
 	width: number;
 	theme: Theme;
+	formatPath?: (path: string, width: number) => string;
 	onSelect?: () => void;
 }
 
 /** Compact path and stats row used inside Revue's existing collapse shell. */
-export function DiffFileHeader({ file, width, theme, onSelect }: DiffFileHeaderProps) {
+export function DiffFileHeader({ file, width, theme, formatPath, onSelect }: DiffFileHeaderProps) {
 	const normalized = useMemo(() => createDiffFile(file), [file]);
 	const state =
 		normalized.metadata.type === "new"
@@ -680,10 +681,14 @@ export function DiffFileHeader({ file, width, theme, onSelect }: DiffFileHeaderP
 			: normalized.metadata.type === "deleted"
 				? " (deleted)"
 				: "";
-	const path =
+	const fullPath =
 		normalized.previousPath && normalized.previousPath !== normalized.path
 			? `${normalized.previousPath} -> ${normalized.path}`
 			: normalized.path;
+	const statsWidth = `+${normalized.stats.additions} -${normalized.stats.deletions} `.length + 2;
+	const path = formatPath
+		? formatPath(fullPath, Math.max(1, width - statsWidth - state.length))
+		: fullPath;
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI boxes expose pointer handlers without DOM roles.
 		<box

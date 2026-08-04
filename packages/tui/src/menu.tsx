@@ -3,6 +3,7 @@
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { useState } from "react";
 import type { DiffLayoutPreference, SidebarPreference } from "./layout.ts";
+import type { PathDisplayMode } from "./pathDisplay.ts";
 import type { FileDisplayPreference } from "./preferences.ts";
 import { useTheme } from "./theme.ts";
 
@@ -52,6 +53,12 @@ const FILE_DISPLAY_PREFERENCES: { preference: FileDisplayPreference; label: stri
 	{ preference: "focused", label: "File display: focused" },
 ];
 
+const PATH_DISPLAY_PREFERENCES: { preference: PathDisplayMode; label: string }[] = [
+	{ preference: "smart", label: "Paths: smart" },
+	{ preference: "tree", label: "Paths: tree" },
+	{ preference: "full", label: "Paths: full" },
+];
+
 const SIDEBAR_PREFERENCES: { preference: SidebarPreference; label: string }[] = [
 	{ preference: "auto", label: "Sidebar: auto" },
 	{ preference: "shown", label: "Sidebar: shown" },
@@ -93,10 +100,12 @@ export const buildAppMenus = ({
 	viewMode,
 	semanticLoading,
 	fileDisplay,
+	pathDisplay,
 	sidebarPreference,
 	diffPreference,
 	splitReachable,
 	setFileDisplay,
+	setPathDisplay,
 	setSidebarPreference,
 	setDiffPreference,
 	requestQuit,
@@ -122,10 +131,12 @@ export const buildAppMenus = ({
 	viewMode: "patch" | "semantic";
 	semanticLoading: boolean;
 	fileDisplay: FileDisplayPreference;
+	pathDisplay: PathDisplayMode;
 	sidebarPreference: SidebarPreference;
 	diffPreference: DiffLayoutPreference;
 	splitReachable: boolean;
 	setFileDisplay: (preference: FileDisplayPreference) => void;
+	setPathDisplay: (preference: PathDisplayMode) => void;
 	setSidebarPreference: (preference: SidebarPreference) => void;
 	setDiffPreference: (preference: DiffLayoutPreference) => void;
 	requestQuit: () => void;
@@ -198,6 +209,15 @@ export const buildAppMenus = ({
 			}),
 		),
 		{ kind: "separator", id: "file-display" },
+		...PATH_DISPLAY_PREFERENCES.map(
+			({ preference, label }): MenuEntry => ({
+				kind: "item",
+				label,
+				checked: pathDisplay === preference,
+				action: () => setPathDisplay(preference),
+			}),
+		),
+		{ kind: "separator", id: "path-display" },
 		...DIFF_PREFERENCES.map(
 			({ preference, label }): MenuEntry => ({
 				kind: "item",

@@ -46,10 +46,9 @@ with the skill installed:
     revue show .revue/runs/a1b2c3d4e5f6
 ```
 
-The reviewer is a full-screen TUI, so that last command runs in your own terminal, not the
-agent's — copy it out and take the tour. Anything Git can diff can be narrated: a branch,
-someone's GitHub PR, staged, unstaged, or the working tree. From a checkout, tour the bundled
-sample without touching a repository: `bun run revue show examples/sample-run`.
+The reviewer is a full-screen TUI, so that last command runs in your own terminal — copy it
+out and take the tour. Anything Git can diff can be narrated: a branch, someone's GitHub PR,
+staged, unstaged, or the working tree.
 
 ## Just the diff
 

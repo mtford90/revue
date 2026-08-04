@@ -4,6 +4,7 @@ export {
 	type DiffBodyProps,
 	DiffFileHeader,
 	type DiffFileHeaderProps,
+	type ExpandDirection,
 } from "./components.tsx";
 export {
 	applicableDecorations,

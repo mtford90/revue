@@ -9,13 +9,16 @@ import {
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
 	DiffBody,
+	type DiffBodyProps,
 	type DiffFile,
 	DiffFileHeader,
+	type DiffFileInput,
 	type DiffInlineAttachment,
 	type DiffLineRange,
 	type DiffSide,
 	decorationAnchorId,
 	diffRangeWithin,
+	type ExpandDirection,
 	findFocusedDecorationAnchor,
 	parsePatch,
 	prepareSyntaxHighlighting,
@@ -45,6 +48,12 @@ import {
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { copyToClipboard } from "./clipboard.ts";
 import { type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import {
+	boundaryActions,
+	expandBoundary,
+	expandedPatchText,
+	type FileExpansion,
+} from "./expand.ts";
 import {
 	type DiffLayoutPreference,
 	defaultPanelWidth,
@@ -1116,6 +1125,12 @@ function ThreadComposer({
 const fileHeaderId = (chapterId: string, index: number) =>
 	`chapter-file-header:${chapterId}:${index}`;
 
+/** How a view reaches the context-expansion machinery the app shell owns. */
+type ContextExpansionUi = {
+	variantFor: (path: string) => DiffFile | undefined;
+	expandersFor: (path: string, base: DiffFileInput) => DiffBodyProps["expanders"];
+};
+
 function ChapterView({
 	chapter,
 	diffTheme,
@@ -1133,6 +1148,7 @@ function ChapterView({
 	selectedThreadRange,
 	threadDraft,
 	replyDraft,
+	contextExpansion,
 	onSelectFile,
 	onToggleCollapse,
 	onToggleFileReview,
@@ -1159,6 +1175,7 @@ function ChapterView({
 	selectedThreadRange: DiffLineRange | undefined;
 	threadDraft: DiffInlineAttachment | undefined;
 	replyDraft: { threadId: string; content: ReactNode } | undefined;
+	contextExpansion?: ContextExpansionUi;
 	onSelectFile: (index: number) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
@@ -1225,6 +1242,7 @@ function ChapterView({
 						const focused = fileIndex === selectedFile;
 						const collapsed = collapsedFiles.has(path);
 						const reviewed = isFileReviewed(vs, chapter.id, path);
+						const displayed = contextExpansion?.variantFor(path) ?? diffFile;
 						return (
 							<box key={diffFile.id} flexDirection="column" width="100%">
 								{streamIndex > 0 ? (
@@ -1264,10 +1282,10 @@ function ChapterView({
 								</box>
 								{collapsed ? null : (
 									<DiffBody
-										file={diffFile}
+										file={displayed}
 										theme={diffTheme}
 										layout={layoutForFile({
-											file: diffFile,
+											file: displayed,
 											preference: diffPreference,
 											splitFits,
 										})}
@@ -1278,6 +1296,10 @@ function ChapterView({
 										focusedDecorationId={focusedDecorationId}
 										selectedRange={selectedThreadRange}
 										inlineAttachments={inlineAttachments}
+										resolveRange={
+											displayed === diffFile ? undefined : gitRangeResolver(diffFiles, path)
+										}
+										expanders={contextExpansion?.expandersFor(path, diffFile)}
 										onRangeSelect={onSelectThreadRange}
 										onRangeContextMenu={onRangeContextMenu}
 									/>
@@ -1557,7 +1579,11 @@ const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
 	},
 	{
 		title: "Files",
-		lines: ["tab/shift-tab focus · enter toggle diff", "c/e collapse/expand all"],
+		lines: [
+			"tab/shift-tab focus · enter toggle diff",
+			"c/e collapse/expand all",
+			"click a ⋯ band to reveal unchanged lines around a hunk",
+		],
 	},
 	{
 		title: "Review",
@@ -1735,6 +1761,7 @@ export function App({
 	file,
 	diffFiles = null,
 	loadSemanticDiff,
+	loadFileLines,
 	initialViewState = emptyViewState(),
 	initialSessionState = { pages: {} },
 	initialPreferences = {},
@@ -1756,6 +1783,8 @@ export function App({
 	file: RevueChaptersFile | null;
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
+	/** The pinned new-side blob for a path, split into lines; null when unavailable. */
+	loadFileLines?: (path: string) => Promise<string[] | null>;
 	initialViewState?: ViewState;
 	initialSessionState?: ReviewSessionState;
 	initialPreferences?: Preferences;
@@ -1812,6 +1841,9 @@ export function App({
 	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
 		() => new Set(initialPageState.collapsedFiles),
 	);
+	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
+	const [expansions, setExpansions] = useState<Map<string, FileExpansion>>(() => new Map());
+	const [expandedVariants, setExpandedVariants] = useState<Map<string, DiffFile>>(() => new Map());
 	const [fileFocusRequest, setFileFocusRequest] = useState(0);
 	const [keyFocusRequest, setKeyFocusRequest] = useState(0);
 	const [diffAnchorTarget, setDiffAnchorTarget] = useState<{ id: string; request: number } | null>(
@@ -1926,7 +1958,28 @@ export function App({
 	}
 
 	useEffect(() => {
-		const highlightable = [...(diffFiles ?? []), ...semanticDiffFiles(semantic)];
+		if (!loadFileLines || !chapter) return;
+		let live = true;
+		for (const path of chapterFilePaths(chapter)) {
+			if (fileLines.has(path)) continue;
+			loadFileLines(path).then((lines) => {
+				if (!live) return;
+				setFileLines((previous) =>
+					previous.has(path) ? previous : new Map(previous).set(path, lines),
+				);
+			});
+		}
+		return () => {
+			live = false;
+		};
+	}, [chapter, loadFileLines, fileLines]);
+
+	useEffect(() => {
+		const highlightable = [
+			...(diffFiles ?? []),
+			...semanticDiffFiles(semantic),
+			...expandedVariants.values(),
+		];
 		if (!highlightable.length || preparedSyntaxTheme === theme.syntaxTheme) return;
 		let current = true;
 		const syntaxTheme = theme.syntaxTheme;
@@ -1936,7 +1989,7 @@ export function App({
 		return () => {
 			current = false;
 		};
-	}, [diffFiles, semantic, preparedSyntaxTheme, theme.syntaxTheme]);
+	}, [diffFiles, semantic, expandedVariants, preparedSyntaxTheme, theme.syntaxTheme]);
 
 	useEffect(() => {
 		const scroll = pageScroll.current;
@@ -2163,6 +2216,8 @@ export function App({
 		setSelectedHunkIndex(restored.selectedHunk);
 		setSelectedKeyChange(restored.selectedKeyChange);
 		setCollapsedFiles(new Set(restored.collapsedFiles));
+		setExpansions(new Map());
+		setExpandedVariants(new Map());
 		setFileFocusRequest(0);
 		setKeyFocusRequest(0);
 		setDiffAnchorTarget(null);
@@ -2185,6 +2240,43 @@ export function App({
 		setAllFiles(!allFiles);
 		restorePageFocus(nextPageId);
 	}
+	function expandContext(
+		path: string,
+		base: DiffFileInput,
+		boundary: number,
+		action: ExpandDirection,
+	) {
+		const lines = fileLines.get(path);
+		if (!lines) return;
+		const nextExpansion = expandBoundary(
+			base.metadata.hunks,
+			expansions.get(path),
+			lines.length,
+			boundary,
+			action,
+		);
+		const parsed = parsePatch(
+			expandedPatchText({ file: base, newLines: lines, expansion: nextExpansion }),
+			`expanded:${path}`,
+		)[0];
+		if (!parsed) return;
+		void prepareSyntaxHighlighting([parsed], preparedSyntaxTheme).then(() => {
+			setExpansions((previous) => new Map(previous).set(path, nextExpansion));
+			setExpandedVariants((previous) => new Map(previous).set(path, parsed));
+		});
+	}
+	const contextExpansion: ContextExpansionUi = {
+		variantFor: (path) => expandedVariants.get(path),
+		expandersFor: (path, base) => {
+			const lines = fileLines.get(path);
+			if (!lines) return undefined;
+			return {
+				actionsFor: (boundary) =>
+					boundaryActions(base.metadata.hunks, expansions.get(path), lines.length, boundary),
+				onExpand: (boundary, action) => expandContext(path, base, boundary, action),
+			};
+		},
+	};
 	function gotoChapter(chapter: Chapter) {
 		const idx = pages.findIndex((p) => p.kind === "chapter" && p.chapter.id === chapter.id);
 		if (idx >= 0) goto(idx);
@@ -2779,6 +2871,7 @@ export function App({
 									width={contentWidth}
 									diffPreference={diffPreference}
 									fileDisplay={fileDisplay}
+									contextExpansion={contextExpansion}
 									splitFits={splitFits}
 									vs={vs}
 									selectedFile={selectedFile}
@@ -2917,6 +3010,7 @@ export async function runApp(
 	options: {
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: () => Promise<SemanticDiffResult>;
+		loadFileLines?: (path: string) => Promise<string[] | null>;
 		initialViewState?: ViewState;
 		initialSessionState?: ReviewSessionState;
 		initialPreferences?: Preferences;
@@ -2951,6 +3045,7 @@ export async function runApp(
 				file={file}
 				diffFiles={options.diffFiles ?? null}
 				loadSemanticDiff={options.loadSemanticDiff}
+				loadFileLines={options.loadFileLines}
 				initialViewState={options.initialViewState}
 				initialSessionState={options.initialSessionState}
 				initialPreferences={options.initialPreferences}

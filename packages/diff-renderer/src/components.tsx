@@ -253,8 +253,60 @@ export interface DiffBodyProps {
 	 * are display-only can emit ranges anchored to the authoritative patch.
 	 */
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
+	/**
+	 * GitHub-style context expanders on hunk boundaries. Boundary 0 sits above the
+	 * first hunk; boundary hunkCount below the last. Absent boundaries render nothing.
+	 */
+	expanders?: {
+		actionsFor: (boundary: number) => readonly ExpandDirection[];
+		onExpand: (boundary: number, action: ExpandDirection) => void;
+	};
 	onRangeSelect?: (range: DiffLineRange) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
+}
+
+export type ExpandDirection = "up" | "down" | "all";
+
+const EXPAND_LABELS: Record<ExpandDirection, string> = {
+	up: "▲ expand up",
+	down: "▼ expand down",
+	all: "↕ expand all",
+};
+
+function ExpanderBand({
+	boundary,
+	actions,
+	theme,
+	onExpand,
+}: {
+	boundary: number;
+	actions: readonly ExpandDirection[];
+	theme: Theme;
+	onExpand: (boundary: number, action: ExpandDirection) => void;
+}) {
+	return (
+		<box width="100%" height={1} backgroundColor={theme.panel} flexDirection="row">
+			<text flexShrink={0} fg={theme.muted} selectable={false}>
+				{"  ⋯"}
+			</text>
+			{actions.map((action) => (
+				// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI pointer affordances live on text renderables.
+				<text
+					key={action}
+					flexShrink={0}
+					fg={theme.accent}
+					selectable={false}
+					onMouseDown={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onExpand(boundary, action);
+					}}
+				>
+					{`  [${EXPAND_LABELS[action]}]`}
+				</text>
+			))}
+		</box>
+	);
 }
 
 function rowHasAnchor(row: DiffRow, anchor: DecorationAnchor): boolean {
@@ -293,6 +345,7 @@ export function DiffBody({
 	inlineAttachments = [],
 	emphasis,
 	resolveRange,
+	expanders,
 	onRangeSelect,
 	onRangeContextMenu,
 }: DiffBodyProps) {
@@ -489,6 +542,9 @@ export function DiffBody({
 		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
 	}
 
+	const trailingBoundary = normalized.metadata.hunks.length;
+	const trailingActions = expanders?.actionsFor(trailingBoundary) ?? [];
+
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: the body clears incomplete gutter drags outside a selectable line.
 		<box
@@ -499,14 +555,30 @@ export function DiffBody({
 		>
 			{rows.map((row) => {
 				if (row.type === "hunk-header") {
-					return showHunkHeaders ? (
-						<box key={row.key} width="100%" height={1} backgroundColor={theme.panel}>
-							<text fg={theme.accent} wrapMode="none" truncate>
-								{row.hunkIndex === selectedHunkIndex ? "▎" : " "}{" "}
-								{sanitizeTerminalLine(row.text).replaceAll("\t", "  ")}
-							</text>
+					const actions = expanders?.actionsFor(row.hunkIndex) ?? [];
+					const band =
+						expanders && actions.length ? (
+							<ExpanderBand
+								boundary={row.hunkIndex}
+								actions={actions}
+								theme={theme}
+								onExpand={expanders.onExpand}
+							/>
+						) : null;
+					if (!band && !showHunkHeaders) return null;
+					return (
+						<box key={row.key} flexDirection="column" width="100%">
+							{band}
+							{showHunkHeaders ? (
+								<box width="100%" height={1} backgroundColor={theme.panel}>
+									<text fg={theme.accent} wrapMode="none" truncate>
+										{row.hunkIndex === selectedHunkIndex ? "▎" : " "}{" "}
+										{sanitizeTerminalLine(row.text).replaceAll("\t", "  ")}
+									</text>
+								</box>
+							) : null}
 						</box>
-					) : null;
+					);
 				}
 				const selected = row.hunkIndex === selectedHunkIndex;
 				const id = row.key === anchorRowKey ? anchorId : undefined;
@@ -587,6 +659,14 @@ export function DiffBody({
 					</box>
 				);
 			})}
+			{expanders && trailingActions.length ? (
+				<ExpanderBand
+					boundary={trailingBoundary}
+					actions={trailingActions}
+					theme={theme}
+					onExpand={expanders.onExpand}
+				/>
+			) : null}
 		</box>
 	);
 }

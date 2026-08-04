@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
 	formatMarkdownReview,
 	MarkdownExportError,
@@ -23,6 +24,7 @@ import {
 	type ThreadAuthor,
 } from "@revue/types";
 import { runDoctor } from "./doctor.ts";
+import { splitFileLines } from "./expand.ts";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
@@ -599,9 +601,24 @@ async function showRun(
 	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
 	const repositoryRoot = repositoryRootForRun(directory);
 	const humanAuthor = resolveHumanAuthor(repositoryRoot);
+	const fileLineCache = new Map<string, Promise<string[] | null>>();
+	const loadFileLines = (path: string): Promise<string[] | null> => {
+		const cached = fileLineCache.get(path);
+		if (cached) return cached;
+		const entry = run.manifest.files.find((candidate) => candidate.path === path);
+		const promise =
+			entry?.newBlob && !entry.isBinary
+				? readFile(join(directory, "blobs", entry.newBlob), "utf8")
+						.then(splitFileLines)
+						.catch(() => null)
+				: Promise.resolve(null);
+		fileLineCache.set(path, promise);
+		return promise;
+	};
 	await runApp(run.chapters, {
 		diffFiles,
 		loadSemanticDiff: () => generateSemanticDiff(run),
+		loadFileLines,
 		initialViewState: store.get(),
 		initialSessionState: store.getSession(),
 		initialPreferences: preferences,

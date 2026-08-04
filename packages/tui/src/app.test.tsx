@@ -184,6 +184,44 @@ test("the menu bar's Story and Files buttons switch surfaces with the pointer", 
 	expect(t.captureCharFrame()).toContain("Chapters (3)");
 });
 
+async function settle(t: Awaited<ReturnType<typeof testRender>>) {
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await t.renderOnce();
+	});
+}
+
+test("expander bands reveal pinned context lines above a hunk", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const blobLines = Array.from({ length: 60 }, (_, index) => `ctx ${index + 1}`);
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			loadFileLines={async (path) => (path === "src/lib/apiClient.ts" ? blobLines : null)}
+		/>,
+		{ width: 130, height: 60 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await nextChapter(t); // chapter 2 shows src/lib/apiClient.ts (@@ -41)
+	await settle(t); // the blob lines land asynchronously
+
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("expand up"); // forty unchanged lines sit above the hunk
+
+	const lines = frame.split("\n");
+	const bandY = lines.findIndex((line) => line.includes("expand up"));
+	await click(t, (lines[bandY]?.indexOf("expand up") ?? -1) + 1, bandY);
+	await settle(t); // highlighting the widened patch is asynchronous too
+
+	const expanded = t.captureCharFrame();
+	expect(expanded).toContain("ctx 40"); // one twenty-line step upward
+	expect(expanded).toContain("ctx 21");
+	expect(expanded).not.toContain("ctx 20");
+	expect(expanded).toContain("expand all"); // the last twenty lines fit one reveal
+});
+
 test("opens on the prologue with the chapter list and review progress", async () => {
 	const t = await testRender(<App file={file} />, { width: 130, height: 32 });
 	await t.renderOnce();

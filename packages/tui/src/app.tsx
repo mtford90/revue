@@ -95,6 +95,7 @@ import {
 	permalinkFor,
 	sourceRangeFor,
 } from "./sourceLink.ts";
+import { StatusBar, type StatusNotice } from "./statusBar.tsx";
 import { complexityColor, severityColor, ThemeProvider, useTheme } from "./theme.ts";
 import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
 import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
@@ -105,7 +106,6 @@ import {
 	isKeyChangeChecked,
 	nextUnreviewedChapter,
 	type ReviewSessionState,
-	reviewedChapterCount,
 	toggleChapter,
 	toggleFile,
 	toggleKeyChange,
@@ -361,7 +361,6 @@ function PageNavStrip({
 	pages,
 	current,
 	chapterCount,
-	progressLabel,
 	width,
 	vs,
 	onNavigatePage,
@@ -371,7 +370,6 @@ function PageNavStrip({
 	pages: Page[];
 	current: number;
 	chapterCount: number;
-	progressLabel: string;
 	width: number;
 	vs: ViewState;
 	onNavigatePage: (index: number) => void;
@@ -406,9 +404,6 @@ function PageNavStrip({
 					{chapter ? `Chapter ${chapter.order}/${chapterCount}` : (page?.label ?? "")}
 				</text>
 			</box>
-			<text flexShrink={0} fg={theme.muted}>
-				{`${progressLabel} `}
-			</text>
 			{filesSurface ? null : (
 				<NavButton
 					label={compact ? "▶" : "Next ▶"}
@@ -488,7 +483,6 @@ function ChapterPanel({
 	selectedKeyChange,
 	stats,
 	pathDisplay,
-	progressLabel,
 	onNavigatePage,
 	onToggleIndex,
 	onResizeStart,
@@ -511,7 +505,6 @@ function ChapterPanel({
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
 	pathDisplay: PathDisplayMode;
-	progressLabel: string;
 	onNavigatePage: (index: number) => void;
 	onToggleIndex: () => void;
 	onResizeStart: (event: OpenTUIMouseEvent) => void;
@@ -546,10 +539,6 @@ function ChapterPanel({
 			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
 				<text flexShrink={0} fg={theme.accent}>
 					revue
-				</text>
-				<box flexGrow={1} minWidth={0} />
-				<text flexShrink={0} fg={theme.muted}>
-					{progressLabel}
 				</text>
 			</box>
 			{chapterCount > 0 && !filesSurface ? (
@@ -3338,15 +3327,34 @@ export function App({
 		}
 	});
 
-	const reviewed = reviewedChapterCount(vs, chapters);
 	const filesPaths = chapterFilePaths(filesChapter);
 	const reviewedFiles = filesPaths.filter((path) =>
 		isFileReviewed(vs, ALL_FILES_CHAPTER_ID, path),
 	).length;
-	const progressLabel =
-		page?.kind === "files"
-			? `${reviewedFiles}/${filesPaths.length} files reviewed`
-			: `${reviewed}/${chapters.length} reviewed`;
+	const storyProgress = chapters.reduce(
+		(acc, c) => {
+			const paths = chapterFilePaths(c);
+			const chapterDone = isChapterReviewed(vs, c.id);
+			return {
+				total: acc.total + paths.length,
+				reviewed:
+					acc.reviewed + paths.filter((p) => chapterDone || isFileReviewed(vs, c.id, p)).length,
+			};
+		},
+		{ total: 0, reviewed: 0 },
+	);
+	const filesSurface = page?.kind === "files";
+	const statusContext =
+		page?.kind === "chapter"
+			? `Ch ${page.chapter.order}/${chapters.length} · ${page.chapter.title}`
+			: (page?.label ?? "revue");
+	const statusNotice: StatusNotice | null = threadDraft
+		? null
+		: threadNotice
+			? { text: threadNotice, tone: "error" }
+			: copyNotice
+				? { text: copyNotice.text, tone: "success" }
+				: null;
 
 	return (
 		<ThemeProvider value={theme}>
@@ -3362,7 +3370,6 @@ export function App({
 				<MenuBar
 					activeMenuId={menu.activeMenuId}
 					terminalWidth={width}
-					viewMode={viewMode}
 					surface={page?.kind === "files" ? "files" : "story"}
 					canSwitchSurface={Boolean(file)}
 					onSelectSurface={(target) => {
@@ -3383,7 +3390,6 @@ export function App({
 						pages={pages}
 						current={current}
 						chapterCount={chapters.length}
-						progressLabel={progressLabel}
 						width={width}
 						vs={vs}
 						onNavigatePage={goto}
@@ -3404,7 +3410,6 @@ export function App({
 							selectedKeyChange={selectedKeyChange}
 							stats={stats}
 							pathDisplay={pathDisplay}
-							progressLabel={progressLabel}
 							onNavigatePage={goto}
 							onToggleIndex={() => changeIndexExpanded(!indexExpanded)}
 							onResizeStart={startPanelResize}
@@ -3600,22 +3605,15 @@ export function App({
 						/>
 					</>
 				) : null}
-				{!threadDraft && threadNotice ? <text fg={theme.badgeRemoved}>{threadNotice}</text> : null}
-				{copyNotice && !threadDraft ? (
-					<text fg={theme.badgeAdded} wrapMode="none" truncate>
-						{copyNotice.text}
-					</text>
-				) : null}
-				<box flexShrink={0} paddingLeft={1} paddingRight={1} flexDirection="column">
-					<text fg={theme.muted}>
-						{`${current + 1}/${pages.length} · j/k scroll · d/u half-page · space/b page · g/G top/bottom`}
-					</text>
-					<text fg={theme.muted}>
-						{
-							"drag gutter thread · drag code + y copy · right-click menu · F10 menu · ]c/[c page · tab file · f/x review · ? help · q quit"
-						}
-					</text>
-				</box>
+				<StatusBar
+					context={statusContext}
+					reviewedFiles={filesSurface ? reviewedFiles : storyProgress.reviewed}
+					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
+					openThreads={threads.filter((t) => t.status === THREAD_STATUS.OPEN).length}
+					viewMode={viewMode}
+					notice={statusNotice}
+					terminalWidth={width}
+				/>
 			</box>
 		</ThemeProvider>
 	);

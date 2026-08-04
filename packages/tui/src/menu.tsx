@@ -311,11 +311,6 @@ const stopMouse = (event: OpenTUIMouseEvent) => {
 	event.stopPropagation();
 };
 
-const VIEW_LABELS: Record<"patch" | "semantic", string> = {
-	patch: "Patch view",
-	semantic: "Semantic view",
-};
-
 export type ReviewSurface = "story" | "files";
 const SURFACES: { id: ReviewSurface; label: string }[] = [
 	{ id: "story", label: "Story" },
@@ -328,7 +323,6 @@ const MENU_BAR_WIDTH = menuSpecs.reduce((total, spec) => total + spec.width, 0);
 export const MenuBar = ({
 	activeMenuId,
 	terminalWidth,
-	viewMode,
 	surface,
 	canSwitchSurface,
 	onSelectSurface,
@@ -338,7 +332,6 @@ export const MenuBar = ({
 }: {
 	activeMenuId: MenuId | null;
 	terminalWidth: number;
-	viewMode: "patch" | "semantic";
 	surface: ReviewSurface;
 	canSwitchSurface: boolean;
 	onSelectSurface: (surface: ReviewSurface) => void;
@@ -347,14 +340,8 @@ export const MenuBar = ({
 	onClose: () => void;
 }) => {
 	const theme = useTheme();
-	const viewLabel = VIEW_LABELS[viewMode];
 	const showSurfaces =
 		canSwitchSurface && terminalWidth - 2 - MENU_BAR_WIDTH >= SURFACE_BAR_WIDTH + 2;
-	// A passive indicator, not a third menu: only shown when it can sit against
-	// the right edge with a gap the menu titles can't close.
-	const showViewLabel =
-		terminalWidth - 2 - MENU_BAR_WIDTH - (showSurfaces ? SURFACE_BAR_WIDTH + 2 : 0) >=
-		viewLabel.length + 2;
 	return (
 		<box
 			height={1}
@@ -412,11 +399,6 @@ export const MenuBar = ({
 						})
 					: null}
 			</box>
-			{showViewLabel ? (
-				<text flexShrink={0} fg={theme.muted} wrapMode="none">
-					{viewLabel}
-				</text>
-			) : null}
 		</box>
 	);
 };

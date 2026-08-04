@@ -96,6 +96,9 @@ async function click(t: Awaited<ReturnType<typeof testRender>>, x: number, y: nu
 	});
 }
 
+const statusLine = (t: Awaited<ReturnType<typeof testRender>>) =>
+	t.captureCharFrame().trimEnd().split("\n").at(-1) ?? "";
+
 test("a chapterless run opens straight onto every file with file-based progress", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const seen: ViewState[] = [];
@@ -107,15 +110,15 @@ test("a chapterless run opens straight onto every file with file-based progress"
 	const frame = t.captureCharFrame();
 
 	expect(frame).toContain("All files");
-	expect(frame).toContain("0/3 files reviewed");
+	expect(frame).toContain("0/3 files");
 	expect(frame).not.toContain("Chapters (");
 	expect(frame).toContain("src/lib/apiClient.ts");
 	expect(frame).toContain("src/lib/backoff.ts");
-	expect(frame).toContain("1/1"); // the flat page is the only page
+	expect(statusLine(t)).toContain("All files"); // the flat surface is the only page
 
 	await press(t, "f"); // review the focused file
 	expect(seen.at(-1)?.files).toContain("__files__::src/lib/apiClient.test.ts");
-	expect(t.captureCharFrame()).toContain("1/3 files reviewed");
+	expect(t.captureCharFrame()).toContain("1/3 files");
 });
 
 test("the Files surface never shows story paging, even without the sidebar", async () => {
@@ -152,7 +155,7 @@ test("w jumps a narrated run to the whole diff and page navigation returns to th
 	expect(frame).toContain("src/lib/apiClient.test.ts");
 	// The surface drops every trace of the story: no chapter index, file-based progress.
 	expect(frame).not.toContain("Chapters (");
-	expect(frame).toContain("0/3 files reviewed");
+	expect(frame).toContain("0/3 files");
 
 	await press(t, "w"); // toggles straight back to the story page it left
 	expect(t.captureCharFrame()).toContain("Add a reusable backoff helper");
@@ -161,7 +164,7 @@ test("w jumps a narrated run to the whole diff and page navigation returns to th
 	await nextChapter(t); // page navigation exits the surface into the story
 	const returned = t.captureCharFrame();
 	expect(returned).not.toContain("Files (3)");
-	expect(returned).toContain("3/4");
+	expect(statusLine(t)).toContain("Ch 2/3");
 });
 
 test("the menu bar's Story and Files buttons switch surfaces with the pointer", async () => {
@@ -232,7 +235,7 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("Prologue"); // sidebar entry
 	expect(frame).toContain("1. Add a re"); // sidebar chapter label (single-line truncated)
 	expect(frame).toContain("Dashboards stay up during deploys now"); // prologue outcome
-	expect(frame).toContain("0/3 reviewed"); // none reviewed yet
+	expect(frame).toContain("0/3 files"); // none reviewed yet
 });
 
 test("reopening restores the page, collapsed files, scroll, and reviewer settings", async () => {
@@ -267,7 +270,7 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 	await t.renderOnce();
 
 	const reopened = t.captureCharFrame();
-	expect(reopened).toContain("3/4");
+	expect(statusLine(t)).toContain("Ch 2/3");
 	expect(reopened).toContain("▶ src/lib/apiClient.ts");
 	expect(reopened).not.toContain("Chapters (3)");
 
@@ -289,22 +292,25 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 	});
 });
 
-test("the view indicator sits against the right edge, not beside the menu titles", async () => {
+test("the status bar carries progress, the view mode, and the help hints", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
 	await t.renderOnce();
-	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+	const bar = statusLine(t);
 
-	expect(bar.trimEnd().endsWith("Patch view")).toBe(true);
-	expect(bar.indexOf("Patch view") - bar.indexOf("View")).toBeGreaterThan(10);
+	expect(bar).toContain("revue");
+	expect(bar).toContain("0/3 files");
+	expect(bar).toContain("Patch │");
+	expect(bar.trimEnd().endsWith("? help · q quit")).toBe(true);
 });
 
-test("the view indicator is dropped rather than crowding a narrow menu bar", async () => {
+test("a narrow status bar sheds detail rather than crowding the hints", async () => {
 	const t = await testRender(<App file={file} />, { width: 24, height: 32 });
 	await t.renderOnce();
-	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+	const bar = statusLine(t);
 
-	expect(bar).toContain("File");
-	expect(bar).not.toContain("Patch view");
+	expect(bar).toContain("? · q");
+	expect(bar).not.toContain("Patch");
+	expect(bar).not.toContain("files");
 });
 
 test("the sidebar index walks back to the prologue from any chapter", async () => {
@@ -312,15 +318,14 @@ test("the sidebar index walks back to the prologue from any chapter", async () =
 	await t.renderOnce();
 	await nextChapter(t);
 	await nextChapter(t);
-	expect(t.captureCharFrame()).toContain("3/4");
+	expect(statusLine(t)).toContain("Ch 2/3");
 
 	const lines = t.captureCharFrame().split("\n");
 	const prologueY = lines.findIndex((line) => line.includes("Prologue"));
 	await click(t, (lines[prologueY]?.indexOf("Prologue") ?? -1) + 1, prologueY);
 
-	const frame = t.captureCharFrame();
-	expect(frame).toContain("1/4");
-	expect(frame).toContain("Dashboards stay up during deploys now");
+	expect(statusLine(t)).toContain("Prologue");
+	expect(t.captureCharFrame()).toContain("Dashboards stay up during deploys now");
 });
 
 test("the prologue's chapter list opens the chapter it names", async () => {
@@ -330,7 +335,7 @@ test("the prologue's chapter list opens the chapter it names", async () => {
 	const entryY = lines.findLastIndex((line) => line.includes("Retry transient failures"));
 	await click(t, (lines[entryY]?.indexOf("Retry transient") ?? -1) + 1, entryY);
 
-	expect(t.captureCharFrame()).toContain("3/4");
+	expect(statusLine(t)).toContain("Ch 2/3");
 });
 
 test("a new file is rendered unified so no pane sits empty", async () => {
@@ -352,11 +357,11 @@ test("[c walks back into the prologue instead of stopping at chapter one", async
 	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
 	await t.renderOnce();
 	await nextChapter(t);
-	expect(t.captureCharFrame()).toContain("2/4");
+	expect(statusLine(t)).toContain("Ch 1/3");
 
 	await press(t, "[");
 	await press(t, "c");
-	expect(t.captureCharFrame()).toContain("1/4");
+	expect(statusLine(t)).toContain("Prologue");
 	expect(t.captureCharFrame()).toContain("Dashboards stay up during deploys now");
 });
 
@@ -390,7 +395,7 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	await arrow(t, "left");
 	expect(t.captureCharFrame()).toContain("Next page");
 	await press(t, "RETURN"); // Previous page — reachable from chapter one because the prologue is a page
-	expect(t.captureCharFrame()).toContain("1/4");
+	expect(statusLine(t)).toContain("Prologue");
 });
 
 test("View menu shows only the focused file and file navigation replaces it", async () => {
@@ -500,7 +505,7 @@ test("View menu toggles the semantic diff without losing the focused file", asyn
 	await act(async () => Promise.resolve());
 	await t.renderOnce();
 	const semanticFrame = t.captureCharFrame();
-	expect(semanticFrame).toContain("Semantic view");
+	expect(semanticFrame).toContain("Semantic │");
 	expect(semanticFrame).toContain("semantic retry loop");
 	expect(semanticFrame).not.toContain("semantic backoff");
 	expect(semanticFrame).toContain("modified: src/lib/apiClient.ts");
@@ -517,7 +522,7 @@ test("View menu toggles the semantic diff without losing the focused file", asyn
 	await arrow(t, "right");
 	await press(t, "RETURN");
 	const patchFrame = t.captureCharFrame();
-	expect(patchFrame).toContain("Patch view");
+	expect(patchFrame).toContain("Patch │");
 	expect(patchFrame).toContain("return fetch");
 	expect(patchFrame).not.toContain("MAX_RETRIES");
 	expect(patchFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
@@ -577,7 +582,7 @@ ${additions}
 	await act(async () => Promise.resolve());
 	await t.renderOnce();
 	const semanticFrame = t.captureCharFrame();
-	expect(semanticFrame).toContain("Semantic view");
+	expect(semanticFrame).toContain("Semantic │");
 	expect(semanticFrame).toContain("semantic row");
 	expect(semanticFrame).not.toContain("semantic row 1 ");
 	for (let index = 0; index < 4; index += 1) await press(t, "j");
@@ -675,7 +680,7 @@ test("an unavailable semantic diff stays in Patch with a safe explanation", asyn
 	await act(async () => Promise.resolve());
 	await t.renderOnce();
 	const frame = t.captureCharFrame();
-	expect(frame).toContain("Patch view");
+	expect(frame).toContain("Patch │");
 	expect(frame).toContain("Semantic diff unavailable: incompatible difft.");
 	expect(frame).toContain("MAX_RETRIES");
 	expect(frame).not.toContain("[31m");
@@ -693,7 +698,7 @@ test("opening a menu cancels an incomplete chapter chord", async () => {
 	await press(t, "ESCAPE");
 	await press(t, "c");
 
-	expect(t.captureCharFrame()).toContain("1/4");
+	expect(statusLine(t)).toContain("Prologue");
 });
 
 test("next unreviewed is unavailable when every chapter is reviewed", async () => {
@@ -722,7 +727,7 @@ test("next unreviewed is unavailable when every chapter is reviewed", async () =
 	await arrow(t, "down");
 	await press(t, "RETURN");
 
-	expect(t.captureCharFrame()).toContain("3/4");
+	expect(statusLine(t)).toContain("Ch 2/3");
 });
 
 test("the mouse menu acts once and blocks the chapter beneath it", async () => {
@@ -850,8 +855,8 @@ test("x marks a chapter reviewed, persists, and auto-advances", async () => {
 	const frame = t.captureCharFrame();
 
 	expect(seen.at(-1)?.chapters).toContain("chapter-1");
-	expect(frame).toContain("1/3 reviewed");
-	expect(frame).toContain("3/4"); // auto-advanced from page 2 to page 3 (next unreviewed)
+	expect(frame).toContain("1/3 files");
+	expect(statusLine(t)).toContain("Ch 2/3"); // auto-advanced from page 2 to page 3 (next unreviewed)
 });
 
 test("f marks the selected file reviewed (which completes a single-file chapter)", async () => {
@@ -1164,7 +1169,7 @@ test("initialViewState is reflected on first render", async () => {
 		{ width: 110, height: 32 },
 	);
 	await t.renderOnce();
-	expect(t.captureCharFrame()).toContain("1/3 reviewed");
+	expect(t.captureCharFrame()).toContain("1/3 files");
 });
 
 test("the theme picker previews a palette, applies the accepted one, and reports the choice", async () => {

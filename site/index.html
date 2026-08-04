@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>revue — narrative code review in your terminal</title>
-<meta name="description" content="revue turns a branch's diff into ordered, narrated chapters — a prologue, the acts, and the judgment calls that need a human — rendered entirely in your terminal." />
+<meta name="description" content="revue organises a branch's diff into ordered, narrated chapters — an interactive, guided tour of the change rather than a wall of files — rendered entirely in your terminal." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -303,9 +303,9 @@
   <h1>rev<span class="accent">u</span>e</h1>
   <p class="tagline">Narrative code review in your terminal.</p>
   <p class="lede">
-    <strong>revue</strong> turns a branch&rsquo;s diff into ordered, narrated
-    <strong>chapters</strong> — a prologue, the acts, and the judgment calls that need a
-    human — rendered entirely in your terminal. No server, no browser, no database.
+    <strong>revue</strong> organises a branch&rsquo;s diff into ordered, narrated
+    <strong>chapters</strong> — an interactive, guided tour of the change rather than a
+    wall of files — rendered entirely in your terminal. No server, no browser, no database.
   </p>
   <div class="cta">
     <a class="primary" href="#quickstart">Get started</a>
@@ -323,22 +323,25 @@
 
 <section class="wrap" aria-labelledby="programme">
   <h2 class="section-title" id="programme">The programme</h2>
-  <p class="section-note">Four commands, in order. Each one reads the last one&rsquo;s output — a review is a pipeline, not a session.</p>
+  <p class="section-note">Four acts, in order. Each one reads the last one&rsquo;s output — a review is a
+  pipeline, not a session. In a hurry, <code>revue diff</code> plays any of the same scopes
+  straight through as a flat diff, no narration.</p>
   <div class="acts">
     <div class="act">
       <div class="no">Act I</div>
       <div>
         <h3><code>revue prep</code> — freeze the scope</h3>
-        <p>Prep pins your Git changes into an immutable run: the patch, both snapshots, the
-        numbered hunks. Nothing shifts underneath the review — not even a rebase.</p>
+        <p>Prep pins any diff into an immutable run — your branch against main, a GitHub PR
+        (<code>--pr 123</code>), staged, unstaged, or the working tree. Nothing shifts underneath
+        the review — not even a rebase.</p>
       </div>
     </div>
     <div class="act">
       <div class="no">Act II</div>
       <div>
-        <h3><code>revue-chapters</code> — the agent writes the programme</h3>
+        <h3>the <code>revue</code> skill — the agent writes the programme</h3>
         <p>The bundled skill has your coding agent read the run&rsquo;s hunks, cluster them into
-        narrated chapters, write the prologue, and flag the judgment calls only a human can make.</p>
+        narrated chapters, and flag the judgment calls only a human can make.</p>
       </div>
     </div>
     <div class="act">
@@ -353,9 +356,10 @@
     <div class="act">
       <div class="no">Act IV</div>
       <div>
-        <h3><code>revue export</code> — leave with a record</h3>
-        <p>The reviewed run renders as deterministic Markdown — narrative, threads, and progress —
-        ready for a PR description or an agent&rsquo;s next pass.</p>
+        <h3><code>revue threads</code> — the notes reach the cast</h3>
+        <p>Every comment you leave anchors to exact lines and round-trips through a public JSON
+        interface, so your agent picks each one up, makes the fix, and replies inline against the
+        same frozen scope.</p>
       </div>
     </div>
   </div>
@@ -370,9 +374,9 @@
       files, <code>y</code> to copy a selection, <code>?</code> for the full map.</p>
     </div>
     <div class="feature">
-      <h3>Threads agents can read</h3>
-      <p>Review threads anchor to exact lines and round-trip through a public JSON interface, so
-      your agent addresses feedback against the same pinned scope.</p>
+      <h3>Leave with a record</h3>
+      <p>A reviewed run exports as deterministic Markdown — narrative, threads, and progress —
+      ready for a PR description or an agent&rsquo;s next pass.</p>
     </div>
     <div class="feature">
       <h3>Two ways to read a diff</h3>
@@ -399,18 +403,19 @@
 
 <section class="wrap quickstart" aria-labelledby="quickstart">
   <h2 class="section-title" id="quickstart">Interval — try it</h2>
-  <p class="section-note">Requires <a href="https://bun.sh">Bun</a> ≥ 1.3.</p>
-  <pre><code><span class="cmt"># clone and install</span>
-<span class="kw">git</span> clone https://github.com/mtford90/revue && <span class="kw">cd</span> revue
-<span class="kw">bun</span> install
+  <p class="section-note">Prebuilt for macOS and Linux; or run from a
+  <a href="https://github.com/mtford90/revue#install">checkout</a> with Bun.</p>
+  <pre><code><span class="cmt"># install</span>
+<span class="kw">brew</span> install mtford90/tap/revue
+<span class="kw">revue</span> skill install           <span class="cmt"># give your coding agent the revue skill</span>
 
-<span class="cmt"># tour the bundled sample run — no repository needed</span>
-<span class="kw">bun</span> run revue show examples/sample-run
+<span class="cmt"># narrate whatever you're working on — or a branch, or a PR</span>
+RUN=$(<span class="kw">revue</span> prep)             <span class="cmt"># revue prep main · revue prep --pr 123</span>
+                              <span class="cmt"># → ask your agent to run the revue skill on "$RUN"</span>
+<span class="kw">revue</span> show <span class="cmt">"$RUN"</span>
 
-<span class="cmt"># then stage your own branch</span>
-RUN=$(<span class="kw">bun</span> run revue prep)
-<span class="kw">bun</span> run revue skill install   <span class="cmt"># give your agent the chapters skill</span>
-<span class="kw">bun</span> run revue show <span class="cmt">"$RUN"</span></code></pre>
+<span class="cmt"># in a hurry? same scopes, no narration</span>
+<span class="kw">revue</span> diff main</code></pre>
 </section>
 
 <section class="wrap credits" aria-labelledby="credits">

@@ -1078,7 +1078,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 	expect(t.captureCharFrame()).toContain("Agent · Review agent");
 	let lifecycleLines = t.captureCharFrame().split("\n");
 	const initialStatusY = lifecycleLines.findIndex((line) => line.includes("✓ Resolved"));
-	expect(lifecycleLines[initialStatusY - 1]).toContain("┌");
+	expect(lifecycleLines[initialStatusY]).toContain("┌");
 	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen]"));
 	await click(t, lifecycleLines[lifecycleY]?.indexOf("Reopen") ?? -1, lifecycleY);
 	expect(t.captureCharFrame()).toContain("! Open");

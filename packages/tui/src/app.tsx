@@ -1106,25 +1106,37 @@ function ThreadMessageView({
 	onDelete: (messageId: string) => void;
 }) {
 	const theme = useTheme();
+	const agent = message.author.kind === THREAD_AUTHOR_KIND.AGENT;
 	return (
 		<box flexDirection="column">
-			<text fg={message.author.kind === THREAD_AUTHOR_KIND.AGENT ? theme.heading : theme.accent}>
-				{message.author.kind === THREAD_AUTHOR_KIND.AGENT ? "Agent" : "Human"} ·{" "}
-				{message.author.name}
-			</text>
-			<text fg={dealtWith ? theme.muted : theme.text}>{message.body}</text>
-			{canDelete ? (
+			<box flexDirection="row">
+				<text fg={agent ? theme.heading : theme.accent}>{agent ? "Agent" : "Human"}</text>
+				<text fg={theme.muted}> · </text>
 				<text
-					fg={theme.badgeRemoved}
-					onMouseDown={(event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						onDelete(message.id);
-					}}
+					fg={dealtWith ? theme.muted : theme.text}
+					attributes={createTextAttributes({ bold: true })}
 				>
-					[Delete message]
+					{message.author.name}
 				</text>
-			) : null}
+				{canDelete ? (
+					<>
+						<box flexGrow={1} />
+						<text
+							fg={theme.badgeRemoved}
+							onMouseDown={(event) => {
+								event.preventDefault();
+								event.stopPropagation();
+								onDelete(message.id);
+							}}
+						>
+							[Delete]
+						</text>
+					</>
+				) : null}
+			</box>
+			<box paddingLeft={2}>
+				<text fg={dealtWith ? theme.muted : theme.text}>{message.body}</text>
+			</box>
 		</box>
 	);
 }
@@ -1152,14 +1164,13 @@ function InlineThread({
 			border
 			borderColor={dealtWith ? theme.badgeAdded : theme.badgeModified}
 			backgroundColor={theme.panel}
+			title={` ${dealtWith ? "✓ Resolved" : "! Open"} · ${thread.id.slice(0, 8)} `}
 			paddingLeft={1}
 			paddingRight={1}
 			marginLeft={2}
 			marginRight={1}
+			gap={1}
 		>
-			<text fg={dealtWith ? theme.badgeAdded : theme.badgeModified}>
-				{dealtWith ? "✓ Resolved" : "! Open"} · Thread {thread.id}
-			</text>
 			{thread.messages.map((message, index) => (
 				<ThreadMessageView
 					key={message.id}
@@ -1192,7 +1203,7 @@ function InlineThread({
 				>
 					[{dealtWith ? "Reopen" : "Resolve"}]
 				</text>
-				<text> </text>
+				<box flexGrow={1} />
 				<text
 					fg={theme.badgeRemoved}
 					onMouseDown={(event) => {
@@ -1938,6 +1949,86 @@ function HelpModal({
 	);
 }
 
+function ConfirmDialog({
+	message,
+	confirmLabel,
+	terminalWidth,
+	terminalHeight,
+	onConfirm,
+	onCancel,
+}: {
+	message: string;
+	confirmLabel: string;
+	terminalWidth: number;
+	terminalHeight: number;
+	onConfirm: () => void;
+	onCancel: () => void;
+}) {
+	const theme = useTheme();
+	const width = Math.max(24, Math.min(48, terminalWidth - 4));
+	const height = 5;
+	return (
+		<>
+			<box
+				position="absolute"
+				top={0}
+				left={0}
+				width="100%"
+				height="100%"
+				zIndex={60}
+				shouldFill={false}
+				onMouseDown={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					onCancel();
+				}}
+			/>
+			<box
+				position="absolute"
+				top={Math.max(0, Math.round((terminalHeight - height) / 2))}
+				left={Math.max(0, Math.round((terminalWidth - width) / 2))}
+				width={width}
+				height={height}
+				zIndex={70}
+				border
+				borderColor={theme.badgeRemoved}
+				backgroundColor={theme.background}
+				flexDirection="column"
+				paddingLeft={1}
+				paddingRight={1}
+				onMouseDown={(event) => event.stopPropagation()}
+			>
+				<text fg={theme.text}>{message}</text>
+				<box flexDirection="row" marginTop={1}>
+					<text
+						fg={theme.badgeRemoved}
+						onMouseDown={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							onConfirm();
+						}}
+					>
+						[{confirmLabel}]
+					</text>
+					<text> </text>
+					<text
+						fg={theme.accent}
+						onMouseDown={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							onCancel();
+						}}
+					>
+						[Cancel]
+					</text>
+					<box flexGrow={1} />
+					<text fg={theme.muted}>enter · esc</text>
+				</box>
+			</box>
+		</>
+	);
+}
+
 // ── App shell ───────────────────────────────────────────────────────────────
 type ThreadDraft =
 	| { kind: "thread"; range: DiffLineRange }
@@ -2116,6 +2207,11 @@ export function App({
 	const [threadDraft, setThreadDraft] = useState<ThreadDraft | null>(null);
 	const [threadBody, setThreadBody] = useState("");
 	const [threadNotice, setThreadNotice] = useState<string | null>(null);
+	const [confirmDelete, setConfirmDelete] = useState<
+		| { kind: "thread"; threadId: string }
+		| { kind: "message"; threadId: string; messageId: string }
+		| null
+	>(null);
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 	// The nonce re-arms the timeout when the same text is copied twice running.
 	const [copyNotice, setCopyNotice] = useState<{ text: string; nonce: number } | null>(null);
@@ -2649,6 +2745,18 @@ export function App({
 			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
 	}
+	function requestDeleteThread(threadId: string) {
+		setConfirmDelete({ kind: "thread", threadId });
+	}
+	function requestDeleteThreadMessage(threadId: string, messageId: string) {
+		setConfirmDelete({ kind: "message", threadId, messageId });
+	}
+	function confirmPendingDelete() {
+		if (!confirmDelete) return;
+		if (confirmDelete.kind === "thread") deleteInlineThread(confirmDelete.threadId);
+		else deleteInlineThreadMessage(confirmDelete.threadId, confirmDelete.messageId);
+		setConfirmDelete(null);
+	}
 	function toggleInlineThreadStatus(thread: ReviewThread) {
 		try {
 			const updated =
@@ -3094,6 +3202,14 @@ export function App({
 		const name = key.name;
 		const paths = chapter ? chapterFilePaths(chapter) : [];
 
+		if (confirmDelete) {
+			key.preventDefault();
+			key.stopPropagation();
+			if (name === "escape" || name === "n" || name === "q") setConfirmDelete(null);
+			else if (name === "return" || name === "y") confirmPendingDelete();
+			return;
+		}
+
 		if (contextMenu) {
 			key.preventDefault();
 			key.stopPropagation();
@@ -3380,8 +3496,8 @@ export function App({
 									onSelectThreadRange={selectThreadRange}
 									onRangeContextMenu={openRangeContextMenu}
 									onReplyThread={startThreadReply}
-									onDeleteThread={deleteInlineThread}
-									onDeleteThreadMessage={deleteInlineThreadMessage}
+									onDeleteThread={requestDeleteThread}
+									onDeleteThreadMessage={requestDeleteThreadMessage}
 									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
@@ -3414,8 +3530,8 @@ export function App({
 									onSelectThreadRange={selectThreadRange}
 									onRangeContextMenu={openRangeContextMenu}
 									onReplyThread={startThreadReply}
-									onDeleteThread={deleteInlineThread}
-									onDeleteThreadMessage={deleteInlineThreadMessage}
+									onDeleteThread={requestDeleteThread}
+									onDeleteThreadMessage={requestDeleteThreadMessage}
 									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
@@ -3450,6 +3566,18 @@ export function App({
 							onSelect={activateContextMenu}
 						/>
 					</>
+				) : null}
+				{confirmDelete ? (
+					<ConfirmDialog
+						message={
+							confirmDelete.kind === "thread" ? "Delete this thread?" : "Delete this message?"
+						}
+						confirmLabel="Delete"
+						terminalWidth={width}
+						terminalHeight={height}
+						onConfirm={confirmPendingDelete}
+						onCancel={() => setConfirmDelete(null)}
+					/>
 				) : null}
 				{showHelp ? (
 					<HelpModal

@@ -43,13 +43,20 @@ RUN=$(bun run revue prep)     # freeze the current diff into an immutable run
 bun run revue show "$RUN"     # open the interactive reviewer
 ```
 
-`revue prep` supports committed, staged, unstaged, and working-tree scopes, any two refs
-(`revue prep main..feature`), and pull requests — including someone else's:
+`revue diff` takes the same scope arguments but skips the narration: it preps and opens
+immediately as a flat file-by-file diff, no agent required.
 
-```bash
-RUN=$(revue prep --pr 123)                                    # PR on the origin remote
-RUN=$(revue prep --pr https://github.com/owner/repo/pull/123) # any GitHub PR
-```
+With no arguments, both review your local changes when any exist — staged, unstaged, or
+untracked — and otherwise compare `HEAD` against the detected `main`/`master`. The common
+scopes, spelled out (swap in `prep` for the narrated flow):
+
+| Want to review | Command |
+| --- | --- |
+| This branch against main | `revue diff main` (merge base; `main..HEAD` compares endpoints directly) |
+| A GitHub PR — including someone else's | `revue diff --pr 123` · `revue diff --pr <github-pr-url>` |
+| Staged + unstaged vs the last commit | `revue diff --ref work` |
+| Staged only vs the last commit | `revue diff --ref staged` |
+| Unstaged only (worktree vs index) | `revue diff --ref unstaged` |
 
 ## Export
 

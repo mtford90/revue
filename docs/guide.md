@@ -86,9 +86,17 @@ only the narrative chrome (story pages, prologue, key changes) is absent. `revue
 prep and show into one step:
 
 ```bash
-revue diff                        # local changes, or the branch against its base
-revue diff main..feature --pr 123 # same scope forms and flags as prep
+revue diff                 # local changes when any exist, else HEAD vs the detected main/master
+revue diff main            # this branch against main, from their merge base
+revue diff main..HEAD      # the same endpoints compared directly
+revue diff --pr 123        # a GitHub PR (or --pr <github-pr-url>)
+revue diff --ref work      # staged + unstaged vs the last commit
+revue diff --ref staged    # staged only vs the last commit
+revue diff --ref unstaged  # unstaged only: worktree vs index
 ```
+
+"Local changes" means anything `git status` would report — staged, unstaged, or untracked — so on
+a dirty branch the bare command shows uncommitted work, not the branch against its base.
 
 It prints the run directory to stderr, so agents can still target the run with `revue threads`.
 Generating chapters for that same run later upgrades it to the full narrated review; `revue export`

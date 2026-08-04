@@ -60,6 +60,15 @@ The URL form fetches directly from that repository, so it works from any local c
 history with the PR's target. For other diff sources, fetch the relevant refs first and pass them
 to prep as ordinary refs.
 
+Repeatable `--ignore <gitignore-pattern>` options exclude files from this prep only, evaluated
+after any `.revueignore` at the repository root. Pass `--show-ignored` to list the effective
+patterns and omissions.
+
+When the user wants a quick look without narration, skip this skill's chapter steps entirely:
+`revue diff [scope…]` accepts the same scope forms as prep and opens the result immediately as a
+flat file-by-file diff — no chapters. It prints the run directory to stderr, so review threads
+(Step 7) can still be targeted against it.
+
 If prep exits non-zero, relay its error and stop. Do not edit `run.json`, `diff.patch`, `hunks.txt`,
 or `blobs/`; they are one immutable input.
 
@@ -185,7 +194,12 @@ revue show "$RUN"
 `revue show` verifies the run hashes, validates `chapters.json`, requires every prepared review unit
 exactly once, checks key-change ranges against their chapter hunks, and opens the pinned patch without
 touching Git. Run `revue show "$RUN" --check` to validate and print a plain-text summary without
-launching the UI.
+launching the UI. Show accepts `--theme <name>`, `--theme auto`, `--theme list`, and
+`--transparent-bg`; without a flag it uses the reviewer's remembered theme.
+
+A run with no `chapters.json` opens as a flat file-by-file diff rather than erroring — so a
+missing chapters file is not caught by show. Confirm Step 5 wrote the file before treating a flat
+display as intentional.
 
 ## Step 7 — Act on review threads
 

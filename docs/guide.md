@@ -78,6 +78,22 @@ It does not recompute Git state. Full and chapter exports preserve each thread a
 status, exact review-unit anchor, author kind/name, creation time, and multi-line body; prologue-only
 exports contain no threads.
 
+## Flat review without chapters
+
+Chapters are optional. `revue show` opens a run with no `chapters.json` as a flat file-by-file
+diff on the Files surface, with review state, threads, copying, and themes all working as usual —
+only the narrative chrome (story pages, prologue, key changes) is absent. `revue diff` collapses
+prep and show into one step:
+
+```bash
+revue diff                        # local changes, or the branch against its base
+revue diff main..feature --pr 123 # same scope forms and flags as prep
+```
+
+It prints the run directory to stderr, so agents can still target the run with `revue threads`.
+Generating chapters for that same run later upgrades it to the full narrated review; `revue export`
+still requires a narrated run.
+
 ## Inline review threads
 
 A **thread** is the official feedback concept. In Patch view, click a visible old/new line-number
@@ -89,9 +105,15 @@ to save and `Escape` to cancel. Any number of independent threads may share an e
 Every root message and reply records an author kind (`human` or `agent`) and display name. Human TUI
 messages use the reviewed repository's `git config user.name`, falling back to the system login.
 Messages from the public agent CLI require an explicit author name. `[Reply]` opens an inline composer
-inside the owning thread. Open threads use an attention marker; resolved threads remain visible with
-a green check and dimmed messages and can be reopened. Replies may be deleted individually, while the
-root message is deleted only by deleting its thread.
+inside the owning thread. Each thread's status and short id sit in its box border title; open threads
+use an attention marker, and resolved threads remain visible with a green check and dimmed messages
+and can be reopened. Replies may be deleted individually via the control on their author row, while
+the root message is deleted only by deleting its thread; either deletion asks for confirmation in a
+modal first.
+
+The **Comments** surface (`o`, or the strip under the menu bar) lists every thread in the review in
+one place; `Enter` jumps to the thread's chapter and anchor. While open threads remain, the Comments
+tab carries their count, so triage state reads from anywhere in the review.
 
 Threads are stored atomically under `.revue/threads.json` at the reviewed repository root, located
 from the supplied run directory and keyed by immutable `runId`. Every mutation takes a cross-process
@@ -149,6 +171,26 @@ The top File/Navigate/View/Help menu makes the main actions discoverable with a 
 Press `F10` to open it, use arrow keys and `Enter`, and press `Escape` or click outside to close.
 Navigate walks pages and unreviewed chapters, View switches rendering, file display, and file
 collapse, and Help opens the keymap in a modal over the review.
+
+A review has three **surfaces**, switched from the strip under the menu bar: **Story** (the narrated
+chapter pages), **Files** (`w`, the whole diff without the story), and **Comments** (`o`, every
+thread in one list). The Comments tab shows its open-thread count while any remain.
+
+The bottom row is a powerline-style **status bar**: the review context, a reviewed-files gauge, the
+open-thread count, and the active Patch/Semantic view, with transient success/error notices in
+place. Terminals known to ship the powerline glyphs (Ghostty, WezTerm, iTerm, kitty) get arrow
+separators; everyone else gets flush segments, and narrow terminals drop segments rather than wrap.
+
+File lists render paths in one of three **path display modes**, cycled with `p` and listed in the
+View menu. **Smart** (the default) hoists the common directory prefix into the Files header and
+abbreviates the remaining directories fish-style, always keeping the filename intact; **tree**
+nests directories with single-child chains collapsed; **full** keeps raw paths. The choice persists
+alongside the other display preferences.
+
+In Patch view, a `⋯` band between hunks (and above the first, below the last) reveals the
+unchanged lines around them, GitHub-style: click **▲ expand up**, **▼ expand down** (20 lines a
+step), or **↕ expand all** to close the gap. The lines come from the run's pinned blobs, so
+expansion never touches Git state.
 
 The sidebar and a side-by-side diff compete for the same columns, so View settles both together.
 Diff layout is `auto`, `split` or `stacked`, and the sidebar is `auto`, `shown` or `hidden`. Under
@@ -242,7 +284,8 @@ Navigation follows Vim/less conventions: `j`/`k` (or `↑`/`↓`) scroll by line
 `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
 scroll by page · `g`/`G` jump to the top/bottom · `]c`/`[c` move between chapters · `{`/`}` focus key
 changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e` collapse/expand
-all diffs · `a` jumps to the next unreviewed chapter · `s` shows/hides the sidebar · `y` copies the
+all diffs · `a` jumps to the next unreviewed chapter · `w` opens the Files surface · `o` opens the
+Comments surface · `p` cycles path display · `s` shows/hides the sidebar · `y` copies the
 highlighted text · `Ctrl-y`/`Ctrl-g` copy the open thread's location/GitHub link · `F10` opens the
 menu · `?` toggles shortcut help ·
 `q`/`esc` quits.

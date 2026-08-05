@@ -1,0 +1,21 @@
+{
+	"$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+	"release-type": "node",
+	"include-component-in-tag": false,
+	"bootstrap-sha": "421ee8bf197d979ef7090d75ba05dada7ec35512",
+	"packages": {
+		".": {
+			"release-type": "node",
+			"include-component-in-tag": false,
+			"draft": true,
+			"force-tag-creation": true,
+			"extra-files": [
+				{
+					"type": "json",
+					"path": "packages/tui/package.json",
+					"jsonpath": "$.version"
+				}
+			]
+		}
+	}
+}

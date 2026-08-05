@@ -308,6 +308,34 @@ its chapter narration. Reopening the same run restores the current page, focused
 collapsed files, and the main and chapter-panel scroll offsets. Saved threads load independently from
 `.revue/threads.json`; an unfinished composer draft is deliberately not restored.
 
+### Remapping shortcuts
+
+Every non-chord action above can be rebound in `~/.revue/keybindings.json`, a JSONC file (`//`
+and `/* */` comments are stripped before parsing) of `"action-id": "key"` or
+`"action-id": ["key", "key"]` entries — an entry replaces that action's full default key list
+rather than adding to it. The help overlay (`?`) shows each action's ID next to its keys, and:
+
+```bash
+revue keybindings          # every action, its description, default keys, and effective keys
+revue keybindings init     # write a commented starter template to ~/.revue/keybindings.json
+```
+
+For example, to swap half-page scrolling onto `Ctrl-d`/`Ctrl-u`:
+
+```jsonc
+{
+  "half-page-down": "ctrl+d",
+  "half-page-up": "ctrl+u",
+}
+```
+
+Keys are lowercase named keys (`up`, `pageup`, `return`, `f1`–`f12`, …), a `ctrl+` prefix, a
+single-character literal, or an uppercase letter for a shifted character (`G`, not `shift+g`).
+`escape`, the raw `[`/`]` chord prefixes, and the digits `1`–`9` are reserved and cannot be bound;
+the `]c`/`[c` chapter-navigation chord itself is fixed. An invalid, unknown, or conflicting entry
+is dropped with a warning — surfaced in `revue keybindings`'s output and the TUI's footer/help
+overlay — while the rest of the file still applies.
+
 ## Roadmap
 
 - [x] Chapters/prologue zod schema (ported from Stage)

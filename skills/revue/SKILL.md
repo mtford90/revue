@@ -266,3 +266,41 @@ revue threads delete "$RUN" <thread-id>
 All operations re-verify the supplied run and pinned anchors without recomputing Git scope. Relay an
 actionable validation error instead of guessing a replacement anchor. `revue comments` is only a
 compatibility command alias; use the official `threads` API.
+
+## Configuring keybindings
+
+If the user asks to remap a shortcut, do it by editing `~/.revue/keybindings.json` — never by
+patching Revue's source. The file is JSONC (`//` and `/* */` comments are stripped before
+parsing) and holds a flat object of `"action-id": "key"` or `"action-id": ["key", "key"]` entries.
+An entry **replaces** that action's full default key list; it does not add to it.
+
+Discover the current action IDs and bindings before writing anything — the defaults can change,
+so never guess or restate them from memory:
+
+```bash
+revue keybindings          # every action, its description, default keys, and effective keys
+revue keybindings init     # writes a commented starter template to ~/.revue/keybindings.json
+```
+
+`init` refuses to overwrite an existing file unless `--force` is passed. Starting from its output
+(uncomment and edit the relevant lines) is more reliable than writing the file from scratch.
+
+Key grammar for a value:
+
+- lowercase named keys: `up`, `down`, `left`, `right`, `pageup`, `pagedown`, `home`, `end`,
+  `insert`, `delete`, `backspace`, `return`, `tab`, `space`, `f1`–`f12`
+- `ctrl+` prefix over a lowercase letter or named key: `ctrl+d`, `ctrl+f10`
+- a single-character literal for an unshifted key: `j`, `?`, `{`
+- an uppercase letter for a shifted character: `G` (not `shift+g` — Revue expands the alias itself)
+- `shift+` prefix only over a named/special key: `shift+tab`
+
+Reserved, never valid in a value: `escape`, the raw `[` and `]` characters (chord prefixes for
+page navigation), and the digits `1`–`9` (direct chapter jumps). Chord actions (page navigation)
+are fixed and cannot appear as keys in the file at all — they're omitted from `init`'s template.
+
+Validation is lenient and per-entry: a malformed file (bad JSON) falls back to the full defaults
+with one warning; within a well-formed file, an unknown action id, an invalid key, a reserved key,
+or a key that collides with another binding in the same context drops just that entry — every
+other entry in the file still applies. Dropped entries and their reasons show up in `revue
+keybindings`'s output and in the TUI's footer/help overlay, so re-run `revue keybindings` after
+editing to confirm the file did what was intended.

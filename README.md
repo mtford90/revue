@@ -73,8 +73,11 @@ Comment on any line - click or drag the line-number gutter - and mark chapters o
 read. Threads live in plain JSON beside your repo and round-trip through a public CLI, so
 your agent can pick up every comment, fix it & reply inline against the same frozen scope.
 
+Every shortcut can be remapped in `~/.revue/keybindings.json`; the help overlay (`?`) shows each
+action's ID alongside its keys. `revue keybindings init` writes a commented starter file.
+
 The [guide](docs/guide.md) covers the rest: Markdown export, the semantic view, themes,
-`.revueignore` & the full keymap.
+`.revueignore`, the full keymap & remapping shortcuts.
 
 ## Why was this made?
 

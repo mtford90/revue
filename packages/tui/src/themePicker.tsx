@@ -1,8 +1,14 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI dialogs use pointer handlers on renderables.
 // biome-ignore-all lint/a11y/useKeyWithMouseEvents: Keyboard operation is routed by the app shell.
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
-import type { Theme } from "@revue/theme";
+import { THEME_IDS, type Theme } from "@revue/theme";
 import { useTheme } from "./theme.ts";
+
+/** A custom theme is "customised" when it shadows a bundled id, "custom" otherwise. */
+const themeBadge = (id: string, customThemeIds: ReadonlySet<string>): string | undefined => {
+	if (!customThemeIds.has(id)) return undefined;
+	return THEME_IDS.includes(id) ? " (customised)" : " (custom)";
+};
 
 const MIN_WIDTH = 34;
 const MAX_WIDTH = 52;
@@ -23,6 +29,7 @@ const windowStart = (selectedIndex: number, count: number, rows: number) => {
 
 export function ThemePicker({
 	themes,
+	customThemeIds = new Set(),
 	selectedIndex,
 	activeThemeId,
 	terminalWidth,
@@ -30,6 +37,8 @@ export function ThemePicker({
 	onPick,
 }: {
 	themes: readonly Theme[];
+	/** Ids sourced from `~/.revue/themes`, marked "(custom)" or "(customised)" in the list. */
+	customThemeIds?: ReadonlySet<string>;
 	selectedIndex: number;
 	activeThemeId: string;
 	terminalWidth: number;
@@ -97,6 +106,7 @@ export function ThemePicker({
 							fg={selected ? theme.text : theme.muted}
 						>
 							{candidate.label}
+							{themeBadge(candidate.id, customThemeIds) ?? ""}
 						</text>
 						<text flexShrink={0} fg={theme.muted}>
 							{candidate.appearance}

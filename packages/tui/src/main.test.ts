@@ -457,6 +457,34 @@ test("show names its themes and refuses an unknown one before touching the run",
 	}
 });
 
+test("show resolves a custom theme by id from ~/.revue/themes", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-custom-theme-"));
+	try {
+		const directory = await copySampleRun(root);
+		const themesDir = join(root, ".revue", "themes");
+		await mkdir(themesDir, { recursive: true });
+		await writeFile(
+			join(themesDir, "mauve.json"),
+			JSON.stringify({ extends: "nord", label: "Mauve" }),
+			"utf8",
+		);
+
+		const known = await run(root, ["show", directory, "--theme", "mauve", "--check"], {
+			HOME: root,
+		});
+		expect(known.exitCode).toBe(0);
+		expect(known.stdout).toContain("run is valid");
+
+		const unknown = await run(root, ["show", directory, "--theme", "not-a-theme", "--check"], {
+			HOME: root,
+		});
+		expect(unknown).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(unknown.stderr).toContain("unknown theme: not-a-theme");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 // Stands in for the skills CLI (vercel-labs/skills): records its arguments and copies the
 // handed-over skill where a real run would install it for Claude Code at project scope.
 const fakeSkillsRunner = async (root: string): Promise<{ executable: string; log: string }> => {

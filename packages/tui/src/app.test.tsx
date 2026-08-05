@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff-renderer";
-import { resolveTheme } from "@revue/theme";
+import { resolveTheme, THEME_IDS } from "@revue/theme";
 import {
 	type ReviewThread,
 	RevueChaptersFileSchema,
@@ -20,6 +20,7 @@ import { mergeKeymap } from "./keybindings.ts";
 import { KEYMAP } from "./keymap.ts";
 import type { Preferences } from "./preferences.ts";
 import type { PermalinkContext } from "./sourceLink.ts";
+import { parseCustomTheme } from "./themes.ts";
 import { createThread } from "./threads.ts";
 import type { ReviewSessionState } from "./viewState.ts";
 
@@ -884,6 +885,26 @@ test("dropped keybinding overrides surface as a footer warning and help-overlay 
 	expect(frame).toContain('not-a-real-action: unknown action "not-a-real-action"');
 });
 
+test("dropped theme issues surface as a footer warning and help-overlay detail, absent otherwise", async () => {
+	const clean = await testRender(<App file={file} />, { width: 110, height: 60 });
+	await clean.renderOnce();
+	expect(clean.captureCharFrame()).not.toContain("theme issue");
+
+	const themeIssues = [{ entry: "broken.background", reason: 'invalid colour "nope"; ignored' }];
+	const t = await testRender(<App file={file} themeIssues={themeIssues} />, {
+		width: 110,
+		height: 60,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("1 theme issue ignored — press ? for details");
+
+	await press(t, "?");
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Theme issues ignored");
+	expect(frame).toContain('broken.background: invalid colour "nope"; ignored');
+});
+
 test("a chapter shows its file list with the shared directory hoisted", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 40 });
 	await t.renderOnce();
@@ -1482,6 +1503,53 @@ test("the theme picker previews a palette, applies the accepted one, and reports
 	expect(t.captureCharFrame()).not.toContain("preview · enter accept");
 	expect(background()).not.toEqual(nordBackground);
 	expect(chosen).toEqual(["one-dark-pro"]);
+});
+
+test("a custom theme with extends and an override is selectable via the picker and paints the TUI", async () => {
+	const custom = parseCustomTheme(
+		"zzz-custom",
+		`{ "extends": "nord", "label": "Nord, mauve", "overrides": { "background": "#2b0f2e" } }`,
+	).theme;
+	if (!custom) throw new Error("expected the custom theme to derive");
+	const shadow = parseCustomTheme("nord", `{ "extends": "nord", "label": "Nord (mine)" }`).theme;
+	if (!shadow) throw new Error("expected the shadowing theme to derive");
+
+	const chosen: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			initialTheme={resolveTheme("nord")}
+			customThemes={[custom, shadow]}
+			onThemeChange={(next) => chosen.push(next.id)}
+		/>,
+		{ width: 110, height: 32 },
+	);
+	await t.renderOnce();
+	const background = () => t.captureSpans().lines[1]?.spans[0]?.bg;
+	const nordBackground = background();
+
+	await press(t, "t");
+	const listFrame = t.captureCharFrame();
+	expect(listFrame).toContain("Nord (mine)");
+	expect(listFrame).toContain("(customised)");
+	// "nord" shadowed once, not twice.
+	expect(listFrame.match(/Nord/g)).toHaveLength(1);
+
+	// Cycle from "nord" to the appended pure-custom entry at the end of the merged list.
+	const steps = THEME_IDS.length - THEME_IDS.indexOf("nord");
+	for (let i = 0; i < steps; i++) await arrow(t, "down");
+	const pickerFrame = t.captureCharFrame();
+	expect(pickerFrame).toContain("Nord, mauve");
+	expect(pickerFrame).toContain("(custom)");
+
+	await act(async () => {
+		t.mockInput.pressEnter();
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	expect(chosen).toEqual(["zzz-custom"]);
+	expect(background()).not.toEqual(nordBackground);
 });
 
 const NEW_SHA = "b".repeat(40);

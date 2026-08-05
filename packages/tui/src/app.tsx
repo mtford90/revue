@@ -29,13 +29,7 @@ import {
 	type RangeDecoration,
 	type SpanEmphasis,
 } from "@revue/diff-renderer";
-import {
-	type Appearance,
-	resolveTheme,
-	THEMES,
-	type Theme,
-	withTransparentSurfaces,
-} from "@revue/theme";
+import { type Appearance, resolveTheme, type Theme, withTransparentSurfaces } from "@revue/theme";
 import {
 	type Chapter,
 	emptyViewState,
@@ -116,6 +110,7 @@ import {
 	useTheme,
 } from "./theme.ts";
 import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
+import { mergeCustomThemes, type ThemeIssue } from "./themes.ts";
 import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
 import {
 	chapterFilePaths,
@@ -2012,6 +2007,7 @@ function HelpModal({
 	onClose,
 	keymap = KEYMAP,
 	issues = [],
+	themeIssues = [],
 }: {
 	terminalWidth: number;
 	terminalHeight: number;
@@ -2019,14 +2015,16 @@ function HelpModal({
 	onClose: () => void;
 	keymap?: readonly KeymapAction[];
 	issues?: readonly KeymapIssue[];
+	themeIssues?: readonly ThemeIssue[];
 }) {
 	const theme = useTheme();
 	const sections = useMemo(() => keymapSections(keymap), [keymap]);
 	const shortcutRows = useMemo(
 		() =>
 			sections.reduce((total, section) => total + section.lines.length + 1, 0) +
-			(issues.length > 0 ? issues.length + 1 : 0),
-		[sections, issues],
+			(issues.length > 0 ? issues.length + 1 : 0) +
+			(themeIssues.length > 0 ? themeIssues.length + 1 : 0),
+		[sections, issues, themeIssues],
 	);
 	const width = Math.max(20, Math.min(HELP_MODAL_MAX_WIDTH, terminalWidth - 4));
 	const height = Math.max(5, Math.min(shortcutRows + 3, terminalHeight - 4));
@@ -2074,6 +2072,21 @@ function HelpModal({
 						<box flexDirection="column" width="100%">
 							<text fg={theme.badgeRemoved}>Keybinding overrides ignored</text>
 							{issues.map((issue) => (
+								<text
+									key={`${issue.entry}-${issue.reason}`}
+									fg={theme.badgeRemoved}
+									wrapMode="none"
+									truncate
+								>
+									{`  ${issue.entry}: ${issue.reason}`}
+								</text>
+							))}
+						</box>
+					) : null}
+					{themeIssues.length > 0 ? (
+						<box flexDirection="column" width="100%">
+							<text fg={theme.badgeRemoved}>Theme issues ignored</text>
+							{themeIssues.map((issue) => (
 								<text
 									key={`${issue.entry}-${issue.reason}`}
 									fg={theme.badgeRemoved}
@@ -2274,6 +2287,8 @@ export function App({
 	onQuit,
 	keymap = KEYMAP,
 	keymapIssues = [],
+	customThemes = [],
+	themeIssues = [],
 }: {
 	/** Null for a chapterless run: the review opens straight onto the All files page. */
 	file: RevueChaptersFile | null;
@@ -2303,10 +2318,18 @@ export function App({
 	keymap?: readonly KeymapAction[];
 	/** User keybinding entries dropped during the merge, surfaced in the footer and help overlay. */
 	keymapIssues?: readonly KeymapIssue[];
+	/** Themes read from `~/.revue/themes`; shadow bundled themes that share an id. */
+	customThemes?: readonly Theme[];
+	/** Custom theme files or keys dropped while loading, surfaced in the footer and help overlay. */
+	themeIssues?: readonly ThemeIssue[];
 }) {
 	const renderer = useRenderer();
 	const { width, height } = useTerminalDimensions();
 	const [chosenTheme, setChosenTheme] = useState(initialTheme);
+	const { themes: pickerThemes, customIds: customThemeIds } = useMemo(
+		() => mergeCustomThemes(customThemes),
+		[customThemes],
+	);
 	const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
 	const shownTheme = previewTheme ?? chosenTheme;
@@ -3349,19 +3372,19 @@ export function App({
 	function openThemePicker() {
 		const selected = Math.max(
 			0,
-			THEMES.findIndex((candidate) => candidate.id === chosenTheme.id),
+			pickerThemes.findIndex((candidate) => candidate.id === chosenTheme.id),
 		);
 		setThemePicker({ selected });
 		setPreviewTheme(null);
 	}
 	function moveThemePreview(delta: number) {
 		if (!themePicker) return;
-		const selected = (themePicker.selected + delta + THEMES.length) % THEMES.length;
+		const selected = (themePicker.selected + delta + pickerThemes.length) % pickerThemes.length;
 		setThemePicker({ selected });
-		setPreviewTheme(THEMES[selected] ?? null);
+		setPreviewTheme(pickerThemes[selected] ?? null);
 	}
 	function chooseTheme(index: number) {
-		const next = THEMES[index];
+		const next = pickerThemes[index];
 		if (!next) return;
 		setChosenTheme(next);
 		setPreviewTheme(null);
@@ -3783,7 +3806,12 @@ export function App({
 							text: `${keymapIssues.length} keybinding ${keymapIssues.length === 1 ? "override" : "overrides"} ignored — press ? for details`,
 							tone: "error",
 						}
-					: null;
+					: themeIssues.length > 0
+						? {
+								text: `${themeIssues.length} theme ${themeIssues.length === 1 ? "issue" : "issues"} ignored — press ? for details`,
+								tone: "error",
+							}
+						: null;
 
 	return (
 		<ThemeProvider value={theme}>
@@ -4035,13 +4063,15 @@ export function App({
 						onClose={() => setShowHelp(false)}
 						keymap={keymap}
 						issues={keymapIssues}
+						themeIssues={themeIssues}
 					/>
 				) : null}
 				{themePicker ? (
 					<>
 						<ThemePickerBackdrop onClose={closeThemePicker} />
 						<ThemePicker
-							themes={THEMES}
+							themes={pickerThemes}
+							customThemeIds={customThemeIds}
 							selectedIndex={themePicker.selected}
 							activeThemeId={chosenTheme.id}
 							terminalWidth={width}
@@ -4093,6 +4123,10 @@ export async function runApp(
 		keymap?: readonly KeymapAction[];
 		/** User keybinding entries dropped during the merge. */
 		keymapIssues?: readonly KeymapIssue[];
+		/** Themes read from `~/.revue/themes`. */
+		customThemes?: readonly Theme[];
+		/** Custom theme files or keys dropped while loading. */
+		themeIssues?: readonly ThemeIssue[];
 	} = {},
 ): Promise<void> {
 	const renderer = await createCliRenderer({ exitOnCtrlC: true });
@@ -4129,6 +4163,8 @@ export async function runApp(
 				onQuit={quit}
 				keymap={options.keymap}
 				keymapIssues={options.keymapIssues}
+				customThemes={options.customThemes}
+				themeIssues={options.themeIssues}
 			/>,
 		);
 		await quitting;

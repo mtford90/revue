@@ -15,7 +15,7 @@ import {
 	ReviewCoverageError,
 	RunArtifactError,
 } from "@revue/prep";
-import { isBundledShikiThemeId, resolveTheme, THEME_IDS } from "@revue/theme";
+import { isBundledShikiThemeId, resolveTheme, THEME_IDS, type Theme } from "@revue/theme";
 import {
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
@@ -33,6 +33,7 @@ import { defaultPreferencesPath, loadPreferences, savePreferences } from "./pref
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
 import { formatChapterlessSummary, formatSummary } from "./summary.ts";
+import { defaultThemesDir, loadCustomThemes, type ThemeIssue } from "./themes.ts";
 import {
 	createThread,
 	defaultThreadsPath,
@@ -531,12 +532,6 @@ async function cmdShow(args: string[]): Promise<number> {
 		process.stdout.write(`${THEME_IDS.join("\n")}\n`);
 		return 0;
 	}
-	if (requestedTheme && requestedTheme !== "auto" && !isBundledShikiThemeId(requestedTheme)) {
-		process.stderr.write(
-			`unknown theme: ${requestedTheme}\nRun \`revue show <run-directory> --theme list\` for the available names.\n`,
-		);
-		return 1;
-	}
 	const directory = options.positionals[0];
 	if (options.positionals.length !== 1 || !directory) {
 		process.stderr.write(`${SHOW_HELP}\n`);
@@ -579,11 +574,30 @@ async function showRun(
 		throw error;
 	}
 
+	let customThemes: Theme[] = [];
+	let themeIssues: ThemeIssue[] = [];
+	if (options.requestedTheme && options.requestedTheme !== "auto") {
+		({ themes: customThemes, issues: themeIssues } = await loadCustomThemes(defaultThemesDir()));
+		if (
+			!isBundledShikiThemeId(options.requestedTheme) &&
+			!customThemes.some((theme) => theme.id === options.requestedTheme)
+		) {
+			process.stderr.write(
+				`unknown theme: ${options.requestedTheme}\nRun \`revue show <run-directory> --theme list\` for the available names.\n`,
+			);
+			return 1;
+		}
+	}
+
 	if (options.check || !process.stdout.isTTY) {
 		process.stdout.write(
 			`${run.chapters ? formatSummary(run.chapters) : formatChapterlessSummary(run.manifest)}\n`,
 		);
 		return 0;
+	}
+
+	if (!options.requestedTheme || options.requestedTheme === "auto") {
+		({ themes: customThemes, issues: themeIssues } = await loadCustomThemes(defaultThemesDir()));
 	}
 
 	const preferencesPath = defaultPreferencesPath();
@@ -593,7 +607,7 @@ async function showRun(
 	const transparentSurfaces = options.transparentBg || preferences.transparentBackground === true;
 	// The terminal has not reported its own background yet, so highlight against the theme the
 	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
-	const startupTheme = resolveTheme(themeId, null);
+	const startupTheme = resolveTheme(themeId, null, customThemes);
 
 	const [{ runApp }, { preparePatch }, { generateSemanticDiff }, { openRunStateStore }] =
 		await Promise.all([
@@ -630,7 +644,9 @@ async function showRun(
 		initialPreferences: preferences,
 		keymap,
 		keymapIssues,
-		resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance),
+		customThemes,
+		themeIssues,
+		resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance, customThemes),
 		initialSyntaxTheme: startupTheme.syntaxTheme,
 		transparentSurfaces,
 		onPreferencesChange: (next) => savePreferences(preferencesPath, next),
@@ -669,12 +685,6 @@ async function cmdDiff(args: string[]): Promise<number> {
 		} else if (argument !== undefined) {
 			prepArgs.push(argument);
 		}
-	}
-	if (requestedTheme && requestedTheme !== "auto" && !isBundledShikiThemeId(requestedTheme)) {
-		process.stderr.write(
-			`unknown theme: ${requestedTheme}\nRun \`revue show <run-directory> --theme list\` for the available names.\n`,
-		);
-		return 1;
 	}
 	let run: PreparedRun;
 	try {

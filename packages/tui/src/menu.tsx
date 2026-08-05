@@ -2,6 +2,7 @@
 // biome-ignore-all lint/a11y/useKeyWithMouseEvents: Keyboard operation is routed by the menu controller.
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { useState } from "react";
+import { keymapHint } from "./keymap.ts";
 import type { DiffLayoutPreference, SidebarPreference } from "./layout.ts";
 import type { PathDisplayMode } from "./pathDisplay.ts";
 import type { FileDisplayPreference } from "./preferences.ts";
@@ -155,19 +156,19 @@ export const buildAppMenus = ({
 	chooseTheme: () => void;
 	themeLabel: string;
 }): Record<MenuId, MenuEntry[]> => ({
-	file: [{ kind: "item", label: "Quit", hint: "q", action: requestQuit }],
+	file: [{ kind: "item", label: "Quit", hint: keymapHint("quit"), action: requestQuit }],
 	navigate: [
 		{
 			kind: "item",
 			label: "Previous page",
-			hint: "[c",
+			hint: keymapHint("previous-page"),
 			disabled: !canMovePrevious,
 			action: movePrevious,
 		},
 		{
 			kind: "item",
 			label: "Next page",
-			hint: "]c",
+			hint: keymapHint("next-page"),
 			disabled: !canMoveNext,
 			action: moveNext,
 		},
@@ -175,7 +176,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Next unreviewed chapter",
-			hint: "a",
+			hint: keymapHint("next-unreviewed"),
 			disabled: !canMoveNextUnreviewed,
 			action: moveNextUnreviewed,
 		},
@@ -183,7 +184,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "All files",
-			hint: "w",
+			hint: keymapHint("toggle-all-files"),
 			checked: allFiles,
 			disabled: !canToggleAllFiles,
 			action: toggleAllFiles,
@@ -191,7 +192,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Comments",
-			hint: "o",
+			hint: keymapHint("toggle-comments"),
 			checked: commentsSurface,
 			disabled: !canToggleAllFiles,
 			action: toggleComments,
@@ -252,14 +253,14 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Collapse files",
-			hint: "c",
+			hint: keymapHint("collapse-files"),
 			disabled: !canChangeFiles,
 			action: collapseFiles,
 		},
 		{
 			kind: "item",
 			label: "Expand files",
-			hint: "e",
+			hint: keymapHint("expand-files"),
 			disabled: !canChangeFiles,
 			action: expandFiles,
 		},
@@ -267,7 +268,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: `Theme: ${themeLabel}`,
-			hint: "t",
+			hint: keymapHint("open-theme-picker"),
 			action: chooseTheme,
 		},
 	],
@@ -275,7 +276,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Keyboard shortcuts",
-			hint: "?",
+			hint: keymapHint("toggle-shortcut-help"),
 			checked: showHelp,
 			action: toggleHelp,
 		},

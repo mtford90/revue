@@ -58,6 +58,7 @@ import {
 	expandedPatchText,
 	type FileExpansion,
 } from "./expand.ts";
+import { APP_KEYS, keymapHint, keymapSections, matchKeymapAction } from "./keymap.ts";
 import {
 	type DiffLayoutPreference,
 	defaultPanelWidth,
@@ -185,42 +186,6 @@ const centreContentOffset = ({
 };
 const COMPACT_NAV_WIDTH = 34;
 const COMPACT_STRIP_WIDTH = 60;
-const APP_KEYS = new Set([
-	"f10",
-	"q",
-	"escape",
-	"pageup",
-	"pagedown",
-	"j",
-	"k",
-	"d",
-	"u",
-	"b",
-	"up",
-	"down",
-	"g",
-	"G",
-	"tab",
-	"return",
-	"c",
-	"e",
-	"space",
-	"x",
-	"f",
-	"a",
-	"o",
-	"[",
-	"]",
-	"{",
-	"}",
-	"p",
-	"r",
-	"s",
-	"t",
-	"w",
-	"y",
-	"?",
-]);
 // ── Page model ──────────────────────────────────────────────────────────────
 // The reviewer pages through one "beat" at a time: an optional prologue, then
 // each chapter in order. This is the core Stage UX, so we own it here and
@@ -2029,71 +1994,9 @@ function SemanticChapterView({
 }
 
 // ── Keyboard help ──────────────────────────────────────────────────────────
-const SHORTCUT_SECTIONS: { title: string; lines: string[] }[] = [
-	{
-		title: "Scrolling",
-		lines: [
-			"j/k or ↑/↓ line",
-			"d/u or ctrl-d/ctrl-u half-page",
-			"space/ctrl-f page down · b/ctrl-b page up",
-			"g/gg top · G bottom · PgUp/PgDn · wheel",
-		],
-	},
-	{
-		title: "Navigation",
-		lines: [
-			"]c/[c next/previous page (prologue is page one)",
-			"w All files: the whole diff without the story",
-			"o Comments: every thread in one list · enter jumps to it",
-			"a next unreviewed chapter",
-			"pointer: the strip under the menu bar, or the sidebar index",
-		],
-	},
-	{
-		title: "Files",
-		lines: [
-			"tab/shift-tab focus · enter toggle diff",
-			"c/e collapse/expand all",
-			"click a ⋯ band to reveal unchanged lines around a hunk",
-		],
-	},
-	{
-		title: "Review",
-		lines: [
-			"x chapter · f focused file",
-			"{/} focus key change · r toggle · 1–9 direct",
-			"pointer: click/drag line-number gutter to start a thread",
-		],
-	},
-	{
-		title: "Copying",
-		lines: [
-			"drag over code to select it · y copies the selection",
-			"right-click a line for copy text, copy path, copy link, comment",
-			"ctrl-y path:line · ctrl-g GitHub link, while a thread is open",
-			"links need a GitHub remote and a committed side",
-		],
-	},
-	{
-		title: "Views",
-		lines: [
-			"s show/hide the sidebar; its narrative stacks above the diff",
-			"p cycle path display: smart, tree, full",
-			"F10 → View toggles Patch / read-only Semantic",
-			"F10 → View sets diff layout: auto, split or stacked",
-			"key-change anchors work in both views; Semantic remains read-only",
-		],
-	},
-	{
-		title: "Menus",
-		lines: ["t theme picker", "F10 · File, Navigate, View, Help", "? shortcuts · q/esc quit"],
-	},
-];
+const HELP_SECTIONS = keymapSections();
 
-const SHORTCUT_ROWS = SHORTCUT_SECTIONS.reduce(
-	(total, section) => total + section.lines.length + 1,
-	0,
-);
+const SHORTCUT_ROWS = HELP_SECTIONS.reduce((total, section) => total + section.lines.length + 1, 0);
 const HELP_MODAL_MAX_WIDTH = 66;
 
 /** Floats over the review rather than displacing it, so the page stays in sight. */
@@ -2151,7 +2054,7 @@ function HelpModal({
 					scrollY
 					verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.border } }}
 				>
-					{SHORTCUT_SECTIONS.map((section) => (
+					{HELP_SECTIONS.map((section) => (
 						<box key={section.title} flexDirection="column" width="100%">
 							<text fg={theme.heading}>{section.title}</text>
 							{section.lines.map((line) => (
@@ -2281,7 +2184,12 @@ const buildRangeMenu = ({
 }): MenuEntry[] => [
 	...(selectedText
 		? ([
-				{ kind: "item", label: "Copy selected text", hint: "y", action: copyText },
+				{
+					kind: "item",
+					label: "Copy selected text",
+					hint: keymapHint("copy-selection"),
+					action: copyText,
+				},
 				{ kind: "separator", id: "text" },
 			] as MenuEntry[])
 		: []),
@@ -3638,98 +3546,155 @@ export function App({
 			else if (name === "return") menu.activate();
 			return;
 		}
-		if (name === "f10") {
+		const keymapContext = page?.kind === "comments" ? "comments" : "page";
+		const actionId = matchKeymapAction(keymapContext, {
+			name: name ?? "",
+			ctrl: key.ctrl,
+			shift: key.shift,
+		});
+
+		if (actionId === "open-menu") {
 			chapterNavigationPrefix.current = null;
 			menu.open("file");
 			return;
 		}
-
-		const previousKeyChange = name === "{" || (name === "[" && key.shift);
-		const nextKeyChange = name === "}" || (name === "]" && key.shift);
-		if (previousKeyChange || nextKeyChange) {
-			moveKeyChangeFocus(previousKeyChange ? -1 : 1);
+		if (actionId === "previous-key-change" || actionId === "next-key-change") {
+			moveKeyChangeFocus(actionId === "previous-key-change" ? -1 : 1);
 			return;
 		}
 		if (handleChapterChord(name)) return;
 		if (copyNotice) setCopyNotice(null);
 
-		if (page?.kind === "comments") {
-			if (name === "q" || name === "escape") quit();
-			else if (name === "?") toggleShortcutHelp();
-			else if (name === "t") openThemePicker();
-			else if (name === "o") toggleComments();
-			else if (name === "w") selectSurface("files");
-			else if (name === "j" || name === "down") moveThreadSelection(1);
-			else if (name === "k" || name === "up") moveThreadSelection(-1);
-			else if (name === "g") moveThreadSelection(-orderedThreads.length);
-			else if (name === "G") moveThreadSelection(orderedThreads.length);
-			else if (name === "return") {
-				const thread = orderedThreads[selectedThread];
-				if (thread) jumpToThread(thread);
+		if (keymapContext === "comments") {
+			switch (actionId) {
+				case "quit":
+					quit();
+					break;
+				case "toggle-shortcut-help":
+					toggleShortcutHelp();
+					break;
+				case "open-theme-picker":
+					openThemePicker();
+					break;
+				case "toggle-comments":
+					toggleComments();
+					break;
+				case "comments-select-files":
+					selectSurface("files");
+					break;
+				case "comments-next":
+					moveThreadSelection(1);
+					break;
+				case "comments-previous":
+					moveThreadSelection(-1);
+					break;
+				case "comments-first":
+					moveThreadSelection(-orderedThreads.length);
+					break;
+				case "comments-last":
+					moveThreadSelection(orderedThreads.length);
+					break;
+				case "jump-to-thread": {
+					const thread = orderedThreads[selectedThread];
+					if (thread) jumpToThread(thread);
+					break;
+				}
+				default:
+					break;
 			}
 			return;
 		}
 
-		if (name === "?") {
-			toggleShortcutHelp();
-		} else if (name === "s") {
-			toggleSidebar();
-		} else if (name === "w") {
-			toggleAllFiles();
-		} else if (name === "o") {
-			toggleComments();
-		} else if (name === "p") {
-			changePathDisplay(nextPathDisplayMode(pathDisplay));
-		} else if (name === "t") {
-			openThemePicker();
-		} else if (name === "y") {
-			const text = highlightedText();
-			if (text) copyText(text);
-		} else if (name === "q" || name === "escape") {
-			quit();
-		} else if (name === "pageup" || name === "pagedown") {
-			pageScroll.current?.scrollBy(name === "pageup" ? -1 : 1, "viewport");
-		} else if ((name === "f" || name === "b") && key.ctrl) {
-			pageScroll.current?.scrollBy(name === "f" ? 1 : -1, "viewport");
-		} else if (name === "d" || name === "u") {
-			pageScroll.current?.scrollBy(name === "d" ? 0.5 : -0.5, "viewport");
-		} else if (name === "space" || name === "b") {
-			pageScroll.current?.scrollBy(name === "space" ? 1 : -1, "viewport");
-		} else if (name === "j" || name === "down") {
-			pageScroll.current?.scrollBy(1);
-		} else if (name === "k" || name === "up") {
-			pageScroll.current?.scrollBy(-1);
-		} else if (name === "G" || (name === "g" && key.shift)) {
-			pageScroll.current?.scrollTo(Number.MAX_SAFE_INTEGER);
-		} else if (name === "g") {
-			pageScroll.current?.scrollTo(0);
-		} else if (name === "tab") {
-			if (paths.length) {
-				const delta = key.shift ? -1 : 1;
-				setSelectedFile((selected) => (selected + delta + paths.length) % paths.length);
-				requestFileFocus();
+		switch (actionId) {
+			case "toggle-shortcut-help":
+				toggleShortcutHelp();
+				break;
+			case "toggle-sidebar":
+				toggleSidebar();
+				break;
+			case "toggle-all-files":
+				toggleAllFiles();
+				break;
+			case "toggle-comments":
+				toggleComments();
+				break;
+			case "cycle-path-display":
+				changePathDisplay(nextPathDisplayMode(pathDisplay));
+				break;
+			case "open-theme-picker":
+				openThemePicker();
+				break;
+			case "copy-selection": {
+				const text = highlightedText();
+				if (text) copyText(text);
+				break;
 			}
-		} else if (!chapter) {
-			// remaining keys act on a chapter only
-		} else if (name === "return") {
-			const path = paths[selectedFile];
-			if (path) toggleCollapsedFile(path);
-		} else if (name === "c") {
-			collapseFiles();
-		} else if (name === "e") {
-			expandFiles();
-		} else if (name === "x") {
-			toggleChapterReview();
-		} else if (name === "f") {
-			const path = paths[selectedFile];
-			if (path) toggleFileReview(path);
-		} else if (name === "a") {
-			moveNextUnreviewed();
-		} else if (name === "r") {
-			toggleSelectedKeyChange(selectedKeyChange);
-		} else if (name && /^[1-9]$/.test(name)) {
-			const idx = Number(name) - 1;
-			if (idx < chapter.keyChanges.length) toggleSelectedKeyChange(idx);
+			case "quit":
+				quit();
+				break;
+			case "page-up":
+				pageScroll.current?.scrollBy(-1, "viewport");
+				break;
+			case "page-down":
+				pageScroll.current?.scrollBy(1, "viewport");
+				break;
+			case "half-page-up":
+				pageScroll.current?.scrollBy(-0.5, "viewport");
+				break;
+			case "half-page-down":
+				pageScroll.current?.scrollBy(0.5, "viewport");
+				break;
+			case "line-up":
+				pageScroll.current?.scrollBy(-1);
+				break;
+			case "line-down":
+				pageScroll.current?.scrollBy(1);
+				break;
+			case "scroll-bottom":
+				pageScroll.current?.scrollTo(Number.MAX_SAFE_INTEGER);
+				break;
+			case "scroll-top":
+				pageScroll.current?.scrollTo(0);
+				break;
+			case "focus-file":
+				if (paths.length) {
+					const delta = key.shift ? -1 : 1;
+					setSelectedFile((selected) => (selected + delta + paths.length) % paths.length);
+					requestFileFocus();
+				}
+				break;
+			case "toggle-file-diff": {
+				if (!chapter) break;
+				const path = paths[selectedFile];
+				if (path) toggleCollapsedFile(path);
+				break;
+			}
+			case "collapse-files":
+				if (chapter) collapseFiles();
+				break;
+			case "expand-files":
+				if (chapter) expandFiles();
+				break;
+			case "toggle-chapter-review":
+				if (chapter) toggleChapterReview();
+				break;
+			case "toggle-file-review": {
+				if (!chapter) break;
+				const path = paths[selectedFile];
+				if (path) toggleFileReview(path);
+				break;
+			}
+			case "next-unreviewed":
+				if (chapter) moveNextUnreviewed();
+				break;
+			case "toggle-key-change":
+				if (chapter) toggleSelectedKeyChange(selectedKeyChange);
+				break;
+			default:
+				if (chapter && name && /^[1-9]$/.test(name)) {
+					const idx = Number(name) - 1;
+					if (idx < chapter.keyChanges.length) toggleSelectedKeyChange(idx);
+				}
 		}
 	});
 

@@ -290,13 +290,14 @@ Key grammar for a value:
 - lowercase named keys: `up`, `down`, `left`, `right`, `pageup`, `pagedown`, `home`, `end`,
   `insert`, `delete`, `backspace`, `return`, `tab`, `space`, `f1`–`f12`
 - `ctrl+` prefix over a lowercase letter or named key: `ctrl+d`, `ctrl+f10`
-- a single-character literal for an unshifted key: `j`, `?`, `{`
+- a single-character literal for the character produced: `j`, `?`, `{`
 - an uppercase letter for a shifted character: `G` (not `shift+g` — Revue expands the alias itself)
 - `shift+` prefix only over a named/special key: `shift+tab`
 
 Reserved, never valid in a value: `escape`, the raw `[` and `]` characters (chord prefixes for
-page navigation), and the digits `1`–`9` (direct chapter jumps). Chord actions (page navigation)
-are fixed and cannot appear as keys in the file at all — they're omitted from `init`'s template.
+page navigation), and the digits `1`–`9` (direct key-change shortcuts). Chord actions (page
+navigation) are fixed and cannot appear as keys in the file at all — they're omitted from
+`init`'s template.
 
 Validation is lenient and per-entry: a malformed file (bad JSON) falls back to the full defaults
 with one warning; within a well-formed file, an unknown action id, an invalid key, a reserved key,

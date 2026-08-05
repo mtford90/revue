@@ -310,10 +310,13 @@ collapsed files, and the main and chapter-panel scroll offsets. Saved threads lo
 
 ### Remapping shortcuts
 
-Every non-chord action above can be rebound in `~/.revue/keybindings.json`, a JSONC file (`//`
-and `/* */` comments are stripped before parsing) of `"action-id": "key"` or
+Every action listed in the help overlay or `revue keybindings` can be rebound in
+`~/.revue/keybindings.json`, a JSONC file (`//` and `/* */` comments are stripped before
+parsing — trailing commas are not, so keep the JSON itself strict) of `"action-id": "key"` or
 `"action-id": ["key", "key"]` entries — an entry replaces that action's full default key list
-rather than adding to it. The help overlay (`?`) shows each action's ID next to its keys, and:
+rather than adding to it. Ctrl-y/Ctrl-g (copy the open thread's location/GitHub link) are
+hardcoded outside the registry and cannot be rebound this way. The help overlay (`?`) shows each
+action's ID next to its keys, and:
 
 ```bash
 revue keybindings          # every action, its description, default keys, and effective keys
@@ -325,16 +328,17 @@ For example, to swap half-page scrolling onto `Ctrl-d`/`Ctrl-u`:
 ```jsonc
 {
   "half-page-down": "ctrl+d",
-  "half-page-up": "ctrl+u",
+  "half-page-up": "ctrl+u"
 }
 ```
 
 Keys are lowercase named keys (`up`, `pageup`, `return`, `f1`–`f12`, …), a `ctrl+` prefix, a
-single-character literal, or an uppercase letter for a shifted character (`G`, not `shift+g`).
-`escape`, the raw `[`/`]` chord prefixes, and the digits `1`–`9` are reserved and cannot be bound;
-the `]c`/`[c` chapter-navigation chord itself is fixed. An invalid, unknown, or conflicting entry
-is dropped with a warning — surfaced in `revue keybindings`'s output and the TUI's footer/help
-overlay — while the rest of the file still applies.
+single-character literal, an uppercase letter for a shifted character (`G`, not `shift+g`), or a
+`shift+` prefix over a named/special key (`shift+tab`). `escape`, the raw `[`/`]` chord prefixes,
+and the digits `1`–`9` are reserved and cannot be bound; the `]c`/`[c` chapter-navigation chord
+itself is fixed. An invalid, unknown, or conflicting entry is dropped with a warning — surfaced in
+`revue keybindings`'s output and the TUI's footer/help overlay — while the rest of the file still
+applies.
 
 ## Roadmap
 

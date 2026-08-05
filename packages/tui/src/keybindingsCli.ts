@@ -75,7 +75,7 @@ const TEMPLATE_HEADER = `// revue keybindings
 //   shift+ prefix          only for named/special keys, e.g. shift+tab
 //
 // Reserved, cannot be bound: escape, [ and ] (chord prefixes), digits 1-9 (direct
-// chapter jumps). Chord actions (page navigation) cannot be rebound and are
+// key-change shortcuts). Chord actions (page navigation) cannot be rebound and are
 // omitted below.
 //
 // Invalid or conflicting entries are dropped with a warning; the rest of the file

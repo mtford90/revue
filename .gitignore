@@ -12,3 +12,5 @@ bun.lock
 # editor
 .idea/
 .vscode/
+.reviews/
+.implement-worktrees/

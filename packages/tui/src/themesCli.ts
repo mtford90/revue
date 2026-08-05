@@ -52,7 +52,8 @@ const TEMPLATE_HEADER = `// revue theme
 //
 // Derivation inputs:
 //   background, foreground   #rgb or #rrggbb; a background is required unless "extends" is set
-//   diffColors.added/removed/modified   optional; fall back to the derived defaults
+//   diffColors.added/removed/modified   optional; fall back to the extends base's diff colours,
+//                                        then the derived defaults
 //
 // extends: the id of a bundled theme to derive from, e.g. "ayu-dark". Run \`revue themes\` for
 // the full list of bundled ids. Any of the derivation inputs above may still be set alongside
@@ -69,7 +70,7 @@ ${OVERRIDABLE_THEME_SLOTS.map((slot) => `//   ${slot}`).join("\n")}
 `;
 
 const TEMPLATE_BODY = `{
-  // "extends": "ayu-dark",
+  "extends": "ayu-dark"
   // "overrides": {
   //   "accent": "#ff8800"
   // }
@@ -79,6 +80,10 @@ const TEMPLATE_BODY = `{
 /** Generates a fully-commented JSONC starter file documenting the custom theme grammar. */
 export const generateThemesTemplate = (_name: string): string =>
 	`${TEMPLATE_HEADER}\n${TEMPLATE_BODY}`;
+
+/** A theme name must be a bare filename stem: no path separators, and no leading dot. */
+export const isValidThemeName = (name: string): boolean =>
+	!name.startsWith(".") && !/[/\\]/.test(name);
 
 export type InitResult = { path: string; wrote: true } | { path: string; wrote: false };
 

@@ -2,8 +2,14 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { THEMES } from "@revue/theme";
 import { loadCustomThemes, parseCustomTheme } from "./themes.ts";
-import { formatThemesListing, generateThemesTemplate, initThemesFile } from "./themesCli.ts";
+import {
+	formatThemesListing,
+	generateThemesTemplate,
+	initThemesFile,
+	isValidThemeName,
+} from "./themesCli.ts";
 
 const tmpDirs: string[] = [];
 afterAll(async () => {
@@ -56,17 +62,25 @@ test("the listing reports validation issues from a broken file", async () => {
 	expect(listing).toContain("broken: malformed JSON; theme ignored");
 });
 
-test("the template documents extends and overrides with a commented worked example", () => {
+test("the template ships an active extends and documents overrides with a commented worked example", () => {
 	const template = generateThemesTemplate("my-theme");
-	expect(template).toContain("extends");
-	expect(template).toContain("overrides");
-	expect(template).toContain('// "extends": "ayu-dark"');
+	expect(template).toContain('"extends": "ayu-dark"');
+	expect(template).toContain('  // "overrides": {');
 });
 
-test("uncommenting the template's example entries round-trips with no issues", () => {
+test("a freshly-written template parses cleanly as an ayu-dark clone", () => {
+	const template = generateThemesTemplate("my-theme");
+	const { theme, issues } = parseCustomTheme("my-theme", template);
+	expect(issues).toEqual([]);
+	expect(theme).toBeDefined();
+	const ayuDark = THEMES.find((candidate) => candidate.id === "ayu-dark");
+	expect(theme?.background).toBe(ayuDark?.background);
+});
+
+test("uncommenting the template's remaining example entries round-trips with no issues", () => {
 	const template = generateThemesTemplate("my-theme");
 	const uncommented = template
-		.replace('  // "extends": "ayu-dark",', '  "extends": "ayu-dark",')
+		.replace('"extends": "ayu-dark"', '"extends": "ayu-dark",')
 		.replace('  // "overrides": {', '  "overrides": {')
 		.replace('  //   "accent": "#ff8800"', '    "accent": "#ff8800"')
 		.replace("  // }", "  }");
@@ -74,6 +88,14 @@ test("uncommenting the template's example entries round-trips with no issues", (
 	expect(issues).toEqual([]);
 	expect(theme).toBeDefined();
 	expect(theme?.accent).toBe("#ff8800");
+});
+
+test("isValidThemeName rejects path separators and leading dots", () => {
+	expect(isValidThemeName("my-theme")).toBe(true);
+	expect(isValidThemeName("../evil")).toBe(false);
+	expect(isValidThemeName("nested/name")).toBe(false);
+	expect(isValidThemeName("nested\\name")).toBe(false);
+	expect(isValidThemeName(".hidden")).toBe(false);
 });
 
 test("init writes the template to the given path, creating parent directories", async () => {

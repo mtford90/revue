@@ -357,12 +357,13 @@ keybindings). A theme either derives from a bundled theme via `extends` or suppl
 }
 ```
 
-`extends` names a bundled theme id (`revue themes` lists them); `label`, `background`, `foreground`,
-`diffColors.added/removed/modified`, and `syntaxTheme` (a bundled Shiki theme id) all fall back to
-the `extends` base when set. Every non-pinned colour is then derived with the same WCAG contrast
-floors as the bundled themes. `overrides` pins any of `revue themes`' listed slot names to a
-`#rgb`/`#rrggbb` colour verbatim, after derivation, with no contrast policing — a pinned colour is
-used exactly as written.
+`extends` names a bundled theme id (`revue themes` lists them); `background`, `foreground`,
+`diffColors.added/removed/modified`, and `syntaxTheme` (a bundled Shiki theme id) fall back to the
+`extends` base when the key itself is unset, while `label` falls back to the theme's own id rather
+than the base's. Every non-pinned colour is then derived with the same WCAG contrast floors as the
+bundled themes. `overrides` pins any of the slot names listed in `revue themes init`'s starter
+template to a `#rgb`/`#rrggbb` colour verbatim, after derivation, with no contrast policing — a
+pinned colour is used exactly as written.
 
 A custom file whose id matches a bundled theme shadows it in place (shown once, marked
 "customised"); any other id is appended as a new theme. Validation is lenient and per-file: a

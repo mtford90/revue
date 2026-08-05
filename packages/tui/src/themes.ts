@@ -2,12 +2,14 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+	appearanceForBackground,
 	applyOverrides,
 	type BundledThemeInputs,
 	buildThemeFromInputs,
 	bundledThemeInputs,
 	CustomThemeFileSchema,
 	DEFAULT_DARK_THEME_ID,
+	DEFAULT_LIGHT_THEME_ID,
 	isBundledShikiThemeId,
 	OVERRIDABLE_THEME_SLOTS,
 	type OverridableThemeSlot,
@@ -25,58 +27,83 @@ const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 const isValidColor = (value: string): boolean => HEX_COLOR.test(value);
 
-/** A colour slot: falls back to `fallback` when absent, or when invalid (with an issue). */
+/** Expands `#rgb` shorthand to `#rrggbb`; a 6-digit hex passes through unchanged. */
+const normalizeColor = (value: string): string => {
+	if (value.length !== 4) return value;
+	const [, r, g, b] = value;
+	return `#${r}${r}${g}${g}${b}${b}`;
+};
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A colour slot: falls back to `fallback` when absent, or when missing/invalid (with an issue). */
 const readColor = (
 	id: string,
 	slot: string,
-	value: string | undefined,
+	value: unknown,
 	fallback: string | undefined,
 	issues: ThemeIssue[],
 ): string | undefined => {
 	if (value === undefined) return fallback;
-	if (isValidColor(value)) return value;
+	if (typeof value === "string" && isValidColor(value)) return normalizeColor(value);
 	issues.push({
 		entry: `${id}.${slot}`,
-		reason: `invalid colour "${value}" for "${slot}"; ignored`,
+		reason: `invalid colour ${JSON.stringify(value)} for "${slot}"; ignored`,
 	});
 	return fallback;
 };
 
 const readDiffColors = (
 	id: string,
-	file: { added?: string; removed?: string; modified?: string } | undefined,
+	file: unknown,
 	base: { added?: string; removed?: string; modified?: string } | undefined,
 	issues: ThemeIssue[],
 ) => {
-	if (!file && !base) return undefined;
+	if (file !== undefined && !isPlainObject(file)) {
+		issues.push({ entry: `${id}.diffColors`, reason: '"diffColors" must be an object; ignored' });
+	}
+	const source = isPlainObject(file)
+		? (file as { added?: unknown; removed?: unknown; modified?: unknown })
+		: undefined;
+	if (!source && !base) return undefined;
 	return {
-		added: readColor(id, "diffColors.added", file?.added, base?.added, issues),
-		removed: readColor(id, "diffColors.removed", file?.removed, base?.removed, issues),
-		modified: readColor(id, "diffColors.modified", file?.modified, base?.modified, issues),
+		added: readColor(id, "diffColors.added", source?.added, base?.added, issues),
+		removed: readColor(id, "diffColors.removed", source?.removed, base?.removed, issues),
+		modified: readColor(id, "diffColors.modified", source?.modified, base?.modified, issues),
 	};
 };
 
 const readSyntaxTheme = (
 	id: string,
-	value: string | undefined,
+	value: unknown,
 	base: string | undefined,
+	fallback: string,
 	issues: ThemeIssue[],
 ): string => {
-	if (value === undefined) return base ?? DEFAULT_DARK_THEME_ID;
-	if (isBundledShikiThemeId(value)) return value;
+	if (value === undefined) return base ?? fallback;
+	if (typeof value === "string" && isBundledShikiThemeId(value)) return value;
 	issues.push({
 		entry: `${id}.syntaxTheme`,
-		reason: `"${value}" is not a bundled Shiki theme; ignored`,
+		reason: `${JSON.stringify(value)} is not a bundled Shiki theme; ignored`,
 	});
-	return base ?? DEFAULT_DARK_THEME_ID;
+	return base ?? fallback;
 };
 
-const readOverrides = (
-	id: string,
-	raw: Record<string, string> | undefined,
-	issues: ThemeIssue[],
-): ThemeOverrides => {
-	if (!raw) return {};
+/** A `label` slot: non-string values are dropped, falling back to the theme's id. */
+const readLabel = (id: string, value: unknown, issues: ThemeIssue[]): string | undefined => {
+	if (value === undefined) return undefined;
+	if (typeof value === "string") return value;
+	issues.push({ entry: `${id}.label`, reason: `"label" must be a string; ignored` });
+	return undefined;
+};
+
+const readOverrides = (id: string, raw: unknown, issues: ThemeIssue[]): ThemeOverrides => {
+	if (raw === undefined) return {};
+	if (!isPlainObject(raw)) {
+		issues.push({ entry: `${id}.overrides`, reason: '"overrides" must be an object; ignored' });
+		return {};
+	}
 	const slots: readonly string[] = OVERRIDABLE_THEME_SLOTS;
 	const overrides: ThemeOverrides = {};
 	for (const [slot, value] of Object.entries(raw)) {
@@ -87,23 +114,24 @@ const readOverrides = (
 			});
 			continue;
 		}
-		if (!isValidColor(value)) {
+		if (typeof value !== "string" || !isValidColor(value)) {
 			issues.push({
 				entry: `${id}.overrides.${slot}`,
-				reason: `invalid colour "${value}" for "${slot}"; ignored`,
+				reason: `invalid colour ${JSON.stringify(value)} for "${slot}"; ignored`,
 			});
 			continue;
 		}
-		overrides[slot as OverridableThemeSlot] = value;
+		overrides[slot as OverridableThemeSlot] = normalizeColor(value);
 	}
 	return overrides;
 };
 
 /**
  * Parse one custom theme file: strip comments, validate shape, resolve `extends` against the
- * bundled derivation inputs, derive via the shared theme core, then apply verbatim overrides. A
- * malformed file or unknown `extends` drops the whole theme; a bad colour, syntax theme, or
- * override slot drops just that key and falls back to the `extends` base where one exists.
+ * bundled derivation inputs, derive via the shared theme core, then apply verbatim overrides.
+ * Malformed JSON, a non-object root, a non-string/unknown `extends`, or no derivable background
+ * drops the whole theme; a wrong-typed or invalid colour, label, syntax theme, override slot, or
+ * `overrides` shape drops just that key and falls back to the `extends` base where one exists.
  */
 export const parseCustomTheme = (
 	id: string,
@@ -121,6 +149,9 @@ export const parseCustomTheme = (
 
 	let base: BundledThemeInputs | undefined;
 	if (file.extends !== undefined) {
+		if (typeof file.extends !== "string") {
+			return { issues: [{ entry: id, reason: '"extends" must be a string; theme ignored' }] };
+		}
 		if (!isBundledShikiThemeId(file.extends)) {
 			return {
 				issues: [{ entry: id, reason: `unknown extends "${file.extends}"; theme ignored` }],
@@ -132,15 +163,29 @@ export const parseCustomTheme = (
 	const issues: ThemeIssue[] = [];
 	const background = readColor(id, "background", file.background, base?.background, issues);
 	if (background === undefined) {
-		return { issues: [{ entry: id, reason: "needs a background or extends; theme ignored" }] };
+		if (file.background === undefined) {
+			return { issues: [{ entry: id, reason: "needs a background or extends; theme ignored" }] };
+		}
+		return { issues };
 	}
 	const foreground = readColor(id, "foreground", file.foreground, base?.foreground, issues);
 	const diffColors = readDiffColors(id, file.diffColors, base?.diffColors, issues);
-	const syntaxTheme = readSyntaxTheme(id, file.syntaxTheme, base?.syntaxTheme, issues);
+	const syntaxFallback =
+		appearanceForBackground(background) === "light"
+			? DEFAULT_LIGHT_THEME_ID
+			: DEFAULT_DARK_THEME_ID;
+	const syntaxTheme = readSyntaxTheme(
+		id,
+		file.syntaxTheme,
+		base?.syntaxTheme,
+		syntaxFallback,
+		issues,
+	);
+	const label = readLabel(id, file.label, issues);
 
 	const derived = buildThemeFromInputs({
 		id,
-		label: file.label,
+		label,
 		background,
 		foreground,
 		diffColors,

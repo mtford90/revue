@@ -70,8 +70,8 @@ test("malformed JSON drops the whole theme", () => {
 	expect(issues).toEqual([{ entry: "broken", reason: "malformed JSON; theme ignored" }]);
 });
 
-test("a shape that fails the schema drops the whole theme", () => {
-	const { theme, issues } = parseCustomTheme("bad-shape", `{ "diffColors": "not an object" }`);
+test("a non-object root drops the whole theme", () => {
+	const { theme, issues } = parseCustomTheme("bad-shape", `["not", "an", "object"]`);
 	expect(theme).toBeUndefined();
 	expect(issues).toEqual([{ entry: "bad-shape", reason: "malformed theme file; ignored" }]);
 });
@@ -89,6 +89,140 @@ test("no background and no extends cannot derive, so the whole theme drops", () 
 	expect(theme).toBeUndefined();
 	expect(issues).toEqual([
 		{ entry: "rootless", reason: "needs a background or extends; theme ignored" },
+	]);
+});
+
+test("an invalid background with no extends reports the specific colour issue, not the generic one", () => {
+	const { theme, issues } = parseCustomTheme("bad-background", `{ "background": "not-a-colour" }`);
+	expect(theme).toBeUndefined();
+	expect(issues).toEqual([
+		{
+			entry: "bad-background.background",
+			reason: 'invalid colour "not-a-colour" for "background"; ignored',
+		},
+	]);
+});
+
+test("shorthand #rgb colours derive identically to their #rrggbb expansions", () => {
+	const shorthand = parseCustomTheme("shorthand", `{ "background": "#fff", "foreground": "#000" }`);
+	const expanded = parseCustomTheme(
+		"shorthand",
+		`{ "background": "#ffffff", "foreground": "#000000" }`,
+	);
+	expect(shorthand.issues).toEqual([]);
+	expect(shorthand.theme).toEqual(expanded.theme);
+	expect(shorthand.theme?.background).toBe("#ffffff");
+	expect(shorthand.theme?.appearance).toBe("light");
+});
+
+test("shorthand diffColors derive identically to their expansions", () => {
+	const shorthand = parseCustomTheme(
+		"shorthand-diff",
+		`{ "background": "#101010", "diffColors": { "added": "#0f0", "removed": "#f00", "modified": "#00f" } }`,
+	);
+	const expanded = parseCustomTheme(
+		"shorthand-diff",
+		`{ "background": "#101010", "diffColors": { "added": "#00ff00", "removed": "#ff0000", "modified": "#0000ff" } }`,
+	);
+	expect(shorthand.issues).toEqual([]);
+	expect(shorthand.theme).toEqual(expanded.theme);
+});
+
+test("a shorthand override pins the expanded colour in the rendered theme", () => {
+	const { theme, issues } = parseCustomTheme(
+		"shorthand-override",
+		`{ "extends": "dracula", "overrides": { "accent": "#f0f" } }`,
+	);
+	expect(issues).toEqual([]);
+	expect(theme?.accent).toBe("#ff00ff");
+});
+
+test("a light background defaults its syntax theme to ayu-light rather than ayu-dark", () => {
+	const { theme, issues } = parseCustomTheme("light-default", `{ "background": "#ffffff" }`);
+	expect(issues).toEqual([]);
+	expect(theme?.syntaxTheme).toBe("ayu-light");
+});
+
+test("a dark background defaults its syntax theme to ayu-dark", () => {
+	const { theme, issues } = parseCustomTheme("dark-default", `{ "background": "#000000" }`);
+	expect(issues).toEqual([]);
+	expect(theme?.syntaxTheme).toBe("ayu-dark");
+});
+
+test("extends still wins the syntax theme default over the background's own appearance", () => {
+	const { theme, issues } = parseCustomTheme(
+		"extends-default",
+		`{ "extends": "ayu-light", "background": "#000000" }`,
+	);
+	expect(issues).toEqual([]);
+	expect(theme?.syntaxTheme).toBe("ayu-light");
+});
+
+test("a wrong-typed background drops only that key rather than the whole file", () => {
+	const { theme, issues } = parseCustomTheme("bad-background-type", `{ "background": 123 }`);
+	expect(theme).toBeUndefined();
+	expect(issues).toEqual([
+		{
+			entry: "bad-background-type.background",
+			reason: 'invalid colour 123 for "background"; ignored',
+		},
+	]);
+});
+
+test("a wrong-typed label drops only that key and falls back to the theme id", () => {
+	const { theme, issues } = parseCustomTheme(
+		"bad-label-type",
+		`{ "background": "#101010", "label": 5 }`,
+	);
+	expect(theme?.label).toBe("bad-label-type");
+	expect(issues).toEqual([
+		{ entry: "bad-label-type.label", reason: '"label" must be a string; ignored' },
+	]);
+});
+
+test("a wrong-typed extends drops the whole theme, since extends is structural", () => {
+	const { theme, issues } = parseCustomTheme("bad-extends-type", `{ "extends": 5 }`);
+	expect(theme).toBeUndefined();
+	expect(issues).toEqual([
+		{ entry: "bad-extends-type", reason: '"extends" must be a string; theme ignored' },
+	]);
+});
+
+test("a wrong-typed diffColors drops only that key and falls back to the extends base", () => {
+	const { theme, issues } = parseCustomTheme(
+		"bad-diff-colors-type",
+		`{ "extends": "dracula", "diffColors": "not an object" }`,
+	);
+	const dracula = THEMES.find((candidate) => candidate.id === "dracula");
+	expect(theme?.addedSignColor).toEqual(dracula?.addedSignColor);
+	expect(issues).toEqual([
+		{ entry: "bad-diff-colors-type.diffColors", reason: '"diffColors" must be an object; ignored' },
+	]);
+});
+
+test("a wrong-typed overrides entry drops only that override key", () => {
+	const { theme, issues } = parseCustomTheme(
+		"bad-override-type",
+		`{ "extends": "dracula", "overrides": { "accent": 123 } }`,
+	);
+	const dracula = THEMES.find((candidate) => candidate.id === "dracula");
+	expect(theme?.accent).toBe(dracula?.accent);
+	expect(issues).toEqual([
+		{
+			entry: "bad-override-type.overrides.accent",
+			reason: 'invalid colour 123 for "accent"; ignored',
+		},
+	]);
+});
+
+test("a non-object overrides value drops the overrides key entirely", () => {
+	const { theme, issues } = parseCustomTheme(
+		"bad-overrides-shape",
+		`{ "background": "#101010", "overrides": "not an object" }`,
+	);
+	expect(theme).toBeDefined();
+	expect(issues).toEqual([
+		{ entry: "bad-overrides-shape.overrides", reason: '"overrides" must be an object; ignored' },
 	]);
 });
 
@@ -196,9 +330,10 @@ test("a missing preferred custom theme id resolves to the default", () => {
 test("the guide's custom-theme worked example parses cleanly through the real loader", async () => {
 	const guide = await readFile(join(import.meta.dir, "../../../docs/guide.md"), "utf8");
 	const match = guide.match(/```jsonc\n\/\/ ~\/\.revue\/themes\/my-ayu\.json\n([\s\S]*?)```/);
-	if (!match) throw new Error("guide.md's my-ayu.json worked example was not found");
+	const worked = match?.[1];
+	if (!worked) throw new Error("guide.md's my-ayu.json worked example was not found");
 
-	const { theme, issues } = parseCustomTheme("my-ayu", match[1]);
+	const { theme, issues } = parseCustomTheme("my-ayu", worked);
 	expect(issues).toEqual([]);
 	expect(theme?.accent).toBe("#ff9940");
 });

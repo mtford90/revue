@@ -428,30 +428,50 @@ test("bare revue and revue diff prep the scope and print the run directory", asy
 		const directory = scoped.stderr.trim().split("\n").at(-1) ?? "";
 		expect(await Bun.file(join(directory, "run.json")).exists()).toBe(true);
 
+		// The theme is validated before git prep runs, so no "Prepared ..." summary is printed.
 		const badTheme = await run(root, ["diff", "--theme", "solarised-dark"]);
-		expect(badTheme.exitCode).toBe(1);
-		expect(badTheme.stderr).toContain("unknown theme: solarised-dark");
+		expect(badTheme).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(badTheme.stderr).toBe(
+			"unknown theme: solarised-dark\nRun `revue show <run-directory> --theme list` or `revue themes` for details.\n",
+		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
-test("show names its themes and refuses an unknown one before touching the run", async () => {
+test("show names its themes, including custom ones, and refuses an unknown one before touching the run", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-theme-"));
 	try {
 		const directory = await copySampleRun(root);
+		const themesDir = join(root, ".revue", "themes");
+		await mkdir(themesDir, { recursive: true });
+		await writeFile(
+			join(themesDir, "mauve.json"),
+			JSON.stringify({ extends: "nord", label: "Mauve" }),
+			"utf8",
+		);
 
-		const listed = await run(root, ["show", directory, "--theme", "list"]);
+		const listed = await run(root, ["show", directory, "--theme", "list"], { HOME: root });
 		expect(listed.exitCode).toBe(0);
-		expect(listed.stdout.trim().split("\n")).toContain("github-dark-default");
+		const ids = listed.stdout.trim().split("\n");
+		expect(ids).toContain("github-dark-default");
+		expect(ids).toContain("mauve");
 
 		const unknown = await run(root, ["show", directory, "--theme", "solarised-dark"]);
 		expect(unknown).toMatchObject({ exitCode: 1, stdout: "" });
-		expect(unknown.stderr).toContain("unknown theme: solarised-dark");
+		expect(unknown.stderr).toBe(
+			"unknown theme: solarised-dark\nRun `revue show <run-directory> --theme list` or `revue themes` for details.\n",
+		);
 
 		const known = await run(root, ["show", directory, "--theme", "nord", "--check"]);
 		expect(known.exitCode).toBe(0);
 		expect(known.stdout).toContain("run is valid");
+
+		// A broken run directory never gets touched: the unknown theme is rejected first.
+		const brokenRun = join(root, "does-not-exist");
+		const beforeRun = await run(root, ["show", brokenRun, "--theme", "solarised-dark"]);
+		expect(beforeRun).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(beforeRun.stderr).toContain("unknown theme: solarised-dark");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -635,14 +655,18 @@ test("themes lists bundled and custom themes and flags shadowed overrides and is
 	}
 });
 
-test("themes init writes a starter template and refuses to overwrite it without --force", async () => {
+test("themes init writes a starter template that parses cleanly, and refuses to overwrite it without --force", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-themes-init-"));
 	try {
 		const init = await run(root, ["themes", "init", "my-theme"], { HOME: root });
 		expect(init.exitCode).toBe(0);
 		expect(init.stdout).toContain(join(root, ".revue", "themes", "my-theme.json"));
 		const written = await Bun.file(join(root, ".revue", "themes", "my-theme.json")).text();
-		expect(written).toContain('// "extends": "ayu-dark"');
+		expect(written).toContain('"extends": "ayu-dark"');
+
+		const listing = await run(root, ["themes"], { HOME: root });
+		expect(listing.exitCode).toBe(0);
+		expect(listing.stdout).not.toContain("Issues:");
 
 		const again = await run(root, ["themes", "init", "my-theme"], { HOME: root });
 		expect(again.exitCode).toBe(1);
@@ -650,6 +674,26 @@ test("themes init writes a starter template and refuses to overwrite it without 
 
 		const forced = await run(root, ["themes", "init", "my-theme", "--force"], { HOME: root });
 		expect(forced.exitCode).toBe(0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("themes init refuses a name containing a path separator or leading dot", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-themes-init-unsafe-"));
+	try {
+		const traversal = await run(root, ["themes", "init", "../evil"], { HOME: root });
+		expect(traversal.exitCode).toBe(1);
+		expect(traversal.stderr).toContain('invalid theme name "../evil"');
+		expect(await Bun.file(join(root, "evil.json")).exists()).toBe(false);
+
+		const nested = await run(root, ["themes", "init", "nested/name"], { HOME: root });
+		expect(nested.exitCode).toBe(1);
+		expect(nested.stderr).toContain('invalid theme name "nested/name"');
+
+		const hidden = await run(root, ["themes", "init", ".hidden"], { HOME: root });
+		expect(hidden.exitCode).toBe(1);
+		expect(hidden.stderr).toContain('invalid theme name ".hidden"');
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

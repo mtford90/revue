@@ -63,6 +63,10 @@ const FALLBACK_DIFF_COLORS = {
 
 const isLight = (background: string) => relativeLuminance(background) > LIGHT_SURFACE_LUMINANCE;
 
+/** The appearance a theme derives to from its background alone, ahead of full derivation. */
+export const appearanceForBackground = (background: string): Appearance =>
+	isLight(background) ? "light" : "dark";
+
 /** A foreground that stays legible over an arbitrary editor surface. */
 const readableForeground = (preferred: string | undefined, background: string): string => {
 	if (preferred && contrastRatio(preferred, background) >= MIN_TEXT_CONTRAST) return preferred;

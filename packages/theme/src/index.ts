@@ -13,6 +13,7 @@ export {
 } from "./shikiThemes.ts";
 export {
 	type Appearance,
+	appearanceForBackground,
 	applyOverrides,
 	type BuildThemeInputs,
 	buildThemeFromInputs,

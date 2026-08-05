@@ -91,7 +91,7 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   either `extends`-ing a bundled theme or supplying their own background/foreground, with
   `overrides` pinning individual colour slots verbatim after derivation; a custom id matching a
   bundled one shadows it in the picker/listing. Validation is lenient and per-file, dropping just
-  the broken theme or key rather than the whole file.
+  the broken theme or key rather than all custom themes.
 - **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
   chapters, pinned file metadata, review questions, authored threads, and optional local review
   progress. Full review is the default; prologue and one chapter by stable id/order are explicit

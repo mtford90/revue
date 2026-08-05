@@ -15,7 +15,7 @@ import {
 	ReviewCoverageError,
 	RunArtifactError,
 } from "@revue/prep";
-import { isBundledShikiThemeId, resolveTheme, THEME_IDS, type Theme } from "@revue/theme";
+import { isBundledShikiThemeId, resolveTheme, type Theme } from "@revue/theme";
 import {
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
@@ -33,8 +33,13 @@ import { defaultPreferencesPath, loadPreferences, savePreferences } from "./pref
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
 import { formatChapterlessSummary, formatSummary } from "./summary.ts";
-import { defaultThemesDir, loadCustomThemes, type ThemeIssue } from "./themes.ts";
-import { formatThemesListing, initThemesFile } from "./themesCli.ts";
+import {
+	defaultThemesDir,
+	loadCustomThemes,
+	mergeCustomThemes,
+	type ThemeIssue,
+} from "./themes.ts";
+import { formatThemesListing, initThemesFile, isValidThemeName } from "./themesCli.ts";
 import {
 	createThread,
 	defaultThreadsPath,
@@ -516,6 +521,31 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 	}
 }
 
+type ThemeLoad = { customThemes: Theme[]; issues: ThemeIssue[] };
+
+const UNKNOWN_THEME_HINT =
+	"Run `revue show <run-directory> --theme list` or `revue themes` for details.";
+
+/**
+ * Loads custom themes (a cheap directory read) and, when a theme id was requested, validates it
+ * against the merged bundled/custom set before any run loading or git prep — so an unknown theme
+ * fails fast rather than after paying for work whose result is about to be discarded.
+ */
+async function loadAndValidateTheme(
+	requestedTheme: string | undefined,
+): Promise<{ theme: ThemeLoad } | { error: string }> {
+	const { themes: customThemes, issues } = await loadCustomThemes(defaultThemesDir());
+	if (
+		requestedTheme &&
+		requestedTheme !== "auto" &&
+		!isBundledShikiThemeId(requestedTheme) &&
+		!customThemes.some((theme) => theme.id === requestedTheme)
+	) {
+		return { error: `unknown theme: ${requestedTheme}\n${UNKNOWN_THEME_HINT}\n` };
+	}
+	return { theme: { customThemes, issues } };
+}
+
 async function cmdShow(args: string[]): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(`${SHOW_HELP}\n`);
@@ -532,7 +562,9 @@ async function cmdShow(args: string[]): Promise<number> {
 	}
 	const requestedTheme = options.values.get("--theme");
 	if (requestedTheme === "list") {
-		process.stdout.write(`${THEME_IDS.join("\n")}\n`);
+		const { themes: customThemes } = await loadCustomThemes(defaultThemesDir());
+		const ids = mergeCustomThemes(customThemes).themes.map((theme) => theme.id);
+		process.stdout.write(`${ids.join("\n")}\n`);
 		return 0;
 	}
 	const directory = options.positionals[0];
@@ -540,17 +572,30 @@ async function cmdShow(args: string[]): Promise<number> {
 		process.stderr.write(`${SHOW_HELP}\n`);
 		return 1;
 	}
+	const themeLoad = await loadAndValidateTheme(requestedTheme);
+	if ("error" in themeLoad) {
+		process.stderr.write(themeLoad.error);
+		return 1;
+	}
 	return showRun(directory, {
 		requestedTheme,
 		check: options.booleans.has("--check"),
 		transparentBg: options.booleans.has("--transparent-bg"),
+		theme: themeLoad.theme,
 	});
 }
 
 async function showRun(
 	directory: string,
-	options: { requestedTheme?: string; check?: boolean; transparentBg?: boolean },
+	options: {
+		requestedTheme?: string;
+		check?: boolean;
+		transparentBg?: boolean;
+		theme: ThemeLoad;
+	},
 ): Promise<number> {
+	const { customThemes, issues: themeIssues } = options.theme;
+
 	let run: Awaited<ReturnType<typeof loadReviewRun>>;
 	try {
 		run = await loadReviewRun(directory);
@@ -577,30 +622,11 @@ async function showRun(
 		throw error;
 	}
 
-	let customThemes: Theme[] = [];
-	let themeIssues: ThemeIssue[] = [];
-	if (options.requestedTheme && options.requestedTheme !== "auto") {
-		({ themes: customThemes, issues: themeIssues } = await loadCustomThemes(defaultThemesDir()));
-		if (
-			!isBundledShikiThemeId(options.requestedTheme) &&
-			!customThemes.some((theme) => theme.id === options.requestedTheme)
-		) {
-			process.stderr.write(
-				`unknown theme: ${options.requestedTheme}\nRun \`revue show <run-directory> --theme list\` for the available names.\n`,
-			);
-			return 1;
-		}
-	}
-
 	if (options.check || !process.stdout.isTTY) {
 		process.stdout.write(
 			`${run.chapters ? formatSummary(run.chapters) : formatChapterlessSummary(run.manifest)}\n`,
 		);
 		return 0;
-	}
-
-	if (!options.requestedTheme || options.requestedTheme === "auto") {
-		({ themes: customThemes, issues: themeIssues } = await loadCustomThemes(defaultThemesDir()));
 	}
 
 	const preferencesPath = defaultPreferencesPath();
@@ -689,6 +715,11 @@ async function cmdDiff(args: string[]): Promise<number> {
 			prepArgs.push(argument);
 		}
 	}
+	const themeLoad = await loadAndValidateTheme(requestedTheme);
+	if ("error" in themeLoad) {
+		process.stderr.write(themeLoad.error);
+		return 1;
+	}
 	let run: PreparedRun;
 	try {
 		run = await prepareRun(prepArgs);
@@ -705,7 +736,7 @@ async function cmdDiff(args: string[]): Promise<number> {
 		throw error;
 	}
 	process.stderr.write(`${prepSummary(run)}\n${run.directory}\n`);
-	return showRun(run.directory, { requestedTheme, transparentBg });
+	return showRun(run.directory, { requestedTheme, transparentBg, theme: themeLoad.theme });
 }
 
 const SKILL_HELP = `usage: revue skill install [--user]
@@ -847,6 +878,12 @@ async function cmdThemes(args: string[]): Promise<number> {
 	const [name, ...extra] = options.positionals;
 	if (!name || extra.length > 0) {
 		process.stderr.write(`themes init takes exactly one <name> argument\n${THEMES_HELP}\n`);
+		return 1;
+	}
+	if (!isValidThemeName(name)) {
+		process.stderr.write(
+			`invalid theme name "${name}": must not contain a path separator or start with a dot\n${THEMES_HELP}\n`,
+		);
 		return 1;
 	}
 	const path = join(defaultThemesDir(), `${name}.json`);

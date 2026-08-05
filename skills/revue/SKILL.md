@@ -326,12 +326,12 @@ is more reliable than writing the file from scratch.
 Grammar for a theme file:
 
 - `extends` — the id of a bundled theme to derive from (`revue themes` lists them)
-- `label`, `background`, `foreground` — `background` is required unless `extends` is set; either
-  may still be set alongside `extends` to override just that input before deriving
+- `label`, `background`, `foreground` — `background` is required unless `extends` is set; any of
+  these may still be set alongside `extends` to override just that input before deriving
 - `diffColors.added`/`removed`/`modified` — optional, fall back to the derived defaults
 - `syntaxTheme` — the id of a bundled Shiki theme; falls back to the derived default
-- `overrides` — pins specific colour slots verbatim on the derived theme (colours from
-  `revue themes` init's template); no contrast policing on pinned values
+- `overrides` — pins specific colour slots verbatim on the derived theme (slot names from the
+  `revue themes init` template); no contrast policing on pinned values
 
 Colours are `#rgb` or `#rrggbb`. A file whose id matches a bundled theme shadows it in place
 (shown once, marked "customised" in `revue themes`); any other id is appended as a new theme.

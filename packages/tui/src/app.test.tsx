@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff-renderer";
-import { resolveTheme, THEME_IDS } from "@revue/theme";
+import { resolveTheme, THEME_IDS, THEMES } from "@revue/theme";
 import {
 	type ReviewThread,
 	RevueChaptersFileSchema,
@@ -905,6 +905,20 @@ test("dropped theme issues surface as a footer warning and help-overlay detail, 
 	expect(frame).toContain('broken.background: invalid colour "nope"; ignored');
 });
 
+test("dropped keybinding and theme issues combine into a single footer notice", async () => {
+	const { keymap, issues: keymapIssues } = mergeKeymap(KEYMAP, { "not-a-real-action": "z" });
+	const themeIssues = [{ entry: "broken.background", reason: 'invalid colour "nope"; ignored' }];
+	const t = await testRender(
+		<App file={file} keymap={keymap} keymapIssues={keymapIssues} themeIssues={themeIssues} />,
+		{ width: 110, height: 60, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("1 keybinding + 1 theme issues ignored — press ? for details");
+	expect(frame).not.toContain("keybinding override ignored");
+	expect(frame).not.toContain("theme issue ignored");
+});
+
 test("a chapter shows its file list with the shared directory hoisted", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 40 });
 	await t.renderOnce();
@@ -1535,8 +1549,13 @@ test("a custom theme with extends and an override is selectable via the picker a
 	// "nord" shadowed once, not twice.
 	expect(listFrame.match(/Nord/g)).toHaveLength(1);
 
-	// Cycle from "nord" to the appended pure-custom entry at the end of the merged list.
-	const steps = THEME_IDS.length - THEME_IDS.indexOf("nord");
+	// Cycle from "nord" to the pure-custom entry, slotted right after the last dark bundled theme
+	// (its appearance), rather than after every bundled theme regardless of appearance.
+	const lastDarkIndex = THEMES.reduce(
+		(last, theme, index) => (theme.appearance === "dark" ? index : last),
+		-1,
+	);
+	const steps = lastDarkIndex + 1 - THEME_IDS.indexOf("nord");
 	for (let i = 0; i < steps; i++) await arrow(t, "down");
 	const pickerFrame = t.captureCharFrame();
 	expect(pickerFrame).toContain("Nord, mauve");

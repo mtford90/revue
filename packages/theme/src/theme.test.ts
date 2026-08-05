@@ -3,6 +3,7 @@ import bundledThemesFixture from "./__fixtures__/bundled-themes.json" with { typ
 import { contrastRatio } from "./color.ts";
 import { BUNDLED_SHIKI_THEME_IDS, bundledThemeInputs } from "./shikiThemes.ts";
 import {
+	appearanceForBackground,
 	applyOverrides,
 	buildThemeFromInputs,
 	DEFAULT_DARK_THEME_ID,
@@ -72,6 +73,13 @@ describe("derived themes", () => {
 			const bundled = THEMES.find((theme) => theme.id === themeId);
 			expect(derived).toEqual(bundled as Theme);
 		}
+	});
+});
+
+describe("appearanceForBackground", () => {
+	test("agrees with buildThemeFromInputs' own appearance derivation", () => {
+		expect(appearanceForBackground("#101010")).toBe("dark");
+		expect(appearanceForBackground("#fafafa")).toBe("light");
 	});
 });
 

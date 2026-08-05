@@ -29,7 +29,13 @@ import {
 	type RangeDecoration,
 	type SpanEmphasis,
 } from "@revue/diff-renderer";
-import { type Appearance, resolveTheme, type Theme, withTransparentSurfaces } from "@revue/theme";
+import {
+	type Appearance,
+	resolveTheme,
+	THEMES,
+	type Theme,
+	withTransparentSurfaces,
+} from "@revue/theme";
 import {
 	type Chapter,
 	emptyViewState,
@@ -143,6 +149,28 @@ import {
 const PANEL_INDEX_MAX_ROWS = 8;
 /** The chapter viewport scrollbox pads its content by one row. */
 const VIEWPORT_TOP_PADDING = 1;
+
+/**
+ * Slots pure-custom themes into the picker's list right after the bundled/shadowed entries that
+ * share their appearance, mirroring how `revue themes` groups the merged list by appearance,
+ * instead of appending them after every bundled theme regardless of appearance.
+ */
+const orderThemesForPicker = (mergedThemes: readonly Theme[]): Theme[] => {
+	const bundledAndShadowed = mergedThemes.slice(0, THEMES.length);
+	const pureCustom = mergedThemes.slice(THEMES.length);
+	const ordered = [...bundledAndShadowed];
+	for (const theme of pureCustom) {
+		let insertAt = ordered.length;
+		for (let index = ordered.length - 1; index >= 0; index--) {
+			if (ordered[index]?.appearance === theme.appearance) {
+				insertAt = index + 1;
+				break;
+			}
+		}
+		ordered.splice(insertAt, 0, theme);
+	}
+	return ordered;
+};
 
 /**
  * Scrolls a row offset (relative to the windowed content) into view. The target
@@ -2326,10 +2354,10 @@ export function App({
 	const renderer = useRenderer();
 	const { width, height } = useTerminalDimensions();
 	const [chosenTheme, setChosenTheme] = useState(initialTheme);
-	const { themes: pickerThemes, customIds: customThemeIds } = useMemo(
-		() => mergeCustomThemes(customThemes),
-		[customThemes],
-	);
+	const { themes: pickerThemes, customIds: customThemeIds } = useMemo(() => {
+		const merged = mergeCustomThemes(customThemes);
+		return { themes: orderThemesForPicker(merged.themes), customIds: merged.customIds };
+	}, [customThemes]);
 	const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
 	const shownTheme = previewTheme ?? chosenTheme;
@@ -3795,23 +3823,30 @@ export function App({
 		page?.kind === "chapter"
 			? `Ch ${page.chapter.order}/${chapters.length} · ${page.chapter.title}`
 			: (page?.label ?? "revue");
+	const configIssuesNotice: StatusNotice | null =
+		keymapIssues.length > 0 && themeIssues.length > 0
+			? {
+					text: `${keymapIssues.length} keybinding + ${themeIssues.length} theme issues ignored — press ? for details`,
+					tone: "error",
+				}
+			: keymapIssues.length > 0
+				? {
+						text: `${keymapIssues.length} keybinding ${keymapIssues.length === 1 ? "override" : "overrides"} ignored — press ? for details`,
+						tone: "error",
+					}
+				: themeIssues.length > 0
+					? {
+							text: `${themeIssues.length} theme ${themeIssues.length === 1 ? "issue" : "issues"} ignored — press ? for details`,
+							tone: "error",
+						}
+					: null;
 	const statusNotice: StatusNotice | null = threadDraft
 		? null
 		: threadNotice
 			? { text: threadNotice, tone: "error" }
 			: copyNotice
 				? { text: copyNotice.text, tone: "success" }
-				: keymapIssues.length > 0
-					? {
-							text: `${keymapIssues.length} keybinding ${keymapIssues.length === 1 ? "override" : "overrides"} ignored — press ? for details`,
-							tone: "error",
-						}
-					: themeIssues.length > 0
-						? {
-								text: `${themeIssues.length} theme ${themeIssues.length === 1 ? "issue" : "issues"} ignored — press ? for details`,
-								tone: "error",
-							}
-						: null;
+				: configIssuesNotice;
 
 	return (
 		<ThemeProvider value={theme}>

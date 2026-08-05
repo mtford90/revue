@@ -82,9 +82,10 @@ Whitespace-only edits do produce spans, because the background is their only vis
 - Ranges are code-unit offsets. Widening to token boundaries keeps them off surrogate-pair and
   grapheme-run interiors, but consumers must not treat them as code-point counts.
 - Greedy pairing is quadratic in the number of lines in a change block, so a block of more than
-  10,000 removed×added candidates skips pairing entirely and its rows keep their plain tint — the
-  same degradation hosts apply to oversized content. Ten thousand candidates were measured under
-  4ms, where 250,000 cost 65ms and a whole-file block cost seconds and gigabytes. Equal-count blocks
-  pair positionally in linear time, so they are never capped.
+  100,000 removed×added candidates skips pairing entirely and its rows keep their plain tint — the
+  same degradation hosts apply to oversized content. Because the renderer memoises pairing, the cap
+  guards against absurdity rather than the cold cost: 90,000 candidates were measured at 22ms once,
+  where a whole-file block cost seconds and gigabytes. Equal-count blocks pair positionally in
+  linear time, so they are never capped.
 - Pairing results are therefore cheap enough to compute per parse, but not per render: the renderer
   memoises them on the parsed change block.

@@ -108,9 +108,11 @@ const positionalPairs = (
 /**
  * Similarity pairing scores every removed line against every added one, so a block is
  * capped by that candidate count. Measured on alike 50-character lines: 10,000 candidates
- * cost under 4ms, 90,000 cost 22ms and 250,000 cost 65ms.
+ * cost under 4ms, 90,000 cost 22ms and 250,000 cost 65ms. The cost is paid once per
+ * block — the renderer memoises pairing — so the cap sits where a rewrite stops being
+ * reviewable line-by-line rather than where the cold cost bites.
  */
-const maxPairingCandidates = 10_000;
+const maxPairingCandidates = 100_000;
 
 /**
  * Pair a change block's removed lines with the added lines that revise them. Equal-count

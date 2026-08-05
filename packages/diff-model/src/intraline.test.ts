@@ -107,13 +107,13 @@ const alikeLines = (count: number, salt: string) =>
 
 test("a change block within the pairing budget still pairs by similarity", () => {
 	expect(
-		pairChangedLines({ oldLines: alikeLines(99, "a"), newLines: alikeLines(100, "b") }),
-	).toHaveLength(99);
+		pairChangedLines({ oldLines: alikeLines(316, "a"), newLines: alikeLines(315, "b") }),
+	).toHaveLength(315);
 });
 
 test("an oversized change block skips pairing rather than pay for it", () => {
 	expect(
-		pairChangedLines({ oldLines: alikeLines(100, "a"), newLines: alikeLines(101, "b") }),
+		pairChangedLines({ oldLines: alikeLines(317, "a"), newLines: alikeLines(316, "b") }),
 	).toEqual([]);
 });
 

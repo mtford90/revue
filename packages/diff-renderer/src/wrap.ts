@@ -77,7 +77,11 @@ export const wrapSpans = (spans: readonly RenderSpan[], width: number): RenderSp
 	return rows;
 };
 
-/** How many visual rows `wrapSpans` would produce, without building them. */
+/**
+ * How many visual rows `wrapSpans` would produce, without building them. Both measure each
+ * span's text on its own, so a grapheme cluster split across two spans counts as two and can
+ * shift the count: callers must keep a cluster within one span.
+ */
 export const wrappedRowCount = (spans: readonly RenderSpan[], width: number): number => {
 	const budget = budgetFor(width);
 	if (!spans.every((span) => asciiOnly.test(span.text))) return wrapSpans(spans, budget).length;

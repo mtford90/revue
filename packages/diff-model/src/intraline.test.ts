@@ -99,6 +99,30 @@ test("a trivial shared affix does not pair two lines", () => {
 	).toEqual([]);
 });
 
+const alikeLines = (count: number, salt: string) =>
+	Array.from(
+		{ length: count },
+		(_, index) => `  const value${index} = compute(${index}, ${salt});`,
+	);
+
+test("a change block within the pairing budget still pairs by similarity", () => {
+	expect(
+		pairChangedLines({ oldLines: alikeLines(99, "a"), newLines: alikeLines(100, "b") }),
+	).toHaveLength(99);
+});
+
+test("an oversized change block skips pairing rather than pay for it", () => {
+	expect(
+		pairChangedLines({ oldLines: alikeLines(100, "a"), newLines: alikeLines(101, "b") }),
+	).toEqual([]);
+});
+
+test("an oversized equal-count block still pairs, because position is linear", () => {
+	expect(
+		pairChangedLines({ oldLines: alikeLines(200, "a"), newLines: alikeLines(200, "b") }),
+	).toHaveLength(200);
+});
+
 test("a single changed token is trimmed down to its own span", () => {
 	expect(
 		intralineSpans({ oldLine: "const total = count;", newLine: "const total = amount;" }),

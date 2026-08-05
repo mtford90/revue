@@ -106,10 +106,17 @@ const positionalPairs = (
 		.map(({ index }) => ({ oldIndex: index, newIndex: index }));
 
 /**
+ * Similarity pairing scores every removed line against every added one, so a block is
+ * capped by that candidate count. Measured on alike 50-character lines: 10,000 candidates
+ * cost under 4ms, 90,000 cost 22ms and 250,000 cost 65ms.
+ */
+const maxPairingCandidates = 10_000;
+
+/**
  * Pair a change block's removed lines with the added lines that revise them. Equal-count
- * blocks pair by position; otherwise the most alike lines pair. Either way only sufficiently
- * alike lines pair, and the rest are left without emphasis rather than paired with an
- * unrelated line.
+ * blocks pair by position; otherwise the most alike lines pair, unless the block is too
+ * large to pair affordably. Either way only sufficiently alike lines pair, and the rest
+ * are left without emphasis rather than paired with an unrelated line.
  */
 export const pairChangedLines = ({
 	oldLines,
@@ -120,6 +127,7 @@ export const pairChangedLines = ({
 }): IntralinePair[] => {
 	if (oldLines.length === 0 || newLines.length === 0) return [];
 	if (oldLines.length === newLines.length) return positionalPairs(oldLines, newLines);
+	if (oldLines.length * newLines.length > maxPairingCandidates) return [];
 	return greedyPairs(oldLines, newLines);
 };
 

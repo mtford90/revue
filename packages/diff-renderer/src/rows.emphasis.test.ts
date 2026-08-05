@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { parsePatch } from "@revue/diff-model";
-import { buildDiffRows } from "./rows.ts";
+import { buildDiffRows, intralineRangesFor } from "./rows.ts";
 
 const patch = `diff --git a/x.ts b/x.ts
 --- a/x.ts
@@ -101,6 +101,19 @@ test("novel emphasis replaces the intra-line backgrounds it overlaps", () => {
 		{ text: "1", bg: "#3d0a0a" },
 		{ text: ";" },
 	]);
+});
+
+test("a parsed change block is paired once, however often its rows are rebuilt", () => {
+	const block = parseOne(pairingPatch).metadata.hunks[0]?.hunkContent.find(
+		(content) => content.type === "change",
+	);
+	if (block?.type !== "change") throw new Error("patch must contain a change block");
+	const lines = { oldLines: ["const value = 1;", "orphan();"], newLines: ["const value = 42;"] };
+
+	const first = intralineRangesFor({ block, ...lines });
+
+	expect(intralineRangesFor({ block, ...lines })).toBe(first);
+	expect(first.additions.get(0)).toEqual([{ start: 14, end: 16 }]);
 });
 
 test("intra-line backgrounds line up with tab-expanded columns", () => {

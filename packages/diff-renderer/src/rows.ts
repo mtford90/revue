@@ -39,7 +39,11 @@ const inRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
 const outOfRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
 	style.kind === "novel" ? { ...span, dim: true } : span;
 
-/** Cut spans at the range boundaries and restyle each piece by whether the overlay covers it. */
+/**
+ * Cut spans at the range boundaries and restyle each piece by whether the overlay covers it.
+ * Ranges must be sorted and non-overlapping: the cursor only moves forwards, so a range
+ * starting behind it is dropped.
+ */
 const overlaySpans = (
 	spans: RenderSpan[],
 	ranges: readonly EmphasisRange[],
@@ -115,29 +119,64 @@ const applyEmphasis = ({
 	);
 };
 
-/** Look up a change block's intra-line ranges by side and offset within the block. */
-const intralineLookup = ({
-	oldLines,
-	newLines,
-	colours,
-}: {
-	oldLines: readonly string[];
-	newLines: readonly string[];
-	colours: IntralineColours;
-}) => {
+/** One parsed change block: a run of removed lines answered by a run of added ones. */
+type ChangeBlock = Extract<
+	DiffFile["metadata"]["hunks"][number]["hunkContent"][number],
+	{ type: "change" }
+>;
+
+/** A change block's intra-line ranges, by side and offset within the block. */
+type IntralineRanges = {
+	deletions: ReadonlyMap<number, readonly EmphasisRange[]>;
+	additions: ReadonlyMap<number, readonly EmphasisRange[]>;
+};
+
+const pairedRanges = (
+	oldLines: readonly string[],
+	newLines: readonly string[],
+): IntralineRanges => {
 	const paired = pairChangedLines({ oldLines, newLines }).map(({ oldIndex, newIndex }) => ({
 		oldIndex,
 		newIndex,
 		spans: intralineSpans({ oldLine: oldLines[oldIndex] ?? "", newLine: newLines[newIndex] ?? "" }),
 	}));
-	const deletions = new Map(paired.map(({ oldIndex, spans }) => [oldIndex, spans.old]));
-	const additions = new Map(paired.map(({ newIndex, spans }) => [newIndex, spans.new]));
-	return (side: DiffSide, offset: number): IntralineEmphasis | undefined => {
-		const ranges = (side === "deletions" ? deletions : additions).get(offset);
-		if (!ranges?.length) return undefined;
-		return { ranges, bg: side === "deletions" ? colours.deletionsBg : colours.additionsBg };
+	return {
+		deletions: new Map(paired.map(({ oldIndex, spans }) => [oldIndex, spans.old])),
+		additions: new Map(paired.map(({ newIndex, spans }) => [newIndex, spans.new])),
 	};
 };
+
+// Pairing costs a comparison per removed×added line, while rows are rebuilt on every
+// render, so the ranges are memoised on the parsed change block. Pierre parses a patch
+// once and the metadata copies made downstream keep its block objects, so block identity
+// is stable across renders; the lines a block covers never change under it.
+const rangesByChangeBlock = new WeakMap<ChangeBlock, IntralineRanges>();
+
+/** The intra-line ranges of one change block, computed once per parse. */
+export const intralineRangesFor = ({
+	block,
+	oldLines,
+	newLines,
+}: {
+	block: ChangeBlock;
+	oldLines: readonly string[];
+	newLines: readonly string[];
+}): IntralineRanges => {
+	const cached = rangesByChangeBlock.get(block);
+	if (cached) return cached;
+	const ranges = pairedRanges(oldLines, newLines);
+	rangesByChangeBlock.set(block, ranges);
+	return ranges;
+};
+
+/** Look up a change block's intra-line ranges by side and offset within the block. */
+const intralineLookup =
+	({ ranges, colours }: { ranges: IntralineRanges; colours: IntralineColours }) =>
+	(side: DiffSide, offset: number): IntralineEmphasis | undefined => {
+		const found = (side === "deletions" ? ranges.deletions : ranges.additions).get(offset);
+		if (!found?.length) return undefined;
+		return { ranges: found, bg: side === "deletions" ? colours.deletionsBg : colours.additionsBg };
+	};
 
 function makeCell({
 	kind,
@@ -303,12 +342,15 @@ export function buildDiffRows(
 
 			const intralineAt = intralineEmphasis
 				? intralineLookup({
-						oldLines: file.metadata.deletionLines
-							.slice(deletionIndex, deletionIndex + content.deletions)
-							.map(stripEol),
-						newLines: file.metadata.additionLines
-							.slice(additionIndex, additionIndex + content.additions)
-							.map(stripEol),
+						ranges: intralineRangesFor({
+							block: content,
+							oldLines: file.metadata.deletionLines
+								.slice(deletionIndex, deletionIndex + content.deletions)
+								.map(stripEol),
+							newLines: file.metadata.additionLines
+								.slice(additionIndex, additionIndex + content.additions)
+								.map(stripEol),
+						}),
 						colours: intralineEmphasis,
 					})
 				: () => undefined;

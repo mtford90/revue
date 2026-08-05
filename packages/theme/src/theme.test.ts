@@ -55,6 +55,20 @@ describe("derived themes", () => {
 		expect(unreadable).toEqual([]);
 	});
 
+	test("every bundled theme's emphasis tint outranks both its row and focused tints", () => {
+		const indistinct = THEMES.flatMap((theme) =>
+			(
+				[
+					["addedEmphasisBg", theme.addedEmphasisBg, theme.addedBg, theme.addedContentBg],
+					["removedEmphasisBg", theme.removedEmphasisBg, theme.removedBg, theme.removedContentBg],
+				] as const
+			)
+				.filter(([, emphasis, row, focused]) => emphasis === row || emphasis === focused)
+				.map(([slot]) => `${theme.id}.${slot}`),
+		);
+		expect(indistinct).toEqual([]);
+	});
+
 	test("appearance follows the editor surface rather than the theme name", () => {
 		const byId = new Map(THEMES.map((theme) => [theme.id, theme.appearance]));
 		expect(byId.get("github-light-default")).toBe("light");
@@ -110,6 +124,18 @@ describe("buildThemeFromInputs", () => {
 		expect(theme.syntaxTheme).toBe("nord");
 	});
 
+	test("derives emphasis tints distinct from the row and focused tints on either appearance", () => {
+		for (const background of ["#101010", "#fafafa"]) {
+			const theme = buildThemeFromInputs({ id: "custom", background });
+			expect(theme.addedEmphasisBg).not.toBe(theme.addedBg);
+			expect(theme.addedEmphasisBg).not.toBe(theme.addedContentBg);
+			expect(theme.removedEmphasisBg).not.toBe(theme.removedBg);
+			expect(theme.removedEmphasisBg).not.toBe(theme.removedContentBg);
+			expect(contrastRatio(theme.text, theme.addedEmphasisBg)).toBeGreaterThanOrEqual(4);
+			expect(contrastRatio(theme.text, theme.removedEmphasisBg)).toBeGreaterThanOrEqual(4);
+		}
+	});
+
 	test("falls back to a legible foreground and fallback diff colours when omitted", () => {
 		const theme = buildThemeFromInputs({ id: "custom", background: "#101010" });
 		expect(contrastRatio(theme.text, theme.panelAlt)).toBeGreaterThanOrEqual(READABLE);
@@ -131,6 +157,17 @@ describe("applyOverrides", () => {
 		const overridden = applyOverrides(base, { text: "#123456" });
 		expect(overridden.background).toBe(base.background);
 		expect(overridden.panel).toBe(base.panel);
+	});
+
+	test("pins the emphasis slots verbatim", () => {
+		const overridden = applyOverrides(base, {
+			addedEmphasisBg: "#0a3d0a",
+			removedEmphasisBg: "#3d0a0a",
+		});
+		expect(overridden.addedEmphasisBg).toBe("#0a3d0a");
+		expect(overridden.removedEmphasisBg).toBe("#3d0a0a");
+		expect(OVERRIDABLE_THEME_SLOTS).toContain("addedEmphasisBg");
+		expect(OVERRIDABLE_THEME_SLOTS).toContain("removedEmphasisBg");
 	});
 
 	test("the overridable slot set excludes id, label, appearance and syntaxTheme", () => {

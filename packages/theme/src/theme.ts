@@ -34,6 +34,9 @@ export type Theme = {
 	removedBg: string;
 	addedContentBg: string;
 	removedContentBg: string;
+	/** The strongest diff tints, painted behind intra-line emphasis inside a changed line. */
+	addedEmphasisBg: string;
+	removedEmphasisBg: string;
 	selectedHunk: string;
 	/** Diff foregrounds. */
 	addedSignColor: string;
@@ -53,6 +56,9 @@ export const DEFAULT_DARK_THEME_ID = "ayu-dark";
 export const DEFAULT_LIGHT_THEME_ID = "ayu-light";
 
 const MIN_TEXT_CONTRAST = 4.5;
+// Emphasis spans are short runs whose whole purpose is visible differentiation, so they trade a
+// little contrast headroom for a tint that always reads stronger than the row and focused tints.
+const MIN_EMPHASIS_CONTRAST = 4;
 const MIN_DIFF_SIGN_CONTRAST = 3;
 const LIGHT_SURFACE_LUMINANCE = 0.45;
 
@@ -93,15 +99,17 @@ const readableTintedBackground = ({
 	background,
 	foreground,
 	preferredAmount,
+	minContrast = MIN_TEXT_CONTRAST,
 }: {
 	tintColor: string;
 	background: string;
 	foreground: string;
 	preferredAmount: number;
+	minContrast?: number;
 }): string => {
 	for (let amount = preferredAmount; amount >= 0.02; amount -= 0.02) {
 		const candidate = blendHex(tintColor, background, amount);
-		if (contrastRatio(foreground, candidate) >= MIN_TEXT_CONTRAST) return candidate;
+		if (contrastRatio(foreground, candidate) >= minContrast) return candidate;
 	}
 	return background;
 };
@@ -136,6 +144,7 @@ export const buildThemeFromInputs = (inputs: BuildThemeInputs): Theme => {
 	const diffColors = inputs.diffColors;
 	const rowTint = lightSurface ? 0.12 : 0.2;
 	const focusedTint = lightSurface ? 0.18 : 0.28;
+	const emphasisTint = lightSurface ? 0.34 : 0.48;
 	const selectedTint = lightSurface ? 0.18 : 0.25;
 
 	const editorForeground = inputs.foreground;
@@ -162,6 +171,14 @@ export const buildThemeFromInputs = (inputs: BuildThemeInputs): Theme => {
 			foreground: text,
 			preferredAmount,
 		});
+	const emphasised = (tintColor: string) =>
+		readableTintedBackground({
+			tintColor,
+			background: editorBackground,
+			foreground: text,
+			preferredAmount: emphasisTint,
+			minContrast: MIN_EMPHASIS_CONTRAST,
+		});
 
 	return {
 		id: inputs.id,
@@ -183,6 +200,8 @@ export const buildThemeFromInputs = (inputs: BuildThemeInputs): Theme => {
 		removedBg: tinted(removed, rowTint),
 		addedContentBg: tinted(added, focusedTint),
 		removedContentBg: tinted(removed, focusedTint),
+		addedEmphasisBg: emphasised(added),
+		removedEmphasisBg: emphasised(removed),
 		selectedHunk: blendHex(modified, editorBackground, selectedTint),
 		addedSignColor: added,
 		removedSignColor: removed,

@@ -137,6 +137,16 @@ test("a shorthand override pins the expanded colour in the rendered theme", () =
 	expect(theme?.accent).toBe("#ff00ff");
 });
 
+test("the emphasis slots round-trip as overrides without loader changes", () => {
+	const { theme, issues } = parseCustomTheme(
+		"emphasis-override",
+		`{ "extends": "dracula", "overrides": { "addedEmphasisBg": "#0a3d0a", "removedEmphasisBg": "#3d0a0a" } }`,
+	);
+	expect(issues).toEqual([]);
+	expect(theme?.addedEmphasisBg).toBe("#0a3d0a");
+	expect(theme?.removedEmphasisBg).toBe("#3d0a0a");
+});
+
 test("a light background defaults its syntax theme to ayu-light rather than ayu-dark", () => {
 	const { theme, issues } = parseCustomTheme("light-default", `{ "background": "#ffffff" }`);
 	expect(issues).toEqual([]);

@@ -8,7 +8,52 @@
  * pointer context menu, menu-bar arrow navigation, help-overlay scrolling,
  * the theme picker and thread-draft composition). Those stay hardcoded in
  * the keyboard handler.
+ *
+ * Every derivation below takes the effective keymap as an (optional,
+ * defaulted) argument rather than closing over a module-level constant, so a
+ * future loader that merges user overrides can pass its own array through
+ * without reworking these call sites.
  */
+
+const ACTION_IDS = [
+	"open-menu",
+	"toggle-shortcut-help",
+	"open-theme-picker",
+	"quit",
+	"toggle-comments",
+	"previous-key-change",
+	"next-key-change",
+	"previous-page",
+	"next-page",
+	"line-up",
+	"line-down",
+	"half-page-up",
+	"half-page-down",
+	"page-up",
+	"page-down",
+	"scroll-top",
+	"scroll-bottom",
+	"next-unreviewed",
+	"toggle-all-files",
+	"focus-file",
+	"toggle-file-diff",
+	"collapse-files",
+	"expand-files",
+	"toggle-chapter-review",
+	"toggle-file-review",
+	"toggle-key-change",
+	"copy-selection",
+	"toggle-sidebar",
+	"cycle-path-display",
+	"comments-select-files",
+	"comments-previous",
+	"comments-next",
+	"comments-first",
+	"comments-last",
+	"jump-to-thread",
+] as const;
+
+export type KeymapActionId = (typeof ACTION_IDS)[number];
 
 export type KeymapContext = "global" | "page" | "comments" | "chord";
 
@@ -22,10 +67,12 @@ export type KeymapSection =
 	| "Menus";
 
 export type KeymapAction = {
-	id: string;
+	id: KeymapActionId;
 	description: string;
 	/** Default keys in the grammar: lowercase named keys, `ctrl+`/`shift+` prefixes, uppercase literals for shifted characters. */
-	keys: string[];
+	keys: readonly string[];
+	/** Keys shown in help/menu text; defaults to `keys`. Use when `keys` carries a terminal-reporting alias that would otherwise display twice (e.g. `G` and `shift+g` for the same keystroke). */
+	displayKeys?: readonly string[];
 	context: KeymapContext;
 	/** Groups the action for the help overlay. Actions without a section are not shown there. */
 	section?: KeymapSection;
@@ -55,7 +102,7 @@ export const KEYMAP: readonly KeymapAction[] = [
 	},
 	{
 		id: "quit",
-		description: "Quit",
+		description: "Quit (Esc also works)",
 		keys: ["q"],
 		context: "global",
 		section: "Menus",
@@ -71,6 +118,7 @@ export const KEYMAP: readonly KeymapAction[] = [
 		id: "previous-key-change",
 		description: "Focus the previous key change",
 		keys: ["{", "shift+["],
+		displayKeys: ["{"],
 		context: "global",
 		section: "Review",
 	},
@@ -78,6 +126,7 @@ export const KEYMAP: readonly KeymapAction[] = [
 		id: "next-key-change",
 		description: "Focus the next key change",
 		keys: ["}", "shift+]"],
+		displayKeys: ["}"],
 		context: "global",
 		section: "Review",
 	},
@@ -127,6 +176,7 @@ export const KEYMAP: readonly KeymapAction[] = [
 		id: "page-up",
 		description: "Scroll up a page",
 		keys: ["pageup", "b", "ctrl+b"],
+		displayKeys: ["pageup", "b"],
 		context: "page",
 		section: "Scrolling",
 	},
@@ -134,6 +184,7 @@ export const KEYMAP: readonly KeymapAction[] = [
 		id: "page-down",
 		description: "Scroll down a page",
 		keys: ["pagedown", "space", "ctrl+f"],
+		displayKeys: ["pagedown", "space"],
 		context: "page",
 		section: "Scrolling",
 	},
@@ -148,6 +199,7 @@ export const KEYMAP: readonly KeymapAction[] = [
 		id: "scroll-bottom",
 		description: "Scroll to the bottom",
 		keys: ["G", "shift+g"],
+		displayKeys: ["G"],
 		context: "page",
 		section: "Scrolling",
 	},
@@ -223,7 +275,7 @@ export const KEYMAP: readonly KeymapAction[] = [
 	},
 	{
 		id: "toggle-sidebar",
-		description: "Show or hide the sidebar",
+		description: "Show or hide the sidebar; its narrative stacks above the diff",
 		keys: ["s"],
 		context: "page",
 		section: "Views",
@@ -276,15 +328,18 @@ export const KEYMAP: readonly KeymapAction[] = [
 const stripModifier = (key: string) => key.replace(/^(ctrl|shift)\+/, "");
 
 /** `preventDefault`/`stopPropagation` gate: every raw key name the app owns, plus the fixed keys outside the registry. */
-export const APP_KEYS = new Set([
-	...KEYMAP.filter((action) => action.context !== "chord").flatMap((action) =>
-		action.keys.map(stripModifier),
-	),
-	"escape",
-]);
+export const deriveAppKeys = (keymap: readonly KeymapAction[] = KEYMAP): Set<string> =>
+	new Set([
+		...keymap
+			.filter((action) => action.context !== "chord")
+			.flatMap((action) => action.keys.map(stripModifier)),
+		"escape",
+	]);
 
-const keymapActionsForContext = (context: Exclude<KeymapContext, "chord">) =>
-	KEYMAP.filter((action) => action.context === context || action.context === "global");
+const keymapActionsForContext = (
+	context: Exclude<KeymapContext, "chord">,
+	keymap: readonly KeymapAction[],
+) => keymap.filter((action) => action.context === context || action.context === "global");
 
 const keyCandidates = ({
 	name,
@@ -304,9 +359,10 @@ const keyCandidates = ({
 export const matchKeymapAction = (
 	context: Exclude<KeymapContext, "chord">,
 	key: { name: string; ctrl?: boolean; shift?: boolean },
-): string | undefined => {
+	keymap: readonly KeymapAction[] = KEYMAP,
+): KeymapActionId | undefined => {
 	if (!key.name) return undefined;
-	const actions = keymapActionsForContext(context);
+	const actions = keymapActionsForContext(context, keymap);
 	const candidates = keyCandidates(key);
 	for (const candidate of candidates) {
 		const match = actions.find((action) => action.keys.includes(candidate));
@@ -324,6 +380,7 @@ const KEY_LABELS: Record<string, string> = {
 	space: "Space",
 	escape: "Esc",
 	tab: "Tab",
+	f10: "F10",
 };
 
 const formatKeymapKey = (key: string): string => {
@@ -332,11 +389,13 @@ const formatKeymapKey = (key: string): string => {
 	return KEY_LABELS[key] ?? key;
 };
 
-const formatKeymapKeys = (keys: string[]) => keys.map(formatKeymapKey).join("/");
+const formatKeymapKeys = (keys: readonly string[]) => keys.map(formatKeymapKey).join("/");
 
 /** The first default key for an action, for compact display such as menu hints. */
-export const keymapHint = (id: string): string | undefined =>
-	KEYMAP.find((action) => action.id === id)?.keys[0];
+export const keymapHint = (
+	id: KeymapActionId,
+	keymap: readonly KeymapAction[] = KEYMAP,
+): string | undefined => keymap.find((action) => action.id === id)?.keys[0];
 
 const KEYMAP_SECTION_ORDER: KeymapSection[] = [
 	"Scrolling",
@@ -359,17 +418,26 @@ const KEYMAP_SECTION_NOTES: Partial<Record<KeymapSection, string[]>> = {
 		"ctrl-y path:line · ctrl-g GitHub link, while a thread is open",
 		"links need a GitHub remote and a committed side",
 	],
-	Views: ["key-change anchors work in both views; Semantic remains read-only"],
+	Views: [
+		"F10 → View toggles Patch / read-only Semantic",
+		"F10 → View sets diff layout: auto, split or stacked",
+		"key-change anchors work in both views; Semantic remains read-only",
+	],
 };
 
 /** Groups registry actions into the help overlay's sections, generating each shortcut's display line. */
-export const keymapSections = (): { title: KeymapSection; lines: string[] }[] =>
+export const keymapSections = (
+	keymap: readonly KeymapAction[] = KEYMAP,
+): { title: KeymapSection; lines: string[] }[] =>
 	KEYMAP_SECTION_ORDER.map((title) => ({
 		title,
 		lines: [
-			...KEYMAP.filter((action) => action.section === title).map(
-				(action) => `${formatKeymapKeys(action.keys)} ${action.description}`,
-			),
+			...keymap
+				.filter((action) => action.section === title)
+				.map(
+					(action) =>
+						`${formatKeymapKeys(action.displayKeys ?? action.keys)} ${action.description}`,
+				),
 			...(KEYMAP_SECTION_NOTES[title] ?? []),
 		],
 	})).filter((section) => section.lines.length > 0);

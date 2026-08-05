@@ -58,7 +58,7 @@ import {
 	expandedPatchText,
 	type FileExpansion,
 } from "./expand.ts";
-import { APP_KEYS, keymapHint, keymapSections, matchKeymapAction } from "./keymap.ts";
+import { deriveAppKeys, keymapHint, keymapSections, matchKeymapAction } from "./keymap.ts";
 import {
 	type DiffLayoutPreference,
 	defaultPanelWidth,
@@ -1994,9 +1994,6 @@ function SemanticChapterView({
 }
 
 // ── Keyboard help ──────────────────────────────────────────────────────────
-const HELP_SECTIONS = keymapSections();
-
-const SHORTCUT_ROWS = HELP_SECTIONS.reduce((total, section) => total + section.lines.length + 1, 0);
 const HELP_MODAL_MAX_WIDTH = 66;
 
 /** Floats over the review rather than displacing it, so the page stays in sight. */
@@ -2012,8 +2009,13 @@ function HelpModal({
 	onClose: () => void;
 }) {
 	const theme = useTheme();
+	const sections = useMemo(() => keymapSections(), []);
+	const shortcutRows = useMemo(
+		() => sections.reduce((total, section) => total + section.lines.length + 1, 0),
+		[sections],
+	);
 	const width = Math.max(20, Math.min(HELP_MODAL_MAX_WIDTH, terminalWidth - 4));
-	const height = Math.max(5, Math.min(SHORTCUT_ROWS + 3, terminalHeight - 4));
+	const height = Math.max(5, Math.min(shortcutRows + 3, terminalHeight - 4));
 	return (
 		<>
 			<box
@@ -2054,7 +2056,7 @@ function HelpModal({
 					scrollY
 					verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.border } }}
 				>
-					{HELP_SECTIONS.map((section) => (
+					{sections.map((section) => (
 						<box key={section.title} flexDirection="column" width="100%">
 							<text fg={theme.heading}>{section.title}</text>
 							{section.lines.map((line) => (
@@ -3482,6 +3484,8 @@ export function App({
 		entry.action();
 	}
 
+	const appKeys = useMemo(() => deriveAppKeys(), []);
+
 	useKeyboard((key) => {
 		const name = key.name;
 		const paths = chapter ? chapterFilePaths(chapter) : [];
@@ -3517,7 +3521,7 @@ export function App({
 			return;
 		}
 
-		if (APP_KEYS.has(name) || menu.activeMenuId || themePicker || (name && /^[1-9]$/.test(name))) {
+		if (appKeys.has(name) || menu.activeMenuId || themePicker || (name && /^[1-9]$/.test(name))) {
 			key.preventDefault();
 			key.stopPropagation();
 		}
@@ -3564,6 +3568,11 @@ export function App({
 		}
 		if (handleChapterChord(name)) return;
 		if (copyNotice) setCopyNotice(null);
+
+		if (name === "escape") {
+			quit();
+			return;
+		}
 
 		if (keymapContext === "comments") {
 			switch (actionId) {

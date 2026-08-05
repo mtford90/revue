@@ -15,6 +15,13 @@ export {
 	rangeToHunkIndex,
 } from "./decorations.ts";
 export { highlightedLines, prepareSyntaxHighlighting } from "./highlight.ts";
+export {
+	type CodeWidths,
+	diffCodeWidths,
+	lineNumberDigits,
+	rowVisualHeight,
+	stackGutterSides,
+} from "./layout.ts";
 export { diffLineId, diffRangeWithin } from "./lineIds.ts";
 export { buildDiffRows, type DiffRowOptions } from "./rows.ts";
 export { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";

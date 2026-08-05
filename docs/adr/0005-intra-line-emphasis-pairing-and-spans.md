@@ -27,10 +27,20 @@ save.
 
 **Pairing** is hybrid. Equal-count blocks pair by position, matching GitHub, because the positional
 reading is what reviewers already expect from the layout. Unequal blocks fall back to greedy
-similarity: candidates score as common prefix length plus common suffix length, a pair is admitted
-only when that score covers roughly half the shorter line, the highest-scoring candidates are taken
-first, and accepted pairs forbid crossing ones so pairing stays order-preserving. Lines that clear
-no gate stay unpaired and carry no emphasis.
+similarity: candidates score as common prefix length plus common suffix length, the highest-scoring
+candidates are taken first, and accepted pairs forbid crossing ones so pairing stays
+order-preserving.
+
+**A similarity gate applies to both paths**: a pair is admitted only when its score covers roughly
+half the shorter line. Lines that clear no gate stay unpaired and carry no emphasis. Gating the
+positional pairs too is a deliberate deviation from GitHub parity. Ungated, a rewritten block of
+equal size pairs unrelated lines by position alone, and because they share almost nothing the spans
+then cover nearly the whole of both lines — emphasis that asserts "this line became that one" when
+it did not. Delta's `max-line-distance` and `diff-highlight`'s refusal to emphasise a whole line are
+the same conservatism: losing emphasis on a genuinely-rewritten pair costs a reviewer little, while
+garish emphasis across unrelated lines actively misleads. Positional pairs are still only ever
+gated, never re-matched: an equal-count block does not compete lines across positions, so surviving
+pairs always agree with the rows the layout shows.
 
 **Spans** are token-level. For a pair, the common prefix and suffix are trimmed, the changed middle
 is widened to whole token boundaries on each side, and the two token streams — word runs of letters,
@@ -47,7 +57,8 @@ Whitespace-only edits do produce spans, because the background is their only vis
 | Pair only equal-count blocks by position (GitHub) | Rejected | Leaves the common one-line-becomes-two case with no emphasis at all. |
 | Pair by Levenshtein distance gate (delta) | Rejected | Quadratic in line length for a decision that a common-affix score already makes well. |
 | Pair purely by similarity, including equal counts (codediff.nvim) | Rejected | Can reorder pairs the positional layout already implies, so emphasis disagrees with the rows. |
-| Hybrid: position for equal counts, gated greedy similarity otherwise | Chosen | Keeps GitHub's predictable reading and still emphasises unequal blocks. |
+| Hybrid: gated position for equal counts, gated greedy similarity otherwise | Chosen | Keeps GitHub's predictable reading and still emphasises unequal blocks. |
+| Pair equal counts by position with no gate (GitHub parity) | Rejected | A same-size rewrite paints near-whole-line emphasis across unrelated lines. |
 | Prefix/suffix trim only, emphasise the whole remainder (diff-highlight) | Rejected | One changed word in the middle of a line emphasises everything between the first and last edit. |
 | Character-level LCS | Rejected | Produces scattered single-character spans that read as noise, and a large LCS matrix per pair. |
 | Token-level LCS after prefix/suffix trim | Chosen | Spans land on word boundaries, and trimming keeps the token streams — and the matrix — small. |
@@ -55,7 +66,10 @@ Whitespace-only edits do produce spans, because the background is their only vis
 ## Consequences
 
 - Unpaired lines are a normal outcome, not a failure: a dissimilar removed line simply keeps its
-  plain row tint.
+  plain row tint. This now includes equal-count blocks, so a same-size block can render with
+  emphasis on some rows and none on others where GitHub would emphasise every row.
+- The gate is a common-affix heuristic, so a rewrite that keeps a long shared prefix — a changed
+  argument list under an identical call, say — still pairs even when little else survives.
 - Spans on each side are computed against that side's own token boundaries, so a trim that lands
   mid-token can widen one side further than the other. The two range lists are independent, so the
   asymmetry is visible only as a slightly wider highlight.

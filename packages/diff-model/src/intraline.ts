@@ -82,10 +82,20 @@ const greedyPairs = (oldLines: readonly string[], newLines: readonly string[]): 
 	return accepted.sort((a, b) => a.oldIndex - b.oldIndex);
 };
 
+const positionalPairs = (
+	oldLines: readonly string[],
+	newLines: readonly string[],
+): IntralinePair[] =>
+	oldLines
+		.map((oldLine, index) => ({ oldLine, newLine: newLines[index] ?? "", index }))
+		.filter(({ oldLine, newLine }) => isRevisionOf(oldLine, newLine))
+		.map(({ index }) => ({ oldIndex: index, newIndex: index }));
+
 /**
  * Pair a change block's removed lines with the added lines that revise them. Equal-count
- * blocks pair by position; otherwise only sufficiently alike lines pair, and the rest are
- * left without emphasis rather than paired with an unrelated line.
+ * blocks pair by position; otherwise the most alike lines pair. Either way only sufficiently
+ * alike lines pair, and the rest are left without emphasis rather than paired with an
+ * unrelated line.
  */
 export const pairChangedLines = ({
 	oldLines,
@@ -95,9 +105,7 @@ export const pairChangedLines = ({
 	newLines: readonly string[];
 }): IntralinePair[] => {
 	if (oldLines.length === 0 || newLines.length === 0) return [];
-	if (oldLines.length === newLines.length) {
-		return oldLines.map((_, index) => ({ oldIndex: index, newIndex: index }));
-	}
+	if (oldLines.length === newLines.length) return positionalPairs(oldLines, newLines);
 	return greedyPairs(oldLines, newLines);
 };
 

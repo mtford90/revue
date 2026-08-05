@@ -6,10 +6,28 @@ const pair = (oldIndex: number, newIndex: number) => ({ oldIndex, newIndex });
 test("an equal-count change block pairs by position", () => {
 	expect(
 		pairChangedLines({
+			oldLines: ["const a = 1;", "const b = 2;", "const c = 3;"],
+			newLines: ["const a = 2;", "const b = 3;", "const c = 4;"],
+		}),
+	).toEqual([pair(0, 0), pair(1, 1), pair(2, 2)]);
+});
+
+test("an equal-count block leaves dissimilar positional pairs unpaired", () => {
+	expect(
+		pairChangedLines({
 			oldLines: ["const a = 1;", "wildly different content here", "const c = 3;"],
 			newLines: ["const a = 2;", "nothing alike whatsoever", "const c = 4;"],
 		}),
-	).toEqual([pair(0, 0), pair(1, 1), pair(2, 2)]);
+	).toEqual([pair(0, 0), pair(2, 2)]);
+});
+
+test("an equal-count block never pairs across positions to find a better match", () => {
+	expect(
+		pairChangedLines({
+			oldLines: ["const a = 1;", "const b = 2;"],
+			newLines: ["const b = 3;", "const a = 4;"],
+		}),
+	).toEqual([pair(0, 0), pair(1, 1)]);
 });
 
 test("an unequal block pairs the similar lines and skips the rest", () => {

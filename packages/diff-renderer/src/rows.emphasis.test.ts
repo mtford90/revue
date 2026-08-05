@@ -60,23 +60,23 @@ const cellsOfKind = (rows: ReturnType<typeof buildDiffRows>, kind: string) =>
 		return [row.old, row.new].filter((cell) => cell.kind === kind);
 	});
 
-test.each(["split", "stack"] as const)(
-	"paired change lines take intra-line backgrounds in %s layout",
-	(layout) => {
-		const rows = buildDiffRows(parseOne(pairingPatch), layout, { intralineEmphasis });
+test.each([
+	"split",
+	"stack",
+] as const)("paired change lines take intra-line backgrounds in %s layout", (layout) => {
+	const rows = buildDiffRows(parseOne(pairingPatch), layout, { intralineEmphasis });
 
-		expect(cellsOfKind(rows, "addition").map((cell) => cell.spans)).toEqual([
-			[{ text: "const value = " }, { text: "42", bg: "#0a3d0a" }, { text: ";" }],
-		]);
-		expect(cellsOfKind(rows, "deletion").map((cell) => cell.spans)).toEqual([
-			[{ text: "const value = " }, { text: "1", bg: "#3d0a0a" }, { text: ";" }],
-			[{ text: "orphan();" }],
-		]);
-		expect(cellsOfKind(rows, "context").map((cell) => cell.spans)).toEqual(
-			cellsOfKind(rows, "context").map(() => [{ text: "const untouched = 0;" }]),
-		);
-	},
-);
+	expect(cellsOfKind(rows, "addition").map((cell) => cell.spans)).toEqual([
+		[{ text: "const value = " }, { text: "42", bg: "#0a3d0a" }, { text: ";" }],
+	]);
+	expect(cellsOfKind(rows, "deletion").map((cell) => cell.spans)).toEqual([
+		[{ text: "const value = " }, { text: "1", bg: "#3d0a0a" }, { text: ";" }],
+		[{ text: "orphan();" }],
+	]);
+	expect(cellsOfKind(rows, "context").map((cell) => cell.spans)).toEqual(
+		cellsOfKind(rows, "context").map(() => [{ text: "const untouched = 0;" }]),
+	);
+});
 
 test("novel emphasis replaces the intra-line backgrounds it overlaps", () => {
 	const rows = buildDiffRows(parseOne(pairingPatch), "stack", {

@@ -16,6 +16,8 @@ import { act } from "react";
 import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
 import { App } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
+import { mergeKeymap } from "./keybindings.ts";
+import { KEYMAP } from "./keymap.ts";
 import type { Preferences } from "./preferences.ts";
 import type { PermalinkContext } from "./sourceLink.ts";
 import { createThread } from "./threads.ts";
@@ -843,6 +845,43 @@ test("the keymap floats over the review instead of replacing it", async () => {
 	await press(t, "ESCAPE");
 	expect(t.captureCharFrame()).not.toContain("Scrolling");
 	expect(quits).toBe(0);
+});
+
+test("a rebound action fires on its new key, its default key falls silent, and the menu hint updates", async () => {
+	const { keymap } = mergeKeymap(KEYMAP, { quit: "z" });
+	let quits = 0;
+	const t = await testRender(<App file={file} keymap={keymap} onQuit={() => (quits += 1)} />, {
+		width: 110,
+		height: 32,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+
+	await press(t, "q");
+	expect(quits).toBe(0);
+
+	await press(t, "F10");
+	expect(t.captureCharFrame()).toMatch(/Quit\s+z\b/);
+
+	await press(t, "ESCAPE");
+	await press(t, "z");
+	expect(quits).toBe(1);
+});
+
+test("dropped keybinding overrides surface as a footer warning and help-overlay detail", async () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, { "not-a-real-action": "z" });
+	const t = await testRender(<App file={file} keymap={keymap} keymapIssues={issues} />, {
+		width: 110,
+		height: 60,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("1 keybinding override ignored — press ? for details");
+
+	await press(t, "?");
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Keybinding overrides ignored");
+	expect(frame).toContain('not-a-real-action: unknown action "not-a-real-action"');
 });
 
 test("a chapter shows its file list with the shared directory hoisted", async () => {

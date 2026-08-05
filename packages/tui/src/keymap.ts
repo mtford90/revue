@@ -15,46 +15,6 @@
  * without reworking these call sites.
  */
 
-const ACTION_IDS = [
-	"open-menu",
-	"toggle-shortcut-help",
-	"open-theme-picker",
-	"quit",
-	"toggle-comments",
-	"previous-key-change",
-	"next-key-change",
-	"previous-page",
-	"next-page",
-	"line-up",
-	"line-down",
-	"half-page-up",
-	"half-page-down",
-	"page-up",
-	"page-down",
-	"scroll-top",
-	"scroll-bottom",
-	"next-unreviewed",
-	"toggle-all-files",
-	"focus-file",
-	"toggle-file-diff",
-	"collapse-files",
-	"expand-files",
-	"toggle-chapter-review",
-	"toggle-file-review",
-	"toggle-key-change",
-	"copy-selection",
-	"toggle-sidebar",
-	"cycle-path-display",
-	"comments-select-files",
-	"comments-previous",
-	"comments-next",
-	"comments-first",
-	"comments-last",
-	"jump-to-thread",
-] as const;
-
-export type KeymapActionId = (typeof ACTION_IDS)[number];
-
 export type KeymapContext = "global" | "page" | "comments" | "chord";
 
 export type KeymapSection =
@@ -66,8 +26,8 @@ export type KeymapSection =
 	| "Views"
 	| "Menus";
 
-export type KeymapAction = {
-	id: KeymapActionId;
+type KeymapActionDef<Id extends string> = {
+	id: Id;
 	description: string;
 	/** Default keys in the grammar: lowercase named keys, `ctrl+`/`shift+` prefixes, uppercase literals for shifted characters. */
 	keys: readonly string[];
@@ -78,7 +38,7 @@ export type KeymapAction = {
 	section?: KeymapSection;
 };
 
-export const KEYMAP: readonly KeymapAction[] = [
+const KEYMAP_DEF = [
 	{
 		id: "open-menu",
 		description: "Open the menu bar (File, Navigate, View, Help)",
@@ -323,7 +283,13 @@ export const KEYMAP: readonly KeymapAction[] = [
 		keys: ["return"],
 		context: "comments",
 	},
-];
+] as const satisfies readonly KeymapActionDef<string>[];
+
+export type KeymapActionId = (typeof KEYMAP_DEF)[number]["id"];
+
+export type KeymapAction = KeymapActionDef<KeymapActionId>;
+
+export const KEYMAP: readonly KeymapAction[] = KEYMAP_DEF;
 
 const stripModifier = (key: string) => key.replace(/^(ctrl|shift)\+/, "");
 
@@ -334,6 +300,12 @@ export const deriveAppKeys = (keymap: readonly KeymapAction[] = KEYMAP): Set<str
 			.filter((action) => action.context !== "chord")
 			.flatMap((action) => action.keys.map(stripModifier)),
 		"escape",
+		// The chord prefixes stay hardcoded outside the registry, so their raw
+		// keys must always be preventDefaulted, even if a user rebinds
+		// previous/next-key-change away from the shift+[/shift+] aliases that
+		// otherwise bring them in.
+		"[",
+		"]",
 	]);
 
 const keymapActionsForContext = (
@@ -436,7 +408,7 @@ export const keymapSections = (
 				.filter((action) => action.section === title)
 				.map(
 					(action) =>
-						`${formatKeymapKeys(action.displayKeys ?? action.keys)} ${action.description}`,
+						`${formatKeymapKeys(action.displayKeys ?? action.keys)} ${action.description} (${action.id})`,
 				),
 			...(KEYMAP_SECTION_NOTES[title] ?? []),
 		],

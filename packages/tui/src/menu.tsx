@@ -2,7 +2,7 @@
 // biome-ignore-all lint/a11y/useKeyWithMouseEvents: Keyboard operation is routed by the menu controller.
 import type { MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import { useState } from "react";
-import { keymapHint } from "./keymap.ts";
+import { KEYMAP, type KeymapAction, keymapHint } from "./keymap.ts";
 import type { DiffLayoutPreference, SidebarPreference } from "./layout.ts";
 import type { PathDisplayMode } from "./pathDisplay.ts";
 import type { FileDisplayPreference } from "./preferences.ts";
@@ -122,6 +122,7 @@ export const buildAppMenus = ({
 	showSemantic,
 	chooseTheme,
 	themeLabel,
+	keymap = KEYMAP,
 }: {
 	canMovePrevious: boolean;
 	canMoveNext: boolean;
@@ -155,20 +156,21 @@ export const buildAppMenus = ({
 	showSemantic: () => void;
 	chooseTheme: () => void;
 	themeLabel: string;
+	keymap?: readonly KeymapAction[];
 }): Record<MenuId, MenuEntry[]> => ({
-	file: [{ kind: "item", label: "Quit", hint: keymapHint("quit"), action: requestQuit }],
+	file: [{ kind: "item", label: "Quit", hint: keymapHint("quit", keymap), action: requestQuit }],
 	navigate: [
 		{
 			kind: "item",
 			label: "Previous page",
-			hint: keymapHint("previous-page"),
+			hint: keymapHint("previous-page", keymap),
 			disabled: !canMovePrevious,
 			action: movePrevious,
 		},
 		{
 			kind: "item",
 			label: "Next page",
-			hint: keymapHint("next-page"),
+			hint: keymapHint("next-page", keymap),
 			disabled: !canMoveNext,
 			action: moveNext,
 		},
@@ -176,7 +178,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Next unreviewed chapter",
-			hint: keymapHint("next-unreviewed"),
+			hint: keymapHint("next-unreviewed", keymap),
 			disabled: !canMoveNextUnreviewed,
 			action: moveNextUnreviewed,
 		},
@@ -184,7 +186,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "All files",
-			hint: keymapHint("toggle-all-files"),
+			hint: keymapHint("toggle-all-files", keymap),
 			checked: allFiles,
 			disabled: !canToggleAllFiles,
 			action: toggleAllFiles,
@@ -192,7 +194,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Comments",
-			hint: keymapHint("toggle-comments"),
+			hint: keymapHint("toggle-comments", keymap),
 			checked: commentsSurface,
 			disabled: !canToggleAllFiles,
 			action: toggleComments,
@@ -253,14 +255,14 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Collapse files",
-			hint: keymapHint("collapse-files"),
+			hint: keymapHint("collapse-files", keymap),
 			disabled: !canChangeFiles,
 			action: collapseFiles,
 		},
 		{
 			kind: "item",
 			label: "Expand files",
-			hint: keymapHint("expand-files"),
+			hint: keymapHint("expand-files", keymap),
 			disabled: !canChangeFiles,
 			action: expandFiles,
 		},
@@ -268,7 +270,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: `Theme: ${themeLabel}`,
-			hint: keymapHint("open-theme-picker"),
+			hint: keymapHint("open-theme-picker", keymap),
 			action: chooseTheme,
 		},
 	],
@@ -276,7 +278,7 @@ export const buildAppMenus = ({
 		{
 			kind: "item",
 			label: "Keyboard shortcuts",
-			hint: keymapHint("toggle-shortcut-help"),
+			hint: keymapHint("toggle-shortcut-help", keymap),
 			checked: showHelp,
 			action: toggleHelp,
 		},

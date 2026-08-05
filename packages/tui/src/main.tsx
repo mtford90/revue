@@ -25,6 +25,7 @@ import {
 } from "@revue/types";
 import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
+import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
@@ -583,6 +584,7 @@ async function showRun(
 
 	const preferencesPath = defaultPreferencesPath();
 	const preferences = await loadPreferences(preferencesPath);
+	const { keymap, issues: keymapIssues } = await loadEffectiveKeymap(defaultKeybindingsPath());
 	const themeId = options.requestedTheme ?? preferences.themeId;
 	const transparentSurfaces = options.transparentBg || preferences.transparentBackground === true;
 	// The terminal has not reported its own background yet, so highlight against the theme the
@@ -622,6 +624,8 @@ async function showRun(
 		initialViewState: store.get(),
 		initialSessionState: store.getSession(),
 		initialPreferences: preferences,
+		keymap,
+		keymapIssues,
 		resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance),
 		initialSyntaxTheme: startupTheme.syntaxTheme,
 		transparentSurfaces,

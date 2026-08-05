@@ -58,7 +58,15 @@ import {
 	expandedPatchText,
 	type FileExpansion,
 } from "./expand.ts";
-import { deriveAppKeys, keymapHint, keymapSections, matchKeymapAction } from "./keymap.ts";
+import type { KeymapIssue } from "./keybindings.ts";
+import {
+	deriveAppKeys,
+	KEYMAP,
+	type KeymapAction,
+	keymapHint,
+	keymapSections,
+	matchKeymapAction,
+} from "./keymap.ts";
 import {
 	type DiffLayoutPreference,
 	defaultPanelWidth,
@@ -2002,17 +2010,23 @@ function HelpModal({
 	terminalHeight,
 	scrollRef,
 	onClose,
+	keymap = KEYMAP,
+	issues = [],
 }: {
 	terminalWidth: number;
 	terminalHeight: number;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
 	onClose: () => void;
+	keymap?: readonly KeymapAction[];
+	issues?: readonly KeymapIssue[];
 }) {
 	const theme = useTheme();
-	const sections = useMemo(() => keymapSections(), []);
+	const sections = useMemo(() => keymapSections(keymap), [keymap]);
 	const shortcutRows = useMemo(
-		() => sections.reduce((total, section) => total + section.lines.length + 1, 0),
-		[sections],
+		() =>
+			sections.reduce((total, section) => total + section.lines.length + 1, 0) +
+			(issues.length > 0 ? issues.length + 1 : 0),
+		[sections, issues],
 	);
 	const width = Math.max(20, Math.min(HELP_MODAL_MAX_WIDTH, terminalWidth - 4));
 	const height = Math.max(5, Math.min(shortcutRows + 3, terminalHeight - 4));
@@ -2056,6 +2070,21 @@ function HelpModal({
 					scrollY
 					verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.border } }}
 				>
+					{issues.length > 0 ? (
+						<box flexDirection="column" width="100%">
+							<text fg={theme.badgeRemoved}>Keybinding overrides ignored</text>
+							{issues.map((issue) => (
+								<text
+									key={`${issue.entry}-${issue.reason}`}
+									fg={theme.badgeRemoved}
+									wrapMode="none"
+									truncate
+								>
+									{`  ${issue.entry}: ${issue.reason}`}
+								</text>
+							))}
+						</box>
+					) : null}
 					{sections.map((section) => (
 						<box key={section.title} flexDirection="column" width="100%">
 							<text fg={theme.heading}>{section.title}</text>
@@ -2176,6 +2205,7 @@ const buildRangeMenu = ({
 	copyLocation,
 	copyLink,
 	comment,
+	keymap = KEYMAP,
 }: {
 	selectedText: string | null;
 	linkBlocker: string | null;
@@ -2183,13 +2213,14 @@ const buildRangeMenu = ({
 	copyLocation: () => void;
 	copyLink: () => void;
 	comment: () => void;
+	keymap?: readonly KeymapAction[];
 }): MenuEntry[] => [
 	...(selectedText
 		? ([
 				{
 					kind: "item",
 					label: "Copy selected text",
-					hint: keymapHint("copy-selection"),
+					hint: keymapHint("copy-selection", keymap),
 					action: copyText,
 				},
 				{ kind: "separator", id: "text" },
@@ -2241,6 +2272,8 @@ export function App({
 	onPreferencesChange,
 	onThemeChange,
 	onQuit,
+	keymap = KEYMAP,
+	keymapIssues = [],
 }: {
 	/** Null for a chapterless run: the review opens straight onto the All files page. */
 	file: RevueChaptersFile | null;
@@ -2266,6 +2299,10 @@ export function App({
 	onPreferencesChange?: (next: Preferences) => void;
 	onThemeChange?: (next: Theme) => void;
 	onQuit?: () => void;
+	/** The registry merged with any `~/.revue/keybindings.json` overrides. */
+	keymap?: readonly KeymapAction[];
+	/** User keybinding entries dropped during the merge, surfaced in the footer and help overlay. */
+	keymapIssues?: readonly KeymapIssue[];
 }) {
 	const renderer = useRenderer();
 	const { width, height } = useTerminalDimensions();
@@ -3428,6 +3465,7 @@ export function App({
 		showSemantic: () => void showSemantic(),
 		chooseTheme: openThemePicker,
 		themeLabel: chosenTheme.label,
+		keymap,
 	});
 	const menu = useMenuController(menus);
 	const contextMenuEntries = contextMenu
@@ -3440,6 +3478,7 @@ export function App({
 				copyLocation: () => copyLocation(contextMenu.range),
 				copyLink: () => copyLink(contextMenu.range),
 				comment: () => selectThreadRange(contextMenu.range),
+				keymap,
 			})
 		: [];
 	const threadComposer = threadDraft ? (
@@ -3484,7 +3523,7 @@ export function App({
 		entry.action();
 	}
 
-	const appKeys = useMemo(() => deriveAppKeys(), []);
+	const appKeys = useMemo(() => deriveAppKeys(keymap), [keymap]);
 
 	useKeyboard((key) => {
 		const name = key.name;
@@ -3551,11 +3590,15 @@ export function App({
 			return;
 		}
 		const keymapContext = page?.kind === "comments" ? "comments" : "page";
-		const actionId = matchKeymapAction(keymapContext, {
-			name: name ?? "",
-			ctrl: key.ctrl,
-			shift: key.shift,
-		});
+		const actionId = matchKeymapAction(
+			keymapContext,
+			{
+				name: name ?? "",
+				ctrl: key.ctrl,
+				shift: key.shift,
+			},
+			keymap,
+		);
 
 		if (actionId === "open-menu") {
 			chapterNavigationPrefix.current = null;
@@ -3735,7 +3778,12 @@ export function App({
 			? { text: threadNotice, tone: "error" }
 			: copyNotice
 				? { text: copyNotice.text, tone: "success" }
-				: null;
+				: keymapIssues.length > 0
+					? {
+							text: `${keymapIssues.length} keybinding ${keymapIssues.length === 1 ? "override" : "overrides"} ignored — press ? for details`,
+							tone: "error",
+						}
+					: null;
 
 	return (
 		<ThemeProvider value={theme}>
@@ -3985,6 +4033,8 @@ export function App({
 						terminalHeight={height}
 						scrollRef={helpScroll}
 						onClose={() => setShowHelp(false)}
+						keymap={keymap}
+						issues={keymapIssues}
 					/>
 				) : null}
 				{themePicker ? (
@@ -4039,6 +4089,10 @@ export async function runApp(
 		onSessionStateChange?: (next: ReviewSessionState) => void;
 		onPreferencesChange?: (next: Preferences) => void;
 		onThemeChange?: (next: Theme) => void;
+		/** The registry merged with any `~/.revue/keybindings.json` overrides. */
+		keymap?: readonly KeymapAction[];
+		/** User keybinding entries dropped during the merge. */
+		keymapIssues?: readonly KeymapIssue[];
 	} = {},
 ): Promise<void> {
 	const renderer = await createCliRenderer({ exitOnCtrlC: true });
@@ -4073,6 +4127,8 @@ export async function runApp(
 				onPreferencesChange={options.onPreferencesChange}
 				onThemeChange={options.onThemeChange}
 				onQuit={quit}
+				keymap={options.keymap}
+				keymapIssues={options.keymapIssues}
 			/>,
 		);
 		await quitting;

@@ -328,7 +328,8 @@ Grammar for a theme file:
 - `extends` — the id of a bundled theme to derive from (`revue themes` lists them)
 - `label`, `background`, `foreground` — `background` is required unless `extends` is set; any of
   these may still be set alongside `extends` to override just that input before deriving
-- `diffColors.added`/`removed`/`modified` — optional, fall back to the derived defaults
+- `diffColors.added`/`removed`/`modified` — optional, fall back per key to the `extends` base's
+  diff colours, then the derived defaults
 - `syntaxTheme` — the id of a bundled Shiki theme; falls back to the derived default
 - `overrides` — pins specific colour slots verbatim on the derived theme (slot names from the
   `revue themes init` template); no contrast policing on pinned values

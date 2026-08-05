@@ -77,6 +77,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -105,3 +106,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/mtford90/homebrew-tap.git" tap
+          bash scripts/generate-tap-formula.sh "$version" artifacts/checksums.txt > tap/Formula/revue.rb
+          cd tap
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -am "revue ${version}"
+          git push

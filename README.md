@@ -75,6 +75,8 @@ your agent can pick up every comment, fix it & reply inline against the same fro
 
 Every shortcut can be remapped in `~/.revue/keybindings.json`; the help overlay (`?`) shows each
 action's ID alongside its keys. `revue keybindings init` writes a commented starter file.
+Themes can be customised too, deriving from a bundled palette in `~/.revue/themes/*.json`;
+`revue themes init <name>` writes a commented starter file.
 
 The [guide](docs/guide.md) covers the rest: Markdown export, the semantic view, themes,
 `.revueignore`, the full keymap & remapping shortcuts.

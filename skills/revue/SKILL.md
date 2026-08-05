@@ -305,3 +305,40 @@ or a key that collides with another binding in the same context drops just that 
 other entry in the file still applies. Dropped entries and their reasons show up in `revue
 keybindings`'s output and in the TUI's footer/help overlay, so re-run `revue keybindings` after
 editing to confirm the file did what was intended.
+
+## Configuring themes
+
+If the user asks for a custom theme, do it by creating or editing a file under
+`~/.revue/themes/` — never by patching Revue's source. Each file is named `<id>.json` (the id is
+the filename minus `.json`) and is JSONC, same comment-stripping rules as keybindings.
+
+Discover the current bundled and custom themes, and any issues in existing files, before writing
+anything:
+
+```bash
+revue themes               # bundled + custom themes, grouped by appearance, plus any issues
+revue themes init <name>   # writes a commented starter template to ~/.revue/themes/<name>.json
+```
+
+`init` refuses to overwrite an existing file unless `--force` is passed. Starting from its output
+is more reliable than writing the file from scratch.
+
+Grammar for a theme file:
+
+- `extends` — the id of a bundled theme to derive from (`revue themes` lists them)
+- `label`, `background`, `foreground` — `background` is required unless `extends` is set; either
+  may still be set alongside `extends` to override just that input before deriving
+- `diffColors.added`/`removed`/`modified` — optional, fall back to the derived defaults
+- `syntaxTheme` — the id of a bundled Shiki theme; falls back to the derived default
+- `overrides` — pins specific colour slots verbatim on the derived theme (colours from
+  `revue themes` init's template); no contrast policing on pinned values
+
+Colours are `#rgb` or `#rrggbb`. A file whose id matches a bundled theme shadows it in place
+(shown once, marked "customised" in `revue themes`); any other id is appended as a new theme.
+
+Validation is lenient and per-file: a malformed file, a missing `background`/`extends`, or an
+unknown `extends` drops the whole theme; a bad colour, syntax theme, or override slot drops just
+that key and falls back to the `extends` base where one exists. Dropped entries and their reasons
+show up in `revue themes`'s output and the TUI's footer/help overlay — re-run `revue themes` after
+editing to confirm the file did what was intended. Themes are read once at startup, so changes
+take effect on the next launch.

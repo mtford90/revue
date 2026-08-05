@@ -87,6 +87,11 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   machine-wide to `~/.revue/preferences.json` with the reviewer's layout choices. Without a named
   or remembered theme Revue uses `ayu-dark`; explicit `auto` asks the terminal to choose between
   `ayu-light` and `ayu-dark`. Transparent mode drops the neutral surfaces while keeping diff tints.
+  Reviewers can also author custom themes as derivation-input files under `~/.revue/themes/`,
+  either `extends`-ing a bundled theme or supplying their own background/foreground, with
+  `overrides` pinning individual colour slots verbatim after derivation; a custom id matching a
+  bundled one shadows it in the picker/listing. Validation is lenient and per-file, dropping just
+  the broken theme or key rather than the whole file.
 - **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
   chapters, pinned file metadata, review questions, authored threads, and optional local review
   progress. Full review is the default; prologue and one chapter by stable id/order are explicit

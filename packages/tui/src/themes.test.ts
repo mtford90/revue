@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_DARK_THEME_ID, isBundledShikiThemeId, resolveTheme, THEMES } from "@revue/theme";
@@ -191,4 +191,14 @@ test("a broken preferred theme resolves to the default without any preference fi
 
 test("a missing preferred custom theme id resolves to the default", () => {
 	expect(resolveTheme("does-not-exist", null, []).id).toBe(DEFAULT_DARK_THEME_ID);
+});
+
+test("the guide's custom-theme worked example parses cleanly through the real loader", async () => {
+	const guide = await readFile(join(import.meta.dir, "../../../docs/guide.md"), "utf8");
+	const match = guide.match(/```jsonc\n\/\/ ~\/\.revue\/themes\/my-ayu\.json\n([\s\S]*?)```/);
+	if (!match) throw new Error("guide.md's my-ayu.json worked example was not found");
+
+	const { theme, issues } = parseCustomTheme("my-ayu", match[1]);
+	expect(issues).toEqual([]);
+	expect(theme?.accent).toBe("#ff9940");
 });

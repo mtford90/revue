@@ -340,6 +340,46 @@ itself is fixed. An invalid, unknown, or conflicting entry is dropped with a war
 `revue keybindings`'s output and the TUI's footer/help overlay — while the rest of the file still
 applies.
 
+### Custom themes
+
+Beyond the bundled palettes, Revue reads reviewer-authored themes from `~/.revue/themes/*.json` —
+one theme per file, id taken from the filename. Comments are stripped before parsing (JSONC, like
+keybindings). A theme either derives from a bundled theme via `extends` or supplies its own
+`background`/`foreground` pair, then may pin individual colour slots verbatim with `overrides`:
+
+```jsonc
+// ~/.revue/themes/my-ayu.json
+{
+  "extends": "ayu-dark",
+  "overrides": {
+    "accent": "#ff9940"
+  }
+}
+```
+
+`extends` names a bundled theme id (`revue themes` lists them); `label`, `background`, `foreground`,
+`diffColors.added/removed/modified`, and `syntaxTheme` (a bundled Shiki theme id) all fall back to
+the `extends` base when set. Every non-pinned colour is then derived with the same WCAG contrast
+floors as the bundled themes. `overrides` pins any of `revue themes`' listed slot names to a
+`#rgb`/`#rrggbb` colour verbatim, after derivation, with no contrast policing — a pinned colour is
+used exactly as written.
+
+A custom file whose id matches a bundled theme shadows it in place (shown once, marked
+"customised"); any other id is appended as a new theme. Validation is lenient and per-file: a
+malformed file, a missing `background`/`extends`, or an unknown `extends` drops the whole theme; a
+bad colour, syntax theme, or override slot drops just that key. Dropped entries and their reasons
+show up in `revue themes`'s Issues block and the TUI's footer/help overlay.
+
+```bash
+revue themes               # bundled + custom themes, grouped by appearance, plus any issues
+revue themes init <name>   # write a commented starter template to ~/.revue/themes/<name>.json
+```
+
+Custom themes are read once at startup, so editing a file takes effect on the next launch. `auto`
+selection between the light/dark defaults, transparent mode, and a missing or broken preferred
+theme falling back without rewriting `~/.revue/preferences.json` all behave the same as with
+bundled themes.
+
 ## Roadmap
 
 - [x] Chapters/prologue zod schema (ported from Stage)

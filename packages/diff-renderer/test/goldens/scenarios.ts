@@ -78,6 +78,22 @@ export const GOLDEN_SCENARIOS: readonly GoldenScenario[] = [
 `,
 	},
 	{
+		name: "equal-count-block-gate",
+		covers: "an equal-count block where only the alike pair earns emphasis",
+		height: 10,
+		widths: DEFAULT_WIDTHS,
+		patch: `diff --git a/gate.ts b/gate.ts
+--- a/gate.ts
++++ b/gate.ts
+@@ -1,3 +1,3 @@
+ const keep = true;
+-const total = sum(a, b);
+-throw new Error("gone");
++const total = sum(a, c);
++return { total };
+`,
+	},
+	{
 		name: "whitespace-only",
 		covers: "trailing whitespace and re-indentation, where nothing visible changes",
 		height: 9,

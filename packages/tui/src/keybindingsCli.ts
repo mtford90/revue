@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { KeymapIssue } from "./keybindings.ts";
+import { expandShiftAliases, isValidUserKey, type KeymapIssue } from "./keybindings.ts";
 import { formatKeymapKeys, KEYMAP_SECTION_ORDER, type KeymapAction } from "./keymap.ts";
 
 const COMMENTS_SECTION_TITLE = "Comments";
@@ -17,20 +17,28 @@ const groupBySection = (
 		}))
 		.filter((section) => section.actions.length > 0);
 
-const sameKeys = (a: readonly string[], b: readonly string[]): boolean =>
-	a.length === b.length && a.every((key) => b.includes(key));
+/** The subset of an action's keys the grammar accepts as a user override — excludes alias
+ * forms (`shift+g`, `shift+[`) the loader re-derives itself via `expandShiftAliases`. */
+const matchingKeys = (action: KeymapAction): string[] => action.keys.filter(isValidUserKey);
+
+const sameKeySet = (a: readonly string[], b: readonly string[]): boolean => {
+	const expandedA = new Set(expandShiftAliases(a));
+	const expandedB = new Set(expandShiftAliases(b));
+	return expandedA.size === expandedB.size && [...expandedA].every((key) => expandedB.has(key));
+};
 
 const formatActionLine = (
 	defaultAction: KeymapAction,
 	effectiveAction: KeymapAction | undefined,
 ) => {
-	const defaultDisplay = formatKeymapKeys(defaultAction.displayKeys ?? defaultAction.keys);
+	const defaultDisplay = formatKeymapKeys(matchingKeys(defaultAction));
 	const effectiveKeys = effectiveAction?.displayKeys ?? effectiveAction?.keys ?? defaultAction.keys;
 	const overridden = Boolean(
-		effectiveAction && !sameKeys(effectiveAction.keys, defaultAction.keys),
+		effectiveAction && !sameKeySet(effectiveAction.keys, defaultAction.keys),
 	);
 	const overrideNote = overridden ? ` (overridden, default: ${defaultDisplay})` : "";
-	return `  ${defaultAction.id.padEnd(24)} ${formatKeymapKeys(effectiveKeys).padEnd(16)} ${defaultAction.description}${overrideNote}`;
+	const chordNote = defaultAction.context === "chord" ? " (fixed, not rebindable)" : "";
+	return `  ${defaultAction.id.padEnd(24)} ${formatKeymapKeys(effectiveKeys).padEnd(16)} ${defaultAction.description}${overrideNote}${chordNote}`;
 };
 
 /** Lists every registry action grouped by section, marking overridden bindings and reporting validation issues. */
@@ -84,7 +92,7 @@ export const generateKeybindingsTemplate = (keymap: readonly KeymapAction[]): st
 				`  // ${title}`,
 				...actions.flatMap((action) => [
 					`  // ${action.description}`,
-					`  // "${action.id}": ${JSON.stringify(action.displayKeys ?? action.keys)}`,
+					`  // "${action.id}": ${JSON.stringify(matchingKeys(action))}`,
 				]),
 			].join("\n"),
 		)

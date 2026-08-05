@@ -783,13 +783,19 @@ async function cmdKeybindings(args: string[]): Promise<number> {
 		return 1;
 	}
 	const path = defaultKeybindingsPath();
-	const result = initKeybindingsFile(path, KEYMAP, options.booleans.has("--force"));
-	if (!result.wrote) {
-		process.stderr.write(`${path} already exists; pass --force to overwrite\n`);
+	try {
+		const result = initKeybindingsFile(path, KEYMAP, options.booleans.has("--force"));
+		if (!result.wrote) {
+			process.stderr.write(`${path} already exists; pass --force to overwrite\n`);
+			return 1;
+		}
+		process.stdout.write(`Wrote ${path}\n`);
+		return 0;
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		process.stderr.write(`Could not write ${path}: ${detail}\n`);
 		return 1;
 	}
-	process.stdout.write(`Wrote ${path}\n`);
-	return 0;
 }
 
 function cmdDoctor(): number {

@@ -127,7 +127,7 @@ const shiftAliasFor = (key: string): string | undefined => {
 	return base ? `shift+${base}` : undefined;
 };
 
-const expandShiftAliases = (keys: readonly string[]): string[] => {
+export const expandShiftAliases = (keys: readonly string[]): string[] => {
 	const expanded = new Set<string>();
 	for (const key of keys) {
 		expanded.add(key);

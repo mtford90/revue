@@ -615,6 +615,46 @@ test("keybindings init writes a starter template and refuses to overwrite it wit
 	}
 });
 
+test("themes lists bundled and custom themes and flags shadowed overrides and issues", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-themes-cli-"));
+	try {
+		await mkdir(join(root, ".revue", "themes"), { recursive: true });
+		await writeFile(
+			join(root, ".revue", "themes", "ayu-dark.json"),
+			JSON.stringify({ extends: "ayu-dark", overrides: { accent: "#ff0000" } }),
+		);
+		await writeFile(join(root, ".revue", "themes", "broken.json"), "{not json");
+		const listing = await run(root, ["themes"], { HOME: root });
+		expect(listing.exitCode).toBe(0);
+		expect(listing.stdout).toContain("dark:");
+		expect(listing.stdout).toMatch(/ayu-dark.*\(customised\)/);
+		expect(listing.stdout).toContain("Issues:");
+		expect(listing.stdout).toContain("broken: malformed JSON; theme ignored");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("themes init writes a starter template and refuses to overwrite it without --force", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-themes-init-"));
+	try {
+		const init = await run(root, ["themes", "init", "my-theme"], { HOME: root });
+		expect(init.exitCode).toBe(0);
+		expect(init.stdout).toContain(join(root, ".revue", "themes", "my-theme.json"));
+		const written = await Bun.file(join(root, ".revue", "themes", "my-theme.json")).text();
+		expect(written).toContain('// "extends": "ayu-dark"');
+
+		const again = await run(root, ["themes", "init", "my-theme"], { HOME: root });
+		expect(again.exitCode).toBe(1);
+		expect(again.stderr).toContain("already exists");
+
+		const forced = await run(root, ["themes", "init", "my-theme", "--force"], { HOME: root });
+		expect(forced.exitCode).toBe(0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("prep --pr fetches a pull request head from the remote and pins it as the compare ref", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-prep-pr-"));
 	try {

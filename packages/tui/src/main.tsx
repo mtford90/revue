@@ -34,6 +34,7 @@ import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
 import { formatChapterlessSummary, formatSummary } from "./summary.ts";
 import { defaultThemesDir, loadCustomThemes, type ThemeIssue } from "./themes.ts";
+import { formatThemesListing, initThemesFile } from "./themesCli.ts";
 import {
 	createThread,
 	defaultThreadsPath,
@@ -64,6 +65,8 @@ Usage:
   revue skill print                    write the bundled skill to stdout for manual installation
   revue keybindings                    list every action, its defaults, and its effective keys
   revue keybindings init [--force]     write a commented keybindings.json starter template
+  revue themes                         list bundled and custom themes, marking overrides
+  revue themes init <name> [--force]   write a commented themes/<name>.json starter template
   revue doctor                         check required and optional dependencies
   revue --version                      print the CLI version
 
@@ -808,6 +811,60 @@ async function cmdKeybindings(args: string[]): Promise<number> {
 	}
 }
 
+const THEMES_HELP = `usage: revue themes
+       revue themes init <name> [--force]
+
+(no args)  list bundled and custom themes grouped by appearance, marking
+           custom and customised (shadowed bundled) ids, followed by any
+           validation issues
+init       write a commented ~/.revue/themes/<name>.json starter template;
+           --force overwrites an existing file`;
+
+async function cmdThemes(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${THEMES_HELP}\n`);
+		return 0;
+	}
+	const [operation, ...rest] = args;
+	if (!operation) {
+		const { themes: customThemes, issues } = await loadCustomThemes(defaultThemesDir());
+		process.stdout.write(`${formatThemesListing({ customThemes, issues })}\n`);
+		return 0;
+	}
+	if (operation !== "init") {
+		process.stderr.write(`unknown themes operation: ${operation}\n${THEMES_HELP}\n`);
+		return 1;
+	}
+	let options: CommandOptions;
+	try {
+		options = parseCommandOptions(rest, [], ["--force"]);
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${THEMES_HELP}\n`,
+		);
+		return 1;
+	}
+	const [name, ...extra] = options.positionals;
+	if (!name || extra.length > 0) {
+		process.stderr.write(`themes init takes exactly one <name> argument\n${THEMES_HELP}\n`);
+		return 1;
+	}
+	const path = join(defaultThemesDir(), `${name}.json`);
+	try {
+		const result = initThemesFile(path, name, options.booleans.has("--force"));
+		if (!result.wrote) {
+			process.stderr.write(`${path} already exists; pass --force to overwrite\n`);
+			return 1;
+		}
+		process.stdout.write(`Wrote ${path}\n`);
+		return 0;
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		process.stderr.write(`Could not write ${path}: ${detail}\n`);
+		return 1;
+	}
+}
+
 function cmdDoctor(): number {
 	const report = runDoctor();
 	process.stdout.write(`${report.lines.join("\n")}\n`);
@@ -828,6 +885,7 @@ async function main(): Promise<number> {
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);
 	if (command === "keybindings") return cmdKeybindings(args);
+	if (command === "themes") return cmdThemes(args);
 	if (command === "doctor") return cmdDoctor();
 	if (!command) return cmdDiff([]);
 	if (command === "-h" || command === "--help" || command === "help") {

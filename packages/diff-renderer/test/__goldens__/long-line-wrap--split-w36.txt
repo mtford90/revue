@@ -1,0 +1,35 @@
+# long-line-wrap--split-w36 — a wrapped line whose emphasis run crosses the wrap point
+# grid 36x14 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+00 |▎ @@ -1,1 +1,1 @@
+01 | 1    - const me │ 1    + const mes
+02 |        ssage =  │        sage = re
+03 |        renderBa │        nderBanne
+04 |        nner("sh │        r("a cons
+05 |        ort tail │        iderably
+06 |        ", optio │        longer ta
+07 |        ns);     │        il that m
+08 |                 │        ust wrap"
+09 |                 │        , options
+10 |                 │        );
+11 |
+12 |
+13 |
+
+# styles: row: cols fg bg [attributes]
+
+00: 0-16 fg=#73b8ff bg=#1e2228  17-35 fg=#ffffff bg=#1e2228
+01: 0-4 fg=#a4a6a9 bg=#3d262e  5-15 fg=#bfbdb6 bg=#3d262e  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+02: 0-4 fg=#a4a6a9 bg=#3d262e  5-15 fg=#bfbdb6 bg=#3d262e  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+03: 0-4 fg=#a4a6a9 bg=#3d262e  5-15 fg=#bfbdb6 bg=#3d262e  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+04: 0-4 fg=#a4a6a9 bg=#3d262e  5-13 fg=#bfbdb6 bg=#3d262e  14-15 fg=#bfbdb6 bg=#7c3f48  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-28 fg=#bfbdb6 bg=#233628  29 fg=#bfbdb6 bg=#385c34  30 fg=#bfbdb6 bg=#233628  31-34 fg=#bfbdb6 bg=#385c34  35 fg=#ffffff bg=#233628
+05: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-10 fg=#bfbdb6 bg=#7c3f48  11-15 fg=#bfbdb6 bg=#3d262e  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-34 fg=#bfbdb6 bg=#385c34  35 fg=#ffffff bg=#233628
+06: 0-4 fg=#a4a6a9 bg=#3d262e  5-15 fg=#bfbdb6 bg=#3d262e  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-32 fg=#bfbdb6 bg=#385c34  33-34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+07: 0-4 fg=#a4a6a9 bg=#3d262e  5-11 fg=#bfbdb6 bg=#3d262e  12-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-27 fg=#bfbdb6 bg=#233628  28-34 fg=#bfbdb6 bg=#385c34  35 fg=#ffffff bg=#233628
+08: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-33 fg=#bfbdb6 bg=#385c34  34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+09: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+10: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-27 fg=#bfbdb6 bg=#233628  28-35 fg=#ffffff bg=#233628
+11: 0-35 fg=#ffffff bg=#00000000
+12: 0-35 fg=#ffffff bg=#00000000
+13: 0-35 fg=#ffffff bg=#00000000

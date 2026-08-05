@@ -1,0 +1,35 @@
+# long-line-wrap--split-w60 — a wrapped line whose emphasis run crosses the wrap point
+# grid 60x14 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+00 |▎ @@ -1,1 +1,1 @@
+01 | 1    - const message = rend │ 1    + const message = rende
+02 |        erBanner("short tail │        rBanner("a considerab
+03 |        ", options);         │        ly longer tail that m
+04 |                             │        ust wrap", options);
+05 |
+06 |
+07 |
+08 |
+09 |
+10 |
+11 |
+12 |
+13 |
+
+# styles: row: cols fg bg [attributes]
+
+00: 0-16 fg=#73b8ff bg=#1e2228  17-59 fg=#ffffff bg=#1e2228
+01: 0-4 fg=#a4a6a9 bg=#3d262e  5-27 fg=#bfbdb6 bg=#3d262e  28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-58 fg=#bfbdb6 bg=#233628  59 fg=#ffffff bg=#233628
+02: 0-4 fg=#a4a6a9 bg=#3d262e  5-17 fg=#bfbdb6 bg=#3d262e  18-22 fg=#bfbdb6 bg=#7c3f48  23-27 fg=#bfbdb6 bg=#3d262e  28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-46 fg=#bfbdb6 bg=#233628  47 fg=#bfbdb6 bg=#385c34  48 fg=#bfbdb6 bg=#233628  49-58 fg=#bfbdb6 bg=#385c34  59 fg=#ffffff bg=#233628
+03: 0-4 fg=#a4a6a9 bg=#3d262e  5-19 fg=#bfbdb6 bg=#3d262e  20-28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-37 fg=#bfbdb6 bg=#233628  38-47 fg=#bfbdb6 bg=#385c34  48-51 fg=#bfbdb6 bg=#233628  52-58 fg=#bfbdb6 bg=#385c34  59 fg=#ffffff bg=#233628
+04: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-37 fg=#bfbdb6 bg=#233628  38-45 fg=#bfbdb6 bg=#385c34  46-57 fg=#bfbdb6 bg=#233628  58-59 fg=#ffffff bg=#233628
+05: 0-59 fg=#ffffff bg=#00000000
+06: 0-59 fg=#ffffff bg=#00000000
+07: 0-59 fg=#ffffff bg=#00000000
+08: 0-59 fg=#ffffff bg=#00000000
+09: 0-59 fg=#ffffff bg=#00000000
+10: 0-59 fg=#ffffff bg=#00000000
+11: 0-59 fg=#ffffff bg=#00000000
+12: 0-59 fg=#ffffff bg=#00000000
+13: 0-59 fg=#ffffff bg=#00000000

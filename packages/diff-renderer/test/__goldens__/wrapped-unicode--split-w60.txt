@@ -1,0 +1,31 @@
+# wrapped-unicode--split-w60 — wide characters straddling a wrap boundary
+# grid 60x12 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+00 |▎ @@ -1,1 +1,1 @@
+01 | 1    - const notice = "短い │ 1    + const notice = "日本
+02 |        ";                   │        語の長い注意書きです
+03 |                             │        、折り返しを必ず跨ぎ
+04 |                             │        ます";
+05 |
+06 |
+07 |
+08 |
+09 |
+10 |
+11 |
+
+# styles: row: cols fg bg [attributes]
+
+00: 0-16 fg=#73b8ff bg=#1e2228  17-59 fg=#ffffff bg=#1e2228
+01: 0-4 fg=#a4a6a9 bg=#3d262e  5-23 fg=#bfbdb6 bg=#3d262e  24-27 fg=#bfbdb6 bg=#7c3f48  28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-53 fg=#bfbdb6 bg=#233628  54-57 fg=#bfbdb6 bg=#385c34  58-59 fg=#ffffff bg=#233628
+02: 0-4 fg=#a4a6a9 bg=#3d262e  5-9 fg=#bfbdb6 bg=#3d262e  10-28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-37 fg=#bfbdb6 bg=#233628  38-57 fg=#bfbdb6 bg=#385c34  58-59 fg=#ffffff bg=#233628
+03: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-37 fg=#bfbdb6 bg=#233628  38-57 fg=#bfbdb6 bg=#385c34  58-59 fg=#ffffff bg=#233628
+04: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-28 fg=#ffffff bg=#3d262e  29 fg=#303238 bg=#293d55  30-34 fg=#a4a6a9 bg=#233628  35-37 fg=#bfbdb6 bg=#233628  38-41 fg=#bfbdb6 bg=#385c34  42-43 fg=#bfbdb6 bg=#233628  44-59 fg=#ffffff bg=#233628
+05: 0-59 fg=#ffffff bg=#00000000
+06: 0-59 fg=#ffffff bg=#00000000
+07: 0-59 fg=#ffffff bg=#00000000
+08: 0-59 fg=#ffffff bg=#00000000
+09: 0-59 fg=#ffffff bg=#00000000
+10: 0-59 fg=#ffffff bg=#00000000
+11: 0-59 fg=#ffffff bg=#00000000

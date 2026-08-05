@@ -1,0 +1,23 @@
+# multi-edit-line--stack-w80 — several separated edits on one line
+# grid 80x8 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+0 |▎ @@ -1,1 +1,1 @@
+1 | 1         - const rect = { x: 1, y: 2, w: 3 };
+2 |      1    + const rect = { x: 9, y: 2, w: 7 };
+3 |
+4 |
+5 |
+6 |
+7 |
+
+# styles: row: cols fg bg [attributes]
+
+0: 0-16 fg=#73b8ff bg=#1e2228  17-79 fg=#ffffff bg=#1e2228
+1: 0-9 fg=#a4a6a9 bg=#3d262e  10-30 fg=#bfbdb6 bg=#3d262e  31 fg=#bfbdb6 bg=#7c3f48  32-42 fg=#bfbdb6 bg=#3d262e  43 fg=#bfbdb6 bg=#7c3f48  44-46 fg=#bfbdb6 bg=#3d262e  47-79 fg=#ffffff bg=#3d262e
+2: 0-9 fg=#a4a6a9 bg=#233628  10-30 fg=#bfbdb6 bg=#233628  31 fg=#bfbdb6 bg=#385c34  32-42 fg=#bfbdb6 bg=#233628  43 fg=#bfbdb6 bg=#385c34  44-46 fg=#bfbdb6 bg=#233628  47-79 fg=#ffffff bg=#233628
+3: 0-79 fg=#ffffff bg=#00000000
+4: 0-79 fg=#ffffff bg=#00000000
+5: 0-79 fg=#ffffff bg=#00000000
+6: 0-79 fg=#ffffff bg=#00000000
+7: 0-79 fg=#ffffff bg=#00000000

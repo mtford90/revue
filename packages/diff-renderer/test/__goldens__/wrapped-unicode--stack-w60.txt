@@ -1,0 +1,31 @@
+# wrapped-unicode--stack-w60 — wide characters straddling a wrap boundary
+# grid 60x12 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+00 |▎ @@ -1,1 +1,1 @@
+01 | 1         - const notice = "短い";
+02 |      1    + const notice = "日本語の長い注意書きです、折り
+03 |             返しを必ず跨ぎます";
+04 |
+05 |
+06 |
+07 |
+08 |
+09 |
+10 |
+11 |
+
+# styles: row: cols fg bg [attributes]
+
+00: 0-16 fg=#73b8ff bg=#1e2228  17-59 fg=#ffffff bg=#1e2228
+01: 0-9 fg=#a4a6a9 bg=#3d262e  10-28 fg=#bfbdb6 bg=#3d262e  29-32 fg=#bfbdb6 bg=#7c3f48  33-34 fg=#bfbdb6 bg=#3d262e  35-59 fg=#ffffff bg=#3d262e
+02: 0-9 fg=#a4a6a9 bg=#233628  10-28 fg=#bfbdb6 bg=#233628  29-58 fg=#bfbdb6 bg=#385c34  59 fg=#ffffff bg=#233628
+03: 0-9 fg=#a4a6a9 bg=#233628  10-12 fg=#bfbdb6 bg=#233628  13-30 fg=#bfbdb6 bg=#385c34  31-32 fg=#bfbdb6 bg=#233628  33-59 fg=#ffffff bg=#233628
+04: 0-59 fg=#ffffff bg=#00000000
+05: 0-59 fg=#ffffff bg=#00000000
+06: 0-59 fg=#ffffff bg=#00000000
+07: 0-59 fg=#ffffff bg=#00000000
+08: 0-59 fg=#ffffff bg=#00000000
+09: 0-59 fg=#ffffff bg=#00000000
+10: 0-59 fg=#ffffff bg=#00000000
+11: 0-59 fg=#ffffff bg=#00000000

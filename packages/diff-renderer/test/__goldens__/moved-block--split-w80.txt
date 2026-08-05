@@ -1,0 +1,43 @@
+# moved-block--split-w80 — a block deleted in one place and re-added in another
+# grid 80x18 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+00 |▎ @@ -1,6 +1,6 @@
+01 | 1    - const helper = () => 1;        │
+02 | 2    - const other = () => 2;         │
+03 | 3      const first = () => 3;         │ 1      const first = () => 3;
+04 | 4      const second = () => 4;        │ 2      const second = () => 4;
+05 | 5      const third = () => 5;         │ 3      const third = () => 5;
+06 |                                       │ 4    + const helper = () => 1;
+07 |                                       │ 5    + const other = () => 2;
+08 |
+09 |
+10 |
+11 |
+12 |
+13 |
+14 |
+15 |
+16 |
+17 |
+
+# styles: row: cols fg bg [attributes]
+
+00: 0-16 fg=#73b8ff bg=#1e2228  17-79 fg=#ffffff bg=#1e2228
+01: 0-4 fg=#a4a6a9 bg=#3d262e  5-30 fg=#bfbdb6 bg=#3d262e  31-38 fg=#ffffff bg=#3d262e  39 fg=#303238 bg=#293d55  40-44 fg=#a4a6a9 bg=#10141c  45-47 fg=#bfbdb6 bg=#10141c  48-79 fg=#ffffff bg=#10141c
+02: 0-4 fg=#a4a6a9 bg=#3d262e  5-29 fg=#bfbdb6 bg=#3d262e  30-38 fg=#ffffff bg=#3d262e  39 fg=#303238 bg=#293d55  40-44 fg=#a4a6a9 bg=#10141c  45-47 fg=#bfbdb6 bg=#10141c  48-79 fg=#ffffff bg=#10141c
+03: 0-4 fg=#a4a6a9 bg=#10141c  5-29 fg=#bfbdb6 bg=#10141c  30-38 fg=#ffffff bg=#10141c  39 fg=#303238 bg=#293d55  40-44 fg=#a4a6a9 bg=#10141c  45-69 fg=#bfbdb6 bg=#10141c  70-79 fg=#ffffff bg=#10141c
+04: 0-4 fg=#a4a6a9 bg=#10141c  5-30 fg=#bfbdb6 bg=#10141c  31-38 fg=#ffffff bg=#10141c  39 fg=#303238 bg=#293d55  40-44 fg=#a4a6a9 bg=#10141c  45-70 fg=#bfbdb6 bg=#10141c  71-79 fg=#ffffff bg=#10141c
+05: 0-4 fg=#a4a6a9 bg=#10141c  5-29 fg=#bfbdb6 bg=#10141c  30-38 fg=#ffffff bg=#10141c  39 fg=#303238 bg=#293d55  40-44 fg=#a4a6a9 bg=#10141c  45-69 fg=#bfbdb6 bg=#10141c  70-79 fg=#ffffff bg=#10141c
+06: 0-4 fg=#a4a6a9 bg=#10141c  5-7 fg=#bfbdb6 bg=#10141c  8-38 fg=#ffffff bg=#10141c  39 fg=#303238 bg=#293d55  40-44 fg=#a4a6a9 bg=#233628  45-70 fg=#bfbdb6 bg=#233628  71-79 fg=#ffffff bg=#233628
+07: 0-4 fg=#a4a6a9 bg=#10141c  5-7 fg=#bfbdb6 bg=#10141c  8-38 fg=#ffffff bg=#10141c  39 fg=#303238 bg=#293d55  40-44 fg=#a4a6a9 bg=#233628  45-69 fg=#bfbdb6 bg=#233628  70-79 fg=#ffffff bg=#233628
+08: 0-79 fg=#ffffff bg=#00000000
+09: 0-79 fg=#ffffff bg=#00000000
+10: 0-79 fg=#ffffff bg=#00000000
+11: 0-79 fg=#ffffff bg=#00000000
+12: 0-79 fg=#ffffff bg=#00000000
+13: 0-79 fg=#ffffff bg=#00000000
+14: 0-79 fg=#ffffff bg=#00000000
+15: 0-79 fg=#ffffff bg=#00000000
+16: 0-79 fg=#ffffff bg=#00000000
+17: 0-79 fg=#ffffff bg=#00000000

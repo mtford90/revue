@@ -1,0 +1,25 @@
+# unicode--split-w48 — emoji, CJK, and combining marks against column widths
+# grid 48x9 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+0 |▎ @@ -1,3 +1,3 @@
+1 | 1    - const status = │ 1    + const status =
+2 |         "ok 🚀";      │        "no 🐛";
+3 | 2    - const label =  │ 2    + const label = "
+4 |        "日本語のラベ  │        日本語の見出し"
+5 |        ル";           │        ;
+6 | 3    - const name = " │ 3    + const name = "c
+7 |        café";         │        afé";
+8 |
+
+# styles: row: cols fg bg [attributes]
+
+0: 0-16 fg=#73b8ff bg=#1e2228  17-47 fg=#ffffff bg=#1e2228
+1: 0-4 fg=#a4a6a9 bg=#3d262e  5-21 fg=#bfbdb6 bg=#3d262e  22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-46 fg=#bfbdb6 bg=#233628  47 fg=#ffffff bg=#233628
+2: 0-4 fg=#a4a6a9 bg=#3d262e  5-9 fg=#bfbdb6 bg=#3d262e  10-11 fg=#bfbdb6 bg=#7c3f48  12 fg=#bfbdb6 bg=#3d262e  13-16 fg=#bfbdb6 bg=#7c3f48  17-22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-32 fg=#bfbdb6 bg=#233628  33-34 fg=#bfbdb6 bg=#385c34  35 fg=#bfbdb6 bg=#233628  36-39 fg=#bfbdb6 bg=#385c34  40-47 fg=#ffffff bg=#233628
+3: 0-4 fg=#a4a6a9 bg=#3d262e  5-21 fg=#bfbdb6 bg=#3d262e  22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-46 fg=#bfbdb6 bg=#233628  47 fg=#ffffff bg=#233628
+4: 0-4 fg=#a4a6a9 bg=#3d262e  5-8 fg=#bfbdb6 bg=#3d262e  9-20 fg=#bfbdb6 bg=#7c3f48  21-22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-31 fg=#bfbdb6 bg=#233628  32-45 fg=#bfbdb6 bg=#385c34  46 fg=#bfbdb6 bg=#233628  47 fg=#ffffff bg=#233628
+5: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-9 fg=#bfbdb6 bg=#7c3f48  10-11 fg=#bfbdb6 bg=#3d262e  12-22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-32 fg=#bfbdb6 bg=#233628  33-47 fg=#ffffff bg=#233628
+6: 0-4 fg=#a4a6a9 bg=#3d262e  5-21 fg=#bfbdb6 bg=#3d262e  22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-45 fg=#bfbdb6 bg=#233628  46 fg=#bfbdb6 bg=#385c34  47 fg=#ffffff bg=#233628
+7: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-13 fg=#bfbdb6 bg=#7c3f48  14-22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-31 fg=#bfbdb6 bg=#233628  32-34 fg=#bfbdb6 bg=#385c34  35-36 fg=#bfbdb6 bg=#233628  37-47 fg=#ffffff bg=#233628
+8: 0-47 fg=#ffffff bg=#00000000

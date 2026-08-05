@@ -1,0 +1,31 @@
+# wrapped-unicode--split-w36 — wide characters straddling a wrap boundary
+# grid 36x12 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+00 |▎ @@ -1,1 +1,1 @@
+01 | 1    - const no │ 1    + const not
+02 |        tice = " │        ice = "日
+03 |        短い";   │        本語の長
+04 |                 │        い注意書
+05 |                 │        きです、
+06 |                 │        折り返し
+07 |                 │        を必ず跨
+08 |                 │        ぎます";
+09 |
+10 |
+11 |
+
+# styles: row: cols fg bg [attributes]
+
+00: 0-16 fg=#73b8ff bg=#1e2228  17-35 fg=#ffffff bg=#1e2228
+01: 0-4 fg=#a4a6a9 bg=#3d262e  5-15 fg=#bfbdb6 bg=#3d262e  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+02: 0-4 fg=#a4a6a9 bg=#3d262e  5-15 fg=#bfbdb6 bg=#3d262e  16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-32 fg=#bfbdb6 bg=#233628  33-34 fg=#bfbdb6 bg=#385c34  35 fg=#ffffff bg=#233628
+03: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-11 fg=#bfbdb6 bg=#7c3f48  12-13 fg=#bfbdb6 bg=#3d262e  14-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-33 fg=#bfbdb6 bg=#385c34  34-35 fg=#ffffff bg=#233628
+04: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-33 fg=#bfbdb6 bg=#385c34  34-35 fg=#ffffff bg=#233628
+05: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-33 fg=#bfbdb6 bg=#385c34  34-35 fg=#ffffff bg=#233628
+06: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-33 fg=#bfbdb6 bg=#385c34  34-35 fg=#ffffff bg=#233628
+07: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-33 fg=#bfbdb6 bg=#385c34  34-35 fg=#ffffff bg=#233628
+08: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8-16 fg=#ffffff bg=#3d262e  17 fg=#303238 bg=#293d55  18-22 fg=#a4a6a9 bg=#233628  23-25 fg=#bfbdb6 bg=#233628  26-31 fg=#bfbdb6 bg=#385c34  32-33 fg=#bfbdb6 bg=#233628  34-35 fg=#ffffff bg=#233628
+09: 0-35 fg=#ffffff bg=#00000000
+10: 0-35 fg=#ffffff bg=#00000000
+11: 0-35 fg=#ffffff bg=#00000000

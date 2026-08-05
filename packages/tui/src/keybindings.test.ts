@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,7 +9,7 @@ import {
 	mergeKeymap,
 	stripJsonComments,
 } from "./keybindings.ts";
-import { KEYMAP, type KeymapAction } from "./keymap.ts";
+import { KEYMAP, type KeymapAction, matchKeymapAction } from "./keymap.ts";
 
 const tmpDirs: string[] = [];
 afterAll(async () => {
@@ -51,7 +51,7 @@ test("the key grammar accepts named keys, ctrl chords, and shifted literals", ()
 	expect(isValidUserKey("shift+tab")).toBe(true);
 });
 
-test("the key grammar rejects escape, digits, shifted letters, and junk", () => {
+test("the key grammar rejects escape, digits, shifted letters, junk, and chord prefixes", () => {
 	expect(isValidUserKey("escape")).toBe(false);
 	expect(isValidUserKey("ctrl+escape")).toBe(false);
 	expect(isValidUserKey("shift+escape")).toBe(false);
@@ -59,13 +59,19 @@ test("the key grammar rejects escape, digits, shifted letters, and junk", () => 
 	expect(isValidUserKey("shift+j")).toBe(false);
 	expect(isValidUserKey("banana")).toBe(false);
 	expect(isValidUserKey("[c")).toBe(false);
+	expect(isValidUserKey("[")).toBe(false);
+	expect(isValidUserKey("]")).toBe(false);
 });
 
 test("an override replaces the full default key list for that action", () => {
 	const { keymap, issues } = mergeKeymap(KEYMAP, { "toggle-comments": "O" });
 	expect(issues).toEqual([]);
 	const action = keymap.find((candidate) => candidate.id === "toggle-comments");
-	expect(action?.keys).toEqual(["O"]);
+	// "shift+o" is added so the binding also matches terminals that report Shift+O as
+	// {name: "o", shift: true} rather than {name: "O"} — mirroring the registry's own
+	// dual-alias idiom (e.g. scroll-bottom: ["G", "shift+g"]).
+	expect(action?.keys).toEqual(["O", "shift+o"]);
+	expect(action?.displayKeys).toEqual(["O"]);
 });
 
 test("a freed default key becomes available to another action", () => {
@@ -75,6 +81,36 @@ test("a freed default key becomes available to another action", () => {
 	});
 	expect(issues).toEqual([]);
 	expect(keymap.find((a) => a.id === "cycle-path-display")?.keys).toEqual(["o"]);
+});
+
+test("freeing a default key works regardless of which entry comes first in the file", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, {
+		"cycle-path-display": "o",
+		"toggle-comments": "O",
+	});
+	expect(issues).toEqual([]);
+	expect(keymap.find((a) => a.id === "cycle-path-display")?.keys).toEqual(["o"]);
+	expect(keymap.find((a) => a.id === "toggle-comments")?.keys).toEqual(["O", "shift+o"]);
+});
+
+test("duplicate keys within one override entry are deduplicated", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, { quit: ["z", "z"] });
+	expect(issues).toEqual([]);
+	expect(keymap.find((a) => a.id === "quit")?.keys).toEqual(["z"]);
+});
+
+test("a wrongly-typed value drops just that entry, not the whole file", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, { quit: 5, "toggle-comments": "O" });
+	expect(issues).toEqual([
+		{ entry: "quit", reason: '"quit" must be a key string or an array of key strings' },
+	]);
+	expect(keymap.find((a) => a.id === "quit")?.keys).toEqual(["q"]);
+	expect(keymap.find((a) => a.id === "toggle-comments")?.keys).toEqual(["O", "shift+o"]);
+});
+
+test("a non-string entry inside an array is dropped with a reason", () => {
+	const { issues } = mergeKeymap(KEYMAP, { quit: ["z", 5] });
+	expect(issues).toEqual([{ entry: "quit", reason: '"quit" has a non-string key' }]);
 });
 
 test("an unknown action is dropped with a warning, defaults kept", () => {
@@ -117,6 +153,15 @@ test("a global override that clashes with a page-context default is dropped", ()
 	expect(keymap.find((a) => a.id === "quit")?.keys).toEqual(["q"]);
 });
 
+test("two overrides claiming the same key: the earlier entry in the file wins", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, { quit: "z", "toggle-comments": "z" });
+	expect(issues).toEqual([
+		{ entry: "toggle-comments", reason: '"z" already bound to another action in this context' },
+	]);
+	expect(keymap.find((a) => a.id === "quit")?.keys).toEqual(["z"]);
+	expect(keymap.find((a) => a.id === "toggle-comments")?.keys).toEqual(["o"]);
+});
+
 test("escape cannot be assigned as an override value", () => {
 	const { issues } = mergeKeymap(KEYMAP, { "toggle-shortcut-help": "escape" });
 	expect(issues[0]?.reason).toContain("invalid key");
@@ -142,6 +187,18 @@ test("malformed JSON falls back to defaults with a warning", async () => {
 	expect(issues).toEqual([{ entry: "keybindings.json", reason: "malformed JSON; using defaults" }]);
 });
 
+test("an unreadable existing file warns rather than silently using defaults", async () => {
+	// A directory at the expected path can't be read as a file (EISDIR), unlike a genuinely
+	// missing file (ENOENT) — the reviewer has a keybindings.json-shaped thing that isn't honoured.
+	const path = await tmpPath();
+	await mkdir(path);
+	const { keymap, issues } = await loadEffectiveKeymap(path);
+	expect(keymap).toEqual(KEYMAP as KeymapAction[]);
+	expect(issues).toEqual([
+		{ entry: "keybindings.json", reason: "could not read the file; using defaults" },
+	]);
+});
+
 test("JSONC comments parse and a valid override takes effect", async () => {
 	const path = await tmpPath(`{
   // remap quit to Q
@@ -149,5 +206,38 @@ test("JSONC comments parse and a valid override takes effect", async () => {
 }`);
 	const { keymap, issues } = await loadEffectiveKeymap(path);
 	expect(issues).toEqual([]);
-	expect(keymap.find((a) => a.id === "quit")?.keys).toEqual(["Q"]);
+	expect(keymap.find((a) => a.id === "quit")?.keys).toEqual(["Q", "shift+q"]);
+});
+
+test("an uppercase override matches both terminal reporting styles", () => {
+	const { keymap } = mergeKeymap(KEYMAP, { quit: "Q" });
+	expect(matchKeymapAction("page", { name: "Q" }, keymap)).toBe("quit");
+	expect(matchKeymapAction("page", { name: "q", shift: true }, keymap)).toBe("quit");
+});
+
+test("an uppercase override doesn't leak onto whatever now owns the freed lowercase key", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, {
+		"toggle-comments": "O",
+		"cycle-path-display": "o",
+	});
+	expect(issues).toEqual([]);
+	expect(matchKeymapAction("page", { name: "O" }, keymap)).toBe("toggle-comments");
+	expect(matchKeymapAction("page", { name: "o", shift: true }, keymap)).toBe("toggle-comments");
+	expect(matchKeymapAction("page", { name: "o" }, keymap)).toBe("cycle-path-display");
+});
+
+test("a ctrl override matches exactly and doesn't also fire on the bare key", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, { "toggle-sidebar": "ctrl+j" });
+	expect(issues).toEqual([]);
+	expect(matchKeymapAction("page", { name: "j", ctrl: true }, keymap)).toBe("toggle-sidebar");
+	expect(matchKeymapAction("page", { name: "j" }, keymap)).toBe("line-down");
+});
+
+test("the default ctrl fallback keeps working alongside user overrides elsewhere", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, { quit: "z" });
+	expect(issues).toEqual([]);
+	// ctrl+d/ctrl+u aren't listed keys for half-page-down/up; they reach them by falling back
+	// from the unmatched "ctrl+d"/"ctrl+u" candidate to the bare "d"/"u" candidate.
+	expect(matchKeymapAction("page", { name: "d", ctrl: true }, keymap)).toBe("half-page-down");
+	expect(matchKeymapAction("page", { name: "u", ctrl: true }, keymap)).toBe("half-page-up");
 });

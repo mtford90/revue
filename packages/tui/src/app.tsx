@@ -2602,8 +2602,9 @@ export function App({
 				files: viewportFiles,
 				attachments: attachmentAnchors,
 				attachmentHeight: (id) => attachmentHeights.get(id) ?? ESTIMATED_ATTACHMENT_HEIGHT,
+				width: contentWidth,
 			}),
-		[viewportFiles, attachmentAnchors, attachmentHeights],
+		[viewportFiles, attachmentAnchors, attachmentHeights, contentWidth],
 	);
 	const windowPlan = useMemo(
 		() =>

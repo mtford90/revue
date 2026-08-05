@@ -2,7 +2,13 @@ import { afterEach, expect, test } from "bun:test";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { resolveTheme } from "@revue/theme";
 import { act } from "react";
-import { DiffBody, DiffFileHeader, parsePatch, prepareSyntaxHighlighting } from "../src/index.ts";
+import {
+	DiffBody,
+	DiffFileHeader,
+	diffLineId,
+	parsePatch,
+	prepareSyntaxHighlighting,
+} from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -221,15 +227,16 @@ test("split rows keep one divider column at odd widths regardless of content len
 	const width = 41;
 	const t = await testRender(<DiffBody file={file} theme={theme} layout="split" width={width} />, {
 		width,
-		height: 8,
+		height: 30,
 	});
 	await t.renderOnce();
 	const changedRows = t
 		.captureCharFrame()
 		.split("\n")
 		.filter((line) => line.includes("│"));
-	expect(changedRows).toHaveLength(2);
-	expect(changedRows.map((line) => line.indexOf("│"))).toEqual([20, 20]);
+	// Both lines wrap, one side at a time, and every row keeps the same divider.
+	expect(changedRows.length).toBeGreaterThan(2);
+	expect(new Set(changedRows.map((line) => line.indexOf("│")))).toEqual(new Set([20]));
 });
 
 test("showLineNumbers false hides old and new number gutters in both layouts", async () => {
@@ -451,13 +458,119 @@ test("line numbers stay in one column whether or not the content overflows", asy
 	if (!file) throw new Error("missing fixture");
 	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={40} />, {
 		width: 40,
-		height: 8,
+		height: 20,
 	});
 	await t.renderOnce();
 	const lines = t.captureCharFrame().split("\n");
 	const overflowing = lines.find((line) => line.includes("xxxx")) ?? "";
 	const fitting = lines.find((line) => line.includes("short again")) ?? "";
 	expect(overflowing.indexOf("+")).toBe(fitting.indexOf("+"));
+});
+
+const WRAPPED_TAIL = "END";
+const wrappedLine = `${"wrapped-".repeat(12)}${WRAPPED_TAIL}`;
+
+const wrapPatch = (line: string) => `diff --git a/wrap.ts b/wrap.ts
+--- a/wrap.ts
++++ b/wrap.ts
+@@ -1,1 +1,1 @@
+-short old line
++${line}
+`;
+
+/** Where a rendered row's code begins: two columns past its change sign. */
+const codeColumn = (row: string) => row.indexOf("+") + 2;
+
+test("a line longer than its pane wraps rather than losing its tail", async () => {
+	const [file] = parsePatch(wrapPatch(wrappedLine));
+	if (!file) throw new Error("missing fixture");
+	for (const layout of ["stack", "split"] as const) {
+		const t = await testRender(<DiffBody file={file} theme={theme} layout={layout} width={60} />, {
+			width: 60,
+			height: 20,
+		});
+		await t.renderOnce();
+		const rows = t.captureCharFrame().split("\n");
+		const first = rows.findIndex((row) => row.includes("wrapped-"));
+		const start = codeColumn(rows[first] ?? "");
+		const last = rows.findIndex((row) => row.includes(WRAPPED_TAIL));
+		const code = rows
+			.slice(first, last + 1)
+			.map((row) => row.slice(start).trimEnd())
+			.join("");
+
+		expect(last).toBeGreaterThan(first);
+		expect(code).toBe(wrappedLine);
+	}
+});
+
+test("continuation rows leave the gutter and the change sign blank", async () => {
+	const [file] = parsePatch(wrapPatch(wrappedLine));
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={60} />, {
+		width: 60,
+		height: 20,
+	});
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const first = rows.findIndex((row) => row.includes("wrapped-"));
+	const start = codeColumn(rows[first] ?? "");
+
+	expect(rows[first]?.slice(0, start)).toContain("1");
+	expect(rows[first]?.slice(0, start)).toContain("+");
+	expect(rows[first + 1]?.slice(0, start).trim()).toBe("");
+	expect(rows[first + 1]?.slice(start).trim()).not.toBe("");
+});
+
+test("text dragged across a wrap still names the one logical line it came from", async () => {
+	const [file] = parsePatch(wrapPatch(wrappedLine));
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={60} />, {
+		width: 60,
+		height: 20,
+	});
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const first = rows.findIndex((row) => row.includes("wrapped-"));
+	const start = codeColumn(rows[first] ?? "");
+	await act(async () => t.mockMouse.drag(start + 2, first, start + 4, first + 1));
+	await t.renderOnce();
+	const selected = t.renderer.getSelection()?.selectedRenderables ?? [];
+
+	expect(selected.length).toBeGreaterThan(1);
+	expect(new Set(selected.map((renderable) => renderable.id))).toEqual(
+		new Set([
+			diffLineId({
+				filePath: "wrap.ts",
+				hunkOldStart: 1,
+				side: "additions",
+				startLine: 1,
+				endLine: 1,
+			}),
+		]),
+	);
+});
+
+test("a split pane pads with blank rows so a wrapped line keeps both sides in step", async () => {
+	const [file] = parsePatch(wrapPatch(wrappedLine));
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="split" width={60} />, {
+		width: 60,
+		height: 20,
+	});
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const dividerRows = rows.filter((row) => row.includes("│"));
+	const divider = dividerRows[0]?.indexOf("│") ?? -1;
+	const paneRows = dividerRows.filter((row) => row.slice(divider).includes("wrapped-"));
+
+	expect(paneRows.length).toBeGreaterThan(1);
+	expect(new Set(dividerRows.map((row) => row.indexOf("│")))).toEqual(new Set([divider]));
+	// The short deletion sits on the first row alone; the rest of its pane is empty.
+	expect(paneRows[0]?.slice(0, divider)).toContain("short old line");
+	expect(paneRows.slice(1).map((row) => row.slice(0, divider).trim())).toEqual(
+		paneRows.slice(1).map(() => ""),
+	);
 });
 
 test("a new file drops the gutter that can never hold an old line number", async () => {
@@ -483,7 +596,7 @@ new file mode 100644
 	expect(first.indexOf("1")).toBeLessThan(4);
 });
 
-const hexInts = (hex: string): number[] => [
+const hexInts = (hex: string): [number, number, number, number] => [
 	Number.parseInt(hex.slice(1, 3), 16),
 	Number.parseInt(hex.slice(3, 5), 16),
 	Number.parseInt(hex.slice(5, 7), 16),
@@ -561,6 +674,34 @@ test("emphasis backgrounds sit inside a focused line's own background", async ()
 
 	expect(background("42")).toEqual(hexInts(theme.addedEmphasisBg));
 	expect(background("const value =")).toEqual(hexInts(theme.addedContentBg));
+});
+
+test("an emphasised run keeps its background on both sides of a wrap", async () => {
+	const [file] = parsePatch(`diff --git a/emphasis-wrap.ts b/emphasis-wrap.ts
+--- a/emphasis-wrap.ts
++++ b/emphasis-wrap.ts
+@@ -1,1 +1,1 @@
+-keep short;
++keep ${"z".repeat(60)};
+`);
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={60} />, {
+		width: 60,
+		height: 10,
+	});
+	await t.renderOnce();
+	const capture = t.captureSpans();
+	const rows = t.captureCharFrame().split("\n");
+	const first = rows.findIndex((row) => row.includes("zzz"));
+	const backgrounds = (row: number, text: string) =>
+		(capture.lines[row]?.spans ?? [])
+			.filter((span) => span.text.includes(text))
+			.map((span) => span.bg.toInts());
+
+	expect(rows[first + 1]).toContain("z;");
+	expect(backgrounds(first, "keep")).toEqual([hexInts(theme.addedBg)]);
+	expect(backgrounds(first, "zz")).toEqual([hexInts(theme.addedEmphasisBg)]);
+	expect(backgrounds(first + 1, "zz")).toEqual([hexInts(theme.addedEmphasisBg)]);
 });
 
 test("syntax colours survive the emphasis background they sit under", async () => {

@@ -16,7 +16,11 @@ import {
 	type DiffLineRange,
 	type DiffRow,
 	type DiffSide,
+	diffCodeWidths,
 	type ExpandDirection,
+	lineNumberDigits,
+	rowVisualHeight,
+	stackGutterSides,
 } from "@revue/diff-renderer";
 
 export type SegmentRows = {
@@ -138,6 +142,8 @@ export type ViewportFile = {
 	/** One-row-each note lines shown above the body while expanded. */
 	noteCount?: number;
 	showHunkHeaders?: boolean;
+	/** Mirrors the body's own prop, since a numbered gutter narrows the wrap budget. */
+	showLineNumbers?: boolean;
 	layout: DiffLayout;
 	expanderActions?: (boundary: number) => readonly ExpandDirection[];
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
@@ -160,15 +166,31 @@ export const structuralRows = (file: DiffFileInput, layout: DiffLayout): Structu
 	return entry;
 };
 
-const bodyHeights = (
-	file: ViewportFile,
-	displayed: DiffFileInput,
-	attachments: readonly DiffInlineAttachment[],
-	attachmentHeight: (id: string) => number,
-): number[] => {
+const bodyHeights = ({
+	file,
+	displayed,
+	attachments,
+	attachmentHeight,
+	width,
+}: {
+	file: ViewportFile;
+	displayed: DiffFileInput;
+	attachments: readonly DiffInlineAttachment[];
+	attachmentHeight: (id: string) => number;
+	width: number;
+}): number[] => {
 	const { normalized, rows } = structuralRows(displayed, file.layout);
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length) return [1];
 	const headerRow = file.showHunkHeaders === false ? 0 : 1;
+	// Long lines soft-wrap, so a logical row is as many terminal rows as the
+	// body's own wrap budget makes it.
+	const widths = diffCodeWidths({
+		width,
+		layout: file.layout,
+		digits: lineNumberDigits(normalized),
+		showLineNumbers: file.showLineNumbers !== false,
+		stackGutters: stackGutterSides(rows).length,
+	});
 	const heights = rows.map((row) => {
 		if (row.type === "hunk-header") {
 			return headerRow + (file.expanderActions?.(row.hunkIndex)?.length ? 1 : 0);
@@ -179,7 +201,10 @@ const bodyHeights = (
 			attachments,
 			resolveRange: file.resolveRange,
 		});
-		return 1 + attached.reduce((sum, attachment) => sum + attachmentHeight(attachment.id), 0);
+		return (
+			rowVisualHeight(row, widths) +
+			attached.reduce((sum, attachment) => sum + attachmentHeight(attachment.id), 0)
+		);
 	});
 	// The trailing expander band occupies a pseudo-row at index rows.length.
 	heights.push(file.expanderActions?.(normalized.metadata.hunks.length)?.length ? 1 : 0);
@@ -206,10 +231,13 @@ export const viewportSegments = ({
 	files,
 	attachments,
 	attachmentHeight,
+	width,
 }: {
 	files: readonly ViewportFile[];
 	attachments: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
+	/** The width the bodies render at; wrapped lines are taller in a narrow terminal. */
+	width: number;
 }): SegmentRows[] => {
 	const segments: SegmentRows[] = [];
 	for (const file of files) {
@@ -226,7 +254,13 @@ export const viewportSegments = ({
 			if (file.displayed) {
 				segments.push({
 					id: bodySegmentId(file.path),
-					heights: bodyHeights(file, file.displayed, attachments, attachmentHeight),
+					heights: bodyHeights({
+						file,
+						displayed: file.displayed,
+						attachments,
+						attachmentHeight,
+						width,
+					}),
 				});
 			}
 		}

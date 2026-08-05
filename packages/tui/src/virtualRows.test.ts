@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { parsePatch } from "@revue/diff-renderer";
 import {
+	bodySegmentId,
 	planWindow,
 	type SegmentRows,
 	segmentOffset,
 	segmentsHeight,
+	viewportSegments,
 	type WindowPlanItem,
 } from "./virtualRows.ts";
 
@@ -122,5 +125,32 @@ describe("planWindow", () => {
 			const plan = planWindow({ segments, scrollTop, viewportHeight: 9, overscan: 4 });
 			expect(planHeight(segments, plan)).toBe(total);
 		}
+	});
+});
+
+describe("viewportSegments", () => {
+	test("counts a wrapped line as the visual rows it renders as", () => {
+		const [file] = parsePatch(`diff --git a/wrap.ts b/wrap.ts
+--- a/wrap.ts
++++ b/wrap.ts
+@@ -1,1 +1,1 @@
+-short
++${"y".repeat(120)}
+`);
+		if (!file) throw new Error("missing fixture");
+		const heightsAt = (width: number) =>
+			viewportSegments({
+				files: [
+					{ path: "wrap.ts", displayed: file, collapsed: false, separator: false, layout: "stack" },
+				],
+				attachments: [],
+				attachmentHeight: () => 0,
+				width,
+			}).find((segment) => segment.id === bodySegmentId("wrap.ts"))?.heights;
+
+		// Two gutters, the sign, and the padding either side leave 40 columns at width 54.
+		expect(heightsAt(54)).toEqual([1, 1, 3, 0]);
+		// A wider terminal reflows the same line back onto fewer rows.
+		expect(heightsAt(134)).toEqual([1, 1, 1, 0]);
 	});
 });

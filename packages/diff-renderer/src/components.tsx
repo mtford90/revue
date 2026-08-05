@@ -4,6 +4,13 @@ import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
 import { attachmentsForRow, rowHasAnchor, rowLineRange } from "./attachments.ts";
 import { decorationAnchorId, findFocusedDecorationAnchor } from "./decorations.ts";
+import {
+	type CodeWidths,
+	diffCodeWidths,
+	lineNumberDigits,
+	splitPaneWidths,
+	stackGutterSides,
+} from "./layout.ts";
 import { diffLineId } from "./lineIds.ts";
 import { buildDiffRows } from "./rows.ts";
 import { sanitizeTerminalLine } from "./terminalText.ts";
@@ -17,18 +24,20 @@ import type {
 	DiffRow,
 	DiffSide,
 	RangeDecoration,
+	RenderSpan,
 	SpanEmphasis,
 } from "./types.ts";
+import { wrapSpans } from "./wrap.ts";
 
 const RIGHT_MOUSE_BUTTON = 2;
 
 const lineNumber = (value: number | undefined, digits: number) =>
 	value === undefined ? " ".repeat(digits) : String(value).padStart(digits);
 
-function CellContent({ cell, theme }: { cell: DiffCell; theme: Theme }) {
+function CellContent({ spans, theme }: { spans: readonly RenderSpan[]; theme: Theme }) {
 	return (
 		<>
-			{cell.spans.map((span, index) => (
+			{spans.map((span, index) => (
 				<span
 					// biome-ignore lint/suspicious/noArrayIndexKey: immutable syntax spans have no independent identity.
 					key={`${index}:${span.text}`}
@@ -45,13 +54,31 @@ function CellContent({ cell, theme }: { cell: DiffCell; theme: Theme }) {
 	);
 }
 
-/** The change marker is chrome rather than code, so it stays out of anything the reader drags over. */
-function LineContent({ cell, lineId, theme }: { cell: DiffCell; lineId?: string; theme: Theme }) {
-	const sign = cell.kind === "addition" ? "+" : cell.kind === "deletion" ? "-" : " ";
+const signFor = (kind: DiffCell["kind"]) =>
+	kind === "addition" ? "+" : kind === "deletion" ? "-" : " ";
+
+/**
+ * The change marker is chrome rather than code, so it stays out of anything the
+ * reader drags over. It is padded either side: one column of air off the gutter,
+ * one between sign and code. A wrapped line's later rows carry no sign at all.
+ */
+function LineContent({
+	kind,
+	spans,
+	continuation,
+	lineId,
+	theme,
+}: {
+	kind: DiffCell["kind"];
+	spans: readonly RenderSpan[];
+	continuation: boolean;
+	lineId?: string;
+	theme: Theme;
+}) {
 	return (
 		<>
 			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable={false}>
-				{sign}{" "}
+				{` ${continuation ? " " : signFor(kind)} `}
 			</text>
 			<text
 				id={lineId}
@@ -62,7 +89,7 @@ function LineContent({ cell, lineId, theme }: { cell: DiffCell; lineId?: string;
 				flexShrink={0}
 				selectable
 			>
-				<CellContent cell={cell} theme={theme} />
+				<CellContent spans={spans} theme={theme} />
 			</text>
 		</>
 	);
@@ -116,6 +143,8 @@ function Gutter({
 
 function SplitCell({
 	cell,
+	spans,
+	continuation,
 	side,
 	digits,
 	showLineNumbers,
@@ -127,6 +156,9 @@ function SplitCell({
 	theme,
 }: {
 	cell: DiffCell;
+	/** This visual row's slice of the cell; later rows of a wrapped line carry the rest. */
+	spans: readonly RenderSpan[];
+	continuation: boolean;
 	side: DiffSide;
 	digits: number;
 	showLineNumbers: boolean;
@@ -138,7 +170,7 @@ function SplitCell({
 	theme: Theme;
 }) {
 	const focused = cell.focusedSides.includes(side);
-	const gutterFocused = cell.gutterFocusedSides.includes(side);
+	const gutterFocused = !continuation && cell.gutterFocusedSides.includes(side);
 	const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
 	const backgroundColor = focused
 		? (cell.focusedBackgrounds[side] ??
@@ -161,20 +193,28 @@ function SplitCell({
 		>
 			<Gutter
 				focused={gutterFocused}
-				number={number}
+				number={continuation ? undefined : number}
 				digits={digits}
 				showLineNumbers={showLineNumbers}
-				attachmentCount={attachmentCount}
+				attachmentCount={continuation ? 0 : attachmentCount}
 				handlers={number === undefined ? undefined : handlers}
 				theme={theme}
 			/>
-			<LineContent cell={cell} lineId={lineId} theme={theme} />
+			<LineContent
+				kind={cell.kind}
+				spans={spans}
+				continuation={continuation}
+				lineId={lineId}
+				theme={theme}
+			/>
 		</box>
 	);
 }
 
 function StackCell({
 	cell,
+	spans,
+	continuation,
 	digits,
 	showLineNumbers,
 	sides,
@@ -185,9 +225,12 @@ function StackCell({
 	theme,
 }: {
 	cell: DiffCell;
+	/** This visual row's slice of the cell; later rows of a wrapped line carry the rest. */
+	spans: readonly RenderSpan[];
+	continuation: boolean;
 	digits: number;
 	showLineNumbers: boolean;
-	sides: DiffSide[];
+	sides: readonly DiffSide[];
 	attachmentCounts: AttachmentCounts;
 	interactions: CellInteractions;
 	lineId?: string;
@@ -217,28 +260,174 @@ function StackCell({
 		>
 			{sides.includes("deletions") ? (
 				<Gutter
-					focused={cell.gutterFocusedSides.includes("deletions")}
-					number={cell.oldLineNumber}
+					focused={!continuation && cell.gutterFocusedSides.includes("deletions")}
+					number={continuation ? undefined : cell.oldLineNumber}
 					digits={digits}
 					showLineNumbers={showLineNumbers}
-					attachmentCount={attachmentCounts.deletions ?? 0}
+					attachmentCount={continuation ? 0 : (attachmentCounts.deletions ?? 0)}
 					handlers={cell.oldLineNumber === undefined ? undefined : interactions.deletions}
 					theme={theme}
 				/>
 			) : null}
 			{sides.includes("additions") ? (
 				<Gutter
-					focused={cell.gutterFocusedSides.includes("additions")}
-					number={cell.newLineNumber}
+					focused={!continuation && cell.gutterFocusedSides.includes("additions")}
+					number={continuation ? undefined : cell.newLineNumber}
 					digits={digits}
 					showLineNumbers={showLineNumbers}
-					attachmentCount={attachmentCounts.additions ?? 0}
+					attachmentCount={continuation ? 0 : (attachmentCounts.additions ?? 0)}
 					handlers={cell.newLineNumber === undefined ? undefined : interactions.additions}
 					theme={theme}
 				/>
 			) : null}
-			<LineContent cell={cell} lineId={lineId} theme={theme} />
+			<LineContent
+				kind={cell.kind}
+				spans={spans}
+				continuation={continuation}
+				lineId={lineId}
+				theme={theme}
+			/>
 		</box>
+	);
+}
+
+/** Everything a rendered line needs from the body about one of its sides. */
+type SideInteraction = {
+	handlers?: GutterHandlers;
+	lineId?: string;
+	onContextMenu?: (event: OpenTUIMouseEvent) => void;
+};
+
+type LineRowProps = {
+	digits: number;
+	showLineNumbers: boolean;
+	widths: CodeWidths;
+	attachmentCounts: AttachmentCounts;
+	/** Named on the first visual row only, so navigation lands on the line's top. */
+	anchorId?: string;
+	selectedBackground?: string;
+	theme: Theme;
+};
+
+/**
+ * One logical line as the visual rows its wrapped sides need. Both panes take the
+ * taller side's height, padding with empty continuation rows, so the divider runs
+ * straight however unevenly the two sides wrap.
+ */
+function SplitLine({
+	row,
+	panes,
+	deletions,
+	additions,
+	digits,
+	showLineNumbers,
+	widths,
+	attachmentCounts,
+	anchorId,
+	selectedBackground,
+	theme,
+}: LineRowProps & {
+	row: Extract<DiffRow, { type: "split-line" }>;
+	panes: { old: number; new: number };
+	deletions: SideInteraction;
+	additions: SideInteraction;
+}) {
+	const oldRows = wrapSpans(row.old.spans, widths.deletions);
+	const newRows = wrapSpans(row.new.spans, widths.additions);
+	return (
+		<>
+			{Array.from({ length: Math.max(oldRows.length, newRows.length) }, (_, index) => (
+				<box
+					// biome-ignore lint/suspicious/noArrayIndexKey: visual rows are positional slices of one line.
+					key={index}
+					id={index === 0 ? anchorId : undefined}
+					width="100%"
+					height={1}
+					flexDirection="row"
+					backgroundColor={selectedBackground}
+				>
+					<SplitCell
+						cell={row.old}
+						spans={oldRows[index] ?? []}
+						continuation={index > 0}
+						side="deletions"
+						digits={digits}
+						showLineNumbers={showLineNumbers}
+						width={panes.old}
+						attachmentCount={attachmentCounts.deletions ?? 0}
+						handlers={deletions.handlers}
+						lineId={deletions.lineId}
+						onContextMenu={deletions.onContextMenu}
+						theme={theme}
+					/>
+					<text fg={theme.border}>│</text>
+					<SplitCell
+						cell={row.new}
+						spans={newRows[index] ?? []}
+						continuation={index > 0}
+						side="additions"
+						digits={digits}
+						showLineNumbers={showLineNumbers}
+						width={panes.new}
+						attachmentCount={attachmentCounts.additions ?? 0}
+						handlers={additions.handlers}
+						lineId={additions.lineId}
+						onContextMenu={additions.onContextMenu}
+						theme={theme}
+					/>
+				</box>
+			))}
+		</>
+	);
+}
+
+function StackLine({
+	row,
+	sides,
+	interactions,
+	lineId,
+	onContextMenu,
+	digits,
+	showLineNumbers,
+	widths,
+	attachmentCounts,
+	anchorId,
+	selectedBackground,
+	theme,
+}: LineRowProps & {
+	row: Extract<DiffRow, { type: "stack-line" }>;
+	sides: readonly DiffSide[];
+	interactions: CellInteractions;
+	lineId?: string;
+	onContextMenu?: (event: OpenTUIMouseEvent) => void;
+}) {
+	return (
+		<>
+			{wrapSpans(row.cell.spans, widths.additions).map((spans, index) => (
+				<box
+					// biome-ignore lint/suspicious/noArrayIndexKey: visual rows are positional slices of one line.
+					key={index}
+					id={index === 0 ? anchorId : undefined}
+					width="100%"
+					height={1}
+					backgroundColor={selectedBackground}
+				>
+					<StackCell
+						cell={row.cell}
+						spans={spans}
+						continuation={index > 0}
+						digits={digits}
+						showLineNumbers={showLineNumbers}
+						sides={sides}
+						attachmentCounts={attachmentCounts}
+						interactions={interactions}
+						lineId={lineId}
+						onContextMenu={onContextMenu}
+						theme={theme}
+					/>
+				</box>
+			))}
+		</>
 	);
 }
 
@@ -415,28 +604,16 @@ export function DiffBody({
 	);
 	const anchorRowKey = anchor ? rows.find((row) => rowHasAnchor(row, anchor))?.key : undefined;
 	const anchorId = anchor ? decorationAnchorId(anchor) : undefined;
-	const highestLine = normalized
-		? Math.max(
-				1,
-				...normalized.metadata.hunks.flatMap((hunk) => [
-					hunk.deletionStart + Math.max(0, hunk.deletionCount - 1),
-					hunk.additionStart + Math.max(0, hunk.additionCount - 1),
-				]),
-			)
-		: 1;
-	const digits = String(highestLine).length;
-	// A new or deleted file has one dead gutter for every row; drop it rather
-	// than indent the whole body past a column that can never hold a number.
-	const stackSides: DiffSide[] = (["deletions", "additions"] as const).filter((side) =>
-		rows.some(
-			(row) =>
-				row.type === "stack-line" &&
-				(side === "deletions" ? row.cell.oldLineNumber : row.cell.newLineNumber) !== undefined,
-		),
-	);
-	const splitContentWidth = Math.max(0, width - 1);
-	const oldPaneWidth = Math.floor(splitContentWidth / 2);
-	const newPaneWidth = splitContentWidth - oldPaneWidth;
+	const digits = normalized ? lineNumberDigits(normalized) : 1;
+	const stackSides = stackGutterSides(rows);
+	const panes = splitPaneWidths(width);
+	const widths = diffCodeWidths({
+		width,
+		layout,
+		digits,
+		showLineNumbers,
+		stackGutters: stackSides.length,
+	});
 
 	const lineRange = (row: DiffRow, side: DiffSide): DiffLineRange | null =>
 		normalized ? rowLineRange({ file: normalized, row, side, resolveRange }) : null;
@@ -531,6 +708,14 @@ export function DiffBody({
 					},
 				}
 			: undefined;
+	const sideInteraction = (row: DiffRow, side: DiffSide): SideInteraction => {
+		const range = lineRange(row, side);
+		return {
+			handlers: gutterHandlers(range),
+			lineId: lineId(range),
+			onContextMenu: contextHandler(range),
+		};
+	};
 	const rowAttachments = (row: DiffRow): DiffInlineAttachment[] =>
 		normalized
 			? attachmentsForRow({ file: normalized, row, attachments: inlineAttachments, resolveRange })
@@ -602,39 +787,19 @@ export function DiffBody({
 				if (row.type === "split-line") {
 					return (
 						<box key={row.key} flexDirection="column" width="100%">
-							<box
-								id={id}
-								width="100%"
-								height={1}
-								flexDirection="row"
-								backgroundColor={selected ? theme.selectedHunk : undefined}
-							>
-								<SplitCell
-									cell={row.old}
-									side="deletions"
-									digits={digits}
-									showLineNumbers={showLineNumbers}
-									width={oldPaneWidth}
-									attachmentCount={counts.deletions ?? 0}
-									handlers={gutterHandlers(lineRange(row, "deletions"))}
-									lineId={lineId(lineRange(row, "deletions"))}
-									onContextMenu={contextHandler(lineRange(row, "deletions"))}
-									theme={theme}
-								/>
-								<text fg={theme.border}>│</text>
-								<SplitCell
-									cell={row.new}
-									side="additions"
-									digits={digits}
-									showLineNumbers={showLineNumbers}
-									width={newPaneWidth}
-									attachmentCount={counts.additions ?? 0}
-									handlers={gutterHandlers(lineRange(row, "additions"))}
-									lineId={lineId(lineRange(row, "additions"))}
-									onContextMenu={contextHandler(lineRange(row, "additions"))}
-									theme={theme}
-								/>
-							</box>
+							<SplitLine
+								row={row}
+								panes={panes}
+								deletions={sideInteraction(row, "deletions")}
+								additions={sideInteraction(row, "additions")}
+								digits={digits}
+								showLineNumbers={showLineNumbers}
+								widths={widths}
+								attachmentCounts={counts}
+								anchorId={id}
+								selectedBackground={selected ? theme.selectedHunk : undefined}
+								theme={theme}
+							/>
 							{attachments.map((attachment) => (
 								<box
 									key={attachment.id}
@@ -651,27 +816,23 @@ export function DiffBody({
 				}
 				return (
 					<box key={row.key} flexDirection="column" width="100%">
-						<box
-							id={id}
-							width="100%"
-							height={1}
-							backgroundColor={selected ? theme.selectedHunk : undefined}
-						>
-							<StackCell
-								cell={row.cell}
-								digits={digits}
-								showLineNumbers={showLineNumbers}
-								sides={stackSides}
-								attachmentCounts={counts}
-								interactions={{
-									deletions: gutterHandlers(lineRange(row, "deletions")),
-									additions: gutterHandlers(lineRange(row, "additions")),
-								}}
-								lineId={lineId(stackRange(row))}
-								onContextMenu={contextHandler(stackRange(row))}
-								theme={theme}
-							/>
-						</box>
+						<StackLine
+							row={row}
+							sides={stackSides}
+							interactions={{
+								deletions: gutterHandlers(lineRange(row, "deletions")),
+								additions: gutterHandlers(lineRange(row, "additions")),
+							}}
+							lineId={lineId(stackRange(row))}
+							onContextMenu={contextHandler(stackRange(row))}
+							digits={digits}
+							showLineNumbers={showLineNumbers}
+							widths={widths}
+							attachmentCounts={counts}
+							anchorId={id}
+							selectedBackground={selected ? theme.selectedHunk : undefined}
+							theme={theme}
+						/>
 						{attachments.map((attachment) => (
 							<box
 								key={attachment.id}

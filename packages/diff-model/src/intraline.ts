@@ -48,8 +48,22 @@ const similarityScore = (a: string, b: string): number => {
 	return prefix + commonSuffixLength(a.slice(prefix), b.slice(prefix));
 };
 
-const isRevisionOf = (a: string, b: string): boolean =>
-	similarityScore(a, b) * 2 >= Math.min(a.length, b.length);
+/** An affix this short is punctuation such as `;` or `}`, not evidence of a revision. */
+const minSharedAffix = 3;
+
+const blankLine = /^\s*$/;
+
+/**
+ * The pairing gate. A pair is admitted when its shared affix covers roughly half the
+ * shorter line, but a blank line only ever revises into another blank line, and a
+ * trivial affix never carries a pair on its own — both are true of unrelated lines.
+ */
+const isRevisionOf = (a: string, b: string): boolean => {
+	if (blankLine.test(a) || blankLine.test(b)) return blankLine.test(a) && blankLine.test(b);
+	const score = similarityScore(a, b);
+	if (score < minSharedAffix) return false;
+	return score * 2 >= Math.min(a.length, b.length);
+};
 
 /** Both indices must advance together, so an accepted pair forbids every crossing one. */
 const withoutCrossing = (accepted: readonly IntralinePair[], candidate: IntralinePair): boolean =>

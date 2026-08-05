@@ -62,6 +62,43 @@ test("an empty side pairs nothing", () => {
 	expect(pairChangedLines({ oldLines: ["const a = 1;"], newLines: [] })).toEqual([]);
 });
 
+test("a blank line is never a revision of a line with content", () => {
+	expect(
+		pairChangedLines({ oldLines: [""], newLines: ["const completelyUnrelated = 42;"] }),
+	).toEqual([]);
+	expect(pairChangedLines({ oldLines: ["   "], newLines: ["const value = 1;"] })).toEqual([]);
+});
+
+test("blank lines moved around content pair nothing by position", () => {
+	expect(
+		pairChangedLines({
+			oldLines: ["", "const after = 2;"],
+			newLines: ["const after = 2;", ""],
+		}),
+	).toEqual([]);
+});
+
+test("the blank gate also applies when similarity pairs an unequal block", () => {
+	expect(
+		pairChangedLines({
+			oldLines: ["", "const kept = 1;"],
+			newLines: ["const kept = 2;"],
+		}),
+	).toEqual([pair(1, 0)]);
+});
+
+test("two blank lines still pair, so indent-only edits keep their emphasis", () => {
+	expect(pairChangedLines({ oldLines: ["  "], newLines: ["\t"] })).toEqual([pair(0, 0)]);
+	expect(pairChangedLines({ oldLines: ["    "], newLines: [""] })).toEqual([pair(0, 0)]);
+});
+
+test("a trivial shared affix does not pair two lines", () => {
+	expect(pairChangedLines({ oldLines: ["}"], newLines: ["return foo(); }"] })).toEqual([]);
+	expect(
+		pairChangedLines({ oldLines: ["}"], newLines: ["return foo(); }", "unrelated();"] }),
+	).toEqual([]);
+});
+
 test("a single changed token is trimmed down to its own span", () => {
 	expect(
 		intralineSpans({ oldLine: "const total = count;", newLine: "const total = amount;" }),

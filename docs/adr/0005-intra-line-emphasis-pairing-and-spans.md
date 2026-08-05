@@ -70,6 +70,11 @@ Whitespace-only edits do produce spans, because the background is their only vis
   emphasis on some rows and none on others where GitHub would emphasise every row.
 - The gate is a common-affix heuristic, so a rewrite that keeps a long shared prefix — a changed
   argument list under an identical call, say — still pairs even when little else survives.
+- The half-the-shorter-line rule is vacuous for short lines, so the gate carries two extra guards: a
+  blank line pairs only with another blank line, and an affix under three characters never carries a
+  pair on its own. Without them a blank line "revised" into a statement, and a stray `}` matched any
+  line ending in one, each painting emphasis across a whole unrelated line. Two blank lines still
+  pair, so trailing-whitespace and indent-only edits keep the background that is their only signal.
 - Spans on each side are computed against that side's own token boundaries, so a trim that lands
   mid-token can widen one side further than the other. The two range lists are independent, so the
   asymmetry is visible only as a slightly wider highlight.

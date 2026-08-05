@@ -26,6 +26,8 @@ import {
 import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
+import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
+import { KEYMAP } from "./keymap.ts";
 import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
@@ -59,6 +61,8 @@ Usage:
   revue comments <operation>           compatibility alias for revue threads
   revue skill install [--user]         install the bundled revue skill via the skills CLI
   revue skill print                    write the bundled skill to stdout for manual installation
+  revue keybindings                    list every action, its defaults, and its effective keys
+  revue keybindings init [--force]     write a commented keybindings.json starter template
   revue doctor                         check required and optional dependencies
   revue --version                      print the CLI version
 
@@ -742,6 +746,52 @@ async function cmdSkill(args: string[]): Promise<number> {
 	}
 }
 
+const KEYBINDINGS_HELP = `usage: revue keybindings
+       revue keybindings init [--force]
+
+(no args)  list every action, its description, its default keys, and its
+           effective keys — overrides and validation issues are flagged
+init       write a commented ~/.revue/keybindings.json starter template;
+           --force overwrites an existing file`;
+
+async function cmdKeybindings(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${KEYBINDINGS_HELP}\n`);
+		return 0;
+	}
+	const [operation, ...rest] = args;
+	if (!operation) {
+		const { keymap, issues } = await loadEffectiveKeymap(defaultKeybindingsPath());
+		process.stdout.write(`${formatKeybindingsListing(KEYMAP, keymap, issues)}\n`);
+		return 0;
+	}
+	if (operation !== "init") {
+		process.stderr.write(`unknown keybindings operation: ${operation}\n${KEYBINDINGS_HELP}\n`);
+		return 1;
+	}
+	let options: CommandOptions;
+	try {
+		options = parseCommandOptions(rest, [], ["--force"]);
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${KEYBINDINGS_HELP}\n`,
+		);
+		return 1;
+	}
+	if (options.positionals.length > 0) {
+		process.stderr.write(`keybindings init takes no positional arguments\n${KEYBINDINGS_HELP}\n`);
+		return 1;
+	}
+	const path = defaultKeybindingsPath();
+	const result = initKeybindingsFile(path, KEYMAP, options.booleans.has("--force"));
+	if (!result.wrote) {
+		process.stderr.write(`${path} already exists; pass --force to overwrite\n`);
+		return 1;
+	}
+	process.stdout.write(`Wrote ${path}\n`);
+	return 0;
+}
+
 function cmdDoctor(): number {
 	const report = runDoctor();
 	process.stdout.write(`${report.lines.join("\n")}\n`);
@@ -761,6 +811,7 @@ async function main(): Promise<number> {
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);
+	if (command === "keybindings") return cmdKeybindings(args);
 	if (command === "doctor") return cmdDoctor();
 	if (!command) return cmdDiff([]);
 	if (command === "-h" || command === "--help" || command === "help") {

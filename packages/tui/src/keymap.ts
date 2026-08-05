@@ -361,7 +361,7 @@ const formatKeymapKey = (key: string): string => {
 	return KEY_LABELS[key] ?? key;
 };
 
-const formatKeymapKeys = (keys: readonly string[]) => keys.map(formatKeymapKey).join("/");
+export const formatKeymapKeys = (keys: readonly string[]) => keys.map(formatKeymapKey).join("/");
 
 /** The first default key for an action, for compact display such as menu hints. */
 export const keymapHint = (
@@ -369,7 +369,7 @@ export const keymapHint = (
 	keymap: readonly KeymapAction[] = KEYMAP,
 ): string | undefined => keymap.find((action) => action.id === id)?.keys[0];
 
-const KEYMAP_SECTION_ORDER: KeymapSection[] = [
+export const KEYMAP_SECTION_ORDER: KeymapSection[] = [
 	"Scrolling",
 	"Navigation",
 	"Files",

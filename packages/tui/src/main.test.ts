@@ -548,6 +548,45 @@ test("doctor reports dependency and skill state and exits by git availability", 
 	}
 });
 
+test("keybindings lists every action and flags overrides and issues", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-keybindings-cli-"));
+	try {
+		await mkdir(join(root, ".revue"));
+		await writeFile(
+			join(root, ".revue", "keybindings.json"),
+			JSON.stringify({ quit: "z", "not-a-real-action": "x" }),
+		);
+		const listing = await run(root, ["keybindings"], { HOME: root });
+		expect(listing.exitCode).toBe(0);
+		expect(listing.stdout).toContain("line-up");
+		expect(listing.stdout).toMatch(/quit\s+z\s+Quit \(Esc also works\) \(overridden, default: q\)/);
+		expect(listing.stdout).toContain("Issues:");
+		expect(listing.stdout).toContain('not-a-real-action: unknown action "not-a-real-action"');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("keybindings init writes a starter template and refuses to overwrite it without --force", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-keybindings-init-"));
+	try {
+		const init = await run(root, ["keybindings", "init"], { HOME: root });
+		expect(init.exitCode).toBe(0);
+		expect(init.stdout).toContain(join(root, ".revue", "keybindings.json"));
+		const written = await Bun.file(join(root, ".revue", "keybindings.json")).text();
+		expect(written).toContain('// "quit": ["q"]');
+
+		const again = await run(root, ["keybindings", "init"], { HOME: root });
+		expect(again.exitCode).toBe(1);
+		expect(again.stderr).toContain("already exists");
+
+		const forced = await run(root, ["keybindings", "init", "--force"], { HOME: root });
+		expect(forced.exitCode).toBe(0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("prep --pr fetches a pull request head from the remote and pins it as the compare ref", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-prep-pr-"));
 	try {

@@ -64,12 +64,12 @@ const multiEdit: Scenario = {
 
 const unequalCount: Scenario = {
 	id: "unequal-block",
-	summary: "one line becomes two, and two similar lines become one dissimilar line",
+	summary: "one line becomes two, then an equal-count block whose lines are unrelated",
 	base: {
 		"router.ts": `export const route = (request: Request): Response => {
 	const path = new URL(request.url).pathname;
+	const method = request.method.toUpperCase();
 	if (path === "/health") return json({ ok: true });
-	if (path === "/ready") return json({ ok: true });
 	return notFound();
 };
 `,
@@ -77,7 +77,8 @@ const unequalCount: Scenario = {
 	head: {
 		"router.ts": `export const route = (request: Request): Response => {
 	const url = new URL(request.url);
-	const path = url.pathname.replace(/\\/+$/, "");
+	const path = url.pathname;
+	const method = request.method.toUpperCase();
 	if (probePaths.has(path)) return json({ ok: true, checkedAt: Date.now() });
 	return notFound();
 };

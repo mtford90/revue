@@ -196,6 +196,16 @@ const resolveViewports = async (): Promise<Viewport[]> => {
 	return viewports;
 };
 
+/** `--scenario <id>` recaptures one shape without waiting on the whole matrix. */
+const selectedScenarios = (): Scenario[] => {
+	const index = process.argv.indexOf("--scenario");
+	if (index === -1) return SCENARIOS;
+	const id = process.argv[index + 1];
+	const chosen = SCENARIOS.filter((scenario) => scenario.id === id);
+	if (chosen.length === 0) throw new Error(`unknown scenario: ${id ?? "(missing)"}`);
+	return chosen;
+};
+
 const main = async (): Promise<number> => {
 	for (const directory of [shotsDir, join(workDir, "tapes"), join(workDir, "fixtures")]) {
 		await mkdir(directory, { recursive: true });
@@ -208,17 +218,21 @@ const main = async (): Promise<number> => {
 			.join(", ")}\n`,
 	);
 
-	const batches = await runQueue(SCENARIOS, (scenario) => captureScenario(scenario, viewports));
+	const scenarios = selectedScenarios();
+	const batches = await runQueue(scenarios, (scenario) => captureScenario(scenario, viewports));
 	const results = batches.flat();
 	const captures = results.filter((result): result is Capture => typeof result !== "string");
 	const failures = results.filter((result): result is string => typeof result === "string");
 	const shots = captures.flatMap((capture) => capture.files);
 
-	await writeFile(
-		join(outDir, "manifest.json"),
-		`${JSON.stringify({ captures, failures }, null, 2)}\n`,
-		"utf8",
-	);
+	// A filtered run only knows about its own scenario, so it leaves the whole-sweep manifest alone.
+	if (scenarios.length === SCENARIOS.length) {
+		await writeFile(
+			join(outDir, "manifest.json"),
+			`${JSON.stringify({ captures, failures }, null, 2)}\n`,
+			"utf8",
+		);
+	}
 	process.stdout.write(`${shots.length} screenshots in ${shotsDir}\n`);
 	for (const failure of failures) process.stderr.write(`FAILED ${failure}\n`);
 	return failures.length === 0 ? 0 : 1;

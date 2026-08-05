@@ -1,3 +1,4 @@
+import { intralineSpans, pairChangedLines } from "@revue/diff-model";
 import { applicableDecorations, decorationsAtLine } from "./decorations.ts";
 import { highlightedLines } from "./highlight.ts";
 import { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
@@ -13,8 +14,10 @@ import type {
 	SpanEmphasis,
 } from "./types.ts";
 
+const stripEol = (line: string | undefined) => (line ?? "").replace(/\r?\n$/, "");
+
 const cleanLine = (line: string | undefined) =>
-	sanitizeTerminalLine((line ?? "").replace(/\r?\n$/, "")).replaceAll("\t", "  ");
+	sanitizeTerminalLine(stripEol(line)).replaceAll("\t", "  ");
 
 /** Rendering doubles tabs, so shift raw-text offsets by the tabs preceding them. */
 const tabAdjusted = (raw: string, range: EmphasisRange): EmphasisRange => {
@@ -22,59 +25,118 @@ const tabAdjusted = (raw: string, range: EmphasisRange): EmphasisRange => {
 	return { start: range.start + extra(range.start), end: range.end + extra(range.end) };
 };
 
-/** Novel ranges glow in the side's colour while the rest of the line falls back to a dim base. */
-const emphasiseSpans = (
+/**
+ * The two flavours of char-exact restyling: novel tokens glow in the side's colour against a
+ * dim base, while intra-line changes take only a background and keep their syntax colours.
+ */
+type OverlayStyle = { kind: "novel"; fg: string } | { kind: "background"; bg: string };
+
+const inRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
+	style.kind === "novel"
+		? { text: span.text, fg: style.fg, bold: true }
+		: { ...span, bg: style.bg };
+
+const outOfRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
+	style.kind === "novel" ? { ...span, dim: true } : span;
+
+/** Cut spans at the range boundaries and restyle each piece by whether the overlay covers it. */
+const overlaySpans = (
 	spans: RenderSpan[],
 	ranges: readonly EmphasisRange[],
-	fg: string,
+	style: OverlayStyle,
 ): RenderSpan[] => {
 	const result: RenderSpan[] = [];
 	let offset = 0;
 	for (const span of spans) {
 		const end = offset + span.text.length;
+		const piece = (from: number, to?: number) => ({
+			...span,
+			text: span.text.slice(from - offset, to === undefined ? undefined : to - offset),
+		});
 		let cursor = offset;
 		for (const range of ranges) {
 			const from = Math.max(range.start, cursor);
 			const to = Math.min(range.end, end);
 			if (to <= from) continue;
-			if (from > cursor)
-				result.push({ ...span, text: span.text.slice(cursor - offset, from - offset), dim: true });
-			result.push({ text: span.text.slice(from - offset, to - offset), fg, bold: true });
+			if (from > cursor) result.push(outOfRange(piece(cursor, from), style));
+			result.push(inRange(piece(from, to), style));
 			cursor = to;
 		}
-		if (cursor < end) result.push({ ...span, text: span.text.slice(cursor - offset), dim: true });
+		if (cursor < end) result.push(outOfRange(piece(cursor), style));
 		offset = end;
 	}
 	return result;
 };
 
-const applyEmphasis = ({
-	spans,
-	kind,
-	raw,
-	oldLineNumber,
-	newLineNumber,
-	emphasis,
-}: {
-	spans: RenderSpan[];
+/** One cell's intra-line ranges, already resolved to that side's background colour. */
+type IntralineEmphasis = { ranges: readonly EmphasisRange[]; bg: string };
+
+type EmphasisSource = {
 	kind: DiffCell["kind"];
-	raw: string;
 	oldLineNumber?: number;
 	newLineNumber?: number;
 	emphasis?: SpanEmphasis;
-}): RenderSpan[] => {
-	if (!emphasis) return spans;
+	intraline?: IntralineEmphasis;
+};
+
+/** Novel emphasis is the host's own reading of a line, so it outranks the intra-line one. */
+const overlayFor = ({
+	kind,
+	oldLineNumber,
+	newLineNumber,
+	emphasis,
+	intraline,
+}: EmphasisSource): { ranges: readonly EmphasisRange[]; style: OverlayStyle } | undefined => {
 	const side: DiffSide | null =
 		kind === "deletion" ? "deletions" : kind === "addition" ? "additions" : null;
+	if (!side) return undefined;
 	const line = side === "deletions" ? oldLineNumber : newLineNumber;
-	if (!side || line === undefined) return spans;
-	const ranges = emphasis.rangesFor(side, line);
-	if (!ranges?.length) return spans;
-	return emphasiseSpans(
+	const novel = emphasis && line !== undefined ? emphasis.rangesFor(side, line) : undefined;
+	if (emphasis && novel?.length) {
+		const fg = side === "deletions" ? emphasis.deletionsFg : emphasis.additionsFg;
+		return { ranges: novel, style: { kind: "novel", fg } };
+	}
+	if (intraline?.ranges.length)
+		return { ranges: intraline.ranges, style: { kind: "background", bg: intraline.bg } };
+	return undefined;
+};
+
+const applyEmphasis = ({
+	spans,
+	raw,
+	...source
+}: EmphasisSource & { spans: RenderSpan[]; raw: string }): RenderSpan[] => {
+	const overlay = overlayFor(source);
+	if (!overlay) return spans;
+	return overlaySpans(
 		spans,
-		ranges.map((range) => tabAdjusted(raw, range)),
-		side === "deletions" ? emphasis.deletionsFg : emphasis.additionsFg,
+		overlay.ranges.map((range) => tabAdjusted(raw, range)),
+		overlay.style,
 	);
+};
+
+/** Look up a change block's intra-line ranges by side and offset within the block. */
+const intralineLookup = ({
+	oldLines,
+	newLines,
+	colours,
+}: {
+	oldLines: readonly string[];
+	newLines: readonly string[];
+	colours: IntralineColours;
+}) => {
+	const paired = pairChangedLines({ oldLines, newLines }).map(({ oldIndex, newIndex }) => ({
+		oldIndex,
+		newIndex,
+		spans: intralineSpans({ oldLine: oldLines[oldIndex] ?? "", newLine: newLines[newIndex] ?? "" }),
+	}));
+	const deletions = new Map(paired.map(({ oldIndex, spans }) => [oldIndex, spans.old]));
+	const additions = new Map(paired.map(({ newIndex, spans }) => [newIndex, spans.new]));
+	return (side: DiffSide, offset: number): IntralineEmphasis | undefined => {
+		const ranges = (side === "deletions" ? deletions : additions).get(offset);
+		if (!ranges?.length) return undefined;
+		return { ranges, bg: side === "deletions" ? colours.deletionsBg : colours.additionsBg };
+	};
 };
 
 function makeCell({
@@ -86,6 +148,7 @@ function makeCell({
 	decorations,
 	focusedDecorationId,
 	emphasis,
+	intraline,
 }: {
 	kind: DiffCell["kind"];
 	text?: string;
@@ -95,6 +158,7 @@ function makeCell({
 	decorations: readonly RangeDecoration[];
 	focusedDecorationId?: string;
 	emphasis?: SpanEmphasis;
+	intraline?: IntralineEmphasis;
 }): DiffCell {
 	const oldRanges = decorationsAtLine(decorations, "deletions", oldLineNumber);
 	const newRanges = decorationsAtLine(decorations, "additions", newLineNumber);
@@ -116,10 +180,11 @@ function makeCell({
 		spans: applyEmphasis({
 			spans: baseSpans,
 			kind,
-			raw: (text ?? "").replace(/\r?\n$/, ""),
+			raw: stripEol(text),
 			oldLineNumber,
 			newLineNumber,
 			emphasis,
+			intraline,
 		}),
 		oldLineNumber,
 		newLineNumber,
@@ -158,19 +223,30 @@ function headerText(hunk: DiffFile["metadata"]["hunks"][number]) {
 	);
 }
 
+/** The backgrounds intra-line emphasis paints with, one per side. */
+export type IntralineColours = { deletionsBg: string; additionsBg: string };
+
 export type DiffRowOptions = {
 	/** The prepared syntax theme to read spans for; raw text renders without one. */
 	syntaxTheme?: string;
 	decorations?: readonly RangeDecoration[];
 	focusedDecorationId?: string;
 	emphasis?: SpanEmphasis;
+	/** Paints the changed characters of paired lines; omitted, no pairing is computed. */
+	intralineEmphasis?: IntralineColours;
 };
 
 /** Expand Pierre metadata into stable split or stack rows with old/new identities. */
 export function buildDiffRows(
 	file: DiffFile,
 	layout: DiffLayout,
-	{ syntaxTheme, decorations = [], focusedDecorationId, emphasis }: DiffRowOptions = {},
+	{
+		syntaxTheme,
+		decorations = [],
+		focusedDecorationId,
+		emphasis,
+		intralineEmphasis,
+	}: DiffRowOptions = {},
 ): DiffRow[] {
 	const rows: DiffRow[] = [];
 	const ranges = applicableDecorations(file, decorations);
@@ -225,6 +301,18 @@ export function buildDiffRows(
 				continue;
 			}
 
+			const intralineAt = intralineEmphasis
+				? intralineLookup({
+						oldLines: file.metadata.deletionLines
+							.slice(deletionIndex, deletionIndex + content.deletions)
+							.map(stripEol),
+						newLines: file.metadata.additionLines
+							.slice(additionIndex, additionIndex + content.additions)
+							.map(stripEol),
+						colours: intralineEmphasis,
+					})
+				: () => undefined;
+
 			if (layout === "split") {
 				for (let offset = 0; offset < Math.max(content.deletions, content.additions); offset += 1) {
 					rows.push({
@@ -241,6 +329,7 @@ export function buildDiffRows(
 										decorations: ranges,
 										focusedDecorationId,
 										emphasis,
+										intraline: intralineAt("deletions", offset),
 									})
 								: emptyCell(),
 						new:
@@ -253,6 +342,7 @@ export function buildDiffRows(
 										decorations: ranges,
 										focusedDecorationId,
 										emphasis,
+										intraline: intralineAt("additions", offset),
 									})
 								: emptyCell(),
 					});
@@ -271,6 +361,7 @@ export function buildDiffRows(
 							decorations: ranges,
 							focusedDecorationId,
 							emphasis,
+							intraline: intralineAt("deletions", offset),
 						}),
 					});
 				}
@@ -287,6 +378,7 @@ export function buildDiffRows(
 							decorations: ranges,
 							focusedDecorationId,
 							emphasis,
+							intraline: intralineAt("additions", offset),
 						}),
 					});
 				}

@@ -95,7 +95,7 @@ test("review ranges use their tint without looking like a gutter selection", asy
 	const targetY = lines.findIndex((line) => line.includes("new two"));
 	const background = t
 		.captureSpans()
-		.lines[targetY]?.spans.find((span) => span.text.includes("new two"))?.bg;
+		.lines[targetY]?.spans.find((span) => span.text.includes("two"))?.bg;
 
 	expect(lines[targetY]).not.toContain("▌");
 	expect(background?.toInts()).toEqual([85, 34, 68, 255]);
@@ -140,14 +140,15 @@ test("gutter selection preserves review tints and stays neutral across diff side
 		const lines = t.captureCharFrame().split("\n");
 		const selectedY = lines.findIndex((line) => line.includes(selectedText));
 		const reviewY = lines.findIndex((line) => line.includes("new two"));
+		// Intra-line emphasis splits each line, so the shared word carries the cell's own tint.
 		backgrounds.push({
 			selected: t
 				.captureSpans()
-				.lines[selectedY]?.spans.find((span) => span.text.includes(selectedText))
+				.lines[selectedY]?.spans.find((span) => span.text.includes("one"))
 				?.bg.toInts(),
 			review: t
 				.captureSpans()
-				.lines[reviewY]?.spans.find((span) => span.text.includes("new two"))
+				.lines[reviewY]?.spans.find((span) => span.text.includes("two"))
 				?.bg.toInts(),
 		});
 	}
@@ -480,4 +481,100 @@ new file mode 100644
 			.split("\n")
 			.find((line) => line.includes("first")) ?? "";
 	expect(first.indexOf("1")).toBeLessThan(4);
+});
+
+const hexInts = (hex: string): number[] => [
+	Number.parseInt(hex.slice(1, 3), 16),
+	Number.parseInt(hex.slice(3, 5), 16),
+	Number.parseInt(hex.slice(5, 7), 16),
+	255,
+];
+
+const intralinePatch = `diff --git a/intraline.ts b/intraline.ts
+--- a/intraline.ts
++++ b/intraline.ts
+@@ -1,2 +1,1 @@
+-const value = 7;
+-orphan();
++const value = 42;
+`;
+
+type CapturedSpan = {
+	text: string;
+	bg: { toInts: () => number[] };
+	fg: { toInts: () => number[] };
+};
+
+const spansAt = (
+	capture: { lines: { spans: CapturedSpan[] }[] },
+	charFrame: string,
+	needle: string,
+): CapturedSpan[] =>
+	capture.lines[charFrame.split("\n").findIndex((line) => line.includes(needle))]?.spans ?? [];
+
+test("changed characters of paired lines take the emphasis background", async () => {
+	const [file] = parsePatch(intralinePatch);
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={60} />, {
+		width: 60,
+		height: 10,
+	});
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+	const capture = t.captureSpans();
+	const backgrounds = (needle: string, text: string) =>
+		spansAt(capture, frame, needle)
+			.filter((span) => span.text.includes(text))
+			.map((span) => span.bg.toInts());
+
+	expect(backgrounds("const value = 42;", "42")).toEqual([hexInts(theme.addedEmphasisBg)]);
+	expect(backgrounds("const value = 42;", "const value =")).toEqual([hexInts(theme.addedBg)]);
+	expect(backgrounds("const value = 7;", "7")).toEqual([hexInts(theme.removedEmphasisBg)]);
+	expect(backgrounds("orphan();", "orphan();")).toEqual([hexInts(theme.removedBg)]);
+});
+
+test("emphasis backgrounds sit inside a focused line's own background", async () => {
+	const [file] = parsePatch(intralinePatch);
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={80}
+			decorations={[
+				{
+					id: "focused-addition",
+					filePath: "intraline.ts",
+					side: "additions",
+					startLine: 1,
+					endLine: 1,
+				},
+			]}
+			focusedDecorationId="focused-addition"
+		/>,
+		{ width: 80, height: 10 },
+	);
+	await t.renderOnce();
+	const spans = spansAt(t.captureSpans(), t.captureCharFrame(), "const value = 42;");
+	const background = (text: string) => spans.find((span) => span.text.includes(text))?.bg.toInts();
+
+	expect(background("42")).toEqual(hexInts(theme.addedEmphasisBg));
+	expect(background("const value =")).toEqual(hexInts(theme.addedContentBg));
+});
+
+test("syntax colours survive the emphasis background they sit under", async () => {
+	const [file] = parsePatch(intralinePatch);
+	if (!file) throw new Error("missing fixture");
+	await prepareSyntaxHighlighting([file], theme.syntaxTheme);
+	const t = await testRender(<DiffBody file={file} theme={theme} layout="stack" width={60} />, {
+		width: 60,
+		height: 10,
+	});
+	await t.renderOnce();
+	const spans = spansAt(t.captureSpans(), t.captureCharFrame(), "const value = 42;");
+	const foreground = (text: string) => spans.find((span) => span.text.includes(text))?.fg.toInts();
+
+	expect(foreground("42")).not.toEqual(foreground("const"));
+	expect(foreground("42")).not.toEqual(hexInts(theme.text));
 });

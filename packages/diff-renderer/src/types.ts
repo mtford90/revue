@@ -47,6 +47,8 @@ export type DiffInlineAttachment = {
 export interface RenderSpan {
 	text: string;
 	fg?: string;
+	/** Paints behind this span alone; without one the cell's own background shows through. */
+	bg?: string;
 	bold?: boolean;
 	dim?: boolean;
 }

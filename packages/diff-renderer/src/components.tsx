@@ -33,6 +33,7 @@ function CellContent({ cell, theme }: { cell: DiffCell; theme: Theme }) {
 					// biome-ignore lint/suspicious/noArrayIndexKey: immutable syntax spans have no independent identity.
 					key={`${index}:${span.text}`}
 					fg={span.fg ?? theme.text}
+					bg={span.bg}
 					attributes={
 						(span.bold ? TextAttributes.BOLD : 0) | (span.dim ? TextAttributes.DIM : 0) || undefined
 					}
@@ -254,7 +255,10 @@ export interface DiffBodyProps {
 	focusedDecorationId?: string;
 	selectedRange?: DiffLineRange;
 	inlineAttachments?: readonly DiffInlineAttachment[];
-	/** Char-exact restyling of novel tokens, e.g. from a semantic diff. */
+	/**
+	 * Char-exact restyling of novel tokens, e.g. from a semantic diff. A host's own reading
+	 * of the changed lines replaces the intra-line emphasis drawn by default.
+	 */
 	emphasis?: SpanEmphasis;
 	/**
 	 * Overrides the hunk lookup behind each line's range, so a body whose own hunks
@@ -374,6 +378,13 @@ export function DiffBody({
 	const renderedDecorations = selectionDecoration
 		? [selectionDecoration, ...decorations]
 		: decorations;
+	const intralineEmphasis = useMemo(
+		() =>
+			emphasis
+				? undefined
+				: { deletionsBg: theme.removedEmphasisBg, additionsBg: theme.addedEmphasisBg },
+		[emphasis, theme.removedEmphasisBg, theme.addedEmphasisBg],
+	);
 	const rows = useMemo(
 		() =>
 			normalized
@@ -382,9 +393,18 @@ export function DiffBody({
 						decorations: renderedDecorations,
 						focusedDecorationId,
 						emphasis,
+						intralineEmphasis,
 					})
 				: [],
-		[normalized, layout, theme.syntaxTheme, renderedDecorations, focusedDecorationId, emphasis],
+		[
+			normalized,
+			layout,
+			theme.syntaxTheme,
+			renderedDecorations,
+			focusedDecorationId,
+			emphasis,
+			intralineEmphasis,
+		],
 	);
 	const anchor = useMemo(
 		() =>

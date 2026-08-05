@@ -284,3 +284,20 @@ export const bundledThemeForeground = (themeId: BundledShikiThemeId): string | u
 export const bundledThemeDiffColors = (
 	themeId: BundledShikiThemeId,
 ): BundledShikiThemeDiffColors | undefined => DIFF_COLORS[themeId];
+
+/** The derivation inputs a custom theme's `extends` starts from when it names a bundled theme. */
+export type BundledThemeInputs = {
+	id: BundledShikiThemeId;
+	background: string;
+	foreground?: string;
+	diffColors?: BundledShikiThemeDiffColors;
+	syntaxTheme: BundledShikiThemeId;
+};
+
+export const bundledThemeInputs = (themeId: BundledShikiThemeId): BundledThemeInputs => ({
+	id: themeId,
+	background: bundledThemeBackground(themeId),
+	foreground: bundledThemeForeground(themeId),
+	diffColors: bundledThemeDiffColors(themeId),
+	syntaxTheme: themeId,
+});

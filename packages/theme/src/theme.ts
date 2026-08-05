@@ -1,10 +1,9 @@
 import { blendHex, contrastRatio, relativeLuminance } from "./color.ts";
 import {
 	BUNDLED_SHIKI_THEME_IDS,
+	type BundledShikiThemeDiffColors,
 	type BundledShikiThemeId,
-	bundledThemeBackground,
-	bundledThemeDiffColors,
-	bundledThemeForeground,
+	bundledThemeInputs,
 	isBundledShikiThemeId,
 } from "./shikiThemes.ts";
 
@@ -115,17 +114,27 @@ const readableChromeColor = (preferred: string, panel: string, panelAlt: string)
 	return stronger.find(carries) ?? anchor;
 };
 
-/** Derive one complete Revue theme from one bundled editor theme. */
-const buildTheme = (themeId: BundledShikiThemeId): Theme => {
-	const editorBackground = bundledThemeBackground(themeId);
+/** The inputs `buildThemeFromInputs` derives a full Theme from, bundled or custom. */
+export type BuildThemeInputs = {
+	id: string;
+	label?: string;
+	background: string;
+	foreground?: string;
+	diffColors?: BundledShikiThemeDiffColors;
+	syntaxTheme?: string;
+};
+
+/** Derive one complete Revue theme from arbitrary derivation inputs, bundled or custom. */
+export const buildThemeFromInputs = (inputs: BuildThemeInputs): Theme => {
+	const editorBackground = inputs.background;
 	const lightSurface = isLight(editorBackground);
 	const fallbackDiffColors = FALLBACK_DIFF_COLORS[lightSurface ? "light" : "dark"];
-	const diffColors = bundledThemeDiffColors(themeId);
+	const diffColors = inputs.diffColors;
 	const rowTint = lightSurface ? 0.12 : 0.2;
 	const focusedTint = lightSurface ? 0.18 : 0.28;
 	const selectedTint = lightSurface ? 0.18 : 0.25;
 
-	const editorForeground = bundledThemeForeground(themeId);
+	const editorForeground = inputs.foreground;
 	const codeForeground = readableForeground(editorForeground, editorBackground);
 	const panel = blendHex(codeForeground, editorBackground, lightSurface ? 0.04 : 0.08);
 	const panelAlt = blendHex(codeForeground, editorBackground, lightSurface ? 0.08 : 0.12);
@@ -151,8 +160,8 @@ const buildTheme = (themeId: BundledShikiThemeId): Theme => {
 		});
 
 	return {
-		id: themeId,
-		label: themeId,
+		id: inputs.id,
+		label: inputs.label ?? inputs.id,
 		appearance: lightSurface ? "light" : "dark",
 		background: editorBackground,
 		panel,
@@ -178,9 +187,13 @@ const buildTheme = (themeId: BundledShikiThemeId): Theme => {
 		badgeRemoved: readableChromeColor(removed, panel, panelAlt),
 		badgeModified: readableChromeColor(modified, panel, panelAlt),
 		badgeNeutral: readableDimForeground(dimmed, panelAlt),
-		syntaxTheme: themeId,
+		syntaxTheme: inputs.syntaxTheme ?? inputs.id,
 	};
 };
+
+/** Derive one complete Revue theme from one bundled editor theme. */
+const buildTheme = (themeId: BundledShikiThemeId): Theme =>
+	buildThemeFromInputs(bundledThemeInputs(themeId));
 
 export const THEMES: Theme[] = BUNDLED_SHIKI_THEME_IDS.map(buildTheme);
 
@@ -195,14 +208,47 @@ const defaultTheme = (appearance: Appearance | null | undefined): Theme => {
 	return themeById(fallbackId) ?? (THEMES[0] as Theme);
 };
 
-/** Resolve a named theme; absence uses Ayu Dark while `auto` follows the terminal. */
+const extraThemeById = (extraThemes: readonly Theme[] | undefined, themeId: string) =>
+	extraThemes?.find((theme) => theme.id === themeId);
+
+/**
+ * Resolve a named theme; absence uses Ayu Dark while `auto` follows the terminal.
+ * `extraThemes` shadow bundled themes that share an id, but never satisfy `auto` or absence.
+ */
 export const resolveTheme = (
 	requested: string | undefined,
 	appearance?: Appearance | null,
+	extraThemes?: readonly Theme[],
 ): Theme => {
 	if (requested === undefined) return defaultTheme(null);
 	if (requested === "auto") return defaultTheme(appearance);
-	return themeById(requested) ?? defaultTheme(appearance);
+	return extraThemeById(extraThemes, requested) ?? themeById(requested) ?? defaultTheme(appearance);
+};
+
+/** Colour slots a custom theme may pin verbatim after derivation. */
+export type OverridableThemeSlot = Exclude<
+	keyof Theme,
+	"id" | "label" | "appearance" | "syntaxTheme"
+>;
+
+export type ThemeOverrides = Partial<Record<OverridableThemeSlot, string>>;
+
+const NON_OVERRIDABLE_SLOTS = new Set<keyof Theme>(["id", "label", "appearance", "syntaxTheme"]);
+
+// Mechanically derived from a real Theme's keys rather than hand-listed, so a new Theme field
+// is overridable (or excluded) by construction rather than by remembering to update this list.
+export const OVERRIDABLE_THEME_SLOTS: readonly OverridableThemeSlot[] = (
+	Object.keys(THEMES[0] as Theme) as (keyof Theme)[]
+).filter((slot): slot is OverridableThemeSlot => !NON_OVERRIDABLE_SLOTS.has(slot));
+
+/** Pin colour slots on a derived theme verbatim; unknown slots are ignored. */
+export const applyOverrides = (theme: Theme, overrides: ThemeOverrides): Theme => {
+	const overridden = { ...theme };
+	for (const slot of OVERRIDABLE_THEME_SLOTS) {
+		const value = overrides[slot];
+		if (value !== undefined) overridden[slot] = value;
+	}
+	return overridden;
 };
 
 /**

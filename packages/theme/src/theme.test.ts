@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import bundledThemesFixture from "./__fixtures__/bundled-themes.json" with { type: "json" };
 import { contrastRatio } from "./color.ts";
+import { BUNDLED_SHIKI_THEME_IDS, bundledThemeInputs } from "./shikiThemes.ts";
 import {
+	applyOverrides,
+	buildThemeFromInputs,
 	DEFAULT_DARK_THEME_ID,
 	DEFAULT_LIGHT_THEME_ID,
+	OVERRIDABLE_THEME_SLOTS,
 	resolveTheme,
 	THEMES,
+	type Theme,
 	TRANSPARENT,
 	withTransparentSurfaces,
 } from "./theme.ts";
@@ -54,6 +60,79 @@ describe("derived themes", () => {
 		expect(byId.get("catppuccin-mocha")).toBe("dark");
 		expect(byId.get("gruvbox-light-soft")).toBe("light");
 	});
+
+	test("every bundled theme derives byte-identically to the pre-refactor fixture", () => {
+		expect(THEMES).toEqual(bundledThemesFixture as Theme[]);
+		expect(THEMES).toHaveLength(BUNDLED_SHIKI_THEME_IDS.length);
+	});
+
+	test("the bundled wrapper matches buildThemeFromInputs called with bundled inputs directly", () => {
+		for (const themeId of BUNDLED_SHIKI_THEME_IDS) {
+			const derived = buildThemeFromInputs(bundledThemeInputs(themeId));
+			const bundled = THEMES.find((theme) => theme.id === themeId);
+			expect(derived).toEqual(bundled as Theme);
+		}
+	});
+});
+
+describe("buildThemeFromInputs", () => {
+	test("derives appearance from background luminance rather than a passed-in flag", () => {
+		const dark = buildThemeFromInputs({ id: "custom-dark", background: "#101010" });
+		const light = buildThemeFromInputs({ id: "custom-light", background: "#fafafa" });
+		expect(dark.appearance).toBe("dark");
+		expect(light.appearance).toBe("light");
+	});
+
+	test("defaults label and syntaxTheme to id when omitted", () => {
+		const theme = buildThemeFromInputs({ id: "custom", background: "#101010" });
+		expect(theme.label).toBe("custom");
+		expect(theme.syntaxTheme).toBe("custom");
+	});
+
+	test("honours an explicit label, syntaxTheme, foreground and diffColors", () => {
+		const theme = buildThemeFromInputs({
+			id: "custom",
+			label: "My Custom Theme",
+			background: "#101010",
+			foreground: "#eeeeee",
+			syntaxTheme: "nord",
+			diffColors: { added: "#00ff00", removed: "#ff0000", modified: "#0000ff" },
+		});
+		expect(theme.label).toBe("My Custom Theme");
+		expect(theme.syntaxTheme).toBe("nord");
+	});
+
+	test("falls back to a legible foreground and fallback diff colours when omitted", () => {
+		const theme = buildThemeFromInputs({ id: "custom", background: "#101010" });
+		expect(contrastRatio(theme.text, theme.panelAlt)).toBeGreaterThanOrEqual(READABLE);
+		expect(theme.addedSignColor).toBeTruthy();
+		expect(theme.removedSignColor).toBeTruthy();
+	});
+});
+
+describe("applyOverrides", () => {
+	const base = buildThemeFromInputs({ id: "custom", background: "#101010" });
+
+	test("pins overridden slots verbatim, without contrast policing", () => {
+		const overridden = applyOverrides(base, { text: "#123456", accent: "#abcdef" });
+		expect(overridden.text).toBe("#123456");
+		expect(overridden.accent).toBe("#abcdef");
+	});
+
+	test("leaves slots that were not overridden untouched", () => {
+		const overridden = applyOverrides(base, { text: "#123456" });
+		expect(overridden.background).toBe(base.background);
+		expect(overridden.panel).toBe(base.panel);
+	});
+
+	test("the overridable slot set excludes id, label, appearance and syntaxTheme", () => {
+		expect(OVERRIDABLE_THEME_SLOTS).not.toContain("id");
+		expect(OVERRIDABLE_THEME_SLOTS).not.toContain("label");
+		expect(OVERRIDABLE_THEME_SLOTS).not.toContain("appearance");
+		expect(OVERRIDABLE_THEME_SLOTS).not.toContain("syntaxTheme");
+		expect(OVERRIDABLE_THEME_SLOTS).toContain("background");
+		expect(OVERRIDABLE_THEME_SLOTS).toContain("badgeAdded");
+	});
 });
 
 describe("resolveTheme", () => {
@@ -69,6 +148,23 @@ describe("resolveTheme", () => {
 
 	test("a known name wins over the terminal's appearance", () => {
 		expect(resolveTheme("nord", "light").id).toBe("nord");
+	});
+
+	test("an extra theme shadows a bundled theme with the same id", () => {
+		const shadow = buildThemeFromInputs({ id: "nord", background: "#000000" });
+		expect(resolveTheme("nord", "light", [shadow])).toBe(shadow);
+	});
+
+	test("an unknown id still falls back to the appearance default when extra themes are given", () => {
+		const shadow = buildThemeFromInputs({ id: "nord", background: "#000000" });
+		expect(resolveTheme("not-a-theme", "light", [shadow]).id).toBe(DEFAULT_LIGHT_THEME_ID);
+	});
+
+	test("auto and absent requests never resolve to an extra theme", () => {
+		const shadow = buildThemeFromInputs({ id: DEFAULT_DARK_THEME_ID, background: "#000000" });
+		expect(resolveTheme("auto", "dark", [shadow]).id).toBe(DEFAULT_DARK_THEME_ID);
+		expect(resolveTheme("auto", "dark", [shadow])).not.toBe(shadow);
+		expect(resolveTheme(undefined, null, [shadow])).not.toBe(shadow);
 	});
 });
 

@@ -55,10 +55,13 @@
     "packages/theme": {
       "name": "@revue/theme",
       "version": "0.0.0",
+      "dependencies": {
+        "zod": "^4.0.0",
+      },
     },
     "packages/tui": {
       "name": "@revue/tui",
-      "version": "0.0.0",
+      "version": "0.3.0",
       "bin": {
         "revue": "./src/main.tsx",
       },

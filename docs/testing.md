@@ -69,7 +69,7 @@ A refactor that preserves behaviour should not require broad test rewrites.
 - Test one representative shortcut per shared action. Test aliases only when key routing or terminal encoding gives them distinct failure modes.
 - Keep narrow-terminal, split/stack, and panel-boundary tests focused on the layout decision, not every rendered character.
 
-## Diff-renderer tests
+## Diff engine and adapter tests
 
 When Revue owns renderer behaviour, cover it with a small set of named patch fixtures spanning materially different structures: additions, deletions, multiple hunks, renames, and absent context. Until then, test Revue's adapter and presentation contract with real patches rather than retesting Hunk or Pierre.
 
@@ -82,9 +82,9 @@ When Revue owns renderer behaviour, cover it with a small set of named patch fix
 ## Diff golden snapshots
 
 The rendered diff frame is itself a contract: intra-line emphasis, wrapping, gutters, and
-column widths are all invisible to a test that only reads characters. `packages/diff-renderer/test/golden.test.tsx`
+column widths are all invisible to a test that only reads characters. `packages/diff-opentui/test/golden.test.tsx`
 renders curated patches headless and compares the whole frame against committed goldens in
-`packages/diff-renderer/test/__goldens__/`.
+`packages/diff-opentui/test/__goldens__/`.
 
 What the suite covers:
 

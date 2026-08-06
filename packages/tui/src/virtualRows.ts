@@ -6,22 +6,23 @@
 // fixed-height gaps, keeping layout work proportional to the screen.
 
 import {
-	attachmentsForRow,
 	buildDiffRows,
 	createDiffFile,
 	type DiffFile,
 	type DiffFileInput,
-	type DiffInlineAttachment,
 	type DiffLayout,
 	type DiffLineRange,
+	type DiffPlanStyles,
 	type DiffRow,
 	type DiffSide,
-	diffCodeWidths,
+	planDiff,
+} from "@revue/diff";
+import {
+	attachmentsForRow,
+	type DiffInlineAttachment,
 	type ExpandDirection,
-	lineNumberDigits,
-	rowVisualHeight,
-	stackGutterSides,
-} from "@revue/diff-renderer";
+	OPENTUI_DIFF_CHROME,
+} from "@revue/diff-opentui";
 
 export type SegmentRows = {
 	id: string;
@@ -166,6 +167,18 @@ export const structuralRows = (file: DiffFileInput, layout: DiffLayout): Structu
 	return entry;
 };
 
+const MEASUREMENT_STYLES: DiffPlanStyles = {
+	text: "",
+	contextBackground: "",
+	additionBackground: "",
+	deletionBackground: "",
+	additionFocusedBackground: "",
+	deletionFocusedBackground: "",
+	selectedHunkBackground: "",
+	intralineAdditionBackground: "",
+	intralineDeletionBackground: "",
+};
+
 const bodyHeights = ({
 	file,
 	displayed,
@@ -179,34 +192,33 @@ const bodyHeights = ({
 	attachmentHeight: (id: string) => number;
 	width: number;
 }): number[] => {
-	const { normalized, rows } = structuralRows(displayed, file.layout);
+	const { normalized } = structuralRows(displayed, file.layout);
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length) return [1];
-	const headerRow = file.showHunkHeaders === false ? 0 : 1;
-	// Long lines soft-wrap, so a logical row is as many terminal rows as the
-	// body's own wrap budget makes it.
-	const widths = diffCodeWidths({
-		width,
+	const visual = planDiff({
+		file: normalized,
 		layout: file.layout,
-		digits: lineNumberDigits(normalized),
-		showLineNumbers: file.showLineNumbers !== false,
-		stackGutters: stackGutterSides(rows).length,
+		width,
+		visibility: {
+			lineNumbers: file.showLineNumbers !== false,
+			hunkHeaders: file.showHunkHeaders !== false,
+		},
+		styles: MEASUREMENT_STYLES,
+		chrome: OPENTUI_DIFF_CHROME,
 	});
-	const heights = rows.map((row) => {
-		if (row.type === "hunk-header") {
-			return headerRow + (file.expanderActions?.(row.hunkIndex)?.length ? 1 : 0);
-		}
+	const heights = visual.rows.map((row) => {
+		if (row.type === "hunk-header")
+			return row.height + (file.expanderActions?.(row.hunkIndex)?.length ? 1 : 0);
 		const attached = attachmentsForRow({
 			file: normalized,
-			row,
+			row: row.logical,
 			attachments,
 			resolveRange: file.resolveRange,
 		});
 		return (
-			rowVisualHeight(row, widths) +
-			attached.reduce((sum, attachment) => sum + attachmentHeight(attachment.id), 0)
+			row.height + attached.reduce((sum, attachment) => sum + attachmentHeight(attachment.id), 0)
 		);
 	});
-	// The trailing expander band occupies a pseudo-row at index rows.length.
+	// The trailing expander band occupies a pseudo-row at index visual.rows.length.
 	heights.push(file.expanderActions?.(normalized.metadata.hunks.length)?.length ? 1 : 0);
 	return heights;
 };

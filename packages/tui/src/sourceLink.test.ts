@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { DiffLineRange } from "@revue/diff-renderer";
+import type { DiffLineRange } from "@revue/diff";
 import type { RunScope } from "@revue/types";
 import {
 	formatSourceLocation,

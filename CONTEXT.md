@@ -12,9 +12,9 @@ prerequisite: a run without chapters opens as a flat, file-by-file diff (`revue 
 - **Stage** (`ReviewStage/stage-cli`) contributes the *chapter model* and the *agent skill* that
   clusters a diff into chapters. Stage renders to a browser; we discard that part.
 - **Pierre** (`@pierre/diffs`) provides public patch parsing, metadata, language detection, and
-  highlighting APIs through Revue’s shared `@revue/diff-model` adapter.
+  highlighting APIs behind Revue’s shared `@revue/diff` Patch engine.
 - **Revue** owns Git scope capture, immutable run artifacts, the terminal renderer, and the
-  chapter-navigation shell. Its renderer selectively adapts
+  chapter-navigation shell. Its Patch engine and OpenTUI adapter selectively adapt
   a bounded set of Hunk v0.15.3 concepts under MIT, but does not depend on Hunk at runtime.
 
 revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
@@ -142,9 +142,9 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   copy. The skill advises how to install the CLI when it is missing but never installs binaries
   itself.
 - **Share the diff model; own the renderer.** See `docs/adr/0002` (supersedes ADR 0001).
-  `@revue/diff-model` owns Pierre parsing adaptation and stable file/hunk identities;
-  `@revue/diff-renderer` owns split/stack rows, terminal presentation, exact inclusive old/new
-  decorations, and focus anchors. `@pierre/diffs` is pinned directly to 1.2.2.
+  `@revue/diff` owns Pierre adaptation, Revue structural types, analysis, sanitisation and the
+  complete width-aware visual plan; `@revue/diff-opentui` owns React/OpenTUI presentation, pointer
+  handling, attachments, measurement and renderable IDs. `@pierre/diffs` is pinned directly to 1.2.2.
 - **One derived palette, not two hand-picked ones.** See `docs/adr/0008`. `@revue/theme` owns
   colour maths, the bundled
   editor-theme table, and the derivation; the shell reads it through one React context and the
@@ -180,8 +180,7 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   selection and inline attachment placement. Revue owns thread/message UUIDs, authors, lifecycle,
   presentation, CLI operations, and chapter association. The disposable pre-thread comment store
   was reset rather than introducing a legacy migration.
-- **Intra-line emphasis is owned, textual, and patch-only.** See `docs/adr/0005`. `@revue/diff-model`
-  pairs changed lines (by position for equal-count blocks, similarity-gated otherwise) and computes
+- **Intra-line emphasis is owned, textual, and patch-only.** See `docs/adr/0005`. `@revue/diff` pairs changed lines (by position for equal-count blocks, similarity-gated otherwise) and computes
   token-level spans; emphasis is background-only and never appears in semantic view, where novelty
   is Difftastic's structural concept.
 - **Chapters are an optional overlay, not required scaffolding.** See `docs/adr/0006`. A run

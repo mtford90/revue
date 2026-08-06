@@ -4,7 +4,7 @@ import {
 	parsePatch,
 	prepareSyntaxHighlighting,
 	rangeToHunkIndex,
-} from "@revue/diff-renderer";
+} from "@revue/diff";
 import type { Chapter, LineRef } from "@revue/types";
 
 // Bridges a chapters file to Revue's renderer: a chapter cites hunks by

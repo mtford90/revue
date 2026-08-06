@@ -1,4 +1,4 @@
-import { type DiffFile, parsePatch } from "@revue/diff-model";
+import { type DiffFile, parsePatch } from "@revue/diff";
 import {
 	RUN_ENDPOINT_KIND,
 	RUN_FILE_STATUS,

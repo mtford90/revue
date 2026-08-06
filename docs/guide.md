@@ -8,22 +8,22 @@ revue combines ideas from MIT projects without taking on their application shell
 
 - **Stage is the brain.** Its real value is the *skill* (chapter-clustering + prologue rules) and the
   *chapter data model* — not its React/SQLite web UI. We port the skill and the zod schema.
-- **Pierre parses and highlights.** `@revue/diff-renderer` uses public `@pierre/diffs` APIs, then owns
-  the terminal split/stack rows, exact side-aware range decorations, and OpenTUI presentation.
+- **Pierre parses and highlights.** `@revue/diff` uses public `@pierre/diffs` APIs and owns parsing, analysis and the width-aware
+  visual plan; `@revue/diff-opentui` mounts that plan as interactive OpenTUI presentation.
 - **Hunk informed bounded terminal surfaces.** Revue selectively adapts Hunk v0.15.3
   body/row/geometry/highlighting concepts in the renderer and menu-bar/controller concepts in the
   TUI under MIT; Hunk is not a runtime dependency.
 
 See [`adr/0002-own-diff-renderer.md`](adr/0002-own-diff-renderer.md) for the current decision
-and [`../packages/diff-renderer/THIRD_PARTY_NOTICES.md`](../packages/diff-renderer/THIRD_PARTY_NOTICES.md)
+and [`../packages/diff/THIRD_PARTY_NOTICES.md`](../packages/diff/THIRD_PARTY_NOTICES.md)
 for Hunk provenance.
 
 ## Package layout
 
 ```
 packages/
-  diff-model/     Shared Pierre patch model and stable file/hunk identities
-  diff-renderer/  Revue-owned OpenTUI presentation over the shared model
+  diff/            Headless Patch engine: parsing, analysis, rows, wrapping, and visual plans
+  diff-opentui/    OpenTUI components, pointer handling, attachments, and measurement
   prep/            Git scope resolution, immutable snapshots, filtering, and hunk formatting
   markdown-export/ Pure deterministic Markdown formatting with no OpenTUI dependency
   theme/           Contrast-aware palettes derived from bundled editor themes
@@ -385,7 +385,7 @@ bundled themes.
 
 - [x] Chapters/prologue zod schema (ported from Stage)
 - [x] `revue show` — load and validate a complete run, navigable TUI shell, `--check` summary
-- [x] Render each chapter's **diff body** via `@revue/diff-renderer` (`hunkRefs` → filtered hunks; `lineRefs` → exact decorations)
+- [x] Render each chapter's **diff body** via `@revue/diff-opentui` over `@revue/diff` (`hunkRefs` → filtered hunks; `lineRefs` → exact decorations)
 - [x] **Mark-as-reviewed** at chapter / file / key-change level, with progress + auto-advance, persisted to `.revue/state.json`
 - [x] Per-chapter **file list** with reviewed checkboxes and `+a -d` stats
 - [x] `revue prep` — pin Git scope, old/new blobs, patch, exclusions, and stable `(filePath, oldStart)` review identities

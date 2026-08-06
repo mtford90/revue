@@ -1,4 +1,4 @@
-import type { DiffFileInput, DiffLayout } from "@revue/diff-renderer";
+import type { DiffFileInput, DiffLayout } from "@revue/diff";
 
 export type SidebarPreference = "auto" | "shown" | "hidden";
 export type DiffLayoutPreference = "auto" | "split" | "stacked";

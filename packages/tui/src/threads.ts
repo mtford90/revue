@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { parsePatch } from "@revue/diff-renderer";
+import { parsePatch } from "@revue/diff";
 import {
 	emptyThreadStoreFile,
 	type ReviewThread,

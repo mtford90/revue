@@ -92,3 +92,7 @@ Whitespace-only edits do produce spans, because the background is their only vis
   linear time, so they are never capped.
 - Pairing results are therefore cheap enough to compute per parse, but not per render: the renderer
   memoises them on the parsed change block.
+
+## Amendment
+
+ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.

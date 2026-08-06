@@ -85,3 +85,7 @@ content.
   patch — context expansion synthesises from them and `show` still never touches Git
   ([ADR 0007](0007-synthesised-patches-and-anchor-authority.md)). Reviewing a bare patch with no
   backing blobs remains explicitly out of scope pending its own design.
+
+## Amendment
+
+ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.

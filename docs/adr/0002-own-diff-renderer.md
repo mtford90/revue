@@ -53,3 +53,7 @@ not Hunk's complete application.
   fallback, avoiding asynchronous state updates and test `act()` warnings.
 - Hunk remains credited as the MIT source of selected concepts, but is no longer a package/runtime
   dependency.
+
+## Amendment
+
+ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.

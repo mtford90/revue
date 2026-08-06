@@ -80,3 +80,7 @@ Thread is the model and `revue threads` is the official API.
   action is disabled with a stated reason rather than emitting a link that could resolve to
   different content. Known gap: the threads CLI authors messages only as `agent`; human authorship
   exists solely through the TUI.
+
+## Amendment
+
+ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.

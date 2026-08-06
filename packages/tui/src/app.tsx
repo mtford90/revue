@@ -12,23 +12,25 @@ import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@op
 import {
 	anchorRowIndex,
 	type DecorationAnchor,
-	DiffBody,
-	type DiffBodyProps,
 	type DiffFile,
-	DiffFileHeader,
 	type DiffFileInput,
-	type DiffInlineAttachment,
 	type DiffLineRange,
 	type DiffSide,
-	decorationAnchorId,
-	diffRangeWithin,
-	type ExpandDirection,
 	findFocusedDecorationAnchor,
 	parsePatch,
 	prepareSyntaxHighlighting,
 	type RangeDecoration,
 	type SpanEmphasis,
-} from "@revue/diff-renderer";
+} from "@revue/diff";
+import {
+	DiffBody,
+	type DiffBodyProps,
+	DiffFileHeader,
+	type DiffInlineAttachment,
+	decorationAnchorId,
+	diffRangeWithin,
+	type ExpandDirection,
+} from "@revue/diff-opentui";
 import {
 	type Appearance,
 	resolveTheme,

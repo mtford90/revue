@@ -42,3 +42,7 @@ Layout cost now tracks the screen, not the diff.
   attachment measurement before it can live in the diff body.
 - The 40/80 row constants trade recomputation frequency against overscan memory; they are tuning
   values, not contracts.
+
+## Amendment
+
+ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.

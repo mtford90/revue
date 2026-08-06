@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parsePatch } from "@revue/diff-renderer";
+import { parsePatch } from "@revue/diff";
 import {
 	bodySegmentId,
 	planWindow,

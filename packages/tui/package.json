@@ -9,7 +9,8 @@
 	"dependencies": {
 		"@opentui/core": "^0.1.89",
 		"@opentui/react": "^0.1.89",
-		"@revue/diff-renderer": "workspace:*",
+		"@revue/diff": "workspace:*",
+		"@revue/diff-opentui": "workspace:*",
 		"@revue/markdown-export": "workspace:*",
 		"@revue/prep": "workspace:*",
 		"@revue/theme": "workspace:*",

@@ -21,7 +21,6 @@ fi
 
 "$BIN" skill print | head -1 | grep -q -- '---'
 "$BIN" show examples/sample-run --check | grep -q "run is valid"
-
 transcript="$(mktemp -d)/typescript"
 export TERM=xterm-256color
 # q is re-sent every second: a keypress that lands before the TUI enables raw mode is

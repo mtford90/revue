@@ -17,6 +17,14 @@
         "@pierre/diffs": "1.2.2",
       },
     },
+    "packages/diff-ansi": {
+      "name": "@revue/diff-ansi",
+      "version": "0.0.0",
+      "dependencies": {
+        "@revue/diff": "workspace:*",
+        "@revue/theme": "workspace:*",
+      },
+    },
     "packages/diff-opentui": {
       "name": "@revue/diff-opentui",
       "version": "0.0.0",
@@ -49,6 +57,18 @@
         "@revue/types": "workspace:*",
         "ignore": "^7.0.5",
         "zod": "^4.0.0",
+      },
+    },
+    "packages/revuediff": {
+      "name": "@revue/revuediff",
+      "version": "0.1.0",
+      "bin": {
+        "revuediff": "./src/main.ts",
+      },
+      "dependencies": {
+        "@revue/diff": "workspace:*",
+        "@revue/diff-ansi": "workspace:*",
+        "@revue/theme": "workspace:*",
       },
     },
     "packages/theme": {
@@ -187,11 +207,15 @@
 
     "@revue/diff": ["@revue/diff@workspace:packages/diff"],
 
+    "@revue/diff-ansi": ["@revue/diff-ansi@workspace:packages/diff-ansi"],
+
     "@revue/diff-opentui": ["@revue/diff-opentui@workspace:packages/diff-opentui"],
 
     "@revue/markdown-export": ["@revue/markdown-export@workspace:packages/markdown-export"],
 
     "@revue/prep": ["@revue/prep@workspace:packages/prep"],
+
+    "@revue/revuediff": ["@revue/revuediff@workspace:packages/revuediff"],
 
     "@revue/theme": ["@revue/theme@workspace:packages/theme"],
 

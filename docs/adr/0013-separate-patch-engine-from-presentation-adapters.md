@@ -42,9 +42,9 @@ Replace the current model/renderer seam with a Patch-engine/presentation-adapter
 3. **Headless prep imports `@revue/diff` directly.** It never depends on the OpenTUI adapter.
 4. **Revue's TUI imports the engine for pure planning/types and the adapter for OpenTUI
    presentation.** The adapter does not re-export the engine as a convenience facade.
-5. **A future ANSI pager is another adapter over `@revue/diff`.** It reads unified patches and
+5. **`@revue/diff-ansi` is an ANSI pager adapter over `@revue/diff`.** It reads unified patches and
    serialises the same planned rows to ANSI without initialising OpenTUI or an alternate screen.
-   Delivering that pager is outside this package-refactor decision.
+   ADR 0014 records its stdin-filter and paging contract.
 
 The engine exposes Revue-owned types rather than making Pierre's metadata shape its external
 contract. Pierre remains the pinned parsing and highlighting implementation behind the engine.

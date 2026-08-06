@@ -119,8 +119,11 @@ protection; keep each patch small enough that its frame stays readable in a diff
 ## What runs where
 
 `.github/workflows/ci.yml` runs typecheck, lint, and the whole suite on every push to `master`
-and every pull request, so the goldens gate a change rather than only a release. The release
-workflow repeats them per target platform before it builds an executable.
+and every pull request, so the goldens gate a change rather than only a release. The independent
+Revue and Revuediff release workflows repeat them per target platform before building their own
+executable. Revue's release smoke drives the OpenTUI binary through a real PTY and checks alternate-
+screen restoration; Revuediff's smoke drives a real patch through its stdin/CLI boundary and checks
+safe ANSI output without requiring OpenTUI terminal modes.
 
 Screenshots are not part of either. They serve visual judgement, which no assertion replaces, and
 they need vhs, ffmpeg, and a macOS-bundled font; the goldens are the automated contract.

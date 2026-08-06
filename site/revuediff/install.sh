@@ -1,14 +1,14 @@
 #!/bin/sh
-# Installs the latest revue release for this platform.
-#   curl -fsSL https://revue.mtford.co.uk/install.sh | sh
-# Set REVUE_INSTALL to change the install directory (default: ~/.local/bin).
+# Installs the latest Revuediff release for this platform.
+#   curl -fsSL https://revue.mtford.co.uk/revuediff/install.sh | sh
+# Set REVUEDIFF_INSTALL to change the install directory (default: ~/.local/bin).
 set -eu
 
 repo="mtford90/revue"
-install_dir="${REVUE_INSTALL:-$HOME/.local/bin}"
+install_dir="${REVUEDIFF_INSTALL:-$HOME/.local/bin}"
 
 fail() {
-	echo "install.sh: $1" >&2
+	echo "revuediff install.sh: $1" >&2
 	exit 1
 }
 
@@ -18,7 +18,7 @@ case "$os-$arch" in
 Darwin-arm64) target="darwin-arm64" ;;
 Darwin-x86_64) target="darwin-x64" ;;
 Linux-x86_64) target="linux-x64" ;;
-*) fail "no prebuilt executable for $os/$arch — see https://github.com/$repo#install for running from a checkout" ;;
+*) fail "no prebuilt executable for $os/$arch — see https://github.com/$repo#install-revuediff" ;;
 esac
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
@@ -41,7 +41,7 @@ resolve_latest_tag() {
 				/^    "draft": false/ { draft = 1 }
 				/^    "prerelease": false/ { stable = 1 }
 				/^  }[,]?$/ {
-					if (draft && stable && tag ~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/) {
+					if (draft && stable && tag ~ /^revuediff-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/) {
 						print tag
 						exit
 					}
@@ -54,18 +54,18 @@ resolve_latest_tag() {
 	done
 }
 
-tag="$(resolve_latest_tag)" || fail "could not determine the latest stable Revue release"
+tag="$(resolve_latest_tag)" || fail "could not determine the latest stable Revuediff release"
 case "$tag" in
-v[0-9]*.[0-9]*.[0-9]*) ;;
-*) fail "could not determine the latest stable Revue release" ;;
+revuediff-v[0-9]*.[0-9]*.[0-9]*) ;;
+*) fail "could not determine the latest stable Revuediff release" ;;
 esac
 
-archive="revue-$tag-$target.tar.gz"
+archive="$tag-$target.tar.gz"
 base="https://github.com/$repo/releases/download/$tag"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-echo "downloading revue $tag ($target)…"
+echo "downloading $tag ($target)…"
 curl -fsSL -o "$tmp/$archive" "$base/$archive"
 curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
 
@@ -80,15 +80,14 @@ fi
 
 mkdir -p "$tmp/extract" "$install_dir"
 tar -xzf "$tmp/$archive" -C "$tmp/extract"
-install -m 755 "$tmp/extract/revue" "$install_dir/revue"
+install -m 755 "$tmp/extract/revuediff" "$install_dir/revuediff"
 
-echo "installed $("$install_dir/revue" --version) to $install_dir/revue"
+echo "installed $("$install_dir/revuediff" --version) to $install_dir/revuediff"
 case ":$PATH:" in
 *":$install_dir:"*) ;;
 *) echo "note: $install_dir is not on your PATH" ;;
 esac
 
 echo
-echo "next steps:"
-echo "  revue skill install   # give your coding agent the revue skill"
-echo "  revue doctor          # check dependencies and skill state"
+echo "configure Git with:"
+echo "  git config --global pager.diff revuediff"

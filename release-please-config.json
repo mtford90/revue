@@ -1,19 +1,45 @@
 {
 	"$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-	"release-type": "node",
-	"include-component-in-tag": false,
+	"release-type": "simple",
 	"bootstrap-sha": "421ee8bf197d979ef7090d75ba05dada7ec35512",
 	"last-release-sha": "421ee8bf197d979ef7090d75ba05dada7ec35512",
+	"separate-pull-requests": true,
+	"always-update": true,
 	"packages": {
-		".": {
-			"release-type": "node",
+		".release-please/revue": {
+			"component": "revue",
+			"package-name": "revue",
 			"include-component-in-tag": false,
+			"include-v-in-tag": true,
+			"changelog-path": "/CHANGELOG.md",
 			"draft": true,
 			"force-tag-creation": true,
 			"extra-files": [
 				{
 					"type": "json",
-					"path": "packages/tui/package.json",
+					"path": "/package.json",
+					"jsonpath": "$.version"
+				},
+				{
+					"type": "json",
+					"path": "/packages/tui/package.json",
+					"jsonpath": "$.version"
+				}
+			]
+		},
+		".release-please/revuediff": {
+			"component": "revuediff",
+			"package-name": "revuediff",
+			"include-component-in-tag": true,
+			"include-v-in-tag": true,
+			"initial-version": "0.1.0",
+			"changelog-path": "/packages/revuediff/CHANGELOG.md",
+			"draft": true,
+			"force-tag-creation": true,
+			"extra-files": [
+				{
+					"type": "json",
+					"path": "/packages/revuediff/package.json",
 					"jsonpath": "$.version"
 				}
 			]

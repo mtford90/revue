@@ -24,6 +24,8 @@ for Hunk provenance.
 packages/
   diff/            Headless Patch engine: parsing, analysis, rows, wrapping, and visual plans
   diff-opentui/    OpenTUI components, pointer handling, attachments, and measurement
+  diff-ansi/       Deterministic ANSI file envelopes shared with Revuediff
+  revuediff/       Standalone `revuediff` stdin formatter and downstream-pager CLI
   prep/            Git scope resolution, immutable snapshots, filtering, and hunk formatting
   markdown-export/ Pure deterministic Markdown formatting with no OpenTUI dependency
   theme/           Contrast-aware palettes derived from bundled editor themes
@@ -33,6 +35,43 @@ skills/
   revue/           The chapter-generating agent skill (adapted from stage-chapters)
 examples/
   sample-run/      A complete prepared run that works without a Git repository
+```
+
+## Revuediff ANSI diff pager
+
+[Revuediff](../packages/revuediff/) is a standalone buffered stdin filter for Git or plain unified
+diffs. It shares the `@revue/diff` Patch engine, syntax spans, wrapping, and changed-line emphasis
+with Revue, but it does not depend on or start OpenTUI, chapters, prepared runs, threads, skills, or
+narrative TUI code. The narrative `revue` executable intentionally has no `pager` command.
+
+```bash
+git config --global pager.diff revuediff
+```
+
+Use `--paging auto|always|never`, `--pager <command>`, `--width <columns>`, and `--theme <name>`.
+Width resolves from `--width`, `LAZYGIT_COLUMNS`, `COLUMNS`, terminal width, then 80. Layout is
+stacked at 79 columns and below; at 80 it is split independently for files with both additions and
+deletions. Pager commands resolve from `--pager`, `REVUEDIFF_PAGER`, `PAGER`, then `less`;
+`GIT_PAGER` is deliberately never used. `less` is optional because a missing default pager falls
+back to direct output.
+
+Neutral rows use the terminal's default background while change tints remain coloured. Revuediff
+supports bundled theme names; `--theme auto` uses the dark default because a stdin filter cannot
+query terminal appearance safely. It deliberately does not read Revue's remembered preferences or
+custom themes under `~/.revue`. The complete input and output are intentionally buffered so
+Revuediff can prepare syntax, make exact auto-paging decisions, and fail open: unsupported,
+combined, submodule, or ambiguous input is emitted in full as sanitised text rather than partially
+formatted.
+
+Current Lazygit configuration:
+
+```yaml
+git:
+  diffRenderers:
+    - type: stdinFilter
+      name: revuediff
+      command: revuediff --paging=never
+      colorArg: never
 ```
 
 ## Installing the agent skill

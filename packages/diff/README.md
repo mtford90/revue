@@ -60,8 +60,8 @@ theme mapping live in [`@revue/diff-opentui`](../diff-opentui/README.md). Prep d
 engine. TUI-owned semantic generation, context expansion, viewport window selection, source links,
 threads and review state remain outside both packages.
 
-A future ANSI pager may consume the same plan and paint stages, but no ANSI output mode or pager is
-included in this work.
+`@revue/diff-ansi` is an implemented ANSI pager adapter consuming the same plan and paint stages;
+it owns ANSI bytes and file envelopes while this engine remains presentation-neutral.
 
 See [ADR 0013](../../docs/adr/0013-separate-patch-engine-from-presentation-adapters.md) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

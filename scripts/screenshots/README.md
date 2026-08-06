@@ -16,8 +16,10 @@ Everything lands in `scripts/screenshots/out/` (gitignored):
 - `out/work/` — throwaway fixture repositories, isolated `HOME`s, and the generated tapes
 
 The sweep is 160 vhs runs (the huge-hunk scenario also shoots a second frame after paging down) and
-takes around an hour with four scenarios in flight. Screenshots already on disk are kept, so an
-interrupted sweep resumes where it stopped; delete `out/` for a clean run.
+takes around an hour with four scenarios in flight. Every run draws every shot again, because a PNG
+on disk carries no record of the code that produced it: reusing one would let a renderer change be
+declared good without ever being rendered. Pass `--resume` to keep what an interrupted sweep already
+wrote, and only when the code has not moved since.
 
 ## How it works
 

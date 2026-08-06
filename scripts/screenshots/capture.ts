@@ -32,6 +32,8 @@ const WORKERS = 4;
 const MIN_BYTES = 4096;
 /** The status bar's quit hint: the first thing on screen once the review has painted. */
 const READY_PATTERN = "q quit";
+/** `--resume` keeps whatever an interrupted sweep already wrote instead of drawing it again. */
+const resuming = process.argv.includes("--resume");
 
 const repoRoot = resolve(import.meta.dir, "..", "..");
 const outDir = join(repoRoot, "scripts", "screenshots", "out");
@@ -123,8 +125,12 @@ const attempt = async (job: Job): Promise<{ files: string[]; stderr: string }> =
 	return { files: usable.every(Boolean) ? expected : [], stderr: run.stderr };
 };
 
-/** Shots already on disk are kept, so an interrupted sweep resumes; delete `out/` to redo them. */
+/**
+ * Shots on disk say nothing about the code that drew them, so reuse is opt-in: a sweep that
+ * silently kept stale PNGs would report a renderer change as passing without ever rendering it.
+ */
 const existingShots = async (job: Job): Promise<string[]> => {
+	if (!resuming) return [];
 	const { screenshot, paged } = shotPaths(job);
 	const expected = paged ? [screenshot, paged] : [screenshot];
 	const usable = await Promise.all(expected.map(isUsable));

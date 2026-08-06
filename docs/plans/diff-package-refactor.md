@@ -280,17 +280,22 @@ Because this moves the renderer interface, manually inspect the TUI at both requ
 re-blessing goldens:
 
 ```bash
-tmux new-session -d -s revue -x 160 -y 45 "bun run revue show examples/sample-run"
-sleep 4
-tmux send-keys -t revue "]"; sleep 0.5; tmux send-keys -t revue "c"
-tmux capture-pane -t revue -p -e
-tmux kill-session -t revue
+export TMUX_TMPDIR="${TMPDIR%/}"
+tmux_socket=agent-verify-revue
 
-tmux new-session -d -s revue -x 100 -y 36 "bun run revue show examples/sample-run"
+tmux -L "$tmux_socket" new-session -d -s revue -x 160 -y 45 "bun run revue show examples/sample-run"
 sleep 4
-tmux send-keys -t revue "]"; sleep 0.5; tmux send-keys -t revue "c"
-tmux capture-pane -t revue -p -e
-tmux kill-session -t revue
+tmux -L "$tmux_socket" send-keys -t revue "]"; sleep 0.5
+tmux -L "$tmux_socket" send-keys -t revue "c"
+tmux -L "$tmux_socket" capture-pane -t revue -p -e
+tmux -L "$tmux_socket" kill-session -t revue
+
+tmux -L "$tmux_socket" new-session -d -s revue -x 100 -y 36 "bun run revue show examples/sample-run"
+sleep 4
+tmux -L "$tmux_socket" send-keys -t revue "]"; sleep 0.5
+tmux -L "$tmux_socket" send-keys -t revue "c"
+tmux -L "$tmux_socket" capture-pane -t revue -p -e
+tmux -L "$tmux_socket" kill-session -t revue
 ```
 
 Inspect the captured split/stack geometry, gutters, wrapping, emphasis, file headers, and chapter

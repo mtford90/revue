@@ -102,7 +102,7 @@ export const GOLDEN_SCENARIOS: readonly GoldenScenario[] = [
 --- a/whitespace.ts
 +++ b/whitespace.ts
 @@ -1,3 +1,3 @@
--const value = 1;
+-const value = 1;   
 +const value = 1;
 -  const nested = 2;
 +    const nested = 2;

@@ -15,7 +15,7 @@
 # styles: row: cols fg bg [attributes]
 
 0: 0-16 fg=#73b8ff bg=#1e2228  17-47 fg=#ffffff bg=#1e2228
-1: 0-9 fg=#a4a6a9 bg=#3d262e  10-28 fg=#bfbdb6 bg=#3d262e  29-47 fg=#ffffff bg=#3d262e
+1: 0-9 fg=#a4a6a9 bg=#3d262e  10-28 fg=#bfbdb6 bg=#3d262e  29-31 fg=#bfbdb6 bg=#7c3f48  32-47 fg=#ffffff bg=#3d262e
 2: 0-9 fg=#a4a6a9 bg=#3d262e  10-31 fg=#bfbdb6 bg=#3d262e  32-47 fg=#ffffff bg=#3d262e
 3: 0-9 fg=#a4a6a9 bg=#233628  10-28 fg=#bfbdb6 bg=#233628  29-47 fg=#ffffff bg=#233628
 4: 0-9 fg=#a4a6a9 bg=#233628  10-12 fg=#bfbdb6 bg=#233628  13-16 fg=#bfbdb6 bg=#385c34  17-33 fg=#bfbdb6 bg=#233628  34-47 fg=#ffffff bg=#233628

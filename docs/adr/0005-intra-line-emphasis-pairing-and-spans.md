@@ -79,8 +79,11 @@ Whitespace-only edits do produce spans, because the background is their only vis
   mid-token can widen one side further than the other. The two range lists are independent, so the
   asymmetry is visible only as a slightly wider highlight.
 - Punctuation runs are single tokens, so changing one character of `);` emphasises the run.
-- Ranges are code-unit offsets. Widening to token boundaries keeps them off surrogate-pair and
-  grapheme-run interiors, but consumers must not treat them as code-point counts.
+- Ranges are code-unit offsets, and consumers must not treat them as code-point counts. Token
+  boundaries alone do not keep them off grapheme interiors: a combining mark tokenises as
+  punctuation, so `é` becoming `è` would otherwise emphasise the mark without its base. Ranges are
+  therefore snapped outwards to whole grapheme clusters, which the renderer relies on — it may not
+  cut a span inside a cluster.
 - Greedy pairing is quadratic in the number of lines in a change block, so a block of more than
   100,000 removed×added candidates skips pairing entirely and its rows keep their plain tint — the
   same degradation hosts apply to oversized content. Because the renderer memoises pairing, the cap

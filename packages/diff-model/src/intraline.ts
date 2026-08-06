@@ -179,6 +179,40 @@ const matchedTokens = (oldTexts: readonly string[], newTexts: readonly string[])
 	return flags;
 };
 
+const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+const asciiOnly = /^[\x20-\x7e]*$/;
+
+/** Cluster starts plus the line length, the offsets a range may legally begin or end on. */
+const graphemeBoundaries = (line: string): number[] => [
+	...[...segmenter.segment(line)].map((cluster) => cluster.index),
+	line.length,
+];
+
+const mergeTouching = (ranges: readonly IntralineRange[]): IntralineRange[] =>
+	ranges.reduce<IntralineRange[]>((merged, range) => {
+		const previous = merged.at(-1);
+		if (previous && previous.end >= range.start) previous.end = Math.max(previous.end, range.end);
+		else merged.push({ ...range });
+		return merged;
+	}, []);
+
+/**
+ * Widen ranges to whole grapheme clusters. Tokenising treats a combining mark as punctuation,
+ * so a token boundary can fall between a base character and its mark; the renderer may not cut
+ * a span there, and a mark alone is not what changed as far as a reader is concerned.
+ */
+const snappedToGraphemes = (line: string, ranges: readonly IntralineRange[]): IntralineRange[] => {
+	if (ranges.length === 0 || asciiOnly.test(line)) return [...ranges];
+	const bounds = graphemeBoundaries(line);
+	return mergeTouching(
+		ranges.map((range) => ({
+			start: bounds.findLast((bound) => bound <= range.start) ?? range.start,
+			end: bounds.find((bound) => bound >= range.end) ?? range.end,
+		})),
+	);
+};
+
 const changedRanges = (tokens: readonly Token[], matched: readonly boolean[]): IntralineRange[] => {
 	const ranges: IntralineRange[] = [];
 	for (const [index, token] of tokens.entries()) {
@@ -215,7 +249,7 @@ export const intralineSpans = ({
 		newTokens.map((token) => token.text),
 	);
 	return {
-		old: changedRanges(oldTokens, matched.old),
-		new: changedRanges(newTokens, matched.new),
+		old: snappedToGraphemes(oldLine, changedRanges(oldTokens, matched.old)),
+		new: snappedToGraphemes(newLine, changedRanges(newTokens, matched.new)),
 	};
 };

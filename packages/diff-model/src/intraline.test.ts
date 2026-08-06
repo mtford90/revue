@@ -214,6 +214,17 @@ test("cjk content yields code-unit ranges over the changed run", () => {
 	});
 });
 
+test("a combining-mark edit emphasises the whole grapheme, not the mark alone", () => {
+	const oldLine = "café latte";
+	const newLine = "cafè latte";
+	const spans = intralineSpans({ oldLine, newLine });
+	expect(spans).toEqual({
+		old: [{ start: 3, end: 5 }],
+		new: [{ start: 3, end: 5 }],
+	});
+	expect(oldLine.slice(3, 5)).toBe("é");
+});
+
 test("an emoji swap never splits a surrogate pair", () => {
 	const oldLine = "tag = 🎉 done";
 	const newLine = "tag = 🎊 done";

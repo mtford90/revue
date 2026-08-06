@@ -53,14 +53,31 @@ index 1111111..2222222 100644
 		expect(Bun.stringWidth(strip(line))).toBeLessThanOrEqual(12);
 });
 
+test("separates old and new stacked gutter values", () => {
+	const file = parsePatch(`diff --git a/a.ts b/a.ts
+index 1111111..2222222 100644
+--- a/a.ts
++++ b/a.ts
+@@ -3,2 +9,2 @@
+ context one
+ context two
+`)[0];
+	if (!file) throw new Error("fixture did not parse");
+	const output = strip(
+		formatAnsiDiffFile({ file, layout: "stack", width: 40, theme: resolveTheme("ayu-dark") }),
+	);
+	expect(output).toContain(" 3  9    context one");
+	expect(output).toContain(" 4 10    context two");
+});
+
 test("uses both planned stack gutters for changed lines", () => {
 	const file = parsePatch(patch)[0];
 	if (!file) throw new Error("fixture did not parse");
 	const output = strip(
 		formatAnsiDiffFile({ file, layout: "stack", width: 40, theme: resolveTheme("ayu-dark") }),
 	);
-	expect(output).toContain("1  - const old");
-	expect(output).toContain(" 1 + const next");
+	expect(output).toContain("1    - const old");
+	expect(output).toContain("  1  + const next");
 });
 
 test.each([

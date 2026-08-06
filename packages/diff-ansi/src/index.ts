@@ -10,10 +10,10 @@ import {
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
 
-/** Chrome emitted by this linear adapter. Gutter columns are number + sign + one edge space. */
+/** Chrome emitted by this linear adapter. Gutters reserve a trailing separator space. */
 export const ANSI_DIFF_CHROME: DiffChromeWidths = {
 	focusMarker: 0,
-	attachmentMarker: 0,
+	attachmentMarker: 1,
 	sign: 2,
 	edge: 1,
 	divider: 1,
@@ -104,7 +104,9 @@ const cellText = (
 	digits: number,
 	gutterSides: readonly ("deletions" | "additions")[],
 ) => {
-	const prefix = `${gutterSides.map((side) => number(cell.gutters?.[side]?.lineNumber, digits)).join("")} ${cell.changeSign} `;
+	const prefix = `${gutterSides
+		.map((side) => number(cell.gutters?.[side]?.lineNumber, digits))
+		.join(" ")}  ${cell.changeSign} `;
 	const spans = cell.spans
 		.map(
 			(span) =>

@@ -152,7 +152,7 @@ export interface DiffCell {
 	kind: "context" | "addition" | "deletion" | "empty";
 	/** Sanitized, tab-expanded source text used for terminal geometry. */
 	text: string;
-	/** Raw source text without its line ending, retained for paint-range offsets. */
+	/** Offset-only unsanitised source. Never serialise or render it; present sanitized spans instead. */
 	rawText: string;
 	spans: RenderSpan[];
 	oldLineNumber?: number;

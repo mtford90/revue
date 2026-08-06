@@ -2,6 +2,8 @@ export { attachmentsForRow, type DiffInlineAttachment } from "./attachments.ts";
 export {
 	DiffBody,
 	type DiffBodyProps,
+	type DiffBodyStandaloneProps,
+	type DiffBodySuppliedPlanProps,
 	DiffFileHeader,
 	type DiffFileHeaderProps,
 	type ExpandDirection,

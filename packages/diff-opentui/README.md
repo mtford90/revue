@@ -17,12 +17,13 @@ const plan = planDiff({
   visibility: { lineNumbers: true, hunkHeaders: true },
   chrome: OPENTUI_DIFF_CHROME,
 });
-<DiffBody plan={plan} file={file} layout="split" width={100} theme={theme} />;
+<DiffBody plan={plan} theme={theme} />;
 ```
 
 Hosts that measure or navigate a diff should pass the same plan to `DiffBody`; Revue's TUI does so
-for viewport heights, source anchors, attachment indices and rendering. A standalone body may omit
-`plan`, in which case the adapter plans once from its stable file/layout/width/visibility inputs.
+for viewport heights, source anchors, attachment indices and rendering. Supplied-plan props exclude
+file, layout, width and visibility inputs, so the plan is the only geometry authority. A standalone
+body instead passes `file`, `layout`, `width` and optional visibility inputs while omitting `plan`.
 Either path uses the adapter's single `OPENTUI_DIFF_CHROME` declaration. Decorations, hunk focus and
 pointer selection are painted only over the supplied logical-row window and never rebuild wrapping.
 

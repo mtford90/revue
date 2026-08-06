@@ -60,6 +60,35 @@ const cellsOfKind = (rows: readonly PaintedDiffRow[], kind: string) =>
 		return visual ? [visual.old, visual.new].filter((cell) => cell.kind === kind) : [];
 	});
 
+const wrappedStackSpans = ({
+	file,
+	width,
+	kind,
+	emphasis,
+}: {
+	file: DiffFile;
+	width: number;
+	kind: "addition" | "deletion";
+	emphasis?: SpanEmphasis;
+}) => {
+	const rows = paintDiff({
+		plan: planDiff({
+			file,
+			layout: "stack",
+			width,
+			visibility: { lineNumbers: false, hunkHeaders: true },
+			chrome,
+		}),
+		styles,
+		emphasis,
+	}).rows;
+	const row = rows.find(
+		(candidate) => candidate.type === "stack-line" && candidate.visualRows[0]?.cell.kind === kind,
+	);
+	if (row?.type !== "stack-line") throw new Error(`missing ${kind} row`);
+	return row.visualRows.map(({ cell }) => cell.spans);
+};
+
 test("paint emphasis splits a stable planned line into dim base and glowing novel tokens", () => {
 	const [file] = parsePatch(patch);
 	if (!file) throw new Error("patch must parse");
@@ -164,5 +193,56 @@ test("intra-line backgrounds line up with tab-expanded columns", () => {
 		{ text: "  const value = ", fg: "#ffffff" },
 		{ text: "42", bg: "#0a3d0a", fg: "#ffffff" },
 		{ text: ";", fg: "#ffffff" },
+	]);
+});
+
+test("novel paint spans every wrapped continuation at exact local offsets", () => {
+	const file = parseOne(`diff --git a/novel-wrap.ts b/novel-wrap.ts
+--- a/novel-wrap.ts
++++ b/novel-wrap.ts
+@@ -1 +1 @@
+-0123456789abcdef
++0123456789ABCDEF
+`);
+
+	expect(
+		wrappedStackSpans({
+			file,
+			width: 8,
+			kind: "addition",
+			emphasis: {
+				rangesFor: (side, line) =>
+					side === "additions" && line === 1 ? [{ start: 6, end: 11 }] : undefined,
+				deletionsFg: "#ff0000",
+				additionsFg: "#00ff00",
+			},
+		}),
+	).toEqual([
+		[
+			{ text: "012345", dim: true, fg: "#ffffff" },
+			{ text: "67", fg: "#00ff00", bold: true },
+		],
+		[
+			{ text: "89A", fg: "#00ff00", bold: true },
+			{ text: "BCDEF", dim: true, fg: "#ffffff" },
+		],
+	]);
+});
+
+test("tab-adjusted intra-line paint crosses a wrap boundary on every continuation", () => {
+	const file = parseOne(`diff --git a/tab-wrap.ts b/tab-wrap.ts
+--- a/tab-wrap.ts
++++ b/tab-wrap.ts
+@@ -1 +1 @@
+-\tconst alphaTail
++\tconst omegaTail
+`);
+
+	expect(wrappedStackSpans({ file, width: 10, kind: "addition" })).toEqual([
+		[
+			{ text: "  const ", fg: "#ffffff" },
+			{ text: "om", bg: "#0a3d0a", fg: "#ffffff" },
+		],
+		[{ text: "egaTail", bg: "#0a3d0a", fg: "#ffffff" }],
 	]);
 });

@@ -28,6 +28,8 @@ import { diffLineId } from "./selectionIds.ts";
 import { diffPlanStyles, OPENTUI_DIFF_CHROME } from "./styles.ts";
 
 const RIGHT_MOUSE_BUTTON = 2;
+const EMPTY_DECORATIONS: readonly RangeDecoration[] = [];
+const EMPTY_ATTACHMENTS: readonly DiffInlineAttachment[] = [];
 
 const lineNumber = (value: number | undefined, digits: number) =>
 	value === undefined ? " ".repeat(digits) : String(value).padStart(digits);
@@ -346,15 +348,8 @@ function StackLine({
 	);
 }
 
-export interface DiffBodyProps {
-	/** A host-supplied plan lets measurement, anchoring and rendering share exact row identities. */
-	plan?: DiffVisualPlan;
-	file?: DiffFileInput;
-	layout?: DiffLayout;
-	width: number;
+interface DiffBodyPaintProps {
 	theme: Theme;
-	showLineNumbers?: boolean;
-	showHunkHeaders?: boolean;
 	selectedHunkIndex?: number;
 	decorations?: readonly RangeDecoration[];
 	focusedDecorationId?: string;
@@ -371,6 +366,29 @@ export interface DiffBodyProps {
 	onRangeSelect?: (range: DiffLineRange) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
 }
+
+/** Host-authoritative geometry: redundant planning inputs are deliberately forbidden. */
+export type DiffBodySuppliedPlanProps = DiffBodyPaintProps & {
+	plan: DiffVisualPlan;
+	file?: never;
+	layout?: never;
+	width?: never;
+	showLineNumbers?: never;
+	showHunkHeaders?: never;
+};
+
+/** Standalone embedding: the adapter owns one plan from these explicit geometry inputs. */
+export type DiffBodyStandaloneProps = DiffBodyPaintProps & {
+	plan?: undefined;
+	file: DiffFileInput;
+	layout?: DiffLayout;
+	width: number;
+	showLineNumbers?: boolean;
+	showHunkHeaders?: boolean;
+};
+
+/** Exactly one geometry authority: either a complete host plan or standalone planning inputs. */
+export type DiffBodyProps = DiffBodySuppliedPlanProps | DiffBodyStandaloneProps;
 
 export type ExpandDirection = "up" | "down" | "all";
 
@@ -426,64 +444,69 @@ function emptyBodyMessage(file: DiffFile): string {
 }
 
 /** Render a file body by mounting the engine's complete visual plan. */
-export function DiffBody({
-	plan: suppliedPlan,
-	file,
-	layout = "split",
-	width,
-	theme,
-	showLineNumbers = true,
-	showHunkHeaders = true,
-	selectedHunkIndex = 0,
-	decorations = [],
-	focusedDecorationId,
-	selectedRange,
-	inlineAttachments = [],
-	emphasis,
-	resolveRange,
-	expanders,
-	window: rowWindow,
-	onAttachmentNode,
-	onRangeSelect,
-	onRangeContextMenu,
-}: DiffBodyProps) {
-	const normalized = useMemo(
-		() => suppliedPlan?.file ?? (file ? createDiffFile(file) : undefined),
-		[suppliedPlan, file],
-	);
-	const geometry = useMemo(
-		() =>
-			suppliedPlan ??
-			(normalized
-				? planDiff({
-						file: normalized,
-						layout,
-						width,
-						visibility: { lineNumbers: showLineNumbers, hunkHeaders: showHunkHeaders },
-						chrome: OPENTUI_DIFF_CHROME,
-						syntaxTheme: theme.syntaxTheme,
-					})
-				: undefined),
-		[suppliedPlan, normalized, layout, width, showLineNumbers, showHunkHeaders, theme.syntaxTheme],
-	);
+export function DiffBody(props: DiffBodyProps) {
+	const {
+		theme,
+		selectedHunkIndex = 0,
+		decorations = EMPTY_DECORATIONS,
+		focusedDecorationId,
+		selectedRange,
+		inlineAttachments = EMPTY_ATTACHMENTS,
+		emphasis,
+		resolveRange,
+		expanders,
+		window: rowWindow,
+		onAttachmentNode,
+		onRangeSelect,
+		onRangeContextMenu,
+	} = props;
+	const geometry = useMemo(() => {
+		if (props.plan) return props.plan;
+		return planDiff({
+			file: createDiffFile(props.file),
+			layout: props.layout ?? "split",
+			width: props.width,
+			visibility: {
+				lineNumbers: props.showLineNumbers ?? true,
+				hunkHeaders: props.showHunkHeaders ?? true,
+			},
+			chrome: OPENTUI_DIFF_CHROME,
+			syntaxTheme: theme.syntaxTheme,
+		});
+	}, [
+		props.plan,
+		props.file,
+		props.layout,
+		props.width,
+		props.showLineNumbers,
+		props.showHunkHeaders,
+		theme.syntaxTheme,
+	]);
+	const normalized = geometry.file;
 	const activeStart = useRef<DiffLineRange | null>(null);
 	const activeRange = useRef<DiffLineRange | null>(null);
 	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
 	const displayedRange = dragRange ?? selectedRange;
-	const selectionDecoration: RangeDecoration | null = displayedRange
-		? {
-				...displayedRange,
-				id: "diff-pointer-selection",
-				active: true,
-				backgroundColor: theme.selectedHunk,
-			}
-		: null;
-	const renderedDecorations = selectionDecoration
-		? [selectionDecoration, ...decorations]
-		: decorations;
+	const selectionDecoration = useMemo<RangeDecoration | null>(
+		() =>
+			displayedRange
+				? {
+						...displayedRange,
+						id: "diff-pointer-selection",
+						active: true,
+						backgroundColor: theme.selectedHunk,
+					}
+				: null,
+		[displayedRange, theme.selectedHunk],
+	);
+	const renderedDecorations = useMemo(
+		() => (selectionDecoration ? [selectionDecoration, ...decorations] : decorations),
+		[selectionDecoration, decorations],
+	);
 	const styles = useMemo(() => diffPlanStyles(theme), [theme]);
-	const painted = geometry
-		? paintDiff({
+	const painted = useMemo(
+		() =>
+			paintDiff({
 				plan: geometry,
 				styles,
 				window: rowWindow,
@@ -491,11 +514,20 @@ export function DiffBody({
 				focusedDecorationId,
 				emphasis,
 				selectedHunkIndex,
-			})
-		: undefined;
+			}),
+		[
+			geometry,
+			styles,
+			rowWindow,
+			renderedDecorations,
+			focusedDecorationId,
+			emphasis,
+			selectedHunkIndex,
+		],
+	);
 	const anchor = useMemo(
 		() =>
-			normalized && focusedDecorationId
+			focusedDecorationId
 				? findFocusedDecorationAnchor(normalized, decorations, focusedDecorationId)
 				: null,
 		[normalized, decorations, focusedDecorationId],
@@ -615,7 +647,6 @@ export function DiffBody({
 		setDragRange(null);
 	};
 
-	if (!normalized || !geometry || !painted) return <text fg={theme.muted}>No file selected.</text>;
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length)
 		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
 

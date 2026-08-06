@@ -1,5 +1,4 @@
 import type { DiffFile, DiffLayout, DiffRow, DiffSide } from "./types.ts";
-import { wrappedRowCount } from "./wrap.ts";
 
 /** Declarative terminal chrome reserved around code by a presentation adapter. */
 export type DiffChromeWidths = {
@@ -96,13 +95,3 @@ export const stackGutterSides = (rows: readonly DiffRow[]): DiffSide[] =>
 				(side === "deletions" ? row.cell.oldLineNumber : row.cell.newLineNumber) !== undefined,
 		),
 	);
-
-/** Visual rows one logical row renders as. */
-export const rowVisualHeight = (row: DiffRow, widths: CodeWidths): number => {
-	if (row.type === "hunk-header") return 1;
-	if (row.type === "stack-line") return wrappedRowCount(row.cell.spans, widths.additions);
-	return Math.max(
-		wrappedRowCount(row.old.spans, widths.deletions),
-		wrappedRowCount(row.new.spans, widths.additions),
-	);
-};

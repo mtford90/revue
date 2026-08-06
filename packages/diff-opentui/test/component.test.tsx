@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
-import { parsePatch, prepareSyntaxHighlighting } from "@revue/diff";
+import { parsePatch, planDiff, prepareSyntaxHighlighting } from "@revue/diff";
 import { resolveTheme } from "@revue/theme";
 import { act } from "react";
-import { DiffBody, DiffFileHeader, diffLineId } from "../src/index.ts";
+import { DiffBody, DiffFileHeader, diffLineId, OPENTUI_DIFF_CHROME } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -205,6 +205,40 @@ test("stack context focus uses the requested side's visible highlight", async ()
 	expect(lines[contextIndex]).toContain("▌");
 	expect(contextBackground).toBeDefined();
 	expect(contextBackground).not.toEqual(unfocusedBackground);
+});
+
+test("host-supplied and standalone plans render equivalent component geometry", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const width = 60;
+	const plan = planDiff({
+		file,
+		layout: "split",
+		width,
+		visibility: { lineNumbers: false, hunkHeaders: false },
+		chrome: OPENTUI_DIFF_CHROME,
+		syntaxTheme: theme.syntaxTheme,
+	});
+	const standalone = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="split"
+			width={width}
+			showLineNumbers={false}
+			showHunkHeaders={false}
+		/>,
+		{ width, height: 8 },
+	);
+	const supplied = await testRender(<DiffBody plan={plan} theme={theme} />, {
+		width,
+		height: 8,
+	});
+
+	await standalone.renderOnce();
+	await supplied.renderOnce();
+	expect(supplied.captureCharFrame()).toBe(standalone.captureCharFrame());
+	expect(supplied.captureSpans()).toEqual(standalone.captureSpans());
 });
 
 test("split rows keep one divider column at odd widths regardless of content length", async () => {

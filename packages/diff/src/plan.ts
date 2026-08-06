@@ -40,6 +40,10 @@ export type PlannedGutter = {
 };
 
 export type PlannedCellPaintSource = {
+	/**
+	 * Offset-only, unsanitised source retained to translate paint ranges after tab expansion.
+	 * It must never be serialised or rendered; use the planned cell spans for presentation.
+	 */
 	rawText: string;
 	intralineRanges: readonly EmphasisRange[];
 };

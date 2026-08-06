@@ -196,7 +196,7 @@ export const planViewportFiles = ({
 	syntaxTheme?: string;
 }): PlannedViewportFile[] =>
 	files.map((file) => {
-		if (!file.displayed) return file;
+		if (!file.displayed || file.collapsed) return file;
 		let byGeometry = geometryCache.get(file.displayed);
 		if (!byGeometry) {
 			byGeometry = new Map();

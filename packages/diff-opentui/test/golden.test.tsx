@@ -2,10 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
-import { type DiffLayout, parsePatch } from "@revue/diff";
+import { type DiffLayout, parsePatch, planDiff } from "@revue/diff";
 import { resolveTheme } from "@revue/theme";
 import { act } from "react";
-import { DiffBody } from "../src/index.ts";
+import { DiffBody, OPENTUI_DIFF_CHROME } from "../src/index.ts";
 import { unifiedDiff } from "./goldens/diffText.ts";
 import { GOLDEN_LAYOUTS, GOLDEN_SCENARIOS, type GoldenScenario } from "./goldens/scenarios.ts";
 import { serialiseFrame } from "./goldens/serialise.ts";
@@ -40,10 +40,18 @@ const render = async ({ scenario, layout, width }: Case): Promise<string> => {
 	if (!file) throw new Error(`scenario ${scenario.name} has no parsable file`);
 	// Syntax highlighting is prepared asynchronously and depends on a WASM grammar,
 	// so goldens deliberately render unhighlighted text.
-	const rendered = await renderOpenTui(
-		<DiffBody file={file} theme={theme} layout={layout} width={width} />,
-		{ width, height: scenario.height },
-	);
+	const plan = planDiff({
+		file,
+		layout,
+		width,
+		visibility: { lineNumbers: true, hunkHeaders: true },
+		chrome: OPENTUI_DIFF_CHROME,
+		syntaxTheme: theme.syntaxTheme,
+	});
+	const rendered = await renderOpenTui(<DiffBody plan={plan} theme={theme} />, {
+		width,
+		height: scenario.height,
+	});
 	activeRenderers.push(rendered.renderer);
 	await rendered.renderOnce();
 	return serialiseFrame(

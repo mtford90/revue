@@ -137,3 +137,81 @@ test("paint-only focus and hunk selection decorate only the requested window", (
 	expect(plan.rows.map((planned) => planned.height)).toEqual(geometryHeights);
 	expect(focused.plan).toBe(plan);
 });
+
+test("split paint keeps multi-line decoration focus isolated to its requested side", () => {
+	const [decoratedFile] = parsePatch(`diff --git a/decorated.ts b/decorated.ts
+--- a/decorated.ts
++++ b/decorated.ts
+@@ -1,3 +1,3 @@
+-old one
+-old two
+-old three
++new one
++new two
++new three
+`);
+	if (!decoratedFile) throw new Error("missing decoration fixture");
+	const plan = planDiff({
+		file: decoratedFile,
+		layout: "split",
+		width: 80,
+		visibility: { lineNumbers: true, hunkHeaders: true },
+		chrome: reservedChrome,
+	});
+	const painted = paintDiff({
+		plan,
+		styles,
+		decorations: [
+			{
+				id: "deleted-lines",
+				focusId: "review-focus",
+				filePath: "decorated.ts",
+				side: "deletions",
+				startLine: 1,
+				endLine: 2,
+			},
+			{
+				id: "active-additions",
+				filePath: "decorated.ts",
+				side: "additions",
+				startLine: 2,
+				endLine: 3,
+				active: true,
+				backgroundColor: "#abc",
+				showGutterMarker: false,
+			},
+		],
+		focusedDecorationId: "review-focus",
+	});
+	const lines = painted.rows.flatMap((row) =>
+		row.type === "split-line" ? [row.visualRows[0]] : [],
+	);
+
+	expect(
+		lines.map((line) => ({
+			oldBackground: line?.old.backgroundColor,
+			newBackground: line?.new.backgroundColor,
+			oldMarker: line?.old.gutters?.deletions?.focused,
+			newMarker: line?.new.gutters?.additions?.focused,
+		})),
+	).toEqual([
+		{
+			oldBackground: styles.deletionFocusedBackground,
+			newBackground: styles.additionBackground,
+			oldMarker: true,
+			newMarker: false,
+		},
+		{
+			oldBackground: styles.deletionFocusedBackground,
+			newBackground: "#abc",
+			oldMarker: true,
+			newMarker: false,
+		},
+		{
+			oldBackground: styles.deletionBackground,
+			newBackground: "#abc",
+			oldMarker: false,
+			newMarker: false,
+		},
+	]);
+});

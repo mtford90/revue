@@ -1569,8 +1569,6 @@ function ChapterView({
 	bodyPlans,
 	windowPlan,
 	width,
-	diffPreference,
-	splitFits,
 	vs,
 	pathDisplay,
 	selectedFile,
@@ -1600,8 +1598,6 @@ function ChapterView({
 	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
 	windowPlan: WindowPlanItem[];
 	width: number;
-	diffPreference: DiffLayoutPreference;
-	splitFits: boolean;
 	vs: ViewState;
 	pathDisplay: PathDisplayMode;
 	selectedFile: number;
@@ -1733,19 +1729,13 @@ function ChapterView({
 					);
 				}
 				const displayed = contextExpansion?.variantFor(path) ?? diffFile;
+				const plan = bodyPlans.get(path);
+				if (!plan) return null;
 				return (
 					<DiffBody
 						key={item.id}
-						plan={bodyPlans.get(path)}
-						file={displayed}
+						plan={plan}
 						theme={diffTheme}
-						layout={layoutForFile({
-							file: displayed,
-							preference: diffPreference,
-							splitFits,
-						})}
-						width={width}
-						showLineNumbers
 						selectedHunkIndex={focused ? selectedHunkIndex : -1}
 						decorations={decorations}
 						focusedDecorationId={focusedDecorationId}
@@ -1815,8 +1805,6 @@ function SemanticChapterView({
 	bodyPlans,
 	windowPlan,
 	width,
-	diffPreference,
-	splitFits,
 	vs,
 	pathDisplay,
 	selectedFile,
@@ -1844,8 +1832,6 @@ function SemanticChapterView({
 	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
 	windowPlan: WindowPlanItem[];
 	width: number;
-	diffPreference: DiffLayoutPreference;
-	splitFits: boolean;
 	vs: ViewState;
 	pathDisplay: PathDisplayMode;
 	selectedFile: number;
@@ -1880,6 +1866,19 @@ function SemanticChapterView({
 			showGutterMarker: false,
 		}));
 	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
+	const emphasisByPath = useMemo(() => {
+		const emphasis = new Map<string, SpanEmphasis>();
+		for (const file of semantic.files) {
+			if (!file.file) continue;
+			emphasis.set(file.path, {
+				rangesFor: (side, line) =>
+					(side === "deletions" ? file.emphasis.deletions : file.emphasis.additions).get(line),
+				deletionsFg: theme.badgeRemoved,
+				additionsFg: theme.badgeAdded,
+			});
+		}
+		return emphasis;
+	}, [semantic, theme.badgeRemoved, theme.badgeAdded]);
 	const chapterThreads = threads.filter((thread) => paths.includes(thread.anchor.filePath));
 	const inlineAttachments: DiffInlineAttachment[] = [
 		...chapterThreads.map((thread) => ({
@@ -1994,29 +1993,14 @@ function SemanticChapterView({
 					);
 				}
 				if (!semanticFile.file) return null;
-				const emphasis: SpanEmphasis = {
-					rangesFor: (side, line) =>
-						(side === "deletions"
-							? semanticFile.emphasis.deletions
-							: semanticFile.emphasis.additions
-						).get(line),
-					deletionsFg: theme.badgeRemoved,
-					additionsFg: theme.badgeAdded,
-				};
+				const emphasis = emphasisByPath.get(path);
+				const plan = bodyPlans.get(path);
+				if (!emphasis || !plan) return null;
 				return (
 					<DiffBody
 						key={item.id}
-						plan={bodyPlans.get(path)}
-						file={semanticFile.file}
+						plan={plan}
 						theme={diffTheme}
-						layout={layoutForFile({
-							file: semanticFile.file,
-							preference: diffPreference,
-							splitFits,
-						})}
-						width={width}
-						showLineNumbers
-						showHunkHeaders={false}
 						selectedHunkIndex={-1}
 						decorations={decorations}
 						focusedDecorationId={focusedDecorationId}
@@ -4012,10 +3996,8 @@ export function App({
 									bodyPlans={bodyPlans}
 									windowPlan={windowPlan}
 									width={contentWidth}
-									diffPreference={diffPreference}
 									contextExpansion={contextExpansion}
 									onAttachmentNode={noteAttachmentNode}
-									splitFits={splitFits}
 									vs={vs}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
@@ -4049,9 +4031,7 @@ export function App({
 									bodyPlans={bodyPlans}
 									windowPlan={windowPlan}
 									width={contentWidth}
-									diffPreference={diffPreference}
 									onAttachmentNode={noteAttachmentNode}
-									splitFits={splitFits}
 									vs={vs}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}

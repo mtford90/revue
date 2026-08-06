@@ -189,6 +189,45 @@ describe("viewportSegments", () => {
 		expect(resized).not.toBe(first);
 	});
 
+	test("does not plan collapsed bodies and reuses their geometry after expansion", () => {
+		const [file] = parsePatch(`diff --git a/collapsed.ts b/collapsed.ts
+--- a/collapsed.ts
++++ b/collapsed.ts
+@@ -1 +1 @@
+-old
++${"expanded ".repeat(20)}
+`);
+		if (!file) throw new Error("missing collapsed fixture");
+		const source = {
+			path: "collapsed.ts",
+			displayed: file,
+			separator: false,
+			layout: "stack" as const,
+		};
+		const plan = (collapsed: boolean) =>
+			planViewportFiles({
+				files: [{ ...source, collapsed }],
+				width: 40,
+				chrome: OPENTUI_DIFF_CHROME,
+			})[0];
+
+		const initiallyCollapsed = plan(true);
+		expect(initiallyCollapsed?.plan).toBeUndefined();
+		expect(
+			viewportSegments({
+				files: initiallyCollapsed ? [initiallyCollapsed] : [],
+				attachments: [],
+				attachmentHeight: () => 0,
+			}),
+		).toEqual([{ id: "head:collapsed.ts", heights: [1] }]);
+
+		const expanded = plan(false);
+		if (!expanded?.plan) throw new Error("expansion must plan the body");
+		expect(expanded.plan.totalHeight).toBeGreaterThan(1);
+		expect(plan(true)?.plan).toBeUndefined();
+		expect(plan(false)?.plan).toBe(expanded.plan);
+	});
+
 	test("uses one planned identity for wrapped anchors, attachments, hidden headers, and expanders", () => {
 		const [file] = parsePatch(`diff --git a/identity.ts b/identity.ts
 --- a/identity.ts

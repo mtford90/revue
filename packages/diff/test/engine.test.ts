@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
+import { applicableDecorations } from "../src/decorations.ts";
 import {
-	applicableDecorations,
-	buildDiffRows,
 	findFocusedDecorationAnchor,
 	inferLanguage,
 	parsePatch,
 	prepareSyntaxHighlighting,
 	type RangeDecoration,
 	rangeToHunkIndex,
-	sanitizeTerminalSpans,
 } from "../src/index.ts";
+import { buildDiffRows } from "../src/rows.ts";
+import { sanitizeTerminalSpans } from "../src/terminalText.ts";
 
 const SYNTAX_THEME = "catppuccin-mocha";
 
@@ -93,25 +93,7 @@ test("inclusive decorations affect only requested sides and lines and support mu
 			endLine: 13,
 		},
 	];
-	const rows = buildDiffRows(source, "split", {
-		decorations,
-		focusedDecorationId: "key-change",
-	}).filter((row) => row.type === "split-line");
-
-	expect(
-		rows.map((row) => ({
-			old: row.old.decorations.deletions ?? [],
-			new: row.new.decorations.additions ?? [],
-			oldFocused: row.old.focusedSides,
-			newFocused: row.new.focusedSides,
-		})),
-	).toEqual([
-		{ old: [], new: [], oldFocused: [], newFocused: [] },
-		{ old: ["old-11"], new: [], oldFocused: ["deletions"], newFocused: [] },
-		{ old: [], new: ["new-12-13"], oldFocused: [], newFocused: ["additions"] },
-		{ old: [], new: ["new-12-13"], oldFocused: [], newFocused: ["additions"] },
-		{ old: [], new: [], oldFocused: [], newFocused: [] },
-	]);
+	expect(applicableDecorations(source, decorations)).toEqual(decorations);
 
 	expect(findFocusedDecorationAnchor(source, decorations, "key-change")).toEqual({
 		decorationId: "old-11",

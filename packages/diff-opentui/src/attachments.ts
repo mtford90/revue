@@ -1,5 +1,9 @@
-import type { DiffFile, DiffLineRange, DiffRow, DiffSide } from "@revue/diff";
-import { rowLineRange } from "@revue/diff";
+import {
+	type DiffLineRange,
+	type DiffSide,
+	type PlannedDiffRow,
+	plannedRowIdentity,
+} from "@revue/diff";
 import type { ReactNode } from "react";
 
 export type DiffInlineAttachment = {
@@ -8,21 +12,29 @@ export type DiffInlineAttachment = {
 	content: ReactNode;
 };
 
-/** The React-valued inline attachments anchored after this logical rendered row. */
+/** The React-valued inline attachments anchored after this exact planned logical row. */
 export const attachmentsForRow = ({
-	file,
 	row,
 	attachments,
 	resolveRange,
 }: {
-	file: DiffFile;
-	row: DiffRow;
+	row: PlannedDiffRow;
 	attachments: readonly DiffInlineAttachment[];
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
 }): DiffInlineAttachment[] => {
 	if (row.type === "hunk-header") return [];
 	return attachments.filter((attachment) => {
-		const range = rowLineRange({ file, row, side: attachment.anchor.side, resolveRange });
+		const identity = plannedRowIdentity(row, attachment.anchor.side);
+		if (!identity) return false;
+		const range = resolveRange
+			? resolveRange(identity.side, identity.lineNumber)
+			: {
+					filePath: identity.filePath,
+					hunkOldStart: identity.hunkOldStart,
+					side: identity.side,
+					startLine: identity.lineNumber,
+					endLine: identity.lineNumber,
+				};
 		return (
 			range !== null &&
 			range.filePath === attachment.anchor.filePath &&

@@ -11,16 +11,6 @@ export type DiffChromeWidths = {
 	minimumCode: number;
 };
 
-/** Existing OpenTUI geometry; other adapters must state their own request explicitly. */
-export const DEFAULT_DIFF_CHROME: DiffChromeWidths = {
-	focusMarker: 1,
-	attachmentMarker: 3,
-	sign: 3,
-	edge: 1,
-	divider: 1,
-	minimumCode: 8,
-};
-
 /** Columns one line-number gutter occupies. */
 const gutterColumns = ({
 	digits,
@@ -35,7 +25,7 @@ const gutterColumns = ({
 /** The two panes a split row divides `width` into after its declared divider. */
 export const splitPaneWidths = (
 	width: number,
-	dividerColumns = DEFAULT_DIFF_CHROME.divider,
+	dividerColumns: number,
 ): { old: number; new: number } => {
 	const content = Math.max(0, width - dividerColumns);
 	const old = Math.floor(content / 2);
@@ -62,16 +52,16 @@ export const diffCodeWidths = ({
 	width,
 	layout,
 	digits,
-	showLineNumbers = true,
-	stackGutters = 2,
-	chrome = DEFAULT_DIFF_CHROME,
+	showLineNumbers,
+	stackGutters,
+	chrome,
 }: {
 	width: number;
 	layout: DiffLayout;
 	digits: number;
-	showLineNumbers?: boolean;
-	stackGutters?: number;
-	chrome?: DiffChromeWidths;
+	showLineNumbers: boolean;
+	stackGutters: number;
+	chrome: DiffChromeWidths;
 }): CodeWidths => {
 	const gutter = gutterColumns({ digits, showLineNumbers, chrome });
 	if (layout === "stack") {

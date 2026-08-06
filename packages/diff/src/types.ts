@@ -150,14 +150,15 @@ export type SpanEmphasis = {
 
 export interface DiffCell {
 	kind: "context" | "addition" | "deletion" | "empty";
+	/** Sanitized, tab-expanded source text used for terminal geometry. */
 	text: string;
+	/** Raw source text without its line ending, retained for paint-range offsets. */
+	rawText: string;
 	spans: RenderSpan[];
 	oldLineNumber?: number;
 	newLineNumber?: number;
-	decorations: Partial<Record<DiffSide, string[]>>;
-	focusedSides: DiffSide[];
-	focusedBackgrounds: Partial<Record<DiffSide, string>>;
-	gutterFocusedSides: DiffSide[];
+	/** Tab-adjusted intra-line ranges; paint colours are deliberately not part of geometry. */
+	intralineRanges: readonly EmphasisRange[];
 }
 
 export type DiffRow =

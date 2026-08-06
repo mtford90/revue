@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { parsePatch } from "./index.ts";
-import { buildDiffRows, intralineRangesFor } from "./rows.ts";
+import { type DiffPlanStyles, type PaintedDiffRow, paintDiff, planDiff } from "./plan.ts";
+import { intralineRangesFor } from "./rows.ts";
+import type { DiffFile, DiffLayout, SpanEmphasis } from "./types.ts";
 
 const patch = `diff --git a/x.ts b/x.ts
 --- a/x.ts
@@ -10,32 +12,75 @@ const patch = `diff --git a/x.ts b/x.ts
 +const value = 42;
 `;
 
-test("emphasis splits changed lines into dim base and glowing novel tokens", () => {
+const styles: DiffPlanStyles = {
+	text: "#ffffff",
+	contextBackground: "#000000",
+	additionBackground: "#001100",
+	deletionBackground: "#110000",
+	additionFocusedBackground: "#002200",
+	deletionFocusedBackground: "#220000",
+	selectedHunkBackground: "#222222",
+	intralineAdditionBackground: "#0a3d0a",
+	intralineDeletionBackground: "#3d0a0a",
+};
+const chrome = {
+	focusMarker: 0,
+	attachmentMarker: 0,
+	sign: 0,
+	edge: 0,
+	divider: 0,
+	minimumCode: 1,
+};
+
+const paintedRows = (
+	file: DiffFile,
+	layout: DiffLayout,
+	emphasis?: SpanEmphasis,
+): PaintedDiffRow[] =>
+	paintDiff({
+		plan: planDiff({
+			file,
+			layout,
+			width: 200,
+			visibility: { lineNumbers: true, hunkHeaders: true },
+			chrome,
+		}),
+		styles,
+		emphasis,
+	}).rows;
+
+const cellsOfKind = (rows: readonly PaintedDiffRow[], kind: string) =>
+	rows.flatMap((row) => {
+		if (row.type === "stack-line") {
+			const cell = row.visualRows[0]?.cell;
+			return cell?.kind === kind ? [cell] : [];
+		}
+		if (row.type !== "split-line") return [];
+		const visual = row.visualRows[0];
+		return visual ? [visual.old, visual.new].filter((cell) => cell.kind === kind) : [];
+	});
+
+test("paint emphasis splits a stable planned line into dim base and glowing novel tokens", () => {
 	const [file] = parsePatch(patch);
 	if (!file) throw new Error("patch must parse");
-	const rows = buildDiffRows(file, "stack", {
-		emphasis: {
-			rangesFor: (side, line) =>
-				side === "additions" && line === 1 ? [{ start: 14, end: 16 }] : undefined,
-			deletionsFg: "#ff0000",
-			additionsFg: "#00ff00",
-		},
+	const rows = paintedRows(file, "stack", {
+		rangesFor: (side, line) =>
+			side === "additions" && line === 1 ? [{ start: 14, end: 16 }] : undefined,
+		deletionsFg: "#ff0000",
+		additionsFg: "#00ff00",
 	});
-	const addition = rows.flatMap((row) =>
-		row.type === "stack-line" && row.cell.kind === "addition" ? [row.cell] : [],
-	)[0];
-	expect(addition?.spans).toEqual([
-		{ text: "const value = ", dim: true },
-		{ text: "42", fg: "#00ff00", bold: true },
-		{ text: ";", dim: true },
-	]);
-	const deletion = rows.flatMap((row) =>
-		row.type === "stack-line" && row.cell.kind === "deletion" ? [row.cell] : [],
-	)[0];
-	expect(deletion?.spans).toEqual([{ text: "-const value = 1;".slice(1) }]);
-});
 
-const intralineEmphasis = { deletionsBg: "#3d0a0a", additionsBg: "#0a3d0a" };
+	expect(cellsOfKind(rows, "addition")[0]?.spans).toEqual([
+		{ text: "const value = ", dim: true, fg: "#ffffff" },
+		{ text: "42", fg: "#00ff00", bold: true },
+		{ text: ";", dim: true, fg: "#ffffff" },
+	]);
+	expect(cellsOfKind(rows, "deletion")[0]?.spans).toEqual([
+		{ text: "const value = ", fg: "#ffffff" },
+		{ text: "1", bg: "#3d0a0a", fg: "#ffffff" },
+		{ text: ";", fg: "#ffffff" },
+	]);
+});
 
 const pairingPatch = `diff --git a/x.ts b/x.ts
 --- a/x.ts
@@ -53,57 +98,45 @@ const parseOne = (source: string) => {
 	return file;
 };
 
-const cellsOfKind = (rows: ReturnType<typeof buildDiffRows>, kind: string) =>
-	rows.flatMap((row) => {
-		if (row.type === "stack-line") return row.cell.kind === kind ? [row.cell] : [];
-		if (row.type !== "split-line") return [];
-		return [row.old, row.new].filter((cell) => cell.kind === kind);
-	});
-
 test.each([
 	"split",
 	"stack",
 ] as const)("paired change lines take intra-line backgrounds in %s layout", (layout) => {
-	const rows = buildDiffRows(parseOne(pairingPatch), layout, { intralineEmphasis });
-
-	expect(cellsOfKind(rows, "addition").map((cell) => cell.spans)).toEqual([
-		[{ text: "const value = " }, { text: "42", bg: "#0a3d0a" }, { text: ";" }],
-	]);
-	expect(cellsOfKind(rows, "deletion").map((cell) => cell.spans)).toEqual([
-		[{ text: "const value = " }, { text: "1", bg: "#3d0a0a" }, { text: ";" }],
-		[{ text: "orphan();" }],
-	]);
-	expect(cellsOfKind(rows, "context").map((cell) => cell.spans)).toEqual(
-		cellsOfKind(rows, "context").map(() => [{ text: "const untouched = 0;" }]),
-	);
-});
-
-test("novel emphasis replaces the intra-line backgrounds it overlaps", () => {
-	const rows = buildDiffRows(parseOne(pairingPatch), "stack", {
-		intralineEmphasis,
-		emphasis: {
-			rangesFor: (side, line) =>
-				side === "additions" && line === 2 ? [{ start: 6, end: 11 }] : undefined,
-			deletionsFg: "#ff0000",
-			additionsFg: "#00ff00",
-		},
-	});
+	const rows = paintedRows(parseOne(pairingPatch), layout);
 
 	expect(cellsOfKind(rows, "addition").map((cell) => cell.spans)).toEqual([
 		[
-			{ text: "const ", dim: true },
-			{ text: "value", fg: "#00ff00", bold: true },
-			{ text: " = 42;", dim: true },
+			{ text: "const value = ", fg: "#ffffff" },
+			{ text: "42", bg: "#0a3d0a", fg: "#ffffff" },
+			{ text: ";", fg: "#ffffff" },
 		],
 	]);
-	expect(cellsOfKind(rows, "deletion")[0]?.spans).toEqual([
-		{ text: "const value = " },
-		{ text: "1", bg: "#3d0a0a" },
-		{ text: ";" },
+	expect(cellsOfKind(rows, "deletion").map((cell) => cell.spans)).toEqual([
+		[
+			{ text: "const value = ", fg: "#ffffff" },
+			{ text: "1", bg: "#3d0a0a", fg: "#ffffff" },
+			{ text: ";", fg: "#ffffff" },
+		],
+		[{ text: "orphan();", fg: "#ffffff" }],
 	]);
 });
 
-test("a parsed change block is paired once, however often its rows are rebuilt", () => {
+test("novel emphasis replaces the intra-line background on its line", () => {
+	const rows = paintedRows(parseOne(pairingPatch), "stack", {
+		rangesFor: (side, line) =>
+			side === "additions" && line === 2 ? [{ start: 6, end: 11 }] : undefined,
+		deletionsFg: "#ff0000",
+		additionsFg: "#00ff00",
+	});
+
+	expect(cellsOfKind(rows, "addition")[0]?.spans).toEqual([
+		{ text: "const ", dim: true, fg: "#ffffff" },
+		{ text: "value", fg: "#00ff00", bold: true },
+		{ text: " = 42;", dim: true, fg: "#ffffff" },
+	]);
+});
+
+test("a parsed change block is paired once however often geometry is planned", () => {
 	const block = parseOne(pairingPatch).metadata.hunks[0]?.hunkContent.find(
 		(content) => content.type === "change",
 	);
@@ -125,12 +158,11 @@ test("intra-line backgrounds line up with tab-expanded columns", () => {
 +\tconst value = 42;
 `);
 	if (!file) throw new Error("patch must parse");
-	const rows = buildDiffRows(file, "stack", { intralineEmphasis });
-	const addition = cellsOfKind(rows, "addition")[0];
+	const addition = cellsOfKind(paintedRows(file, "stack"), "addition")[0];
 
 	expect(addition?.spans).toEqual([
-		{ text: "  const value = " },
-		{ text: "42", bg: "#0a3d0a" },
-		{ text: ";" },
+		{ text: "  const value = ", fg: "#ffffff" },
+		{ text: "42", bg: "#0a3d0a", fg: "#ffffff" },
+		{ text: ";", fg: "#ffffff" },
 	]);
 });

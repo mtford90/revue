@@ -1,6 +1,7 @@
+import { applicableDecorations, decorationsAtLine } from "./decorations.ts";
 import type { CodeWidths, DiffChromeWidths } from "./layout.ts";
 import { diffCodeWidths, lineNumberDigits, splitPaneWidths, stackGutterSides } from "./layout.ts";
-import { buildDiffRows } from "./rows.ts";
+import { buildDiffRows, tabAdjustedRanges } from "./rows.ts";
 import { sanitizeTerminalLine } from "./terminalText.ts";
 import type {
 	DiffCell,
@@ -9,6 +10,7 @@ import type {
 	DiffRow,
 	DiffSide,
 	DiffSourceLineIdentity,
+	EmphasisRange,
 	RangeDecoration,
 	RenderSpan,
 	SpanEmphasis,
@@ -35,9 +37,14 @@ export type DiffPlanVisibility = {
 export type PlannedGutter = {
 	side: DiffSide;
 	lineNumber?: number;
-	focused: boolean;
 };
 
+export type PlannedCellPaintSource = {
+	rawText: string;
+	intralineRanges: readonly EmphasisRange[];
+};
+
+/** Stable, wrapped geometry for one side of one visual terminal row. */
 export type PlannedVisualCell = {
 	kind: DiffCell["kind"];
 	continuationIndex: number;
@@ -45,7 +52,9 @@ export type PlannedVisualCell = {
 	padding: boolean;
 	changeSign: " " | "+" | "-";
 	spans: RenderSpan[];
-	backgroundColor: string;
+	/** UTF-16 offset of this visual fragment in the sanitized logical source line. */
+	sourceOffset: number;
+	paintSource: PlannedCellPaintSource;
 	identities: Partial<Record<DiffSide, DiffSourceLineIdentity>>;
 	/** Present only on the source line's first visual row. */
 	gutters?: Partial<Record<DiffSide, PlannedGutter>>;
@@ -53,7 +62,6 @@ export type PlannedVisualCell = {
 
 export type PlannedHunkHeaderRow = {
 	type: "hunk-header";
-	logical: Extract<DiffRow, { type: "hunk-header" }>;
 	key: string;
 	hunkIndex: number;
 	height: 0 | 1;
@@ -63,26 +71,23 @@ export type PlannedHunkHeaderRow = {
 
 export type PlannedSplitLineRow = {
 	type: "split-line";
-	logical: Extract<DiffRow, { type: "split-line" }>;
 	key: string;
 	hunkIndex: number;
 	height: number;
-	selectedBackground?: string;
 	visualRows: { continuationIndex: number; old: PlannedVisualCell; new: PlannedVisualCell }[];
 };
 
 export type PlannedStackLineRow = {
 	type: "stack-line";
-	logical: Extract<DiffRow, { type: "stack-line" }>;
 	key: string;
 	hunkIndex: number;
 	height: number;
-	selectedBackground?: string;
 	visualRows: { continuationIndex: number; cell: PlannedVisualCell }[];
 };
 
 export type PlannedDiffRow = PlannedHunkHeaderRow | PlannedSplitLineRow | PlannedStackLineRow;
 
+/** Stable geometry and source identities. Paint-only inputs are intentionally absent. */
 export type DiffVisualPlan = {
 	file: DiffFile;
 	layout: DiffLayout;
@@ -91,7 +96,6 @@ export type DiffVisualPlan = {
 	digits: number;
 	visibility: DiffPlanVisibility;
 	chrome: DiffChromeWidths;
-	codeWidths: CodeWidths;
 	paneWidths: { old: number; new: number };
 	stackGutterSides: DiffSide[];
 	rows: PlannedDiffRow[];
@@ -102,13 +106,46 @@ export type PlanDiffInput = {
 	layout: DiffLayout;
 	width: number;
 	visibility: DiffPlanVisibility;
-	styles: DiffPlanStyles;
 	chrome: DiffChromeWidths;
+	/** Prepared syntax spans are stable geometry input; absent themes use raw text spans. */
+	syntaxTheme?: string;
+};
+
+export type PaintedGutter = PlannedGutter & { focused: boolean };
+
+export type PaintedVisualCell = Omit<PlannedVisualCell, "spans" | "gutters"> & {
+	spans: RenderSpan[];
+	backgroundColor: string;
+	gutters?: Partial<Record<DiffSide, PaintedGutter>>;
+};
+
+export type PaintedHunkHeaderRow = PlannedHunkHeaderRow;
+export type PaintedSplitLineRow = Omit<PlannedSplitLineRow, "visualRows"> & {
+	selectedBackground?: string;
+	visualRows: { continuationIndex: number; old: PaintedVisualCell; new: PaintedVisualCell }[];
+};
+export type PaintedStackLineRow = Omit<PlannedStackLineRow, "visualRows"> & {
+	selectedBackground?: string;
+	visualRows: { continuationIndex: number; cell: PaintedVisualCell }[];
+};
+export type PaintedDiffRow = PaintedHunkHeaderRow | PaintedSplitLineRow | PaintedStackLineRow;
+
+export type PaintDiffInput = {
+	plan: DiffVisualPlan;
+	styles: DiffPlanStyles;
+	/** Only this TUI-owned logical-row window is decorated and materialised. */
+	window?: { start: number; end: number };
 	decorations?: readonly RangeDecoration[];
 	focusedDecorationId?: string;
 	emphasis?: SpanEmphasis;
-	syntaxTheme?: string;
 	selectedHunkIndex?: number;
+};
+
+export type PaintedDiffSlice = {
+	plan: DiffVisualPlan;
+	start: number;
+	end: number;
+	rows: PaintedDiffRow[];
 };
 
 const signFor = (kind: DiffCell["kind"]): " " | "+" | "-" =>
@@ -138,92 +175,71 @@ const identityFor = ({
 	};
 };
 
-const backgroundFor = (cell: DiffCell, styles: DiffPlanStyles): string => {
-	if (cell.focusedSides.includes("deletions"))
-		return cell.focusedBackgrounds.deletions ?? styles.deletionFocusedBackground;
-	if (cell.focusedSides.includes("additions"))
-		return cell.focusedBackgrounds.additions ?? styles.additionFocusedBackground;
-	if (cell.kind === "addition") return styles.additionBackground;
-	if (cell.kind === "deletion") return styles.deletionBackground;
-	return styles.contextBackground;
-};
-
-const visualCell = ({
+const plannedCells = ({
 	file,
 	row,
 	cell,
-	spans,
-	continuationIndex,
-	padding,
+	wrapped,
+	height,
 	sides,
-	styles,
 }: {
 	file: DiffFile;
 	row: DiffRow;
 	cell: DiffCell;
-	spans: RenderSpan[];
-	continuationIndex: number;
-	padding: boolean;
+	wrapped: RenderSpan[][];
+	height: number;
 	sides: readonly DiffSide[];
-	styles: DiffPlanStyles;
-}): PlannedVisualCell => {
+}): PlannedVisualCell[] => {
 	const identities: Partial<Record<DiffSide, DiffSourceLineIdentity>> = {};
-	const gutters: Partial<Record<DiffSide, PlannedGutter>> = {};
 	for (const side of sides) {
 		const identity = identityFor({ file, row, cell, side });
 		if (identity) identities[side] = identity;
-		if (continuationIndex === 0) {
-			gutters[side] = {
-				side,
-				lineNumber: identity?.lineNumber,
-				focused: cell.gutterFocusedSides.includes(side),
-			};
-		}
 	}
-	return {
-		kind: cell.kind,
-		continuationIndex,
-		padding,
-		changeSign: continuationIndex === 0 ? signFor(cell.kind) : " ",
-		spans: spans.map((span) => ({ ...span, fg: span.fg ?? styles.text })),
-		backgroundColor: backgroundFor(cell, styles),
-		identities,
-		gutters: continuationIndex === 0 ? gutters : undefined,
+	const paintSource: PlannedCellPaintSource = {
+		rawText: cell.rawText,
+		intralineRanges: cell.intralineRanges,
 	};
+	let sourceOffset = 0;
+	return Array.from({ length: height }, (_, continuationIndex) => {
+		const spans = wrapped[continuationIndex] ?? [];
+		const gutters: Partial<Record<DiffSide, PlannedGutter>> = {};
+		if (continuationIndex === 0) {
+			for (const side of sides) {
+				gutters[side] = { side, lineNumber: identities[side]?.lineNumber };
+			}
+		}
+		const planned: PlannedVisualCell = {
+			kind: cell.kind,
+			continuationIndex,
+			padding: continuationIndex >= wrapped.length,
+			changeSign: continuationIndex === 0 ? signFor(cell.kind) : " ",
+			spans,
+			sourceOffset,
+			paintSource,
+			identities,
+			gutters: continuationIndex === 0 ? gutters : undefined,
+		};
+		sourceOffset += spans.reduce((length, span) => length + span.text.length, 0);
+		return planned;
+	});
 };
 
 /**
- * Produce the complete width-aware visual plan shared by presentation adapters.
- * Adapters mount or serialise these wrapped rows; they do not recompute geometry or padding.
+ * Produce stable width-aware geometry shared by measurement and presentation. Decorations,
+ * focus, selection and colours are excluded so interactive paint changes cannot rebuild wrapping.
  */
 export function planDiff({
 	file,
 	layout,
 	width,
 	visibility,
-	styles,
 	chrome,
-	decorations = [],
-	focusedDecorationId,
-	emphasis,
 	syntaxTheme,
-	selectedHunkIndex,
 }: PlanDiffInput): DiffVisualPlan {
-	const rows = buildDiffRows(file, layout, {
-		syntaxTheme,
-		decorations,
-		focusedDecorationId,
-		emphasis,
-		intralineEmphasis: emphasis
-			? undefined
-			: {
-					deletionsBg: styles.intralineDeletionBackground,
-					additionsBg: styles.intralineAdditionBackground,
-				},
-	});
+	const rows = buildDiffRows(file, layout, { syntaxTheme });
 	const digits = lineNumberDigits(file);
 	const stackSides = stackGutterSides(rows);
-	const codeWidths = diffCodeWidths({
+	const codeWidths: CodeWidths = diffCodeWidths({
 		width,
 		layout,
 		digits,
@@ -237,7 +253,6 @@ export function planDiff({
 			const hunk = file.metadata.hunks[row.hunkIndex];
 			return {
 				type: "hunk-header",
-				logical: row,
 				key: row.key,
 				hunkIndex: row.hunkIndex,
 				height: visibility.hunkHeaders ? 1 : 0,
@@ -250,64 +265,52 @@ export function planDiff({
 				},
 			};
 		}
-		const selectedBackground =
-			row.hunkIndex === selectedHunkIndex ? styles.selectedHunkBackground : undefined;
 		if (row.type === "stack-line") {
 			const wrapped = wrapSpans(row.cell.spans, codeWidths.additions);
+			const cells = plannedCells({
+				file,
+				row,
+				cell: row.cell,
+				wrapped,
+				height: wrapped.length,
+				sides: stackSides,
+			});
 			return {
 				type: "stack-line",
-				logical: row,
 				key: row.key,
 				hunkIndex: row.hunkIndex,
 				height: wrapped.length,
-				selectedBackground,
-				visualRows: wrapped.map((spans, continuationIndex) => ({
-					continuationIndex,
-					cell: visualCell({
-						file,
-						row,
-						cell: row.cell,
-						spans,
-						continuationIndex,
-						padding: false,
-						sides: stackSides,
-						styles,
-					}),
-				})),
+				visualRows: cells.map((cell, continuationIndex) => ({ continuationIndex, cell })),
 			};
 		}
 		const oldRows = wrapSpans(row.old.spans, codeWidths.deletions);
 		const newRows = wrapSpans(row.new.spans, codeWidths.additions);
 		const height = Math.max(oldRows.length, newRows.length);
+		const oldCells = plannedCells({
+			file,
+			row,
+			cell: row.old,
+			wrapped: oldRows,
+			height,
+			sides: ["deletions"],
+		});
+		const newCells = plannedCells({
+			file,
+			row,
+			cell: row.new,
+			wrapped: newRows,
+			height,
+			sides: ["additions"],
+		});
 		return {
 			type: "split-line",
-			logical: row,
 			key: row.key,
 			hunkIndex: row.hunkIndex,
 			height,
-			selectedBackground,
 			visualRows: Array.from({ length: height }, (_, continuationIndex) => ({
 				continuationIndex,
-				old: visualCell({
-					file,
-					row,
-					cell: row.old,
-					spans: oldRows[continuationIndex] ?? [],
-					continuationIndex,
-					padding: continuationIndex >= oldRows.length,
-					sides: ["deletions"],
-					styles,
-				}),
-				new: visualCell({
-					file,
-					row,
-					cell: row.new,
-					spans: newRows[continuationIndex] ?? [],
-					continuationIndex,
-					padding: continuationIndex >= newRows.length,
-					sides: ["additions"],
-					styles,
-				}),
+				old: oldCells[continuationIndex] as PlannedVisualCell,
+				new: newCells[continuationIndex] as PlannedVisualCell,
 			})),
 		};
 	});
@@ -319,9 +322,237 @@ export function planDiff({
 		digits,
 		visibility,
 		chrome,
-		codeWidths,
 		paneWidths,
 		stackGutterSides: stackSides,
 		rows: planned,
 	};
+}
+
+type OverlayStyle = { kind: "novel"; fg: string } | { kind: "background"; bg: string };
+
+const inRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
+	style.kind === "novel"
+		? { text: span.text, fg: style.fg, bold: true }
+		: { ...span, bg: style.bg };
+
+const outOfRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
+	style.kind === "novel" ? { ...span, dim: true } : span;
+
+/** Cut one already-wrapped visual fragment at paint boundaries without changing its geometry. */
+const overlaySpans = (
+	spans: readonly RenderSpan[],
+	ranges: readonly EmphasisRange[],
+	style: OverlayStyle,
+): RenderSpan[] => {
+	const result: RenderSpan[] = [];
+	let offset = 0;
+	for (const span of spans) {
+		const end = offset + span.text.length;
+		const piece = (from: number, to?: number) => ({
+			...span,
+			text: span.text.slice(from - offset, to === undefined ? undefined : to - offset),
+		});
+		let cursor = offset;
+		for (const range of ranges) {
+			const from = Math.max(range.start, cursor);
+			const to = Math.min(range.end, end);
+			if (to <= from) continue;
+			if (from > cursor) result.push(outOfRange(piece(cursor, from), style));
+			result.push(inRange(piece(from, to), style));
+			cursor = to;
+		}
+		if (cursor < end) result.push(outOfRange(piece(cursor), style));
+		offset = end;
+	}
+	return result;
+};
+
+const emphasisOverlay = ({
+	cell,
+	emphasis,
+	styles,
+}: {
+	cell: PlannedVisualCell;
+	emphasis?: SpanEmphasis;
+	styles: DiffPlanStyles;
+}): { ranges: readonly EmphasisRange[]; style: OverlayStyle } | undefined => {
+	const side: DiffSide | null =
+		cell.kind === "deletion" ? "deletions" : cell.kind === "addition" ? "additions" : null;
+	if (!side) return undefined;
+	const line = cell.identities[side]?.lineNumber;
+	const novel = emphasis && line !== undefined ? emphasis.rangesFor(side, line) : undefined;
+	if (novel?.length && emphasis) {
+		return {
+			ranges: tabAdjustedRanges(cell.paintSource.rawText, novel),
+			style: {
+				kind: "novel",
+				fg: side === "deletions" ? emphasis.deletionsFg : emphasis.additionsFg,
+			},
+		};
+	}
+	if (!cell.paintSource.intralineRanges.length) return undefined;
+	return {
+		ranges: cell.paintSource.intralineRanges,
+		style: {
+			kind: "background",
+			bg:
+				side === "deletions"
+					? styles.intralineDeletionBackground
+					: styles.intralineAdditionBackground,
+		},
+	};
+};
+
+const localRanges = (
+	ranges: readonly EmphasisRange[],
+	offset: number,
+	length: number,
+): EmphasisRange[] =>
+	ranges.flatMap((range) => {
+		const start = Math.max(range.start, offset);
+		const end = Math.min(range.end, offset + length);
+		return end > start ? [{ start: start - offset, end: end - offset }] : [];
+	});
+
+const focusFor = ({
+	cell,
+	side,
+	decorations,
+	focusedDecorationId,
+}: {
+	cell: PlannedVisualCell;
+	side: DiffSide;
+	decorations: readonly RangeDecoration[];
+	focusedDecorationId?: string;
+}): RangeDecoration | undefined => {
+	const line = cell.identities[side]?.lineNumber;
+	return decorationsAtLine(decorations, side, line).find(
+		(range) =>
+			range.active === true ||
+			(focusedDecorationId !== undefined &&
+				(range.id === focusedDecorationId || range.focusId === focusedDecorationId)),
+	);
+};
+
+const paintCell = ({
+	cell,
+	styles,
+	decorations,
+	focusedDecorationId,
+	emphasis,
+}: {
+	cell: PlannedVisualCell;
+	styles: DiffPlanStyles;
+	decorations: readonly RangeDecoration[];
+	focusedDecorationId?: string;
+	emphasis?: SpanEmphasis;
+}): PaintedVisualCell => {
+	const deletionFocus = focusFor({
+		cell,
+		side: "deletions",
+		decorations,
+		focusedDecorationId,
+	});
+	const additionFocus = focusFor({
+		cell,
+		side: "additions",
+		decorations,
+		focusedDecorationId,
+	});
+	const backgroundColor = deletionFocus
+		? (deletionFocus.backgroundColor ?? styles.deletionFocusedBackground)
+		: additionFocus
+			? (additionFocus.backgroundColor ?? styles.additionFocusedBackground)
+			: cell.kind === "addition"
+				? styles.additionBackground
+				: cell.kind === "deletion"
+					? styles.deletionBackground
+					: styles.contextBackground;
+	const overlay = emphasisOverlay({ cell, emphasis, styles });
+	const length = cell.spans.reduce((total, span) => total + span.text.length, 0);
+	const spans = (
+		overlay
+			? overlaySpans(
+					cell.spans,
+					localRanges(overlay.ranges, cell.sourceOffset, length),
+					overlay.style,
+				)
+			: [...cell.spans]
+	).map((span) => ({ ...span, fg: span.fg ?? styles.text }));
+	const gutters = cell.gutters
+		? (Object.fromEntries(
+				Object.entries(cell.gutters).map(([side, gutter]) => {
+					const focus = side === "deletions" ? deletionFocus : additionFocus;
+					return [
+						side,
+						{
+							...gutter,
+							focused: Boolean(focus && focus.showGutterMarker !== false),
+						},
+					];
+				}),
+			) as Partial<Record<DiffSide, PaintedGutter>>)
+		: undefined;
+	return { ...cell, spans, backgroundColor, gutters };
+};
+
+/**
+ * Apply transient styling only to the mounted logical-row window. This stage has no width input and
+ * consumes already-wrapped cells, so navigation, focus and pointer drags cannot recompute geometry.
+ */
+export function paintDiff({
+	plan,
+	styles,
+	window,
+	decorations = [],
+	focusedDecorationId,
+	emphasis,
+	selectedHunkIndex,
+}: PaintDiffInput): PaintedDiffSlice {
+	const start = Math.max(0, Math.min(plan.rows.length, window?.start ?? 0));
+	const end = Math.max(start, Math.min(plan.rows.length, window?.end ?? plan.rows.length));
+	const applicable = applicableDecorations(plan.file, decorations);
+	const rows = plan.rows.slice(start, end).map((row): PaintedDiffRow => {
+		if (row.type === "hunk-header") return row;
+		const selectedBackground =
+			row.hunkIndex === selectedHunkIndex ? styles.selectedHunkBackground : undefined;
+		if (row.type === "stack-line") {
+			return {
+				...row,
+				selectedBackground,
+				visualRows: row.visualRows.map(({ continuationIndex, cell }) => ({
+					continuationIndex,
+					cell: paintCell({
+						cell,
+						styles,
+						decorations: applicable,
+						focusedDecorationId,
+						emphasis,
+					}),
+				})),
+			};
+		}
+		return {
+			...row,
+			selectedBackground,
+			visualRows: row.visualRows.map(({ continuationIndex, old, new: addition }) => ({
+				continuationIndex,
+				old: paintCell({
+					cell: old,
+					styles,
+					decorations: applicable,
+					focusedDecorationId,
+					emphasis,
+				}),
+				new: paintCell({
+					cell: addition,
+					styles,
+					decorations: applicable,
+					focusedDecorationId,
+					emphasis,
+				}),
+			})),
+		};
+	});
+	return { plan, start, end, rows };
 }

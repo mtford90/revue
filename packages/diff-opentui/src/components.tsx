@@ -1,20 +1,22 @@
 import { type MouseEvent as OpenTUIMouseEvent, TextAttributes } from "@opentui/core";
 import {
+	anchorRowIndex,
 	createDiffFile,
 	type DiffFile,
 	type DiffFileInput,
 	type DiffLayout,
 	type DiffLineRange,
 	type DiffSide,
+	type DiffVisualPlan,
 	findFocusedDecorationAnchor,
-	type PlannedDiffRow,
-	type PlannedSplitLineRow,
-	type PlannedStackLineRow,
-	type PlannedVisualCell,
+	type PaintedDiffRow,
+	type PaintedSplitLineRow,
+	type PaintedStackLineRow,
+	type PaintedVisualCell,
+	paintDiff,
 	planDiff,
 	type RangeDecoration,
 	type RenderSpan,
-	rowHasAnchor,
 	type SpanEmphasis,
 	sanitizeTerminalLine,
 } from "@revue/diff";
@@ -55,7 +57,7 @@ function LineContent({
 	lineId,
 	theme,
 }: {
-	cell: PlannedVisualCell;
+	cell: PaintedVisualCell;
 	lineId?: string;
 	theme: Theme;
 }) {
@@ -137,7 +139,7 @@ function SplitCell({
 	onContextMenu,
 	theme,
 }: {
-	cell: PlannedVisualCell;
+	cell: PaintedVisualCell;
 	side: DiffSide;
 	digits: number;
 	showLineNumbers: boolean;
@@ -185,7 +187,7 @@ function StackCell({
 	onContextMenu,
 	theme,
 }: {
-	cell: PlannedVisualCell;
+	cell: PaintedVisualCell;
 	digits: number;
 	showLineNumbers: boolean;
 	sides: readonly DiffSide[];
@@ -251,7 +253,7 @@ function SplitLine({
 	anchorId,
 	theme,
 }: LineRowProps & {
-	row: PlannedSplitLineRow;
+	row: PaintedSplitLineRow;
 	panes: { old: number; new: number };
 	deletions: SideInteraction;
 	additions: SideInteraction;
@@ -311,7 +313,7 @@ function StackLine({
 	anchorId,
 	theme,
 }: LineRowProps & {
-	row: PlannedStackLineRow;
+	row: PaintedStackLineRow;
 	sides: readonly DiffSide[];
 	interactions: CellInteractions;
 	lineId?: string;
@@ -345,6 +347,8 @@ function StackLine({
 }
 
 export interface DiffBodyProps {
+	/** A host-supplied plan lets measurement, anchoring and rendering share exact row identities. */
+	plan?: DiffVisualPlan;
 	file?: DiffFileInput;
 	layout?: DiffLayout;
 	width: number;
@@ -423,6 +427,7 @@ function emptyBodyMessage(file: DiffFile): string {
 
 /** Render a file body by mounting the engine's complete visual plan. */
 export function DiffBody({
+	plan: suppliedPlan,
 	file,
 	layout = "split",
 	width,
@@ -442,7 +447,25 @@ export function DiffBody({
 	onRangeSelect,
 	onRangeContextMenu,
 }: DiffBodyProps) {
-	const normalized = useMemo(() => (file ? createDiffFile(file) : undefined), [file]);
+	const normalized = useMemo(
+		() => suppliedPlan?.file ?? (file ? createDiffFile(file) : undefined),
+		[suppliedPlan, file],
+	);
+	const geometry = useMemo(
+		() =>
+			suppliedPlan ??
+			(normalized
+				? planDiff({
+						file: normalized,
+						layout,
+						width,
+						visibility: { lineNumbers: showLineNumbers, hunkHeaders: showHunkHeaders },
+						chrome: OPENTUI_DIFF_CHROME,
+						syntaxTheme: theme.syntaxTheme,
+					})
+				: undefined),
+		[suppliedPlan, normalized, layout, width, showLineNumbers, showHunkHeaders, theme.syntaxTheme],
+	);
 	const activeStart = useRef<DiffLineRange | null>(null);
 	const activeRange = useRef<DiffLineRange | null>(null);
 	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
@@ -459,37 +482,17 @@ export function DiffBody({
 		? [selectionDecoration, ...decorations]
 		: decorations;
 	const styles = useMemo(() => diffPlanStyles(theme), [theme]);
-	const plan = useMemo(
-		() =>
-			normalized
-				? planDiff({
-						file: normalized,
-						layout,
-						width,
-						visibility: { lineNumbers: showLineNumbers, hunkHeaders: showHunkHeaders },
-						styles,
-						chrome: OPENTUI_DIFF_CHROME,
-						decorations: renderedDecorations,
-						focusedDecorationId,
-						emphasis,
-						syntaxTheme: theme.syntaxTheme,
-						selectedHunkIndex,
-					})
-				: undefined,
-		[
-			normalized,
-			layout,
-			width,
-			showLineNumbers,
-			showHunkHeaders,
-			styles,
-			renderedDecorations,
-			focusedDecorationId,
-			emphasis,
-			theme.syntaxTheme,
-			selectedHunkIndex,
-		],
-	);
+	const painted = geometry
+		? paintDiff({
+				plan: geometry,
+				styles,
+				window: rowWindow,
+				decorations: renderedDecorations,
+				focusedDecorationId,
+				emphasis,
+				selectedHunkIndex,
+			})
+		: undefined;
 	const anchor = useMemo(
 		() =>
 			normalized && focusedDecorationId
@@ -497,15 +500,12 @@ export function DiffBody({
 				: null,
 		[normalized, decorations, focusedDecorationId],
 	);
-	const anchorRowKey =
-		anchor && plan
-			? plan.rows.find((row) => row.type !== "hunk-header" && rowHasAnchor(row.logical, anchor))
-					?.key
-			: undefined;
+	const anchorIndex = anchor && geometry ? anchorRowIndex(geometry, anchor) : -1;
+	const anchorRowKey = anchorIndex >= 0 ? geometry?.rows[anchorIndex]?.key : undefined;
 	const anchorId = anchor ? decorationAnchorId(anchor) : undefined;
 
 	const rangeForIdentity = (
-		identity: PlannedVisualCell["identities"][DiffSide],
+		identity: PaintedVisualCell["identities"][DiffSide],
 	): DiffLineRange | null => {
 		if (!identity) return null;
 		if (resolveRange) return resolveRange(identity.side, identity.lineNumber);
@@ -599,7 +599,7 @@ export function DiffBody({
 					},
 				}
 			: undefined;
-	const interaction = (cell: PlannedVisualCell, side: DiffSide): SideInteraction => {
+	const interaction = (cell: PaintedVisualCell, side: DiffSide): SideInteraction => {
 		const range = rangeForIdentity(cell.identities[side]);
 		return {
 			handlers: gutterHandlers(range),
@@ -607,34 +607,27 @@ export function DiffBody({
 			onContextMenu: contextHandler(range),
 		};
 	};
-	const rowAttachments = (row: Exclude<PlannedDiffRow, { type: "hunk-header" }>) =>
-		normalized
-			? attachmentsForRow({
-					file: normalized,
-					row: row.logical,
-					attachments: inlineAttachments,
-					resolveRange,
-				})
-			: [];
+	const rowAttachments = (row: Exclude<PaintedDiffRow, { type: "hunk-header" }>) =>
+		attachmentsForRow({ row, attachments: inlineAttachments, resolveRange });
 	const cancelActiveRange = () => {
 		activeStart.current = null;
 		activeRange.current = null;
 		setDragRange(null);
 	};
 
-	if (!normalized || !plan) return <text fg={theme.muted}>No file selected.</text>;
+	if (!normalized || !geometry || !painted) return <text fg={theme.muted}>No file selected.</text>;
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length)
 		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
 
-	const visibleRows = rowWindow ? plan.rows.slice(rowWindow.start, rowWindow.end) : plan.rows;
-	const windowReachesEnd = !rowWindow || rowWindow.end > plan.rows.length;
+	const visibleRows = painted.rows;
+	const windowReachesEnd = !rowWindow || rowWindow.end > geometry.rows.length;
 	const trailingBoundary = normalized.metadata.hunks.length;
 	const trailingActions = windowReachesEnd ? (expanders?.actionsFor(trailingBoundary) ?? []) : [];
 
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: the body clears incomplete gutter drags outside a selectable line.
 		<box
-			width={width}
+			width={geometry.width}
 			flexDirection="column"
 			onMouseUp={cancelActiveRange}
 			onMouseDragEnd={cancelActiveRange}
@@ -678,11 +671,11 @@ export function DiffBody({
 					row.type === "split-line" && firstCell && secondCell ? (
 						<SplitLine
 							row={row}
-							panes={plan.paneWidths}
+							panes={geometry.paneWidths}
 							deletions={interaction(firstCell, "deletions")}
 							additions={interaction(secondCell, "additions")}
-							digits={plan.digits}
-							showLineNumbers={plan.visibility.lineNumbers}
+							digits={geometry.digits}
+							showLineNumbers={geometry.visibility.lineNumbers}
 							attachmentCounts={counts}
 							anchorId={id}
 							theme={theme}
@@ -690,7 +683,7 @@ export function DiffBody({
 					) : row.type === "stack-line" && firstCell ? (
 						<StackLine
 							row={row}
-							sides={plan.stackGutterSides}
+							sides={geometry.stackGutterSides}
 							interactions={{
 								deletions: interaction(firstCell, "deletions").handlers,
 								additions: interaction(firstCell, "additions").handlers,
@@ -703,8 +696,8 @@ export function DiffBody({
 								interaction(firstCell, firstCell.kind === "deletion" ? "deletions" : "additions")
 									.onContextMenu ?? interaction(firstCell, "deletions").onContextMenu
 							}
-							digits={plan.digits}
-							showLineNumbers={plan.visibility.lineNumbers}
+							digits={geometry.digits}
+							showLineNumbers={geometry.visibility.lineNumbers}
 							attachmentCounts={counts}
 							anchorId={id}
 							theme={theme}

@@ -1,27 +1,19 @@
-export {
-	applicableDecorations,
-	decorationsAtLine,
-	findFocusedDecorationAnchor,
-	rangeToHunkIndex,
-} from "./decorations.ts";
-export { type HighlightedLines, highlightedLines, prepareSyntaxHighlighting } from "./highlight.ts";
-export type { IntralinePair, IntralineRange, IntralineSpans } from "./intraline.ts";
-export { intralineSpans, pairChangedLines } from "./intraline.ts";
-export {
-	type CodeWidths,
-	DEFAULT_DIFF_CHROME,
-	type DiffChromeWidths,
-	diffCodeWidths,
-	lineNumberDigits,
-	rowVisualHeight,
-	splitPaneWidths,
-	stackGutterSides,
-} from "./layout.ts";
+export { findFocusedDecorationAnchor, rangeToHunkIndex } from "./decorations.ts";
+export { type HighlightedLines, prepareSyntaxHighlighting } from "./highlight.ts";
+export type { DiffChromeWidths } from "./layout.ts";
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export {
 	type DiffPlanStyles,
 	type DiffPlanVisibility,
 	type DiffVisualPlan,
+	type PaintDiffInput,
+	type PaintedDiffRow,
+	type PaintedDiffSlice,
+	type PaintedGutter,
+	type PaintedHunkHeaderRow,
+	type PaintedSplitLineRow,
+	type PaintedStackLineRow,
+	type PaintedVisualCell,
 	type PlanDiffInput,
 	type PlannedDiffRow,
 	type PlannedGutter,
@@ -29,19 +21,13 @@ export {
 	type PlannedSplitLineRow,
 	type PlannedStackLineRow,
 	type PlannedVisualCell,
+	paintDiff,
 	planDiff,
 } from "./plan.ts";
-export { anchorRowIndex, rowHasAnchor, rowLineRange } from "./ranges.ts";
-export {
-	buildDiffRows,
-	type DiffRowOptions,
-	type IntralineColours,
-	intralineRangesFor,
-} from "./rows.ts";
-export { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
+export { anchorRowIndex, plannedRowIdentity } from "./ranges.ts";
+export { sanitizeTerminalLine } from "./terminalText.ts";
 export type {
 	DecorationAnchor,
-	DiffCell,
 	DiffChangeContent,
 	DiffContextContent,
 	DiffFile,
@@ -52,7 +38,6 @@ export type {
 	DiffLine,
 	DiffLineRange,
 	DiffMetadata,
-	DiffRow,
 	DiffSide,
 	DiffSourceLineIdentity,
 	DiffStats,
@@ -62,4 +47,3 @@ export type {
 	RenderSpan,
 	SpanEmphasis,
 } from "./types.ts";
-export { columnWidth, wrappedRowCount, wrapSpans } from "./wrap.ts";

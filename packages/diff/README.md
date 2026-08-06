@@ -2,8 +2,8 @@
 
 `@revue/diff` is Revue's Bun-targeted, presentation-neutral Patch engine. It parses unified patches
 into Revue-owned structural types, analyses changed lines, prepares safe styled spans, and produces a
-complete width-aware visual plan. It does not choose responsive layout policy or import React,
-OpenTUI, Revue themes, Git, chapters, threads, review state, or semantic-diff generation.
+stable width-aware visual plan. It does not choose responsive layout or viewport policy and does not
+import React, OpenTUI, Revue themes, Git, chapters, threads, review state, or semantic-diff generation.
 
 Pierre 1.2.2 supplies the public parser and highlighter APIs behind this boundary. Pierre declares
 React and React DOM peers itself, so installing the engine is not transitively React-free; the engine
@@ -14,20 +14,28 @@ has no direct React dependency and exports no Pierre type.
 ```text
 unified patch
   -> parsePatch (paths, statuses, modes, hunks, lines, statistics)
-  -> changed-line pairing and intra-line spans
-  -> syntax spans, decorations, sanitisation, split/stack logical rows
-  -> planDiff(layout, width, visibility, styles, chrome)
-  -> fully wrapped visual rows with resolved pane/code widths and split padding
+  -> changed-line pairing, syntax spans, sanitisation and stable logical identities
+  -> planDiff(file, layout, width, visibility, chrome)
+       stable wrapping, continuation rows, split padding and measured heights
+  -> paintDiff(plan, styles, mounted window, transient decorations)
+       selection, focus, hunk and emphasis paint for only the requested rows
 ```
 
-`planDiff` takes an explicit `split` or `stack` layout, available width, line-number and hunk-header
-visibility, plain style slots, range decorations, optional span emphasis, and a declarative chrome
-request. Each planned line retains its file/hunk/side/line identity, continuation index, sign,
-first-row gutters, wrapped spans and resolved background. Split cells are already padded to the same
-height. An adapter mounts or serialises the plan; it must not wrap, align or invent continuation rows.
+`planDiff` is the public width-aware engine boundary. Its inputs are limited to stable geometry:
+file, explicit split/stack layout, available width, line-number/header visibility, prepared syntax
+theme and an adapter-declared chrome request. Every planned line retains file/hunk/side/line
+identity, continuation index, sign, first-row gutters and wrapped spans; split cells are already
+padded to the same height.
 
-The engine also exports pure range-to-hunk, row-to-range and focus-anchor lookup. Durable identities
-are source identities, never presentation renderable IDs.
+`paintDiff` has no width input and cannot reconstruct wrapping. It applies theme slots, range focus,
+pointer selection, selected-hunk backgrounds and optional span emphasis only to a caller-selected
+logical-row window. Presentation adapters therefore mount or serialise planned rows without wrapping,
+aligning or inventing continuation rows, while TUI navigation can reuse the unchanged plan during
+interactive paint updates.
+
+The public barrel intentionally does not export row builders, wrapping functions, width arithmetic,
+or visual-height helpers. Unit tests for those internals import their owning modules directly.
+Durable identities are source identities, never presentation renderable IDs.
 
 ## Parsing and analysis
 
@@ -41,9 +49,9 @@ end-exclusive code-unit ranges snapped to grapheme boundaries. Long or pathologi
 by omitting optional emphasis rather than blocking display.
 
 Terminal text is sanitised before planning. Long lines hard-wrap by terminal columns without
-splitting graphemes, and style spans survive wrap boundaries. Chrome widths are declarative: the
-OpenTUI adapter requests its one focus-marker and three attachment-marker columns; another adapter
-may request zero.
+splitting graphemes, and style spans survive wrap boundaries. Chrome is always explicit: the
+OpenTUI adapter requests its focus, attachment, sign, edge and divider columns; another adapter may
+request zero chrome.
 
 ## Ownership boundaries
 
@@ -52,8 +60,8 @@ theme mapping live in [`@revue/diff-opentui`](../diff-opentui/README.md). Prep d
 engine. TUI-owned semantic generation, context expansion, viewport window selection, source links,
 threads and review state remain outside both packages.
 
-A future ANSI pager may serialise the same visual plan, but no ANSI output mode or pager is included
-in this refactor.
+A future ANSI pager may consume the same plan and paint stages, but no ANSI output mode or pager is
+included in this work.
 
 See [ADR 0013](../../docs/adr/0013-separate-patch-engine-from-presentation-adapters.md) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

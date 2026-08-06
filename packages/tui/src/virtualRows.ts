@@ -6,22 +6,19 @@
 // fixed-height gaps, keeping layout work proportional to the screen.
 
 import {
-	buildDiffRows,
 	createDiffFile,
-	type DiffFile,
+	type DiffChromeWidths,
 	type DiffFileInput,
 	type DiffLayout,
 	type DiffLineRange,
-	type DiffPlanStyles,
-	type DiffRow,
 	type DiffSide,
+	type DiffVisualPlan,
 	planDiff,
 } from "@revue/diff";
 import {
 	attachmentsForRow,
 	type DiffInlineAttachment,
 	type ExpandDirection,
-	OPENTUI_DIFF_CHROME,
 } from "@revue/diff-opentui";
 
 export type SegmentRows = {
@@ -150,67 +147,108 @@ export type ViewportFile = {
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
 };
 
-type StructuralEntry = { layout: DiffLayout; normalized: DiffFile; rows: DiffRow[] };
-const structuralCache = new WeakMap<DiffFileInput, StructuralEntry>();
+export type PlannedViewportFile = ViewportFile & {
+	/** Exact engine plan shared by viewport measurement, navigation and OpenTUI rendering. */
+	plan?: DiffVisualPlan;
+};
+
+const geometryCache = new WeakMap<DiffFileInput, Map<string, DiffVisualPlan>>();
+const GEOMETRY_CACHE_LIMIT = 8;
+
+const geometryKey = ({
+	file,
+	width,
+	chrome,
+	syntaxTheme,
+}: {
+	file: ViewportFile;
+	width: number;
+	chrome: DiffChromeWidths;
+	syntaxTheme?: string;
+}) =>
+	[
+		file.layout,
+		width,
+		file.showLineNumbers !== false,
+		file.showHunkHeaders !== false,
+		syntaxTheme ?? "",
+		chrome.focusMarker,
+		chrome.attachmentMarker,
+		chrome.sign,
+		chrome.edge,
+		chrome.divider,
+		chrome.minimumCode,
+	].join(":");
 
 /**
- * The row structure DiffBody will render for this file: identical inputs minus
- * decorations, which never change row count. Cached per file object so height
- * planning costs nothing on unrelated re-renders.
+ * Plan stable body geometry once per file/layout/width/visibility/chrome identity. The caller must
+ * pass adapter chrome explicitly; transient selection/focus/decoration state is intentionally absent.
  */
-export const structuralRows = (file: DiffFileInput, layout: DiffLayout): StructuralEntry => {
-	const cached = structuralCache.get(file);
-	if (cached && cached.layout === layout) return cached;
-	const normalized = createDiffFile(file);
-	const entry = { layout, normalized, rows: buildDiffRows(normalized, layout) };
-	structuralCache.set(file, entry);
-	return entry;
-};
-
-const MEASUREMENT_STYLES: DiffPlanStyles = {
-	text: "",
-	contextBackground: "",
-	additionBackground: "",
-	deletionBackground: "",
-	additionFocusedBackground: "",
-	deletionFocusedBackground: "",
-	selectedHunkBackground: "",
-	intralineAdditionBackground: "",
-	intralineDeletionBackground: "",
-};
+export const planViewportFiles = ({
+	files,
+	width,
+	chrome,
+	syntaxTheme,
+}: {
+	files: readonly ViewportFile[];
+	width: number;
+	chrome: DiffChromeWidths;
+	syntaxTheme?: string;
+}): PlannedViewportFile[] =>
+	files.map((file) => {
+		if (!file.displayed) return file;
+		let byGeometry = geometryCache.get(file.displayed);
+		if (!byGeometry) {
+			byGeometry = new Map();
+			geometryCache.set(file.displayed, byGeometry);
+		}
+		const key = geometryKey({ file, width, chrome, syntaxTheme });
+		let plan = byGeometry.get(key);
+		if (plan) {
+			// Refresh this entry so repeated navigation keeps the active geometry hot.
+			byGeometry.delete(key);
+			byGeometry.set(key, plan);
+		}
+		if (!plan) {
+			const normalized = createDiffFile(file.displayed);
+			plan = planDiff({
+				file: normalized,
+				layout: file.layout,
+				width,
+				visibility: {
+					lineNumbers: file.showLineNumbers !== false,
+					hunkHeaders: file.showHunkHeaders !== false,
+				},
+				chrome,
+				syntaxTheme,
+			});
+			byGeometry.set(key, plan);
+			if (byGeometry.size > GEOMETRY_CACHE_LIMIT) {
+				const oldest = byGeometry.keys().next().value;
+				if (oldest !== undefined) byGeometry.delete(oldest);
+			}
+		}
+		return { ...file, plan };
+	});
 
 const bodyHeights = ({
 	file,
-	displayed,
 	attachments,
 	attachmentHeight,
-	width,
 }: {
-	file: ViewportFile;
-	displayed: DiffFileInput;
+	file: PlannedViewportFile;
 	attachments: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
-	width: number;
 }): number[] => {
-	const { normalized } = structuralRows(displayed, file.layout);
+	const visual = file.plan;
+	if (!visual) return [];
+	const normalized = visual.file;
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length) return [1];
-	const visual = planDiff({
-		file: normalized,
-		layout: file.layout,
-		width,
-		visibility: {
-			lineNumbers: file.showLineNumbers !== false,
-			hunkHeaders: file.showHunkHeaders !== false,
-		},
-		styles: MEASUREMENT_STYLES,
-		chrome: OPENTUI_DIFF_CHROME,
-	});
 	const heights = visual.rows.map((row) => {
 		if (row.type === "hunk-header")
 			return row.height + (file.expanderActions?.(row.hunkIndex)?.length ? 1 : 0);
 		const attached = attachmentsForRow({
-			file: normalized,
-			row: row.logical,
+			row,
 			attachments,
 			resolveRange: file.resolveRange,
 		});
@@ -224,14 +262,12 @@ const bodyHeights = ({
 };
 
 /** The row an inline attachment with this anchor renders under, or -1. */
-export const attachmentRowIndex = (file: ViewportFile, anchor: DiffLineRange): number => {
-	if (!file.displayed) return -1;
-	const { normalized, rows } = structuralRows(file.displayed, file.layout);
+export const attachmentRowIndex = (file: PlannedViewportFile, anchor: DiffLineRange): number => {
+	if (!file.plan) return -1;
 	const probe = [{ id: "probe", anchor, content: null }];
-	return rows.findIndex(
+	return file.plan.rows.findIndex(
 		(row) =>
 			attachmentsForRow({
-				file: normalized,
 				row,
 				attachments: probe,
 				resolveRange: file.resolveRange,
@@ -243,13 +279,10 @@ export const viewportSegments = ({
 	files,
 	attachments,
 	attachmentHeight,
-	width,
 }: {
-	files: readonly ViewportFile[];
+	files: readonly PlannedViewportFile[];
 	attachments: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
-	/** The width the bodies render at; wrapped lines are taller in a narrow terminal. */
-	width: number;
 }): SegmentRows[] => {
 	const segments: SegmentRows[] = [];
 	for (const file of files) {
@@ -263,16 +296,10 @@ export const viewportSegments = ({
 					heights: Array.from({ length: file.noteCount }, () => 1),
 				});
 			}
-			if (file.displayed) {
+			if (file.plan) {
 				segments.push({
 					id: bodySegmentId(file.path),
-					heights: bodyHeights({
-						file,
-						displayed: file.displayed,
-						attachments,
-						attachmentHeight,
-						width,
-					}),
+					heights: bodyHeights({ file, attachments, attachmentHeight }),
 				});
 			}
 		}

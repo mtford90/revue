@@ -1,44 +1,25 @@
-import type { DecorationAnchor, DiffFile, DiffLineRange, DiffRow, DiffSide } from "./types.ts";
+import type { DiffVisualPlan, PlannedDiffRow, PlannedVisualCell } from "./plan.ts";
+import type { DecorationAnchor, DiffSide, DiffSourceLineIdentity } from "./types.ts";
 
-/** Resolve one logical source row to its durable side-aware hunk range. */
-export const rowLineRange = ({
-	file,
-	row,
-	side,
-	resolveRange,
-}: {
-	file: DiffFile;
-	row: DiffRow;
-	side: DiffSide;
-	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
-}): DiffLineRange | null => {
-	if (row.type === "hunk-header") return null;
-	const cell = row.type === "split-line" ? (side === "deletions" ? row.old : row.new) : row.cell;
-	const number = side === "deletions" ? cell.oldLineNumber : cell.newLineNumber;
-	if (number === undefined) return null;
-	if (resolveRange) return resolveRange(side, number);
-	const hunk = file.metadata.hunks[row.hunkIndex];
-	if (!hunk) return null;
-	return {
-		filePath: file.path,
-		hunkOldStart: hunk.deletionStart,
-		side,
-		startLine: number,
-		endLine: number,
-	};
+const firstCell = (
+	row: Exclude<PlannedDiffRow, { type: "hunk-header" }>,
+	side: DiffSide,
+): PlannedVisualCell | undefined => {
+	if (row.type === "stack-line") return row.visualRows[0]?.cell;
+	const visual = row.visualRows[0];
+	return side === "deletions" ? visual?.old : visual?.new;
 };
 
-export const rowHasAnchor = (row: DiffRow, anchor: DecorationAnchor): boolean => {
-	if (row.type === "hunk-header" || row.hunkIndex !== anchor.hunkIndex) return false;
-	if (row.type === "split-line") {
-		return anchor.side === "deletions"
-			? row.old.oldLineNumber === anchor.lineNumber
-			: row.new.newLineNumber === anchor.lineNumber;
-	}
-	return anchor.side === "deletions"
-		? row.cell.oldLineNumber === anchor.lineNumber
-		: row.cell.newLineNumber === anchor.lineNumber;
-};
+/** Read one logical planned row's durable source identity on the requested side. */
+export const plannedRowIdentity = (
+	row: PlannedDiffRow,
+	side: DiffSide,
+): DiffSourceLineIdentity | undefined =>
+	row.type === "hunk-header" ? undefined : firstCell(row, side)?.identities[side];
 
-export const anchorRowIndex = (rows: readonly DiffRow[], anchor: DecorationAnchor): number =>
-	rows.findIndex((row) => rowHasAnchor(row, anchor));
+/** Resolve an anchor against the exact planned logical identities used for height and rendering. */
+export const anchorRowIndex = (plan: DiffVisualPlan, anchor: DecorationAnchor): number =>
+	plan.rows.findIndex((row) => {
+		const identity = plannedRowIdentity(row, anchor.side);
+		return identity?.hunkIndex === anchor.hunkIndex && identity.lineNumber === anchor.lineNumber;
+	});

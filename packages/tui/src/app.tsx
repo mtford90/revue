@@ -16,6 +16,7 @@ import {
 	type DiffFileInput,
 	type DiffLineRange,
 	type DiffSide,
+	type DiffVisualPlan,
 	findFocusedDecorationAnchor,
 	parsePatch,
 	prepareSyntaxHighlighting,
@@ -30,6 +31,7 @@ import {
 	decorationAnchorId,
 	diffRangeWithin,
 	type ExpandDirection,
+	OPENTUI_DIFF_CHROME,
 } from "@revue/diff-opentui";
 import {
 	type Appearance,
@@ -137,12 +139,13 @@ import {
 	ESTIMATED_ATTACHMENT_HEIGHT,
 	headerSegmentId,
 	OVERSCAN_ROWS,
+	type PlannedViewportFile,
+	planViewportFiles,
 	planWindow,
 	SCROLL_STEP_ROWS,
 	segmentKind,
 	segmentOffset,
 	segmentPath,
-	structuralRows,
 	type ViewportFile,
 	viewportSegments,
 	type WindowPlanItem,
@@ -1563,6 +1566,7 @@ function ChapterView({
 	diffTheme,
 	diffFiles,
 	visibleDiffFiles,
+	bodyPlans,
 	windowPlan,
 	width,
 	diffPreference,
@@ -1593,6 +1597,7 @@ function ChapterView({
 	diffTheme: Theme;
 	diffFiles: DiffFile[] | null;
 	visibleDiffFiles: ChapterDiffFile[];
+	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
 	windowPlan: WindowPlanItem[];
 	width: number;
 	diffPreference: DiffLayoutPreference;
@@ -1731,6 +1736,7 @@ function ChapterView({
 				return (
 					<DiffBody
 						key={item.id}
+						plan={bodyPlans.get(path)}
 						file={displayed}
 						theme={diffTheme}
 						layout={layoutForFile({
@@ -1806,6 +1812,7 @@ function SemanticChapterView({
 	semantic,
 	diffTheme,
 	diffFiles,
+	bodyPlans,
 	windowPlan,
 	width,
 	diffPreference,
@@ -1834,6 +1841,7 @@ function SemanticChapterView({
 	semantic: PreparedSemantic;
 	diffTheme: Theme;
 	diffFiles: DiffFile[] | null;
+	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
 	windowPlan: WindowPlanItem[];
 	width: number;
 	diffPreference: DiffLayoutPreference;
@@ -1998,6 +2006,7 @@ function SemanticChapterView({
 				return (
 					<DiffBody
 						key={item.id}
+						plan={bodyPlans.get(path)}
 						file={semanticFile.file}
 						theme={diffTheme}
 						layout={layoutForFile({
@@ -2598,15 +2607,33 @@ export function App({
 		],
 		[chapterThreadList, threadDraft],
 	);
+	const plannedViewportFiles = useMemo<PlannedViewportFile[]>(
+		() =>
+			planViewportFiles({
+				files: viewportFiles,
+				width: contentWidth,
+				chrome: OPENTUI_DIFF_CHROME,
+				syntaxTheme: diffTheme.syntaxTheme,
+			}),
+		[viewportFiles, contentWidth, diffTheme.syntaxTheme],
+	);
+	const bodyPlans = useMemo(
+		() =>
+			new Map(
+				plannedViewportFiles.flatMap((file) =>
+					file.plan ? ([[file.path, file.plan]] as const) : [],
+				),
+			),
+		[plannedViewportFiles],
+	);
 	const chapterSegments = useMemo(
 		() =>
 			viewportSegments({
-				files: viewportFiles,
+				files: plannedViewportFiles,
 				attachments: attachmentAnchors,
 				attachmentHeight: (id) => attachmentHeights.get(id) ?? ESTIMATED_ATTACHMENT_HEIGHT,
-				width: contentWidth,
 			}),
-		[viewportFiles, attachmentAnchors, attachmentHeights, contentWidth],
+		[plannedViewportFiles, attachmentAnchors, attachmentHeights],
 	);
 	const windowPlan = useMemo(
 		() =>
@@ -2622,8 +2649,8 @@ export function App({
 	// or replan never re-triggers a scroll on its own.
 	const chapterSegmentsRef = useRef(chapterSegments);
 	chapterSegmentsRef.current = chapterSegments;
-	const viewportFilesRef = useRef(viewportFiles);
-	viewportFilesRef.current = viewportFiles;
+	const viewportFilesRef = useRef(plannedViewportFiles);
+	viewportFilesRef.current = plannedViewportFiles;
 	const threadsRef = useRef(threads);
 	threadsRef.current = threads;
 	function noteAttachmentNode(id: string, node: { height: number } | null) {
@@ -2800,11 +2827,8 @@ export function App({
 		const file = viewportFilesRef.current.find(
 			(candidate) => candidate.path === diffAnchorTarget.path,
 		);
-		if (file?.displayed) {
-			const row = anchorRowIndex(
-				structuralRows(file.displayed, file.layout).rows,
-				diffAnchorTarget.anchor,
-			);
+		if (file?.plan) {
+			const row = anchorRowIndex(file.plan, diffAnchorTarget.anchor);
 			const offset =
 				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
 			if (offset !== null) {
@@ -3985,6 +4009,7 @@ export function App({
 									diffTheme={diffTheme}
 									diffFiles={diffFiles}
 									visibleDiffFiles={visibleChapterFiles}
+									bodyPlans={bodyPlans}
 									windowPlan={windowPlan}
 									width={contentWidth}
 									diffPreference={diffPreference}
@@ -4021,6 +4046,7 @@ export function App({
 									semantic={semantic}
 									diffTheme={diffTheme}
 									diffFiles={diffFiles ?? null}
+									bodyPlans={bodyPlans}
 									windowPlan={windowPlan}
 									width={contentWidth}
 									diffPreference={diffPreference}

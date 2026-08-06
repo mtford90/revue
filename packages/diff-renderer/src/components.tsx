@@ -197,7 +197,7 @@ function SplitCell({
 				digits={digits}
 				showLineNumbers={showLineNumbers}
 				attachmentCount={continuation ? 0 : attachmentCount}
-				handlers={number === undefined ? undefined : handlers}
+				handlers={continuation || number === undefined ? undefined : handlers}
 				theme={theme}
 			/>
 			<LineContent
@@ -265,7 +265,9 @@ function StackCell({
 					digits={digits}
 					showLineNumbers={showLineNumbers}
 					attachmentCount={continuation ? 0 : (attachmentCounts.deletions ?? 0)}
-					handlers={cell.oldLineNumber === undefined ? undefined : interactions.deletions}
+					handlers={
+						continuation || cell.oldLineNumber === undefined ? undefined : interactions.deletions
+					}
 					theme={theme}
 				/>
 			) : null}
@@ -276,7 +278,9 @@ function StackCell({
 					digits={digits}
 					showLineNumbers={showLineNumbers}
 					attachmentCount={continuation ? 0 : (attachmentCounts.additions ?? 0)}
-					handlers={cell.newLineNumber === undefined ? undefined : interactions.additions}
+					handlers={
+						continuation || cell.newLineNumber === undefined ? undefined : interactions.additions
+					}
 					theme={theme}
 				/>
 			) : null}

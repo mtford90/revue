@@ -522,6 +522,36 @@ test("continuation rows leave the gutter and the change sign blank", async () =>
 	expect(rows[first + 1]?.slice(start).trim()).not.toBe("");
 });
 
+test("a continuation row's blank gutter does not select the line", async () => {
+	const [file] = parsePatch(wrapPatch(wrappedLine));
+	if (!file) throw new Error("missing fixture");
+	for (const layout of ["stack", "split"] as const) {
+		const selections: unknown[] = [];
+		const t = await testRender(
+			<DiffBody
+				file={file}
+				theme={theme}
+				layout={layout}
+				width={60}
+				onRangeSelect={(range) => selections.push(range)}
+			/>,
+			{ width: 60, height: 20 },
+		);
+		await t.renderOnce();
+		const rows = t.captureCharFrame().split("\n");
+		const first = rows.findIndex((row) => row.includes("wrapped-"));
+		const gutterX = (rows[first]?.indexOf("1") ?? -1) as number;
+
+		await act(async () => t.mockMouse.click(gutterX, first));
+		await t.renderOnce();
+		expect(selections).toHaveLength(1);
+
+		await act(async () => t.mockMouse.click(gutterX, first + 1));
+		await t.renderOnce();
+		expect(selections).toHaveLength(1);
+	}
+});
+
 test("text dragged across a wrap still names the one logical line it came from", async () => {
 	const [file] = parsePatch(wrapPatch(wrappedLine));
 	if (!file) throw new Error("missing fixture");

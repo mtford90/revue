@@ -39,7 +39,6 @@
 		".revueignore",
 		"docs/adr/",
 		"docs/plans/diff-package-refactor.md",
-		"examples/",
 		"packages/diff-opentui/",
 		"packages/markdown-export/",
 		"packages/prep/",
@@ -52,7 +51,8 @@
 		"site/hero.tape",
 		"site/index.html",
 		"site/install.sh",
-		"skills/"
+		"skills/",
+		"examples/sample-run/"
 	],
 	"revuediff": [
 		".github/workflows/revuediff-release.yml",
@@ -62,6 +62,7 @@
 		"scripts/generate-revuediff-tap-formula.sh",
 		"scripts/generate-revuediff-tap-formula.test.ts",
 		"scripts/revuediff-release-smoke.sh",
-		"site/revuediff/"
+		"site/revuediff/",
+		"examples/revuediff/"
 	]
 }

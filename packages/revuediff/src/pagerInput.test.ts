@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { classifyPagerInput } from "./pagerInput.ts";
 
 const patch = `diff --git a/a.ts b/a.ts
@@ -9,6 +11,16 @@ index 1111111..2222222 100644
 -const old = 1;
 +const next = 2;
 `;
+
+test("classifies the checked-in Revuediff demo patches as supported", async () => {
+	for (const fixture of ["feature.patch", "plain.patch"]) {
+		const input = await readFile(
+			join(import.meta.dir, "../../../examples/revuediff", fixture),
+			"utf8",
+		);
+		expect(classifyPagerInput(input).kind, fixture).toBe("supported");
+	}
+});
 
 test("classifies coloured Git and plain unified patches after sanitising them", () => {
 	const result = classifyPagerInput(`\x1b[31m${patch}\x1b[0m`);

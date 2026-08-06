@@ -266,9 +266,9 @@ semantics and are always relative to that root:
 
 Repeatable `--ignore <pattern>` options add rules for one prep invocation only. They are evaluated in
 command-line order after `.revueignore`, so they can refine or negate persistent rules, and they
-never read or modify `.revueignore`. Revue does not import a global Git excludes file into these
-rules. Repository `.gitignore` still controls discovery of untracked files, but never hides changes
-to files Git already tracks.
+never read or modify `.revueignore`. These review-only rules remain separate from Git's standard
+exclusions: nested `.gitignore` files, `.git/info/exclude`, and the configured `core.excludesFile`
+control discovery of untracked files, but never hide changes to files Git already tracks.
 
 Added and modified files match their current path. Deleted files match their deleted path. Renames
 and copies match both the current path and the old path; the file is omitted when either path's final

@@ -36,7 +36,8 @@ Scope semantics are explicit:
 - committed: merge base to compare commit by default; `A..B` requests direct endpoint comparison;
 - staged: captured `HEAD` commit to captured index tree;
 - unstaged: captured index tree to worktree, excluding untracked files;
-- work: captured `HEAD` commit to final worktree, including sorted untracked files.
+- work: captured `HEAD` commit to final worktree, including sorted untracked files not ignored by
+  Git's standard exclusion sources.
 
 With no explicit scope, prep selects work when local changes exist and committed otherwise. Local
 modes reject unresolved conflicts and recheck HEAD, index, patch, and included worktree bytes before

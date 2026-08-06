@@ -248,12 +248,7 @@ const nulPaths = (bytes: Uint8Array<ArrayBuffer>): string[] =>
 const untrackedPaths = async (plan: ScopePlan): Promise<string[]> => {
 	if (plan.mode !== RUN_SCOPE_MODE.WORK) return [];
 	const paths = nulPaths(
-		await gitBytes(plan.context, [
-			"ls-files",
-			"--others",
-			"--exclude-per-directory=.gitignore",
-			"-z",
-		]),
+		await gitBytes(plan.context, ["ls-files", "--others", "--exclude-standard", "-z"]),
 	);
 	const trackedAtHead = new Set(
 		nulPaths(await gitBytes(plan.context, ["ls-tree", "-r", "--name-only", "-z", plan.head.sha])),

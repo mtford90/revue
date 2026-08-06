@@ -102,9 +102,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 - **The chapters file** — `chapters.json` inside a run. It mirrors Stage’s agent output
   (`{ chapters, prologue? }`). The narration is the source of truth; there is no database.
 - **prep** — the CLI step that resolves committed/staged/unstaged/work scope, freezes the exact patch
-  and old/new file bytes, applies built-in, root `.revueignore`, and session `--ignore` filtering,
-  and emits numbered hunks. Persistent rules run before session rules; both rename paths are tested,
-  and every effective input and omission reason is pinned in the run. Local modes detect
+  and old/new file bytes, uses Git's standard exclusions to discover untracked files, applies
+  built-in, root `.revueignore`, and session `--ignore` filtering, and emits numbered hunks.
+  Persistent rules run before session rules; both rename paths are tested, and every effective input
+  and omission reason is pinned in the run. Local modes detect
   index/worktree races and fail rather than produce a mixed snapshot.
 - **Theme** — the single palette Revue paints with, derived from one bundled editor theme rather
   than hand-picked: neutral surfaces, foregrounds, diff row tints, semantic status colours, and the

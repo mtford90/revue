@@ -62,7 +62,8 @@ to prep as ordinary refs.
 
 Repeatable `--ignore <gitignore-pattern>` options exclude files from this prep only, evaluated
 after any `.revueignore` at the repository root. Pass `--show-ignored` to list the effective
-patterns and omissions.
+patterns and omissions. Git's standard exclusions (`.gitignore`, `.git/info/exclude`, and
+`core.excludesFile`) control untracked-file discovery only; tracked changes remain reviewable.
 
 When the user wants a quick look without narration, skip this skill's chapter steps entirely:
 `revue diff [scope…]` accepts the same scope forms as prep and opens the result immediately as a

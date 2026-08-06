@@ -168,13 +168,14 @@ test("persistent and session ignores compose with rename path provenance", async
 	expect(await readFile(join(root, ".revueignore"), "utf8")).toBe(ignoreFile);
 });
 
-test("ignored worktree bytes do not change review identity or inherit global excludes", async () => {
+test("standard Git excludes hide untracked files but retain tracked changes", async () => {
 	const root = await repository();
 	const globalExcludes = join(root, "..", `${root.split("/").at(-1)}-global-excludes`);
 	await writeFile(globalExcludes, "global-hidden.txt\n");
 	try {
 		await git(root, "config", "core.excludesFile", globalExcludes);
-		await write(root, ".gitignore", ".revue/\nkeep.txt\n");
+		await write(root, ".git/info/exclude", "local-hidden.txt\n");
+		await write(root, ".gitignore", ".revue/\nrepo-hidden.txt\nkeep.txt\n");
 		await write(root, ".revueignore", "ignored.txt\n");
 		await write(root, "keep.txt", "before\n");
 		await write(root, "ignored.txt", "before\n");
@@ -182,13 +183,12 @@ test("ignored worktree bytes do not change review identity or inherit global exc
 		await commit(root, "Baseline");
 		await write(root, "keep.txt", "after\n");
 		await write(root, "ignored.txt", "ignored one\n");
+		await write(root, "repo-hidden.txt", "review me\n");
+		await write(root, "local-hidden.txt", "review me\n");
 		await write(root, "global-hidden.txt", "review me\n");
 
 		const first = await prepareRun(["--ref", "work", "--base", "main"], root);
-		expect(first.manifest.files.map((file) => file.path)).toEqual([
-			"global-hidden.txt",
-			"keep.txt",
-		]);
+		expect(first.manifest.files.map((file) => file.path)).toEqual(["keep.txt"]);
 		await write(root, "ignored.txt", "ignored two\n");
 		const second = await prepareRun(["--ref", "work", "--base", "main"], root);
 

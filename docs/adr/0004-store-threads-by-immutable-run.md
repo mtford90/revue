@@ -68,3 +68,15 @@ Thread is the model and `revue threads` is the official API.
   remove it automatically because deleting a newly acquired lock would risk data loss; the reported
   `.lock` file must be removed after confirming its recorded process is gone.
 - Semantic anchors and an all-threads explorer require separate product decisions.
+
+## Amendments
+
+- 2026-08-05 — Anchor authority is now formally cross-view: anchors always resolve against the
+  original git hunks whatever view created them, and commenting is refused on synthesised-only
+  lines ([ADR 0007](0007-synthesised-patches-and-anchor-authority.md)). The exactly-one-chapter
+  ownership check is conditional on narration existing ([ADR 0006](0006-chapterless-runs.md)).
+  GitHub permalinks derived from an anchor are offered per side only when that side's `RunScope`
+  endpoint is `kind: "commit"` — index-tree and worktree endpoints are unpinned, so their copy-link
+  action is disabled with a stated reason rather than emitting a link that could resolve to
+  different content. Known gap: the threads CLI authors messages only as `agent`; human authorship
+  exists solely through the TUI.

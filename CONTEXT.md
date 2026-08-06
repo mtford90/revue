@@ -4,8 +4,10 @@ Domain language and load-bearing concepts for revue. Keep this current as the de
 
 ## What revue is
 
-A terminal-native tool for reviewing a git branch as a **narrated sequence of chapters** rather than
-a flat diff.
+A terminal-native tool for reviewing a git diff — a branch, a PR, arbitrary refs, or local
+changes — as a **narrated sequence of chapters**. Narration is the product's point but not a
+prerequisite: a run without chapters opens as a flat, file-by-file diff (`revue diff`, bare
+`revue`), and gains the narrative lens when an agent adds one.
 
 - **Stage** (`ReviewStage/stage-cli`) contributes the *chapter model* and the *agent skill* that
   clusters a diff into chapters. Stage renders to a browser; we discard that part.
@@ -43,6 +45,10 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   diagram, 2–5 key changes, 1–5 focus areas, and a complexity rating. Shown before chapter one.
 - **Focus area** — a typed/severity-tagged spot in the prologue worth a reviewer's attention.
 - **Page** — a TUI navigation unit: the prologue (if present) followed by each chapter in order.
+- **Surface** — a top-level tab above pages: **Story** (the narrated page sequence), **Files** (the
+  whole run as one flat stream), and **Comments** (every thread with open/dealt-with status,
+  jumping to its owning chapter). Internally Files — and any chapterless run — is one synthetic
+  chapter covering every hunk, so all features work identically there.
 - **Diff view** — Patch (the default, authoritative line-numbered review surface) or Semantic (a
   lazy, read-only Difftastic rendering of the same run's pinned old/new blobs). Chapter/file focus
   survives switching and the reviewer’s relative chapter position transfers between modes. Semantic
@@ -52,6 +58,23 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
 - **File display** — All (the default chapter stream) or Focused (only the selected file). The
   reviewer moves the focused surface through the chapter with file navigation. It applies to both
   diff views and persists machine-wide as a reviewer preference rather than per-run state.
+- **Path display** — how file lists render paths: **smart** (common-prefix elision plus directory
+  abbreviation, the default), **tree** (a collapsed directory tree), or **full**. A reviewer
+  preference, computed by a pure module rather than generic truncation.
+- **Context expansion** — GitHub-style revealing of unchanged lines around hunks. Each inter-hunk
+  gap is a numbered boundary; revealing rewrites the patch from the run's pinned blobs and
+  re-parses it. Blobs are the sole source of extra file content — `show` never touches Git — and
+  revealed lines never accept comment anchors.
+- **Selection** — the gutter-drag line range that says what the reviewer is acting on. Comment,
+  copy-text, copy-location, and copy-GitHub-link are verbs hung off the one selection, reachable
+  from the composer footer keys and the right-click menu alike. A GitHub permalink is offered per
+  side only when that side's endpoint is a pinned commit; unpinned sides are greyed out with the
+  reason.
+- **Keybindings** — every shortcut derives from one typed keymap registry (handler, help overlay,
+  menu hints, and CLI all read it). Reviewers override actions via hand-edited JSONC at
+  `~/.revue/keybindings.json`; escape, digits, and chord prefixes are reserved, and validation
+  drops just the broken entry with a surfaced warning. `revue keybindings` prints the effective
+  map.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes
@@ -61,15 +84,19 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   the same run key in `.revue/state.json`. It restores a saved review rather than becoming part of
   the immutable run. Unfinished thread drafts are deliberately excluded.
 - **Run** — an immutable directory under `.revue/runs/<runId>/` containing `run.json`, the pinned
-  `diff.patch`, agent-facing `hunks.txt`, content-addressed old/new blobs, and the agent-written
-  `chapters.json`. `show` consumes this directory and never recomputes Git state.
+  `diff.patch`, agent-facing `hunks.txt`, content-addressed old/new blobs, and — optionally — the
+  agent-written `chapters.json`. `show` consumes this directory and never recomputes Git state. A
+  run without chapters is fully reviewable as a flat diff; narration is an overlay, not
+  scaffolding.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
   hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
   totals. Creation time and narration are deliberately excluded.
-- **Run key** — `sha256(runId + chapters)`, truncated for local persistence. Review progress belongs
-  to one pinned code snapshot narrated one specific way; changing either starts fresh. Threads use
-  the full immutable **run ID** instead, so feedback survives chapter regeneration for unchanged
-  frozen code.
+- **Run key** — `sha256(runId + chapters)`, truncated for local persistence; a chapterless run
+  hashes `runId` plus a chapterless sentinel so its progress keys on the snapshot alone. Review
+  progress belongs to one pinned code snapshot narrated one specific way; changing either starts
+  fresh, except that a newly narrated run seeds its view state from any chapterless progress for
+  the same snapshot (a one-way migration). Threads use the full immutable **run ID** instead, so
+  feedback survives chapter regeneration for unchanged frozen code.
 - **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
   revue's, persisted to `.revue/state.json` (a `{ [runKey]: ViewState }` map).
 - **The chapters file** — `chapters.json` inside a run. It mirrors Stage’s agent output
@@ -92,6 +119,13 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   `overrides` pinning individual colour slots verbatim after derivation; a custom id matching a
   bundled one shadows it in the picker/listing. Validation is lenient and per-file, dropping just
   the broken theme or key rather than all custom themes.
+- **Intra-line emphasis** — patch-view marking of the changed characters *within* a paired
+  removed/added line: a stronger diff-tinted background behind the changed spans, syntax
+  foregrounds untouched. Only lines the differ pairs as revisions of each other carry it;
+  unpaired lines keep the plain row tint.
+- **Novel emphasis** — semantic-view bold/dim marking of the tokens Difftastic reports as novel.
+  A distinct concept from intra-line emphasis: novelty is structural, computed by Difftastic;
+  intra-line emphasis is textual, computed by revue's own patch differ.
 - **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
   chapters, pinned file metadata, review questions, authored threads, and optional local review
   progress. Full review is the default; prologue and one chapter by stable id/order are explicit
@@ -111,7 +145,8 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   `@revue/diff-model` owns Pierre parsing adaptation and stable file/hunk identities;
   `@revue/diff-renderer` owns split/stack rows, terminal presentation, exact inclusive old/new
   decorations, and focus anchors. `@pierre/diffs` is pinned directly to 1.2.2.
-- **One derived palette, not two hand-picked ones.** `@revue/theme` owns colour maths, the bundled
+- **One derived palette, not two hand-picked ones.** See `docs/adr/0008`. `@revue/theme` owns
+  colour maths, the bundled
   editor-theme table, and the derivation; the shell reads it through one React context and the
   renderer takes it as a prop, so no package keeps a palette of its own. Highlighting is prepared
   per syntax theme and the diff keeps the last prepared colours while a new theme is highlighting,
@@ -145,6 +180,37 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   selection and inline attachment placement. Revue owns thread/message UUIDs, authors, lifecycle,
   presentation, CLI operations, and chapter association. The disposable pre-thread comment store
   was reset rather than introducing a legacy migration.
+- **Intra-line emphasis is owned, textual, and patch-only.** See `docs/adr/0005`. `@revue/diff-model`
+  pairs changed lines (by position for equal-count blocks, similarity-gated otherwise) and computes
+  token-level spans; emphasis is background-only and never appears in semantic view, where novelty
+  is Difftastic's structural concept.
+- **Chapters are an optional overlay, not required scaffolding.** See `docs/adr/0006`. A run
+  without `chapters.json` opens as a flat diff through the same immutable-run pipeline, modelled
+  internally as one synthetic chapter so every feature works in both modes by construction.
+  Chapterless progress seeds narrated progress one way; markdown export refuses a chapterless run.
+- **Alternate views synthesise patches; anchors stay on the git hunks.** See `docs/adr/0007`.
+  Semantic view and context expansion synthesise unified patches replayed through the one
+  canonical pipeline rather than owning renderers. Displayed geometry varies per view; comment
+  anchors always resolve against the original git hunks, so every thread renders in every view and
+  synthesised-only lines refuse comments.
+- **One keymap registry; user-owned overrides.** See `docs/adr/0009`. Shortcuts exist once, in the
+  typed registry; `~/.revue/keybindings.json` overrides action-to-keys with reserved keys,
+  fixed-point merging, and per-entry lenient validation.
+- **Preferences belong to the reviewer; progress belongs to the repository.** See `docs/adr/0010`.
+  `~/.revue` holds machine-wide reviewer state, split into machine-written (`preferences.json`)
+  and hand-edited (`keybindings.json`, `themes/`) files that never mix; `./.revue` holds run
+  progress, session state, and threads. All such writes are non-fatal.
+- **Native per-platform executables, gated by a PTY smoke test.** See `docs/adr/0011`. No
+  cross-compilation (OpenTUI ships native libraries per platform), the git tag is the single
+  version source for binary and embedded skill alike, and every artefact must survive a real-PTY
+  alternate-screen check before release. No npm distribution; difftastic is never bundled, only
+  detected and advised.
+- **The TUI owns viewport windowing.** See `docs/adr/0012`. OpenTUI culling still pays full layout
+  cost, so Revue mounts only near-window row segments and preserves scroll geometry with
+  fixed-height gaps; reveals are offset-based, and diff-body components need measurable heights.
+- **Agents never launch the TUI.** An agent validates with `revue show "$RUN" --check` and hands
+  the human the exact `revue show` command for their own terminal; the TUI cannot run inside an
+  agent harness, and the skill forbids suggesting otherwise.
 - **Semantic diff is a read-only external view.** The TUI invokes a compatible `difft` lazily and
   passes only verified blob paths from the supplied run (using an empty temporary side for an absent
   added/deleted snapshot). It parses only Difftastic’s presentation styling into terminal-safe spans,

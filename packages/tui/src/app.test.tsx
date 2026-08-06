@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
-import { parsePatch } from "@revue/diff-renderer";
+import { parsePatch } from "@revue/diff";
 import { resolveTheme, THEME_IDS, THEMES } from "@revue/theme";
 import {
 	type ReviewThread,
@@ -464,7 +464,8 @@ test("View menu shows only the focused file and file navigation replaces it", as
 		{ width: 120, height: 60, kittyKeyboard: true },
 	);
 	await t.renderOnce();
-	expect(t.captureCharFrame()).toContain("MAX_RETRIES");
+	// Both files are on screen; only backoff.ts declares the retry ceiling.
+	expect(t.captureCharFrame()).toContain("MAX_RETRIES = 4");
 	expect(t.captureCharFrame()).toContain("return fetch");
 
 	await press(t, "F10");
@@ -475,13 +476,13 @@ test("View menu shows only the focused file and file navigation replaces it", as
 	await arrow(t, "down");
 	await press(t, "RETURN");
 
-	expect(t.captureCharFrame()).toContain("MAX_RETRIES");
+	expect(t.captureCharFrame()).toContain("MAX_RETRIES = 4");
 	expect(t.captureCharFrame()).not.toContain("return fetch");
 	expect(preferences.at(-1)).toMatchObject({ fileDisplay: "focused" });
 
 	await press(t, "TAB");
 	expect(t.captureCharFrame()).toContain("return fetch");
-	expect(t.captureCharFrame()).not.toContain("MAX_RETRIES");
+	expect(t.captureCharFrame()).not.toContain("MAX_RETRIES = 4");
 });
 
 test("View menu toggles the semantic diff without losing the focused file", async () => {
@@ -567,7 +568,7 @@ test("View menu toggles the semantic diff without losing the focused file", asyn
 	const patchFrame = t.captureCharFrame();
 	expect(patchFrame).toContain("Patch │");
 	expect(patchFrame).toContain("return fetch");
-	expect(patchFrame).not.toContain("MAX_RETRIES");
+	expect(patchFrame).not.toContain("MAX_RETRIES = 4");
 	expect(patchFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
 	expect(loads).toBe(1);
 });

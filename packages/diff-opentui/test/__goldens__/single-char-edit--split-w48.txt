@@ -1,0 +1,23 @@
+# single-char-edit--split-w48 — one changed character inside an equal-count pair
+# grid 48x8 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+0 |▎ @@ -1,2 +1,2 @@
+1 | 1      const keep = t │ 1      const keep = tr
+2 |        rue;           │        ue;
+3 | 2    - const total =  │ 2    + const total = 2
+4 |        1;             │        ;
+5 |
+6 |
+7 |
+
+# styles: row: cols fg bg [attributes]
+
+0: 0-16 fg=#73b8ff bg=#1e2228  17-47 fg=#ffffff bg=#1e2228
+1: 0-4 fg=#a4a6a9 bg=#10141c  5-21 fg=#bfbdb6 bg=#10141c  22 fg=#ffffff bg=#10141c  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#10141c  29-46 fg=#bfbdb6 bg=#10141c  47 fg=#ffffff bg=#10141c
+2: 0-4 fg=#a4a6a9 bg=#10141c  5-11 fg=#bfbdb6 bg=#10141c  12-22 fg=#ffffff bg=#10141c  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#10141c  29-34 fg=#bfbdb6 bg=#10141c  35-47 fg=#ffffff bg=#10141c
+3: 0-4 fg=#a4a6a9 bg=#3d262e  5-21 fg=#bfbdb6 bg=#3d262e  22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-45 fg=#bfbdb6 bg=#233628  46 fg=#bfbdb6 bg=#385c34  47 fg=#ffffff bg=#233628
+4: 0-4 fg=#a4a6a9 bg=#3d262e  5-7 fg=#bfbdb6 bg=#3d262e  8 fg=#bfbdb6 bg=#7c3f48  9 fg=#bfbdb6 bg=#3d262e  10-22 fg=#ffffff bg=#3d262e  23 fg=#303238 bg=#293d55  24-28 fg=#a4a6a9 bg=#233628  29-32 fg=#bfbdb6 bg=#233628  33-47 fg=#ffffff bg=#233628
+5: 0-47 fg=#ffffff bg=#00000000
+6: 0-47 fg=#ffffff bg=#00000000
+7: 0-47 fg=#ffffff bg=#00000000

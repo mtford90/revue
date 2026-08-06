@@ -37,11 +37,14 @@ A tool call cannot eyeball an OpenTUI shell. Drive it under tmux at a fixed size
 pane instead. Vary the size: 160x45 and 100x36 expose different layout faults.
 
 ```bash
-tmux new-session -d -s revue -x 160 -y 45 "bun run revue show examples/sample-run"
+export TMUX_TMPDIR="${TMPDIR%/}"
+tmux_socket=agent-verify-revue
+tmux -L "$tmux_socket" new-session -d -s revue -x 160 -y 45 "bun run revue show examples/sample-run"
 sleep 4
-tmux send-keys -t revue "]"; sleep 0.5; tmux send-keys -t revue "c"   # into chapter one
-tmux capture-pane -t revue -p        # -e keeps the colour escapes
-tmux kill-session -t revue
+tmux -L "$tmux_socket" send-keys -t revue "]"; sleep 0.5
+tmux -L "$tmux_socket" send-keys -t revue "c"   # into chapter one
+tmux -L "$tmux_socket" capture-pane -t revue -p -e
+tmux -L "$tmux_socket" kill-session -t revue
 ```
 
 Capture with `-e` whenever the change is a colour or a background. A plain capture cannot tell a

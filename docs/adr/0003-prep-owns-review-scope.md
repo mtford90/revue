@@ -75,3 +75,17 @@ content.
 - A working-tree endpoint represents filesystem bytes for included files; `diff.patch` remains the
   authoritative source for line numbers.
 - `examples/sample-run` is a committed complete run and exercises the production loading path.
+
+## Amendments
+
+- 2026-08-05 — `chapters.json` is now optional: a run without narration opens as a flat diff
+  ([ADR 0006](0006-chapterless-runs.md)). `revue --pr <number|url>` fetches and pins `FETCH_HEAD`
+  immediately, flowing into ordinary committed merge-base scope, so PR review inherits these
+  guarantees unchanged. The pinned blobs are the sole legitimate source of file content beyond the
+  patch — context expansion synthesises from them and `show` still never touches Git
+  ([ADR 0007](0007-synthesised-patches-and-anchor-authority.md)). Reviewing a bare patch with no
+  backing blobs remains explicitly out of scope pending its own design.
+
+## Amendment
+
+ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.

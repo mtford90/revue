@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parsePatch } from "@revue/diff-model";
+import { parsePatch } from "@revue/diff";
 import { RUN_FILE_STATUS, RUN_OBJECT_KIND, type RunFile } from "@revue/types";
 import { formatAgentInput } from "../src/format.ts";
 

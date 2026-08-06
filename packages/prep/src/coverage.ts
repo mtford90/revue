@@ -1,4 +1,4 @@
-import { type DiffFile, parsePatch } from "@revue/diff-model";
+import { type DiffFile, parsePatch } from "@revue/diff";
 import {
 	type Chapter,
 	type LineRef,

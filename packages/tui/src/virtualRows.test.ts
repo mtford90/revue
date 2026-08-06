@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { anchorRowIndex, parsePatch } from "@revue/diff";
+import { OPENTUI_DIFF_CHROME } from "@revue/diff-opentui";
 import {
+	attachmentRowIndex,
+	bodySegmentId,
+	planViewportFiles,
 	planWindow,
 	type SegmentRows,
 	segmentOffset,
 	segmentsHeight,
+	viewportSegments,
 	type WindowPlanItem,
 } from "./virtualRows.ts";
 
@@ -122,5 +128,163 @@ describe("planWindow", () => {
 			const plan = planWindow({ segments, scrollTop, viewportHeight: 9, overscan: 4 });
 			expect(planHeight(segments, plan)).toBe(total);
 		}
+	});
+});
+
+describe("viewportSegments", () => {
+	test("counts a wrapped line as the visual rows it renders as", () => {
+		const [file] = parsePatch(`diff --git a/wrap.ts b/wrap.ts
+--- a/wrap.ts
++++ b/wrap.ts
+@@ -1,1 +1,1 @@
+-short
++${"y".repeat(120)}
+`);
+		if (!file) throw new Error("missing fixture");
+		const heightsAt = (width: number) => {
+			const files = planViewportFiles({
+				files: [
+					{ path: "wrap.ts", displayed: file, collapsed: false, separator: false, layout: "stack" },
+				],
+				width,
+				chrome: OPENTUI_DIFF_CHROME,
+			});
+			return viewportSegments({
+				files,
+				attachments: [],
+				attachmentHeight: () => 0,
+			}).find((segment) => segment.id === bodySegmentId("wrap.ts"))?.heights;
+		};
+
+		// Two gutters, the sign, and the padding either side leave 40 columns at width 54.
+		expect(heightsAt(54)).toEqual([1, 1, 3, 0]);
+		// A wider terminal reflows the same line back onto fewer rows.
+		expect(heightsAt(134)).toEqual([1, 1, 1, 0]);
+	});
+
+	test("reuses geometry across navigation models until a stable layout input changes", () => {
+		const [file] = parsePatch(`diff --git a/cache.ts b/cache.ts
+--- a/cache.ts
++++ b/cache.ts
+@@ -1 +1 @@
+-old
++${"new ".repeat(40)}
+`);
+		if (!file) throw new Error("missing cache fixture");
+		const source = {
+			path: "cache.ts",
+			displayed: file,
+			collapsed: false,
+			separator: false,
+			layout: "stack" as const,
+		};
+		const at = (width: number) =>
+			planViewportFiles({ files: [{ ...source }], width, chrome: OPENTUI_DIFF_CHROME })[0]?.plan;
+
+		const first = at(50);
+		const afterNavigationModelRebuild = at(50);
+		const resized = at(51);
+
+		expect(afterNavigationModelRebuild).toBe(first);
+		expect(resized).not.toBe(first);
+	});
+
+	test("does not plan collapsed bodies and reuses their geometry after expansion", () => {
+		const [file] = parsePatch(`diff --git a/collapsed.ts b/collapsed.ts
+--- a/collapsed.ts
++++ b/collapsed.ts
+@@ -1 +1 @@
+-old
++${"expanded ".repeat(20)}
+`);
+		if (!file) throw new Error("missing collapsed fixture");
+		const source = {
+			path: "collapsed.ts",
+			displayed: file,
+			separator: false,
+			layout: "stack" as const,
+		};
+		const plan = (collapsed: boolean) =>
+			planViewportFiles({
+				files: [{ ...source, collapsed }],
+				width: 40,
+				chrome: OPENTUI_DIFF_CHROME,
+			})[0];
+
+		const initiallyCollapsed = plan(true);
+		expect(initiallyCollapsed?.plan).toBeUndefined();
+		expect(
+			viewportSegments({
+				files: initiallyCollapsed ? [initiallyCollapsed] : [],
+				attachments: [],
+				attachmentHeight: () => 0,
+			}),
+		).toEqual([{ id: "head:collapsed.ts", heights: [1] }]);
+
+		const expanded = plan(false);
+		if (!expanded?.plan) throw new Error("expansion must plan the body");
+		expect(expanded.plan.totalHeight).toBeGreaterThan(1);
+		expect(plan(true)?.plan).toBeUndefined();
+		expect(plan(false)?.plan).toBe(expanded.plan);
+	});
+
+	test("uses one planned identity for wrapped anchors, attachments, hidden headers, and expanders", () => {
+		const [file] = parsePatch(`diff --git a/identity.ts b/identity.ts
+--- a/identity.ts
++++ b/identity.ts
+@@ -1 +1 @@
+-old one
++${"wrapped ".repeat(18)}tail
+@@ -10 +10 @@
+-old ten
++new ten
+`);
+		if (!file) throw new Error("missing identity fixture");
+		const source = {
+			path: "identity.ts",
+			displayed: file,
+			collapsed: false,
+			separator: false,
+			layout: "stack" as const,
+			showHunkHeaders: false,
+			expanderActions: (boundary: number) => (boundary < 2 ? (["down"] as const) : []),
+		};
+		const [planned] = planViewportFiles({
+			files: [source],
+			width: 40,
+			chrome: OPENTUI_DIFF_CHROME,
+		});
+		if (!planned?.plan) throw new Error("missing shared plan");
+		const anchor = {
+			filePath: "identity.ts",
+			hunkOldStart: 1,
+			side: "additions" as const,
+			startLine: 1,
+			endLine: 1,
+		};
+		const decorationAnchor = {
+			decorationId: "wrapped",
+			focusId: "wrapped",
+			fileId: file.id,
+			filePath: file.path,
+			hunkIndex: 0,
+			side: "additions" as const,
+			lineNumber: 1,
+		};
+		const plannedIndex = anchorRowIndex(planned.plan, decorationAnchor);
+		const attachedIndex = attachmentRowIndex(planned, anchor);
+		const segments = viewportSegments({
+			files: [planned],
+			attachments: [{ id: "thread", anchor, content: null }],
+			attachmentHeight: () => 5,
+		});
+		const body = segments.find((segment) => segment.id === bodySegmentId("identity.ts"));
+
+		expect(attachedIndex).toBe(plannedIndex);
+		expect(planned.plan.rows[0]).toMatchObject({ type: "hunk-header", height: 0 });
+		expect(planned.plan.rows[plannedIndex]?.height).toBeGreaterThan(1);
+		expect(body?.heights[0]).toBe(1); // hidden header plus its expander band
+		expect(body?.heights[plannedIndex]).toBe((planned.plan.rows[plannedIndex]?.height ?? 0) + 5);
+		expect(body?.heights).toHaveLength(planned.plan.rows.length + 1);
 	});
 });

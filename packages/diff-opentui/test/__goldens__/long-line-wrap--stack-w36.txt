@@ -1,0 +1,35 @@
+# long-line-wrap--stack-w36 — a wrapped line whose emphasis run crosses the wrap point
+# grid 36x14 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+00 |▎ @@ -1,1 +1,1 @@
+01 | 1         - const message = render
+02 |             Banner("short tail", o
+03 |             ptions);
+04 |      1    + const message = render
+05 |             Banner("a considerably
+06 |              longer tail that must
+07 |              wrap", options);
+08 |
+09 |
+10 |
+11 |
+12 |
+13 |
+
+# styles: row: cols fg bg [attributes]
+
+00: 0-16 fg=#73b8ff bg=#1e2228  17-35 fg=#ffffff bg=#1e2228
+01: 0-9 fg=#a4a6a9 bg=#3d262e  10-34 fg=#bfbdb6 bg=#3d262e  35 fg=#ffffff bg=#3d262e
+02: 0-9 fg=#a4a6a9 bg=#3d262e  10-20 fg=#bfbdb6 bg=#3d262e  21-25 fg=#bfbdb6 bg=#7c3f48  26-34 fg=#bfbdb6 bg=#3d262e  35 fg=#ffffff bg=#3d262e
+03: 0-9 fg=#a4a6a9 bg=#3d262e  10-20 fg=#bfbdb6 bg=#3d262e  21-35 fg=#ffffff bg=#3d262e
+04: 0-9 fg=#a4a6a9 bg=#233628  10-34 fg=#bfbdb6 bg=#233628  35 fg=#ffffff bg=#233628
+05: 0-9 fg=#a4a6a9 bg=#233628  10-20 fg=#bfbdb6 bg=#233628  21 fg=#bfbdb6 bg=#385c34  22 fg=#bfbdb6 bg=#233628  23-34 fg=#bfbdb6 bg=#385c34  35 fg=#ffffff bg=#233628
+06: 0-9 fg=#a4a6a9 bg=#233628  10-12 fg=#bfbdb6 bg=#233628  13-20 fg=#bfbdb6 bg=#385c34  21-24 fg=#bfbdb6 bg=#233628  25-34 fg=#bfbdb6 bg=#385c34  35 fg=#ffffff bg=#233628
+07: 0-9 fg=#a4a6a9 bg=#233628  10-12 fg=#bfbdb6 bg=#233628  13-17 fg=#bfbdb6 bg=#385c34  18-29 fg=#bfbdb6 bg=#233628  30-35 fg=#ffffff bg=#233628
+08: 0-35 fg=#ffffff bg=#00000000
+09: 0-35 fg=#ffffff bg=#00000000
+10: 0-35 fg=#ffffff bg=#00000000
+11: 0-35 fg=#ffffff bg=#00000000
+12: 0-35 fg=#ffffff bg=#00000000
+13: 0-35 fg=#ffffff bg=#00000000

@@ -1,4 +1,4 @@
-import type { DiffLineRange, DiffSide } from "@revue/diff-renderer";
+import type { DiffLineRange, DiffSide } from "@revue/diff";
 import { RUN_ENDPOINT_KIND, type RunScope } from "@revue/types";
 
 export type GitHubRemote = { owner: string; repo: string };

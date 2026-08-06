@@ -69,7 +69,7 @@ A refactor that preserves behaviour should not require broad test rewrites.
 - Test one representative shortcut per shared action. Test aliases only when key routing or terminal encoding gives them distinct failure modes.
 - Keep narrow-terminal, split/stack, and panel-boundary tests focused on the layout decision, not every rendered character.
 
-## Diff-renderer tests
+## Diff engine and adapter tests
 
 When Revue owns renderer behaviour, cover it with a small set of named patch fixtures spanning materially different structures: additions, deletions, multiple hunks, renames, and absent context. Until then, test Revue's adapter and presentation contract with real patches rather than retesting Hunk or Pierre.
 
@@ -78,6 +78,52 @@ When Revue owns renderer behaviour, cover it with a small set of named patch fix
 - If Revue vendors bounded Hunk code, maintain parity tests at Revue's public renderer boundary rather than copying Hunk's private tests wholesale.
 - When Revue owns language inference, test it by path and fallback behaviour; do not snapshot large ANSI or syntax-token streams.
 - Expected values must not reimplement the production algorithm inside the test.
+
+## Diff golden snapshots
+
+The rendered diff frame is itself a contract: intra-line emphasis, wrapping, gutters, and
+column widths are all invisible to a test that only reads characters. `packages/diff-opentui/test/golden.test.tsx`
+renders curated patches headless and compares the whole frame against committed goldens in
+`packages/diff-opentui/test/__goldens__/`.
+
+What the suite covers:
+
+- one scenario per rendering family — single-character and word edits, multi-edit lines,
+  unequal-count blocks, whitespace-only changes, unicode (emoji, CJK, combining marks),
+  long-line wrap with an emphasis run crossing the wrap point, wrapped wide characters,
+  a moved block, and blank-line handling;
+- each scenario in both split and stack layouts at two widths, the wrap scenarios at widths
+  narrow enough to force wrapping;
+- the fixed `ayu-dark` theme with syntax highlighting deliberately left unprepared, because
+  highlighting is asynchronous and grammar-dependent and would make goldens flaky.
+
+A golden holds the character grid with trailing spaces trimmed, then a per-row style map of
+column runs as `cols fg=#rrggbb bg=#rrggbb [attributes]`. Style columns are terminal columns,
+so a wide glyph spans two. Colours and attributes are part of the snapshot: a background or
+bold change fails the suite even when every character is unchanged.
+
+A failure prints an elided unified diff of golden against rendering, where `-` is the
+committed golden and `+` is what the code now produces, followed by the re-bless command.
+
+Re-bless only when the new rendering is the intended one, then read the resulting diff as a
+review of the change:
+
+```bash
+bun run goldens:update
+```
+
+Goldens are checked-in fixtures, never generated at test time from a repository or `git`
+invocation. Add a scenario to `test/goldens/scenarios.ts` when a new rendering family earns
+protection; keep each patch small enough that its frame stays readable in a diff.
+
+## What runs where
+
+`.github/workflows/ci.yml` runs typecheck, lint, and the whole suite on every push to `master`
+and every pull request, so the goldens gate a change rather than only a release. The release
+workflow repeats them per target platform before it builds an executable.
+
+Screenshots are not part of either. They serve visual judgement, which no assertion replaces, and
+they need vhs, ffmpeg, and a macOS-bundled font; the goldens are the automated contract.
 
 ## Regression tests
 

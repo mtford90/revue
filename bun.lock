@@ -10,19 +10,18 @@
         "typescript": "^5.7.0",
       },
     },
-    "packages/diff-model": {
-      "name": "@revue/diff-model",
+    "packages/diff": {
+      "name": "@revue/diff",
       "version": "0.0.0",
       "dependencies": {
         "@pierre/diffs": "1.2.2",
       },
     },
-    "packages/diff-renderer": {
-      "name": "@revue/diff-renderer",
+    "packages/diff-opentui": {
+      "name": "@revue/diff-opentui",
       "version": "0.0.0",
       "dependencies": {
-        "@pierre/diffs": "1.2.2",
-        "@revue/diff-model": "workspace:*",
+        "@revue/diff": "workspace:*",
         "@revue/theme": "workspace:*",
       },
       "devDependencies": {
@@ -46,7 +45,7 @@
       "name": "@revue/prep",
       "version": "0.0.0",
       "dependencies": {
-        "@revue/diff-model": "workspace:*",
+        "@revue/diff": "workspace:*",
         "@revue/types": "workspace:*",
         "ignore": "^7.0.5",
         "zod": "^4.0.0",
@@ -61,14 +60,15 @@
     },
     "packages/tui": {
       "name": "@revue/tui",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "revue": "./src/main.tsx",
       },
       "dependencies": {
         "@opentui/core": "^0.1.89",
         "@opentui/react": "^0.1.89",
-        "@revue/diff-renderer": "workspace:*",
+        "@revue/diff": "workspace:*",
+        "@revue/diff-opentui": "workspace:*",
         "@revue/markdown-export": "workspace:*",
         "@revue/prep": "workspace:*",
         "@revue/theme": "workspace:*",
@@ -185,9 +185,9 @@
 
     "@pierre/theme": ["@pierre/theme@1.0.3", "", {}, "sha512-sWHv11TMoqKxKDgTIk5VbhQjdPhs8DCcBxbjh3mRlS3YOM/OcrWoGX6MM8eBGn9cUu3M46Py0JnxsG2nJaFTuA=="],
 
-    "@revue/diff-model": ["@revue/diff-model@workspace:packages/diff-model"],
+    "@revue/diff": ["@revue/diff@workspace:packages/diff"],
 
-    "@revue/diff-renderer": ["@revue/diff-renderer@workspace:packages/diff-renderer"],
+    "@revue/diff-opentui": ["@revue/diff-opentui@workspace:packages/diff-opentui"],
 
     "@revue/markdown-export": ["@revue/markdown-export@workspace:packages/markdown-export"],
 

@@ -1,4 +1,4 @@
-import type { DiffFileInput } from "@revue/diff-renderer";
+import type { DiffFileInput } from "@revue/diff";
 
 // GitHub-style incremental context expansion. Each gap between hunks (and above
 // the first / below the last) is a numbered boundary; revealing lines widens the

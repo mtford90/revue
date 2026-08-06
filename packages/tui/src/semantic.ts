@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sanitizeTerminalLine } from "@revue/diff-renderer";
+import { sanitizeTerminalLine } from "@revue/diff";
 import type { PreparedRun } from "@revue/prep";
 import { RUN_FILE_STATUS, RUN_OBJECT_KIND, type RunFile } from "@revue/types";
 import { z } from "zod";

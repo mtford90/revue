@@ -12,23 +12,27 @@ import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@op
 import {
 	anchorRowIndex,
 	type DecorationAnchor,
-	DiffBody,
-	type DiffBodyProps,
 	type DiffFile,
-	DiffFileHeader,
 	type DiffFileInput,
-	type DiffInlineAttachment,
 	type DiffLineRange,
 	type DiffSide,
-	decorationAnchorId,
-	diffRangeWithin,
-	type ExpandDirection,
+	type DiffVisualPlan,
 	findFocusedDecorationAnchor,
 	parsePatch,
 	prepareSyntaxHighlighting,
 	type RangeDecoration,
 	type SpanEmphasis,
-} from "@revue/diff-renderer";
+} from "@revue/diff";
+import {
+	DiffBody,
+	type DiffBodyProps,
+	DiffFileHeader,
+	type DiffInlineAttachment,
+	decorationAnchorId,
+	diffRangeWithin,
+	type ExpandDirection,
+	OPENTUI_DIFF_CHROME,
+} from "@revue/diff-opentui";
 import {
 	type Appearance,
 	resolveTheme,
@@ -135,12 +139,13 @@ import {
 	ESTIMATED_ATTACHMENT_HEIGHT,
 	headerSegmentId,
 	OVERSCAN_ROWS,
+	type PlannedViewportFile,
+	planViewportFiles,
 	planWindow,
 	SCROLL_STEP_ROWS,
 	segmentKind,
 	segmentOffset,
 	segmentPath,
-	structuralRows,
 	type ViewportFile,
 	viewportSegments,
 	type WindowPlanItem,
@@ -1561,10 +1566,9 @@ function ChapterView({
 	diffTheme,
 	diffFiles,
 	visibleDiffFiles,
+	bodyPlans,
 	windowPlan,
 	width,
-	diffPreference,
-	splitFits,
 	vs,
 	pathDisplay,
 	selectedFile,
@@ -1591,10 +1595,9 @@ function ChapterView({
 	diffTheme: Theme;
 	diffFiles: DiffFile[] | null;
 	visibleDiffFiles: ChapterDiffFile[];
+	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
 	windowPlan: WindowPlanItem[];
 	width: number;
-	diffPreference: DiffLayoutPreference;
-	splitFits: boolean;
 	vs: ViewState;
 	pathDisplay: PathDisplayMode;
 	selectedFile: number;
@@ -1726,18 +1729,13 @@ function ChapterView({
 					);
 				}
 				const displayed = contextExpansion?.variantFor(path) ?? diffFile;
+				const plan = bodyPlans.get(path);
+				if (!plan) return null;
 				return (
 					<DiffBody
 						key={item.id}
-						file={displayed}
+						plan={plan}
 						theme={diffTheme}
-						layout={layoutForFile({
-							file: displayed,
-							preference: diffPreference,
-							splitFits,
-						})}
-						width={width}
-						showLineNumbers
 						selectedHunkIndex={focused ? selectedHunkIndex : -1}
 						decorations={decorations}
 						focusedDecorationId={focusedDecorationId}
@@ -1804,10 +1802,9 @@ function SemanticChapterView({
 	semantic,
 	diffTheme,
 	diffFiles,
+	bodyPlans,
 	windowPlan,
 	width,
-	diffPreference,
-	splitFits,
 	vs,
 	pathDisplay,
 	selectedFile,
@@ -1832,10 +1829,9 @@ function SemanticChapterView({
 	semantic: PreparedSemantic;
 	diffTheme: Theme;
 	diffFiles: DiffFile[] | null;
+	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
 	windowPlan: WindowPlanItem[];
 	width: number;
-	diffPreference: DiffLayoutPreference;
-	splitFits: boolean;
 	vs: ViewState;
 	pathDisplay: PathDisplayMode;
 	selectedFile: number;
@@ -1870,6 +1866,19 @@ function SemanticChapterView({
 			showGutterMarker: false,
 		}));
 	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
+	const emphasisByPath = useMemo(() => {
+		const emphasis = new Map<string, SpanEmphasis>();
+		for (const file of semantic.files) {
+			if (!file.file) continue;
+			emphasis.set(file.path, {
+				rangesFor: (side, line) =>
+					(side === "deletions" ? file.emphasis.deletions : file.emphasis.additions).get(line),
+				deletionsFg: theme.badgeRemoved,
+				additionsFg: theme.badgeAdded,
+			});
+		}
+		return emphasis;
+	}, [semantic, theme.badgeRemoved, theme.badgeAdded]);
 	const chapterThreads = threads.filter((thread) => paths.includes(thread.anchor.filePath));
 	const inlineAttachments: DiffInlineAttachment[] = [
 		...chapterThreads.map((thread) => ({
@@ -1984,28 +1993,14 @@ function SemanticChapterView({
 					);
 				}
 				if (!semanticFile.file) return null;
-				const emphasis: SpanEmphasis = {
-					rangesFor: (side, line) =>
-						(side === "deletions"
-							? semanticFile.emphasis.deletions
-							: semanticFile.emphasis.additions
-						).get(line),
-					deletionsFg: theme.badgeRemoved,
-					additionsFg: theme.badgeAdded,
-				};
+				const emphasis = emphasisByPath.get(path);
+				const plan = bodyPlans.get(path);
+				if (!emphasis || !plan) return null;
 				return (
 					<DiffBody
 						key={item.id}
-						file={semanticFile.file}
+						plan={plan}
 						theme={diffTheme}
-						layout={layoutForFile({
-							file: semanticFile.file,
-							preference: diffPreference,
-							splitFits,
-						})}
-						width={width}
-						showLineNumbers
-						showHunkHeaders={false}
 						selectedHunkIndex={-1}
 						decorations={decorations}
 						focusedDecorationId={focusedDecorationId}
@@ -2596,14 +2591,33 @@ export function App({
 		],
 		[chapterThreadList, threadDraft],
 	);
+	const plannedViewportFiles = useMemo<PlannedViewportFile[]>(
+		() =>
+			planViewportFiles({
+				files: viewportFiles,
+				width: contentWidth,
+				chrome: OPENTUI_DIFF_CHROME,
+				syntaxTheme: diffTheme.syntaxTheme,
+			}),
+		[viewportFiles, contentWidth, diffTheme.syntaxTheme],
+	);
+	const bodyPlans = useMemo(
+		() =>
+			new Map(
+				plannedViewportFiles.flatMap((file) =>
+					file.plan ? ([[file.path, file.plan]] as const) : [],
+				),
+			),
+		[plannedViewportFiles],
+	);
 	const chapterSegments = useMemo(
 		() =>
 			viewportSegments({
-				files: viewportFiles,
+				files: plannedViewportFiles,
 				attachments: attachmentAnchors,
 				attachmentHeight: (id) => attachmentHeights.get(id) ?? ESTIMATED_ATTACHMENT_HEIGHT,
 			}),
-		[viewportFiles, attachmentAnchors, attachmentHeights],
+		[plannedViewportFiles, attachmentAnchors, attachmentHeights],
 	);
 	const windowPlan = useMemo(
 		() =>
@@ -2619,8 +2633,8 @@ export function App({
 	// or replan never re-triggers a scroll on its own.
 	const chapterSegmentsRef = useRef(chapterSegments);
 	chapterSegmentsRef.current = chapterSegments;
-	const viewportFilesRef = useRef(viewportFiles);
-	viewportFilesRef.current = viewportFiles;
+	const viewportFilesRef = useRef(plannedViewportFiles);
+	viewportFilesRef.current = plannedViewportFiles;
 	const threadsRef = useRef(threads);
 	threadsRef.current = threads;
 	function noteAttachmentNode(id: string, node: { height: number } | null) {
@@ -2797,11 +2811,8 @@ export function App({
 		const file = viewportFilesRef.current.find(
 			(candidate) => candidate.path === diffAnchorTarget.path,
 		);
-		if (file?.displayed) {
-			const row = anchorRowIndex(
-				structuralRows(file.displayed, file.layout).rows,
-				diffAnchorTarget.anchor,
-			);
+		if (file?.plan) {
+			const row = anchorRowIndex(file.plan, diffAnchorTarget.anchor);
 			const offset =
 				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
 			if (offset !== null) {
@@ -3982,12 +3993,11 @@ export function App({
 									diffTheme={diffTheme}
 									diffFiles={diffFiles}
 									visibleDiffFiles={visibleChapterFiles}
+									bodyPlans={bodyPlans}
 									windowPlan={windowPlan}
 									width={contentWidth}
-									diffPreference={diffPreference}
 									contextExpansion={contextExpansion}
 									onAttachmentNode={noteAttachmentNode}
-									splitFits={splitFits}
 									vs={vs}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
@@ -4018,11 +4028,10 @@ export function App({
 									semantic={semantic}
 									diffTheme={diffTheme}
 									diffFiles={diffFiles ?? null}
+									bodyPlans={bodyPlans}
 									windowPlan={windowPlan}
 									width={contentWidth}
-									diffPreference={diffPreference}
 									onAttachmentNode={noteAttachmentNode}
-									splitFits={splitFits}
 									vs={vs}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}

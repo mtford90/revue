@@ -14,3 +14,6 @@ bun.lock
 .vscode/
 .reviews/
 .implement-worktrees/
+
+# screenshot harness output
+scripts/screenshots/out/

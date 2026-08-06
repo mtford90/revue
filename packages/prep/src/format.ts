@@ -1,4 +1,4 @@
-import type { DiffFile } from "@revue/diff-model";
+import type { DiffFile } from "@revue/diff";
 import type { RunCommit, RunFile } from "@revue/types";
 
 export type AgentInputFile = {

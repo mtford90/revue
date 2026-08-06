@@ -160,6 +160,39 @@ test("the semantic view stays navigable across unmounted gaps", async () => {
 	expect(bottom).not.toContain("meaning 1 of f0");
 });
 
+test("wrapped lines keep the scroll geometry honest across unmounted gaps", async () => {
+	// Every added line is several terminal rows wide, so planned heights only
+	// match the painted body if the plan counts wrapped rows too.
+	const path = "src/wide.txt";
+	const line = (index: number) => `line ${index} of the wide file ${"pad ".repeat(40)}`;
+	const added = Array.from({ length: 120 }, (_, index) => `+${line(index + 1)}`).join("\n");
+	const diffFiles = await preparePatch(
+		[
+			`diff --git a/${path} b/${path}`,
+			"index 0000000..1111111 100644",
+			`--- a/${path}`,
+			`+++ b/${path}`,
+			"@@ -1,1 +1,120 @@",
+			"-old wide line",
+			added,
+		].join("\n"),
+		theme.syntaxTheme,
+	);
+	const t = await testRender(<App file={null} diffFiles={diffFiles} />, { width: 120, height: 40 });
+	await t.renderOnce();
+
+	// A marker at the head of each line survives the wrap intact.
+	const top = t.captureCharFrame();
+	expect(top).toContain("line 1 of the wide file");
+	expect(top).not.toContain("line 120 of the wide file");
+
+	await press(t, "G");
+	await settleWindow(t);
+	const bottom = t.captureCharFrame();
+	expect(bottom).toContain("line 120 of the wide file");
+	expect(bottom).not.toContain("line 1 of the wide file");
+});
+
 test("focusing a file whose rows are unmounted scrolls its header into view", async () => {
 	const diffFiles = await preparePatch(bigPatch(), theme.syntaxTheme);
 	const t = await testRender(<App file={null} diffFiles={diffFiles} />, {

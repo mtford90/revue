@@ -116,6 +116,15 @@ Goldens are checked-in fixtures, never generated at test time from a repository 
 invocation. Add a scenario to `test/goldens/scenarios.ts` when a new rendering family earns
 protection; keep each patch small enough that its frame stays readable in a diff.
 
+## What runs where
+
+`.github/workflows/ci.yml` runs typecheck, lint, and the whole suite on every push to `master`
+and every pull request, so the goldens gate a change rather than only a release. The release
+workflow repeats them per target platform before it builds an executable.
+
+Screenshots are not part of either. They serve visual judgement, which no assertion replaces, and
+they need vhs, ffmpeg, and a macOS-bundled font; the goldens are the automated contract.
+
 ## Regression tests
 
 For a bug fix:

@@ -1,8 +1,11 @@
 import {
 	type DiffLineRange,
+	type DiffRow,
 	type DiffSide,
+	type DiffStructure,
 	type PlannedDiffRow,
 	plannedRowIdentity,
+	structureRowIdentity,
 } from "@revue/diff";
 import type { ReactNode } from "react";
 
@@ -18,13 +21,21 @@ export const attachmentsForRow = ({
 	attachments,
 	resolveRange,
 }: {
-	row: PlannedDiffRow;
+	row: PlannedDiffRow | { structure: DiffStructure; row: DiffRow };
 	attachments: readonly DiffInlineAttachment[];
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
 }): DiffInlineAttachment[] => {
-	if (row.type === "hunk-header") return [];
+	const logical = "structure" in row ? row.row : row;
+	if (logical.type === "hunk-header") return [];
 	return attachments.filter((attachment) => {
-		const identity = plannedRowIdentity(row, attachment.anchor.side);
+		const identity =
+			"structure" in row
+				? structureRowIdentity({
+						structure: row.structure,
+						row: row.row,
+						side: attachment.anchor.side,
+					})
+				: plannedRowIdentity(row, attachment.anchor.side);
 		if (!identity) return false;
 		const range = resolveRange
 			? resolveRange(identity.side, identity.lineNumber)

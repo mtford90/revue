@@ -140,6 +140,7 @@ import {
 	headerSegmentId,
 	OVERSCAN_ROWS,
 	type PlannedViewportFile,
+	planViewportBodies,
 	planViewportFiles,
 	planWindow,
 	SCROLL_STEP_ROWS,
@@ -2601,15 +2602,6 @@ export function App({
 			}),
 		[viewportFiles, contentWidth, diffTheme.syntaxTheme],
 	);
-	const bodyPlans = useMemo(
-		() =>
-			new Map(
-				plannedViewportFiles.flatMap((file) =>
-					file.plan ? ([[file.path, file.plan]] as const) : [],
-				),
-			),
-		[plannedViewportFiles],
-	);
 	const chapterSegments = useMemo(
 		() =>
 			viewportSegments({
@@ -2628,6 +2620,19 @@ export function App({
 				overscan: OVERSCAN_ROWS,
 			}),
 		[chapterSegments, scrollWin, height],
+	);
+	const mountedViewportFiles = useMemo(
+		() => planViewportBodies({ files: plannedViewportFiles, windowPlan }),
+		[plannedViewportFiles, windowPlan],
+	);
+	const bodyPlans = useMemo(
+		() =>
+			new Map(
+				mountedViewportFiles.flatMap((file) =>
+					file.plan ? ([[file.path, file.plan]] as const) : [],
+				),
+			),
+		[mountedViewportFiles],
 	);
 	// Reveal effects read the current model through refs, so a height correction
 	// or replan never re-triggers a scroll on its own.
@@ -2811,8 +2816,8 @@ export function App({
 		const file = viewportFilesRef.current.find(
 			(candidate) => candidate.path === diffAnchorTarget.path,
 		);
-		if (file?.plan) {
-			const row = anchorRowIndex(file.plan, diffAnchorTarget.anchor);
+		if (file?.measurement) {
+			const row = anchorRowIndex(file.measurement, diffAnchorTarget.anchor);
 			const offset =
 				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
 			if (offset !== null) {

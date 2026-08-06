@@ -3,9 +3,13 @@ export { type HighlightedLines, prepareSyntaxHighlighting } from "./highlight.ts
 export type { DiffChromeWidths } from "./layout.ts";
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export {
+	type DiffMeasurement,
 	type DiffPlanStyles,
 	type DiffPlanVisibility,
+	type DiffStructure,
 	type DiffVisualPlan,
+	diffStructure,
+	measureDiff,
 	type PaintDiffInput,
 	type PaintedDiffRow,
 	type PaintedDiffSlice,
@@ -23,6 +27,7 @@ export {
 	type PlannedVisualCell,
 	paintDiff,
 	planDiff,
+	structureRowIdentity,
 } from "./plan.ts";
 export { anchorRowIndex, plannedRowIdentity } from "./ranges.ts";
 export { sanitizeTerminalLine } from "./terminalText.ts";
@@ -38,6 +43,7 @@ export type {
 	DiffLine,
 	DiffLineRange,
 	DiffMetadata,
+	DiffRow,
 	DiffSide,
 	DiffSourceLineIdentity,
 	DiffStats,

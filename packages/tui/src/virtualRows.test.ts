@@ -4,6 +4,7 @@ import { OPENTUI_DIFF_CHROME } from "@revue/diff-opentui";
 import {
 	attachmentRowIndex,
 	bodySegmentId,
+	planViewportBodies,
 	planViewportFiles,
 	planWindow,
 	type SegmentRows,
@@ -17,6 +18,22 @@ const uniform = (id: string, rows: number): SegmentRows => ({
 	id,
 	heights: Array.from({ length: rows }, () => 1),
 });
+
+const materialiseBodies = (files: ReturnType<typeof planViewportFiles>) =>
+	planViewportBodies({
+		files,
+		windowPlan: files.flatMap((file) =>
+			file.measurement
+				? [
+						{
+							kind: "rows" as const,
+							id: bodySegmentId(file.path),
+							window: { start: 0, end: file.measurement.heights.length + 1 },
+						},
+					]
+				: [],
+		),
+	});
 
 const planHeight = (segments: SegmentRows[], plan: WindowPlanItem[]): number =>
 	plan.reduce(
@@ -132,6 +149,59 @@ describe("planWindow", () => {
 });
 
 describe("viewportSegments", () => {
+	test("resize performance measures off-screen bodies without allocating visual plans", () => {
+		const files = parsePatch(`diff --git a/first.ts b/first.ts
+--- a/first.ts
++++ b/first.ts
+@@ -1 +1 @@
+-old
++${"first ".repeat(20)}
+diff --git a/second.ts b/second.ts
+--- a/second.ts
++++ b/second.ts
+@@ -1 +1 @@
+-old
++${"second ".repeat(20)}
+`);
+		const planned = planViewportFiles({
+			files: files.map((file) => ({
+				path: file.path,
+				displayed: file,
+				collapsed: false,
+				separator: false,
+				layout: "stack" as const,
+			})),
+			width: 40,
+			chrome: OPENTUI_DIFF_CHROME,
+		});
+
+		expect(planned.map((file) => file.plan)).toEqual([undefined, undefined]);
+		expect(
+			planViewportBodies({
+				files: planned,
+				windowPlan: [
+					{
+						kind: "rows",
+						id: bodySegmentId("first.ts"),
+						window: { start: 0, end: 4 },
+					},
+				],
+			}).map((file) => Boolean(file.plan)),
+		).toEqual([true, false]);
+		expect(
+			viewportSegments({
+				files: planned,
+				attachments: [],
+				attachmentHeight: () => 0,
+			}),
+		).toEqual([
+			{ id: "head:first.ts", heights: [1] },
+			{ id: "body:first.ts", heights: [1, 1, 5, 0] },
+			{ id: "head:second.ts", heights: [1] },
+			{ id: "body:second.ts", heights: [1, 1, 6, 0] },
+		]);
+	});
+
 	test("counts a wrapped line as the visual rows it renders as", () => {
 		const [file] = parsePatch(`diff --git a/wrap.ts b/wrap.ts
 --- a/wrap.ts
@@ -162,6 +232,32 @@ describe("viewportSegments", () => {
 		expect(heightsAt(134)).toEqual([1, 1, 1, 0]);
 	});
 
+	test("keeps lightweight and visual heights identical across layouts and widths", () => {
+		const [file] = parsePatch(`diff --git a/heights.ts b/heights.ts
+--- a/heights.ts
++++ b/heights.ts
+@@ -1,2 +1,2 @@
+-${"old ".repeat(18)}
++${"new ".repeat(27)}
+ unchanged
+`);
+		if (!file) throw new Error("missing height fixture");
+		for (const layout of ["split", "stack"] as const) {
+			for (const width of [36, 80]) {
+				const files = planViewportFiles({
+					files: [
+						{ path: "heights.ts", displayed: file, collapsed: false, separator: false, layout },
+					],
+					width,
+					chrome: OPENTUI_DIFF_CHROME,
+				});
+				const [mounted] = materialiseBodies(files);
+				if (!mounted?.measurement || !mounted.plan) throw new Error("missing geometry");
+				expect(mounted.measurement.heights).toEqual(mounted.plan.rows.map((row) => row.height));
+			}
+		}
+	});
+
 	test("reuses geometry across navigation models until a stable layout input changes", () => {
 		const [file] = parsePatch(`diff --git a/cache.ts b/cache.ts
 --- a/cache.ts
@@ -179,7 +275,9 @@ describe("viewportSegments", () => {
 			layout: "stack" as const,
 		};
 		const at = (width: number) =>
-			planViewportFiles({ files: [{ ...source }], width, chrome: OPENTUI_DIFF_CHROME })[0]?.plan;
+			materialiseBodies(
+				planViewportFiles({ files: [{ ...source }], width, chrome: OPENTUI_DIFF_CHROME }),
+			)[0]?.plan;
 
 		const first = at(50);
 		const afterNavigationModelRebuild = at(50);
@@ -221,11 +319,16 @@ describe("viewportSegments", () => {
 			}),
 		).toEqual([{ id: "head:collapsed.ts", heights: [1] }]);
 
-		const expanded = plan(false);
-		if (!expanded?.plan) throw new Error("expansion must plan the body");
-		expect(expanded.plan.totalHeight).toBeGreaterThan(1);
+		const expandedFile = plan(false);
+		if (!expandedFile) throw new Error("missing expanded body");
+		const expanded = materialiseBodies([expandedFile]);
+		const expandedPlan = expanded[0]?.plan;
+		if (!expandedPlan) throw new Error("expansion must plan the body");
+		expect(expandedPlan.totalHeight).toBeGreaterThan(1);
 		expect(plan(true)?.plan).toBeUndefined();
-		expect(plan(false)?.plan).toBe(expanded.plan);
+		const repeatedFile = plan(false);
+		if (!repeatedFile) throw new Error("missing repeated body");
+		expect(materialiseBodies([repeatedFile])[0]?.plan).toBe(expandedPlan);
 	});
 
 	test("uses one planned identity for wrapped anchors, attachments, hidden headers, and expanders", () => {
@@ -249,11 +352,13 @@ describe("viewportSegments", () => {
 			showHunkHeaders: false,
 			expanderActions: (boundary: number) => (boundary < 2 ? (["down"] as const) : []),
 		};
-		const [planned] = planViewportFiles({
-			files: [source],
-			width: 40,
-			chrome: OPENTUI_DIFF_CHROME,
-		});
+		const [planned] = materialiseBodies(
+			planViewportFiles({
+				files: [source],
+				width: 40,
+				chrome: OPENTUI_DIFF_CHROME,
+			}),
+		);
 		if (!planned?.plan) throw new Error("missing shared plan");
 		const anchor = {
 			filePath: "identity.ts",

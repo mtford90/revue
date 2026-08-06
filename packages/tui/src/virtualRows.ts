@@ -8,11 +8,15 @@
 import {
 	createDiffFile,
 	type DiffChromeWidths,
+	type DiffFile,
 	type DiffFileInput,
 	type DiffLayout,
 	type DiffLineRange,
+	type DiffMeasurement,
 	type DiffSide,
 	type DiffVisualPlan,
+	diffStructure,
+	measureDiff,
 	planDiff,
 } from "@revue/diff";
 import {
@@ -148,11 +152,19 @@ export type ViewportFile = {
 };
 
 export type PlannedViewportFile = ViewportFile & {
-	/** Exact engine plan shared by viewport measurement, navigation and OpenTUI rendering. */
+	/** Exact lightweight geometry used to retain scroll offsets outside the mounted window. */
+	measurement?: DiffMeasurement;
+	/** Full visual geometry exists only while this body intersects the mounted window. */
 	plan?: DiffVisualPlan;
 };
 
-const geometryCache = new WeakMap<DiffFileInput, Map<string, DiffVisualPlan>>();
+type FileGeometryCache = {
+	file: DiffFile;
+	measurements: Map<string, DiffMeasurement>;
+};
+
+const geometryCache = new WeakMap<DiffFileInput, FileGeometryCache>();
+const visualPlans = new WeakMap<DiffMeasurement, DiffVisualPlan>();
 const GEOMETRY_CACHE_LIMIT = 8;
 
 const geometryKey = ({
@@ -180,10 +192,15 @@ const geometryKey = ({
 		chrome.minimumCode,
 	].join(":");
 
-/**
- * Plan stable body geometry once per file/layout/width/visibility/chrome identity. The caller must
- * pass adapter chrome explicitly; transient selection/focus/decoration state is intentionally absent.
- */
+const geometryFor = (file: DiffFileInput): FileGeometryCache => {
+	const cached = geometryCache.get(file);
+	if (cached) return cached;
+	const geometry = { file: createDiffFile(file), measurements: new Map<string, DiffMeasurement>() };
+	geometryCache.set(file, geometry);
+	return geometry;
+};
+
+/** Measure every expanded body without allocating visual cells for off-screen rows. */
 export const planViewportFiles = ({
 	files,
 	width,
@@ -197,39 +214,60 @@ export const planViewportFiles = ({
 }): PlannedViewportFile[] =>
 	files.map((file) => {
 		if (!file.displayed || file.collapsed) return file;
-		let byGeometry = geometryCache.get(file.displayed);
-		if (!byGeometry) {
-			byGeometry = new Map();
-			geometryCache.set(file.displayed, byGeometry);
-		}
+		const cache = geometryFor(file.displayed);
 		const key = geometryKey({ file, width, chrome, syntaxTheme });
-		let plan = byGeometry.get(key);
-		if (plan) {
-			// Refresh this entry so repeated navigation keeps the active geometry hot.
-			byGeometry.delete(key);
-			byGeometry.set(key, plan);
+		let measurement = cache.measurements.get(key);
+		if (measurement) {
+			cache.measurements.delete(key);
+			cache.measurements.set(key, measurement);
 		}
-		if (!plan) {
-			const normalized = createDiffFile(file.displayed);
-			plan = planDiff({
-				file: normalized,
-				layout: file.layout,
+		if (!measurement) {
+			measurement = measureDiff({
+				structure: diffStructure({ file: cache.file, layout: file.layout, syntaxTheme }),
 				width,
 				visibility: {
 					lineNumbers: file.showLineNumbers !== false,
 					hunkHeaders: file.showHunkHeaders !== false,
 				},
 				chrome,
-				syntaxTheme,
 			});
-			byGeometry.set(key, plan);
-			if (byGeometry.size > GEOMETRY_CACHE_LIMIT) {
-				const oldest = byGeometry.keys().next().value;
-				if (oldest !== undefined) byGeometry.delete(oldest);
+			cache.measurements.set(key, measurement);
+			if (cache.measurements.size > GEOMETRY_CACHE_LIMIT) {
+				const oldest = cache.measurements.keys().next().value;
+				if (oldest !== undefined) cache.measurements.delete(oldest);
 			}
+		}
+		return { ...file, measurement };
+	});
+
+/** Materialise visual rows only for bodies selected by the viewport's overscanned window. */
+export const planViewportBodies = ({
+	files,
+	windowPlan,
+}: {
+	files: readonly PlannedViewportFile[];
+	windowPlan: readonly WindowPlanItem[];
+}): PlannedViewportFile[] => {
+	const mountedBodies = new Set(
+		windowPlan.flatMap((item) =>
+			item.kind === "rows" && segmentKind(item.id) === "body" ? [segmentPath(item.id)] : [],
+		),
+	);
+	return files.map((file) => {
+		if (!file.measurement || !mountedBodies.has(file.path)) return file;
+		let plan = visualPlans.get(file.measurement);
+		if (!plan) {
+			plan = planDiff({
+				structure: file.measurement.structure,
+				width: file.measurement.width,
+				visibility: file.measurement.visibility,
+				chrome: file.measurement.chrome,
+			});
+			visualPlans.set(file.measurement, plan);
 		}
 		return { ...file, plan };
 	});
+};
 
 const bodyHeights = ({
 	file,
@@ -240,35 +278,35 @@ const bodyHeights = ({
 	attachments: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
 }): number[] => {
-	const visual = file.plan;
-	if (!visual) return [];
-	const normalized = visual.file;
+	const measurement = file.measurement;
+	if (!measurement) return [];
+	const normalized = measurement.structure.file;
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length) return [1];
-	const heights = visual.rows.map((row) => {
+	const heights = measurement.structure.rows.map((row, index) => {
+		const height = measurement.heights[index] ?? 0;
 		if (row.type === "hunk-header")
-			return row.height + (file.expanderActions?.(row.hunkIndex)?.length ? 1 : 0);
+			return height + (file.expanderActions?.(row.hunkIndex)?.length ? 1 : 0);
 		const attached = attachmentsForRow({
-			row,
+			row: { structure: measurement.structure, row },
 			attachments,
 			resolveRange: file.resolveRange,
 		});
-		return (
-			row.height + attached.reduce((sum, attachment) => sum + attachmentHeight(attachment.id), 0)
-		);
+		return height + attached.reduce((sum, attachment) => sum + attachmentHeight(attachment.id), 0);
 	});
-	// The trailing expander band occupies a pseudo-row at index visual.rows.length.
+	// The trailing expander band occupies a pseudo-row after the measured rows.
 	heights.push(file.expanderActions?.(normalized.metadata.hunks.length)?.length ? 1 : 0);
 	return heights;
 };
 
 /** The row an inline attachment with this anchor renders under, or -1. */
 export const attachmentRowIndex = (file: PlannedViewportFile, anchor: DiffLineRange): number => {
-	if (!file.plan) return -1;
+	const measurement = file.measurement;
+	if (!measurement) return -1;
 	const probe = [{ id: "probe", anchor, content: null }];
-	return file.plan.rows.findIndex(
+	return measurement.structure.rows.findIndex(
 		(row) =>
 			attachmentsForRow({
-				row,
+				row: { structure: measurement.structure, row },
 				attachments: probe,
 				resolveRange: file.resolveRange,
 			}).length > 0,
@@ -296,7 +334,7 @@ export const viewportSegments = ({
 					heights: Array.from({ length: file.noteCount }, () => 1),
 				});
 			}
-			if (file.plan) {
+			if (file.measurement) {
 				segments.push({
 					id: bodySegmentId(file.path),
 					heights: bodyHeights({ file, attachments, attachmentHeight }),

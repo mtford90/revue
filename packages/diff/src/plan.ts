@@ -15,7 +15,7 @@ import type {
 	RenderSpan,
 	SpanEmphasis,
 } from "./types.ts";
-import { wrapSpans } from "./wrap.ts";
+import { wrappedRowCount, wrapSpans } from "./wrap.ts";
 
 export type DiffPlanStyles = {
 	text: string;
@@ -32,6 +32,22 @@ export type DiffPlanStyles = {
 export type DiffPlanVisibility = {
 	lineNumbers: boolean;
 	hunkHeaders: boolean;
+};
+
+export type DiffStructure = {
+	file: DiffFile;
+	layout: DiffLayout;
+	rows: DiffRow[];
+	digits: number;
+	stackGutterSides: DiffSide[];
+};
+
+export type DiffMeasurement = {
+	structure: DiffStructure;
+	width: number;
+	visibility: DiffPlanVisibility;
+	chrome: DiffChromeWidths;
+	heights: number[];
 };
 
 export type PlannedGutter = {
@@ -105,14 +121,34 @@ export type DiffVisualPlan = {
 	rows: PlannedDiffRow[];
 };
 
-export type PlanDiffInput = {
-	file: DiffFile;
-	layout: DiffLayout;
+type PlanDiffGeometryInput = {
 	width: number;
 	visibility: DiffPlanVisibility;
 	chrome: DiffChromeWidths;
-	/** Prepared syntax spans are stable geometry input; absent themes use raw text spans. */
-	syntaxTheme?: string;
+};
+
+export type PlanDiffInput = PlanDiffGeometryInput &
+	(
+		| {
+				file: DiffFile;
+				layout: DiffLayout;
+				/** Prepared syntax spans are stable geometry input; absent themes use raw text spans. */
+				syntaxTheme?: string;
+				structure?: never;
+		  }
+		| {
+				structure: DiffStructure;
+				file?: never;
+				layout?: never;
+				syntaxTheme?: never;
+		  }
+	);
+
+export type MeasureDiffInput = {
+	structure: DiffStructure;
+	width: number;
+	visibility: DiffPlanVisibility;
+	chrome: DiffChromeWidths;
 };
 
 export type PaintedGutter = PlannedGutter & { focused: boolean };
@@ -155,6 +191,37 @@ export type PaintedDiffSlice = {
 const signFor = (kind: DiffCell["kind"]): " " | "+" | "-" =>
 	kind === "addition" ? "+" : kind === "deletion" ? "-" : " ";
 
+const structures = new WeakMap<DiffFile, Map<string, DiffStructure>>();
+
+export const diffStructure = ({
+	file,
+	layout,
+	syntaxTheme,
+}: {
+	file: DiffFile;
+	layout: DiffLayout;
+	syntaxTheme?: string;
+}): DiffStructure => {
+	let byLayout = structures.get(file);
+	if (!byLayout) {
+		byLayout = new Map();
+		structures.set(file, byLayout);
+	}
+	const key = `${layout}:${syntaxTheme ?? ""}`;
+	const cached = byLayout.get(key);
+	if (cached) return cached;
+	const rows = buildDiffRows(file, layout, { syntaxTheme });
+	const structure = {
+		file,
+		layout,
+		rows,
+		digits: lineNumberDigits(file),
+		stackGutterSides: stackGutterSides(rows),
+	};
+	byLayout.set(key, structure);
+	return structure;
+};
+
 const identityFor = ({
 	file,
 	row,
@@ -177,6 +244,20 @@ const identityFor = ({
 		side,
 		lineNumber,
 	};
+};
+
+export const structureRowIdentity = ({
+	structure,
+	row,
+	side,
+}: {
+	structure: DiffStructure;
+	row: DiffRow;
+	side: DiffSide;
+}): DiffSourceLineIdentity | undefined => {
+	if (row.type === "hunk-header") return undefined;
+	const cell = row.type === "stack-line" ? row.cell : side === "deletions" ? row.old : row.new;
+	return identityFor({ file: structure.file, row, cell, side });
 };
 
 const plannedCells = ({
@@ -228,24 +309,48 @@ const plannedCells = ({
 	});
 };
 
+export const measureDiff = ({
+	structure,
+	width,
+	visibility,
+	chrome,
+}: MeasureDiffInput): DiffMeasurement => {
+	const codeWidths: CodeWidths = diffCodeWidths({
+		width,
+		layout: structure.layout,
+		digits: structure.digits,
+		showLineNumbers: visibility.lineNumbers,
+		stackGutters: structure.stackGutterSides.length,
+		chrome,
+	});
+	const heights = structure.rows.map((row) => {
+		if (row.type === "hunk-header") return visibility.hunkHeaders ? 1 : 0;
+		return row.type === "stack-line"
+			? wrappedRowCount(row.cell.spans, codeWidths.additions)
+			: Math.max(
+					wrappedRowCount(row.old.spans, codeWidths.deletions),
+					wrappedRowCount(row.new.spans, codeWidths.additions),
+				);
+	});
+	return { structure, width, visibility, chrome, heights };
+};
+
 /**
  * Produce stable width-aware geometry shared by measurement and presentation. Decorations,
  * focus, selection and colours are excluded so interactive paint changes cannot rebuild wrapping.
  */
-export function planDiff({
-	file,
-	layout,
-	width,
-	visibility,
-	chrome,
-	syntaxTheme,
-}: PlanDiffInput): DiffVisualPlan {
-	const rows = buildDiffRows(file, layout, { syntaxTheme });
-	const digits = lineNumberDigits(file);
-	const stackSides = stackGutterSides(rows);
+export function planDiff(input: PlanDiffInput): DiffVisualPlan {
+	const { width, visibility, chrome } = input;
+	const source =
+		input.structure ??
+		diffStructure({ file: input.file, layout: input.layout, syntaxTheme: input.syntaxTheme });
+	const file = source.file;
+	const rows = source.rows;
+	const digits = source.digits;
+	const stackSides = source.stackGutterSides;
 	const codeWidths: CodeWidths = diffCodeWidths({
 		width,
-		layout,
+		layout: source.layout,
 		digits,
 		showLineNumbers: visibility.lineNumbers,
 		stackGutters: stackSides.length,
@@ -319,8 +424,8 @@ export function planDiff({
 		};
 	});
 	return {
-		file,
-		layout,
+		file: source.file,
+		layout: source.layout,
 		width,
 		totalHeight: planned.reduce((height, row) => height + row.height, 0),
 		digits,

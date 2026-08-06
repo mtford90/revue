@@ -1,4 +1,5 @@
-import type { DiffVisualPlan, PlannedDiffRow, PlannedVisualCell } from "./plan.ts";
+import type { DiffMeasurement, DiffVisualPlan, PlannedDiffRow, PlannedVisualCell } from "./plan.ts";
+import { structureRowIdentity } from "./plan.ts";
 import type { DecorationAnchor, DiffSide, DiffSourceLineIdentity } from "./types.ts";
 
 const firstCell = (
@@ -17,9 +18,22 @@ export const plannedRowIdentity = (
 ): DiffSourceLineIdentity | undefined =>
 	row.type === "hunk-header" ? undefined : firstCell(row, side)?.identities[side];
 
-/** Resolve an anchor against the exact planned logical identities used for height and rendering. */
-export const anchorRowIndex = (plan: DiffVisualPlan, anchor: DecorationAnchor): number =>
-	plan.rows.findIndex((row) => {
-		const identity = plannedRowIdentity(row, anchor.side);
-		return identity?.hunkIndex === anchor.hunkIndex && identity.lineNumber === anchor.lineNumber;
-	});
+const matchesAnchor = (identity: DiffSourceLineIdentity | undefined, anchor: DecorationAnchor) =>
+	identity?.hunkIndex === anchor.hunkIndex && identity.lineNumber === anchor.lineNumber;
+
+/** Resolve an anchor against the exact logical identities used for height and rendering. */
+export const anchorRowIndex = (
+	plan: DiffVisualPlan | DiffMeasurement,
+	anchor: DecorationAnchor,
+): number => {
+	if ("rows" in plan)
+		return plan.rows.findIndex((row) =>
+			matchesAnchor(plannedRowIdentity(row, anchor.side), anchor),
+		);
+	return plan.structure.rows.findIndex((row) =>
+		matchesAnchor(
+			structureRowIdentity({ structure: plan.structure, row, side: anchor.side }),
+			anchor,
+		),
+	);
+};

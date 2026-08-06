@@ -2,6 +2,37 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.5.0](https://github.com/mtford90/revue/compare/v0.4.0...v0.5.0) (2026-08-06)
+
+
+### Features
+
+* **diff-model:** add intra-line pairing and span computation ([b2eba15](https://github.com/mtford90/revue/commit/b2eba1570bbd530662be833c65d0dd296d6da5f6))
+* **diff-renderer:** add a column-aware wrap layout for diff rows ([d0009c4](https://github.com/mtford90/revue/commit/d0009c43a1ecf8d253bedfcaa721d75f16fac211))
+* **diff-renderer:** render intra-line emphasis in the patch view ([556c12f](https://github.com/mtford90/revue/commit/556c12f478023ae84843cf67c9aff5db6a78d285))
+* **diff-renderer:** soft-wrap long diff lines with room to breathe ([062f941](https://github.com/mtford90/revue/commit/062f941f6499a0e3c67f2e47597f8eeb39355bcf))
+* **prep:** honour standard Git exclusions ([012afab](https://github.com/mtford90/revue/commit/012afabd3533496313bf3e5110f158ba9433c3b3))
+* refactor patch engine into core and OpenTUI adapter ([a1a97fc](https://github.com/mtford90/revue/commit/a1a97fcef70224f41f2333db415136b1b49a8e50))
+* **theme:** add diff emphasis background slots ([3162ddd](https://github.com/mtford90/revue/commit/3162ddd0e30fa15af8ed34f183a58e66df251dd0))
+
+
+### Bug Fixes
+
+* close diff planning review gaps ([b008e2d](https://github.com/mtford90/revue/commit/b008e2de7e3ecfce49341a2e97e6bc640c491bff))
+* **diff-model:** gate equal-count pairs by similarity ([85cd34b](https://github.com/mtford90/revue/commit/85cd34be4df9aab60f919e33ad522db92aa4d483))
+* **diff-model:** snap emphasis ranges to grapheme boundaries ([ec19569](https://github.com/mtford90/revue/commit/ec19569245a592ced38124bd2f4d528bdc12bdb2))
+* **diff-model:** stop pairing blank and trivially alike lines ([582ab9c](https://github.com/mtford90/revue/commit/582ab9ca6ae3be3b4f03d09971e987bde162863d))
+* **diff-renderer:** stop continuation gutters accepting clicks ([4554d2e](https://github.com/mtford90/revue/commit/4554d2eefb77072bec706ab3d8ef9556dbbaa94d))
+* keep resize planning viewport-bounded ([0905bae](https://github.com/mtford90/revue/commit/0905baed86b6929da24efbc5871a6c71354c777a))
+* restore bounded diff planning ([8be48cf](https://github.com/mtford90/revue/commit/8be48cf8a7cb9173f3048e1d186a702df4d54c67))
+* **screenshots:** draw every shot again unless resuming is asked for ([f47be10](https://github.com/mtford90/revue/commit/f47be10e97e100c52e3e23d8717bba384c038f43))
+
+
+### Performance Improvements
+
+* **diff-model,diff-renderer:** cap and memoise intra-line pairing ([9a73d21](https://github.com/mtford90/revue/commit/9a73d21c89da5d550968e5bf63d34bd21d2c5860))
+* **diff-model:** raise the pairing cap now memoisation absorbs the cost ([402d73f](https://github.com/mtford90/revue/commit/402d73ff6fe938a844575a21ee614ecacffdcfee))
+
 ## [0.4.0](https://github.com/mtford90/revue/compare/v0.3.0...v0.4.0) (2026-08-05)
 
 

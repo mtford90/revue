@@ -45,6 +45,17 @@ export const keyChangeSchema = z.strictObject({
 });
 export type KeyChange = z.infer<typeof keyChangeSchema>;
 
+/**
+ * How much of the prepared diff the narrative sets out to cover. A partial depth carries the
+ * words the reviewer sees — the `10,000ft` preset or whatever the agent was asked for — and is
+ * the only thing that lets a narrative leave review units out.
+ */
+export const narrativeDepthSchema = z.discriminatedUnion("kind", [
+	z.strictObject({ kind: z.literal("full") }),
+	z.strictObject({ kind: z.literal("partial"), label: z.string().min(1) }),
+]);
+export type NarrativeDepth = z.infer<typeof narrativeDepthSchema>;
+
 /** One narrative beat: a coherent group of hunks the reviewer can absorb as a unit. */
 export const chapterSchema = z.strictObject({
 	id: z.string().min(1),

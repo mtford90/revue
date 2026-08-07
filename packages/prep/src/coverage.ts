@@ -2,6 +2,7 @@ import { type DiffFile, parsePatch } from "@revue/diff";
 import {
 	type Chapter,
 	type LineRef,
+	partialDepthLabel,
 	type RevueChaptersFile,
 	RUN_EXCLUSION_REASON,
 	type RunExclusion,
@@ -99,10 +100,13 @@ const omittedPathExplanation = (
 	return `${label} references ${JSON.stringify(path)}, which prep omitted via ${exclusionSource(exclusion)} pattern ${JSON.stringify(exclusion.pattern)}${matched}; regenerate chapters.json from this run's hunks.txt, or adjust the ignore rule and prep a new run`;
 };
 
-const reviewUnitIssues = (run: PreparedRun, chapters: Chapter[]): string[] => {
+const reviewUnitIssues = (run: PreparedRun, file: RevueChaptersFile): string[] => {
+	// Only a narrative that says out loud it is partial may leave units out; everything else,
+	// including a chapters file written before depth existed, still owes every one of them.
+	const everyUnitRequired = partialDepthLabel(file) === null;
 	const expected = new Map(manifestUnitEntries(run));
 	const occurrences = new Map<string, string[]>();
-	for (const chapter of chapters) {
+	for (const chapter of file.chapters) {
 		for (const reference of chapter.hunkRefs) {
 			const key = unitKey(reference.filePath, reference.oldStart);
 			occurrences.set(key, [...(occurrences.get(key) ?? []), chapter.id]);
@@ -111,7 +115,7 @@ const reviewUnitIssues = (run: PreparedRun, chapters: Chapter[]): string[] => {
 	const issues: string[] = [];
 	for (const [key, label] of expected) {
 		const owners = occurrences.get(key) ?? [];
-		if (!owners.length) issues.push(`missing review unit ${label}`);
+		if (!owners.length && everyUnitRequired) issues.push(`missing review unit ${label}`);
 		if (owners.length > 1) issues.push(`review unit ${label} appears ${owners.length} times`);
 	}
 	for (const [key, owners] of occurrences) {
@@ -183,7 +187,7 @@ export function validateReviewCoverage(run: PreparedRun, file: RevueChaptersFile
 	const issues = [
 		...preparedUnitIssues(run, files),
 		...chapterIdentityIssues(file.chapters),
-		...reviewUnitIssues(run, file.chapters),
+		...reviewUnitIssues(run, file),
 		...lineReferenceIssues(run, new Map(files.map((entry) => [entry.path, entry])), file.chapters),
 	];
 	if (issues.length) {

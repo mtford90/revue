@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { RevueChaptersFileSchema } from "@revue/types";
+import { type RevueChaptersFile, RevueChaptersFileSchema } from "@revue/types";
 import { loadPreparedRun } from "../src/artifact.ts";
 import { validateReviewCoverage } from "../src/coverage.ts";
 
@@ -11,6 +11,12 @@ const sample = async () => ({
 	chapters: RevueChaptersFileSchema.parse(
 		await Bun.file(resolve(sampleDirectory, "chapters.json")).json(),
 	),
+});
+
+/** The same narration, declared as a deliberately incomplete one. */
+const zoomedOut = (file: RevueChaptersFile): RevueChaptersFile => ({
+	...file,
+	depth: { kind: "partial", label: "10,000ft" },
 });
 
 test("coverage validation requires each prepared unit exactly once", async () => {
@@ -25,6 +31,7 @@ test("coverage validation requires each prepared unit exactly once", async () =>
 	};
 
 	expect(() => validateReviewCoverage(run, duplicated)).toThrow("appears 2 times");
+	expect(() => validateReviewCoverage(run, zoomedOut(duplicated))).toThrow("appears 2 times");
 	const firstFile = run.manifest.files[0];
 	if (!firstFile) throw new Error("Expected a sample run file");
 	const duplicateManifest = {
@@ -34,6 +41,31 @@ test("coverage validation requires each prepared unit exactly once", async () =>
 	expect(() => validateReviewCoverage(duplicateManifest, chapters)).toThrow(
 		"duplicate run.json review unit",
 	);
+	expect(() => validateReviewCoverage(duplicateManifest, zoomedOut(chapters))).toThrow(
+		"duplicate run.json review unit",
+	);
+});
+
+test("only an explicitly partial depth may leave a prepared unit out", async () => {
+	const { run, chapters } = await sample();
+	const dropped = {
+		...chapters,
+		chapters: chapters.chapters.filter((chapter) => chapter.id !== "chapter-3"),
+	};
+
+	expect(() => validateReviewCoverage(run, dropped)).toThrow(
+		'missing review unit "src/lib/apiClient.test.ts"@0',
+	);
+	expect(() => validateReviewCoverage(run, { ...dropped, depth: { kind: "full" } })).toThrow(
+		'missing review unit "src/lib/apiClient.test.ts"@0',
+	);
+	expect(() => validateReviewCoverage(run, zoomedOut(dropped))).not.toThrow();
+	expect(() =>
+		validateReviewCoverage(run, {
+			...dropped,
+			depth: { kind: "partial", label: "just the API changes" },
+		}),
+	).not.toThrow();
 });
 
 test("coverage validation accepts an interlude, a chapter that cites no review units", async () => {
@@ -91,6 +123,27 @@ test("coverage validation explains references to paths omitted during prep", asy
 	expect(() => validateReviewCoverage(withExclusion, withOmittedReference)).toThrow(
 		`prep omitted via --ignore pattern "fixtures/**"; regenerate chapters.json from this run's hunks.txt`,
 	);
+	expect(() => validateReviewCoverage(withExclusion, zoomedOut(withOmittedReference))).toThrow(
+		`prep omitted via --ignore pattern "fixtures/**"`,
+	);
+});
+
+test("coverage validation rejects a unit no prepared run has, at any depth", async () => {
+	const { run, chapters } = await sample();
+	const invented = {
+		...chapters,
+		chapters: chapters.chapters.map((chapter, index) =>
+			index === 0
+				? {
+						...chapter,
+						hunkRefs: [...chapter.hunkRefs, { filePath: "src/lib/ghost.ts", oldStart: 3 }],
+					}
+				: chapter,
+		),
+	};
+
+	expect(() => validateReviewCoverage(run, invented)).toThrow("unknown review unit");
+	expect(() => validateReviewCoverage(run, zoomedOut(invented))).toThrow("unknown review unit");
 });
 
 test("coverage validation rejects chapter identities that would corrupt review state", async () => {
@@ -101,6 +154,7 @@ test("coverage validation rejects chapter identities that would corrupt review s
 
 	expect(() => validateReviewCoverage(run, duplicated)).toThrow("duplicate chapter id");
 	expect(() => validateReviewCoverage(run, duplicated)).toThrow("duplicate chapter order");
+	expect(() => validateReviewCoverage(run, zoomedOut(duplicated))).toThrow("duplicate chapter id");
 });
 
 test("coverage validation keeps key-change ranges inside their chapter units", async () => {
@@ -124,4 +178,7 @@ test("coverage validation keeps key-change ranges inside their chapter units", a
 	};
 
 	expect(() => validateReviewCoverage(run, outside)).toThrow("is outside the pinned hunks");
+	expect(() => validateReviewCoverage(run, zoomedOut(outside))).toThrow(
+		"is outside the pinned hunks",
+	);
 });

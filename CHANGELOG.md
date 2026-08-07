@@ -2,6 +2,13 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.5.1](https://github.com/mtford90/revue/compare/v0.5.0...v0.5.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **tui:** reach the Comments surface without a narrative ([98f4861](https://github.com/mtford90/revue/commit/98f48614159610b61cb0078317762d24c92da329))
+
 ## [0.5.0](https://github.com/mtford90/revue/compare/v0.4.0...v0.5.0) (2026-08-06)
 
 

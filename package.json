@@ -1,6 +1,6 @@
 {
 	"name": "revue-monorepo",
-	"version": "0.5.0",
+	"version": "0.5.1",
 	"private": true,
 	"description": "Narrative code review in your terminal — Stage's chapters with a Revue-owned TUI renderer.",
 	"type": "module",

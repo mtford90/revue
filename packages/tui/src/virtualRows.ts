@@ -7,6 +7,7 @@
 
 import {
 	createDiffFile,
+	type DiagramVisualPlan,
 	type DiffChromeWidths,
 	type DiffFile,
 	type DiffFileInput,
@@ -134,6 +135,8 @@ export const notesSegmentId = (path: string) => `notes:${path}`;
 export const bodySegmentId = (path: string) => `body:${path}`;
 export const excerptPadSegmentId = (key: string) => `excpad:${key}`;
 export const excerptSegmentId = (key: string) => `exc:${key}`;
+export const diagramPadSegmentId = (key: string) => `diapad:${key}`;
+export const diagramSegmentId = (key: string) => `dia:${key}`;
 export const segmentKind = (id: string) => id.slice(0, id.indexOf(":"));
 export const segmentPath = (id: string) => id.slice(id.indexOf(":") + 1);
 
@@ -356,21 +359,37 @@ const excerptSegments = ({
 	},
 ];
 
+/**
+ * A figure the chapter draws. It leads the content column rather than sitting in narration
+ * order, because it illustrates the chapter rather than one file within it.
+ */
+export type ViewportDiagram = {
+	key: string;
+	plan: DiagramVisualPlan;
+};
+
+const diagramSegments = (diagram: ViewportDiagram): SegmentRows[] => [
+	{ id: diagramPadSegmentId(diagram.key), heights: [1] },
+	{ id: diagramSegmentId(diagram.key), heights: diagram.plan.rows.map((row) => row.height) },
+];
+
 export const viewportSegments = ({
 	files,
+	diagrams = [],
 	excerpts = [],
 	attachments,
 	excerptAttachments = [],
 	attachmentHeight,
 }: {
 	files: readonly PlannedViewportFile[];
+	diagrams?: readonly ViewportDiagram[];
 	excerpts?: readonly ViewportExcerpt[];
 	attachments: readonly DiffInlineAttachment[];
 	/** Threads on quoted code, matched against excerpt rows rather than diff rows. */
 	excerptAttachments?: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
 }): SegmentRows[] => {
-	const segments: SegmentRows[] = [];
+	const segments: SegmentRows[] = diagrams.flatMap(diagramSegments);
 	const placed = new Set<string>();
 	const placeAfter = (path: string | null) => {
 		for (const excerpt of excerpts) {

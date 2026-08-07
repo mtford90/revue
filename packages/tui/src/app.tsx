@@ -21,12 +21,14 @@ import {
 	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	parsePatch,
+	planDiagram,
 	planExcerpt,
 	prepareSyntaxHighlighting,
 	type RangeDecoration,
 	type SpanEmphasis,
 } from "@revue/diff";
 import {
+	DiagramBlock,
 	DiffBody,
 	type DiffBodyProps,
 	DiffFileHeader,
@@ -100,7 +102,7 @@ import {
 	resolvePanelWidth,
 	type SidebarPreference,
 } from "./layout.ts";
-import { Narration } from "./markdown.tsx";
+import { Narration, splitNarration } from "./markdown.tsx";
 import {
 	buildAppMenus,
 	ContextMenu,
@@ -170,6 +172,7 @@ import {
 	segmentKind,
 	segmentOffset,
 	segmentPath,
+	type ViewportDiagram,
 	type ViewportExcerpt,
 	type ViewportFile,
 	viewportSegments,
@@ -323,6 +326,9 @@ const emptyReviewPageState = () => ({
  */
 const excerptAnchor = (paths: readonly string[], index: number): string | null =>
 	paths.length ? (paths[Math.min(index, paths.length - 1)] ?? null) : null;
+
+/** Fold keys for figures, namespaced away from excerpt keys, which are cited ranges. */
+const diagramFoldKey = (chapterId: string, index: number) => `diagram:${chapterId}:${index}`;
 
 type ChapterFocusTarget = { kind: "file"; index: number } | { kind: "excerpt"; key: string };
 
@@ -578,6 +584,9 @@ function ChapterBrief({
 				);
 			}
 		: undefined;
+	// Diagrams are hoisted out of the summary: they render in the content column, where the
+	// window plan can give them a height, rather than inside the brief.
+	const prose = splitNarration(chapter.summary).prose;
 	if (isInterlude(chapter)) {
 		return (
 			<box flexDirection="column" width="100%" gap={1}>
@@ -585,18 +594,14 @@ function ChapterBrief({
 					<text fg={theme.accent}>{chapter.title}</text>
 					<text fg={theme.muted}>{INTERLUDE_NOTE}</text>
 				</box>
-				{chapter.summary ? (
-					<Narration text={chapter.summary} fg={theme.muted} onMouseDown={proseMenu} />
-				) : null}
+				{prose ? <Narration text={prose} fg={theme.muted} onMouseDown={proseMenu} /> : null}
 			</box>
 		);
 	}
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
-			{chapter.summary ? (
-				<Narration text={chapter.summary} fg={theme.muted} onMouseDown={proseMenu} />
-			) : null}
+			{prose ? <Narration text={prose} fg={theme.muted} onMouseDown={proseMenu} /> : null}
 			<KeyChanges
 				chapter={chapter}
 				vs={vs}
@@ -1767,6 +1772,7 @@ function ChapterView({
 	diffFiles,
 	visibleDiffFiles,
 	bodyPlans,
+	diagrams,
 	excerpts,
 	focusedExcerpt,
 	excerptSelection,
@@ -1786,6 +1792,7 @@ function ChapterView({
 	contextExpansion,
 	onAttachmentNode,
 	onSelectFile,
+	onToggleDiagram,
 	onToggleExcerpt,
 	onSelectExcerptRange,
 	onExcerptRangeContextMenu,
@@ -1803,6 +1810,7 @@ function ChapterView({
 	diffFiles: DiffFile[] | null;
 	visibleDiffFiles: ChapterDiffFile[];
 	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
+	diagrams: readonly ViewportDiagram[];
 	excerpts: readonly ViewportExcerpt[];
 	focusedExcerpt: string | null;
 	excerptSelection: DiffLineRange | null;
@@ -1823,6 +1831,7 @@ function ChapterView({
 	contextExpansion?: ContextExpansionUi;
 	onAttachmentNode: (id: string, node: { height: number } | null) => void;
 	onSelectFile: (index: number) => void;
+	onToggleDiagram: (key: string) => void;
 	onToggleExcerpt: (key: string) => void;
 	onSelectExcerptRange: (range: DiffLineRange) => void;
 	onExcerptRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
@@ -1884,8 +1893,21 @@ function ChapterView({
 				}
 				const path = segmentPath(item.id);
 				const kind = segmentKind(item.id);
-				if (kind === "excpad") {
+				if (kind === "excpad" || kind === "diapad") {
 					return <box key={item.id} height={1} flexShrink={0} width="100%" />;
+				}
+				if (kind === "dia") {
+					const diagram = diagrams.find((candidate) => candidate.key === path);
+					if (!diagram) return null;
+					return (
+						<DiagramBlock
+							key={item.id}
+							plan={diagram.plan}
+							theme={diffTheme}
+							window={item.window}
+							onToggle={onToggleDiagram}
+						/>
+					);
 				}
 				if (kind === "exc") {
 					const excerpt = excerpts.find((candidate) => candidate.key === path);
@@ -2761,6 +2783,11 @@ export function App({
 		page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story";
 	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	const interlude = chapter ? isInterlude(chapter) : false;
+	/**
+	 * Whether the page's body is the planned content column. An interlude has no diff to swap,
+	 * so its figures and quotations are planned in either view rather than only in Patch.
+	 */
+	const plannedBody = Boolean(chapter) && (viewMode === "patch" || interlude);
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
@@ -2853,7 +2880,7 @@ export function App({
 	// Quoted code comes from the frozen context, never re-resolved from Git; a citation nothing
 	// was frozen for simply does not appear.
 	const chapterExcerpts = useMemo<ViewportExcerpt[]>(() => {
-		if (!chapter || viewMode !== "patch") return [];
+		if (!chapter || !plannedBody) return [];
 		const paths = viewportFiles.map((entry) => entry.path);
 		return distinctExcerpts(chapter).flatMap(({ key, excerpt }, index) => {
 			const frozen = frozenExcerptFor(context, excerpt);
@@ -2873,7 +2900,28 @@ export function App({
 				},
 			];
 		});
-	}, [chapter, context, viewMode, viewportFiles, openExcerpts, contentWidth]);
+	}, [chapter, context, plannedBody, viewportFiles, openExcerpts, contentWidth]);
+	/**
+	 * Figures the chapter draws, taken from fenced blocks in its own summary rather than a
+	 * schema field of their own. They share the excerpts' fold set; the keys cannot collide
+	 * because an excerpt keys on its cited range.
+	 */
+	const chapterDiagrams = useMemo<ViewportDiagram[]>(() => {
+		if (!chapter || !plannedBody) return [];
+		return splitNarration(chapter.summary).diagrams.map((diagram, index) => {
+			const key = diagramFoldKey(chapter.id, index);
+			return {
+				key,
+				plan: planDiagram({
+					key,
+					diagram,
+					folded: !openExcerpts.has(key),
+					width: contentWidth,
+					chrome: OPENTUI_DIFF_CHROME,
+				}),
+			};
+		});
+	}, [chapter, plannedBody, openExcerpts, contentWidth]);
 	/**
 	 * What the file cursor steps through, in narration order. An excerpt is a stop on that walk
 	 * so `toggle-file-diff` can open it, which is why folding needs no shortcut of its own.
@@ -2971,6 +3019,7 @@ export function App({
 		() =>
 			viewportSegments({
 				files: plannedViewportFiles,
+				diagrams: chapterDiagrams,
 				excerpts: chapterExcerpts,
 				attachments: attachmentAnchors,
 				excerptAttachments: excerptAttachmentAnchors,
@@ -2978,6 +3027,7 @@ export function App({
 			}),
 		[
 			plannedViewportFiles,
+			chapterDiagrams,
 			chapterExcerpts,
 			attachmentAnchors,
 			excerptAttachmentAnchors,
@@ -3714,13 +3764,17 @@ export function App({
 			requestFileFocus();
 		}
 	}
-	function toggleExcerpt(key: string) {
+	/** The fold shared by every quoted block: excerpts and the figures beside them. */
+	function toggleQuotedBlock(key: string) {
 		setOpenExcerpts((current) => {
 			const next = new Set(current);
 			if (next.has(key)) next.delete(key);
 			else next.add(key);
 			return next;
 		});
+	}
+	function toggleExcerpt(key: string) {
+		toggleQuotedBlock(key);
 		setFocusedExcerpt(key);
 	}
 	function toggleCollapsedFile(path: string) {
@@ -4517,14 +4571,14 @@ export function App({
 									onJump={jumpToThread}
 								/>
 							) : null}
-							{interlude ? <InterludeClose keymap={keymap} /> : null}
-							{chapter && !interlude && viewMode === "patch" ? (
+							{chapter && plannedBody ? (
 								<ChapterView
 									chapter={chapter}
 									diffTheme={diffTheme}
 									diffFiles={diffFiles}
 									visibleDiffFiles={visibleChapterFiles}
 									bodyPlans={bodyPlans}
+									diagrams={chapterDiagrams}
 									excerpts={chapterExcerpts}
 									focusedExcerpt={focusedExcerpt}
 									excerptSelection={excerptSelection}
@@ -4532,6 +4586,7 @@ export function App({
 									width={contentWidth}
 									contextExpansion={contextExpansion}
 									onAttachmentNode={noteAttachmentNode}
+									onToggleDiagram={toggleQuotedBlock}
 									onToggleExcerpt={toggleExcerpt}
 									onSelectExcerptRange={selectExcerptRange}
 									onExcerptRangeContextMenu={openExcerptContextMenu}
@@ -4597,6 +4652,7 @@ export function App({
 									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
+							{interlude ? <InterludeClose keymap={keymap} /> : null}
 						</box>
 					</scrollbox>
 				</box>

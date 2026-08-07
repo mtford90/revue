@@ -128,7 +128,10 @@ Every review unit in `hunks.txt` must appear in **exactly one** chapter — no o
 - **Summary:** 2–3 sentences — what this chapter enables and why. Lead with impact. When a chapter
   builds on a previous one, open with the causal link ("Now that X is in place…"). Short paragraphs,
   one idea each, separated by blank lines. Markdown allowed: `**bold**`, `*italics*`, `` `code` ``,
-  and short fenced snippets (≤ 6 lines).
+  and short fenced snippets (≤ 6 lines). No lists, tables or block quotes — they render as raw text.
+- **Diagrams:** a fence tagged `ascii` or `mermaid` is a figure rather than a snippet. It leaves the
+  prose and renders beside the diff as a folded block the reviewer opens. Mermaid is shown as source,
+  never drawn. Use them sparingly, and mostly on a chapter with no hunks.
 
 ### Key change rules
 

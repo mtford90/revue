@@ -2589,3 +2589,151 @@ test("excerpt threads list in the Comments surface, marked when the narrative st
 	expect(chapterFrame).toContain("export class Transport {");
 	expect(chapterFrame).toContain("Why does this stay synchronous?");
 });
+
+/** The chrome an excerpt reserves before its code at the excerpt's default numbering width. */
+const EXCERPT_GUTTER_COLUMNS = 17;
+
+const ASCII_FIGURE = "prep ──▶ chapters.json ──▶ show";
+const MERMAID_SOURCE = "graph LR; prep --> show";
+
+/** An interlude whose narration carries both figures as fenced blocks, and no diff at all. */
+const withDiagrams: RevueChaptersFile = {
+	...withExcerpt,
+	chapters: [
+		...withExcerpt.chapters,
+		{
+			id: "interlude",
+			order: withExcerpt.chapters.length + 1,
+			title: "How prep and show fit together",
+			summary: [
+				"Prep freezes the run; show only ever reads it.",
+				"",
+				"```ascii",
+				ASCII_FIGURE,
+				"```",
+				"",
+				"```mermaid",
+				MERMAID_SOURCE,
+				"```",
+			].join("\n"),
+			hunkRefs: [],
+			keyChanges: [],
+			excerpts: [],
+		},
+	],
+};
+
+/** The column a rendered line's own text starts on, ignoring the chrome before it. */
+const textColumn = (t: Awaited<ReturnType<typeof testRender>>, needle: string) => {
+	const line = t
+		.captureCharFrame()
+		.split("\n")
+		.find((row) => row.includes(needle));
+	if (line === undefined) throw new Error(`no row shows ${needle}`);
+	return line.indexOf(needle);
+};
+
+/** The block rule immediately left of a rendered line, past the sidebar's own divider. */
+const ruleColumn = (t: Awaited<ReturnType<typeof testRender>>, needle: string) => {
+	const line =
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((row) => row.includes(needle)) ?? "";
+	return line.lastIndexOf("│", line.indexOf(needle));
+};
+
+const textColour = (t: Awaited<ReturnType<typeof testRender>>, needle: string) => {
+	const y = t
+		.captureCharFrame()
+		.split("\n")
+		.findIndex((line) => line.includes(needle));
+	return t
+		.captureSpans()
+		.lines[y]?.spans.find((span) => span.text.includes(needle))
+		?.fg?.toString();
+};
+
+const gotoChapter = async (t: Awaited<ReturnType<typeof testRender>>, order: number) => {
+	for (let step = 0; step < 8 && !statusLine(t).includes(`Ch ${order}/`); step += 1) {
+		await nextChapter(t);
+	}
+	if (!statusLine(t).includes(`Ch ${order}/`)) throw new Error(`never reached chapter ${order}`);
+};
+
+/** Click the fold action on the band or header that carries a given label. */
+const clickBlockAction = async (t: Awaited<ReturnType<typeof testRender>>, label: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const row = lines.findIndex((line) => line.includes(label));
+	if (row < 0) throw new Error(`no foldable row shows ${label}`);
+	const line = lines[row] ?? "";
+	// The sidebar shares the terminal row, so the action is the bracket after the label itself.
+	await click(t, line.indexOf("[", line.indexOf(label)) + 2, row);
+};
+
+test("an interlude's diagrams fold, open, and line up with quoted code", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App file={withDiagrams} context={frozenContext} diffFiles={diffFiles} />,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+	await gotoChapter(t, 4);
+	const folded = t.captureCharFrame();
+
+	expect(folded).toContain("⋯  diagram · ascii  [▼ show 1 line]");
+	expect(folded).toContain("⋯  diagram · mermaid source  [▼ show 1 line]");
+	expect(folded).not.toContain(ASCII_FIGURE);
+	// The fences never reach the narration, which keeps its own prose.
+	expect(folded).toContain("Prep freezes the run");
+	expect(folded).not.toContain("```");
+
+	await clickBlockAction(t, "diagram · ascii");
+	await clickBlockAction(t, "diagram · mermaid source");
+	const opened = t.captureCharFrame();
+
+	expect(opened).toContain("diagram · ascii");
+	expect(opened).toContain("[▲ hide]");
+	expect(opened).toContain(ASCII_FIGURE);
+	expect(opened).toContain(MERMAID_SOURCE);
+	// A figure has no line numbers, yet reserves the quoted block's whole gutter before its text.
+	expect(textColumn(t, ASCII_FIGURE) - ruleColumn(t, ASCII_FIGURE)).toBe(EXCERPT_GUTTER_COLUMNS);
+	// ASCII is the drawing itself; Mermaid is source, so it reads as a label would.
+	expect(textColour(t, ASCII_FIGURE)).toBe(RGBA.fromHex(resolveTheme(undefined).text).toString());
+	expect(textColour(t, MERMAID_SOURCE)).toBe(
+		RGBA.fromHex(resolveTheme(undefined).muted).toString(),
+	);
+
+	await clickBlockAction(t, "diagram · ascii");
+
+	expect(t.captureCharFrame()).not.toContain(ASCII_FIGURE);
+	// The close still ends the page, below the figures rather than above them.
+	expect(t.captureCharFrame()).toContain("── end of chapter ──");
+});
+
+test("a fenced snippet in narration renders as code rather than raw backticks", async () => {
+	const snippet = "revue show .revue/runs/latest";
+	const withSnippet: RevueChaptersFile = {
+		...file,
+		chapters: file.chapters.map((chapter, index) =>
+			index === 0
+				? { ...chapter, summary: ["Run it yourself:", "```sh", snippet, "```"].join("\n") }
+				: chapter,
+		),
+	};
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={withSnippet} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	await nextChapter(t);
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Run it yourself:");
+	expect(frame).toContain(snippet);
+	expect(frame).not.toContain("```");
+	// A snippet is code, not a diagram: it stays in the narration and gets no fold.
+	expect(frame).not.toContain("diagram · ");
+	expect(frame).not.toContain("[▼ show");
+});

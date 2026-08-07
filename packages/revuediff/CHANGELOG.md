@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1](https://github.com/mtford90/revue/compare/revuediff-v0.1.0...revuediff-v0.1.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* avoid pager signal-test race during stdin write ([3d9c55b](https://github.com/mtford90/revue/commit/3d9c55bbb46435e54f97c80ed99e1d3b7d4cc2c8))
+* build native highlighter before CI tests ([f50eb60](https://github.com/mtford90/revue/commit/f50eb60afc2934f02e8527eb745738148171cecc))
+* install pager signal traps before readiness ([0e2318a](https://github.com/mtford90/revue/commit/0e2318a5f438e17a141c523ff2ddd06df072974d))
+* keep pager signal traps on the spawned shell ([5c535f1](https://github.com/mtford90/revue/commit/5c535f1e59585943e7b13fdf3faa575d108b3e0f))
+* prefer ignored paths in release routing ([cf9304d](https://github.com/mtford90/revue/commit/cf9304d6a39d33b30ccb7ba5f26607628e94f4dc))
+* stop pinning release versions in route tests ([24b5180](https://github.com/mtford90/revue/commit/24b5180e5d6f9920db2f76b2fc239ee1907e6d77))
+
 ## 0.1.0 (2026-08-07)
 
 

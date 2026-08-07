@@ -215,13 +215,16 @@ test("forwards SIGINT and SIGTERM to the active pager and exits nonzero", async 
 		for (const signal of ["SIGINT", "SIGTERM"] as const) {
 			const ready = join(directory, `${signal}-ready`);
 			const seen = join(directory, `${signal}-seen`);
+			const trapSignal = signal === "SIGINT" ? "INT" : "TERM";
 			// Inline shell keeps the trap on the same process writePager spawns via
 			// `sh -c`. A script path nests another interpreter, so Linux can deliver
 			// the signal to the outer shell and leave the trap waiting forever.
+			// Install the trap before advertising readiness — a ready-then-trap race
+			// lets CI deliver the signal under the default terminate action.
 			const pager = [
 				"cat >/dev/null",
+				`trap 'echo ${signal} > ${JSON.stringify(seen)}; exit 1' ${trapSignal}`,
 				`echo ready > ${JSON.stringify(ready)}`,
-				`trap 'echo ${signal} > ${JSON.stringify(seen)}; exit 1' ${signal}`,
 				"while :; do sleep 0.05; done",
 			].join("; ");
 			const child = Bun.spawn([process.execPath, runner], {

@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
+import { RGBA } from "@opentui/core";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff";
 import { resolveTheme, THEME_IDS, THEMES } from "@revue/theme";
@@ -2253,13 +2254,23 @@ const clickAction = async (t: Awaited<ReturnType<typeof testRender>>, marker: st
 	await click(t, (lines[row] ?? "").indexOf(marker) + 2, row);
 };
 
-const renderExcerptChapter = async (onViewStateChange?: (next: ViewState) => void) => {
+const renderExcerptChapter = async ({
+	onViewStateChange,
+	onCopy,
+	permalinkContext,
+}: {
+	onViewStateChange?: (next: ViewState) => void;
+	onCopy?: (text: string) => boolean;
+	permalinkContext?: PermalinkContext;
+} = {}) => {
 	const diffFiles = await loadPatch(PATCH);
 	const t = await testRender(
 		<App
 			file={withExcerpt}
 			context={frozenContext}
 			diffFiles={diffFiles}
+			permalinks={permalinkContext}
+			onCopy={onCopy}
 			onViewStateChange={onViewStateChange}
 		/>,
 		{ width: 130, height: 44 },
@@ -2269,9 +2280,28 @@ const renderExcerptChapter = async (onViewStateChange?: (next: ViewState) => voi
 	return t;
 };
 
+/** The line-number cell beside a quoted line, found by walking back from its code. */
+const excerptGutter = (t: Awaited<ReturnType<typeof testRender>>, code: string, number: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes(code));
+	const line = lines[y] ?? "";
+	return { x: line.lastIndexOf(number, line.indexOf(code)), y };
+};
+
+const rowBackground = (t: Awaited<ReturnType<typeof testRender>>, code: string) => {
+	const y = t
+		.captureCharFrame()
+		.split("\n")
+		.findIndex((line) => line.includes(code));
+	return t
+		.captureSpans()
+		.lines[y]?.spans.find((span) => span.text.includes(code))
+		?.bg?.toString();
+};
+
 test("a cited excerpt is folded scenery that contributes nothing to review progress", async () => {
 	const seen: ViewState[] = [];
-	const t = await renderExcerptChapter((next) => seen.push(next));
+	const t = await renderExcerptChapter({ onViewStateChange: (next) => seen.push(next) });
 	const frame = t.captureCharFrame();
 
 	expect(frame).toContain(FOLDED_BAND);
@@ -2304,6 +2334,91 @@ test("clicking the band opens the excerpt in place, caption above its header", a
 	await clickAction(t, "[▲ hide]");
 
 	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+});
+
+test("dragging a quoted line's gutter tints the range and y yanks the quotation", async () => {
+	const copied: string[] = [];
+	const t = await renderExcerptChapter({
+		onCopy: (text) => {
+			copied.push(text);
+			return true;
+		},
+	});
+	await clickAction(t, "[▼ show");
+	const untinted = rowBackground(t, "export class Transport {");
+
+	const first = excerptGutter(t, "export class Transport {", "12");
+	const second = excerptGutter(t, "dispatch(request)", "13");
+	await act(async () => {
+		await t.mockMouse.drag(first.x, first.y, second.x, second.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	const tint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
+	expect(rowBackground(t, "export class Transport {")).toBe(tint);
+	expect(rowBackground(t, "dispatch(request)")).toBe(tint);
+	expect(untinted).not.toBe(tint);
+	// No composer: an excerpt line takes no comment, so the selection simply stands.
+	expect(t.captureCharFrame()).not.toContain("New review thread");
+
+	await press(t, "y");
+	expect(copied).toEqual(["export class Transport {\n  dispatch(request) {}"]);
+	expect(t.captureCharFrame()).toContain("Copied 2 selected lines");
+});
+
+test("an excerpt line answers the full range menu against its own file and lines", async () => {
+	const copied: string[] = [];
+	const t = await renderExcerptChapter({
+		permalinkContext: permalinks(NEW_SHA),
+		onCopy: (text) => {
+			copied.push(text);
+			return true;
+		},
+	});
+	await clickAction(t, "[▼ show");
+
+	const first = excerptGutter(t, "export class Transport {", "12");
+	const second = excerptGutter(t, "dispatch(request)", "13");
+	await act(async () => {
+		await t.mockMouse.drag(first.x, first.y, second.x, second.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	await rightClick(t, first.x, first.y);
+
+	const menu = t.captureCharFrame();
+	expect(menu).toContain("Copy selected text");
+	expect(menu).toContain("Copy path:line");
+	expect(menu).toContain("Copy GitHub link");
+	expect(menu).toContain("Comment on selection");
+
+	const menuLines = menu.split("\n");
+	const pathY = menuLines.findIndex((line) => line.includes("Copy path:line"));
+	await click(t, (menuLines[pathY]?.indexOf("Copy path:line") ?? -1) + 1, pathY);
+	// The quoted file, not the chapter's diffed file, and the citation's own line numbers.
+	expect(copied).toEqual(["src/lib/transport.ts:12-13"]);
+
+	await rightClick(t, first.x, first.y);
+	const reopened = t.captureCharFrame().split("\n");
+	const linkY = reopened.findIndex((line) => line.includes("Copy GitHub link"));
+	await click(t, (reopened[linkY]?.indexOf("Copy GitHub link") ?? -1) + 1, linkY);
+
+	expect(copied.at(-1)).toBe(
+		`https://github.com/mtford/revue/blob/${NEW_SHA}/src/lib/transport.ts#L12-L13`,
+	);
+});
+
+test("an uncommitted new side blocks a quoted line's link for the same stated reason", async () => {
+	const t = await renderExcerptChapter({ permalinkContext: permalinks(null) });
+	await clickAction(t, "[▼ show");
+
+	const gutter = excerptGutter(t, "export class Transport {", "12");
+	await rightClick(t, gutter.x, gutter.y);
+
+	expect(t.captureCharFrame()).toContain("Copy GitHub link (side is not committed)");
 });
 
 test("the file cursor steps onto an excerpt so the existing toggle key opens it", async () => {

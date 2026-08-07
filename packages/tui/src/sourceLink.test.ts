@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { DiffLineRange } from "@revue/diff";
+import { type DiffLineRange, excerptLineRange } from "@revue/diff";
 import type { RunScope } from "@revue/types";
 import {
 	formatSourceLocation,
@@ -86,6 +86,30 @@ test("a working-tree side has no commit to link to, so only that side is blocked
 	expect(permalinkFor({ context, range: range() })).toBeNull();
 	expect(permalinkBlocker({ context, side: "additions" })).toBe("side is not committed");
 	expect(permalinkBlocker({ context, side: "deletions" })).toBeNull();
+});
+
+test("a quoted excerpt links against the new endpoint even when the diff never touched it", () => {
+	const context = permalinkContextFor({
+		scope: committedScope,
+		remoteUrl: "git@github.com:mtford/revue.git",
+	});
+	// An excerpt is unchanged content from the new endpoint and belongs to no hunk, so it
+	// carries the additions side and no previous path can be looked up for it.
+	const excerpt = excerptLineRange({ filePath: "src/lib/transport.ts", lineNumber: 12 });
+	expect(permalinkFor({ context, range: { ...excerpt, endLine: 14 } })).toBe(
+		`https://github.com/mtford/revue/blob/${NEW_SHA}/src/lib/transport.ts#L12-L14`,
+	);
+	expect(formatSourceLocation(sourceRangeFor(excerpt, undefined))).toBe("src/lib/transport.ts:12");
+});
+
+test("an excerpt is blocked by an uncommitted new endpoint for the diff's own reason", () => {
+	const context = permalinkContextFor({
+		scope: worktreeScope,
+		remoteUrl: "git@github.com:mtford/revue.git",
+	});
+	const excerpt = excerptLineRange({ filePath: "src/lib/transport.ts", lineNumber: 12 });
+	expect(permalinkFor({ context, range: excerpt })).toBeNull();
+	expect(permalinkBlocker({ context, side: excerpt.side })).toBe("side is not committed");
 });
 
 test("without a GitHub remote there is no permalink context at all", () => {

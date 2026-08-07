@@ -325,6 +325,29 @@ const distinctExcerpts = (chapter: Chapter): { key: string; excerpt: ContextExce
 	});
 };
 
+/** Whether a quotation is the one a range was dragged over, so tint and yank agree. */
+const excerptCovers = (quotation: ExcerptQuotation, range: DiffLineRange): boolean =>
+	quotation.filePath === range.filePath &&
+	quotation.startLine <= range.startLine &&
+	range.endLine <= quotation.endLine;
+
+/**
+ * The frozen lines a selected range covers. The quotation is the only source: an excerpt may
+ * cite a file the diff never touched, so neither the manifest nor the parsed patch can answer.
+ */
+const excerptRangeText = (
+	excerpts: readonly ViewportExcerpt[],
+	range: DiffLineRange,
+): string | null => {
+	const quotation = excerpts
+		.map((excerpt) => excerpt.plan.quotation)
+		.find((candidate) => excerptCovers(candidate, range));
+	if (!quotation) return null;
+	const from = range.startLine - quotation.startLine;
+	const lines = quotation.lines.slice(from, from + (range.endLine - range.startLine) + 1);
+	return lines.length ? lines.join("\n") : null;
+};
+
 const pageRowId = (index: number) => `page-index-row:${index}`;
 
 function PageIndexRows({
@@ -1673,6 +1696,7 @@ function ChapterView({
 	bodyPlans,
 	excerpts,
 	focusedExcerpt,
+	excerptSelection,
 	windowPlan,
 	width,
 	vs,
@@ -1689,6 +1713,8 @@ function ChapterView({
 	onAttachmentNode,
 	onSelectFile,
 	onToggleExcerpt,
+	onSelectExcerptRange,
+	onExcerptRangeContextMenu,
 	onToggleCollapse,
 	onToggleFileReview,
 	onSelectThreadRange,
@@ -1705,6 +1731,7 @@ function ChapterView({
 	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
 	excerpts: readonly ViewportExcerpt[];
 	focusedExcerpt: string | null;
+	excerptSelection: DiffLineRange | null;
 	windowPlan: WindowPlanItem[];
 	width: number;
 	vs: ViewState;
@@ -1721,6 +1748,8 @@ function ChapterView({
 	onAttachmentNode: (id: string, node: { height: number } | null) => void;
 	onSelectFile: (index: number) => void;
 	onToggleExcerpt: (key: string) => void;
+	onSelectExcerptRange: (range: DiffLineRange) => void;
+	onExcerptRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
 	onSelectThreadRange: (range: DiffLineRange) => void;
@@ -1801,6 +1830,13 @@ function ChapterView({
 							focused={focusedExcerpt === excerpt.key}
 							window={item.window}
 							onToggle={onToggleExcerpt}
+							selectedRange={
+								excerptSelection && excerptCovers(excerpt.plan.quotation, excerptSelection)
+									? excerptSelection
+									: undefined
+							}
+							onRangeSelect={onSelectExcerptRange}
+							onRangeContextMenu={onExcerptRangeContextMenu}
 						/>
 					);
 				}
@@ -2357,7 +2393,15 @@ type ContextMenuState = {
 	selected: number;
 	/** Whatever was dragged over when the menu opened, so the entry survives the menu taking focus. */
 	selectedText: string | null;
-} & ({ kind: "range"; range: DiffLineRange } | { kind: "prose"; reference: ChapterReference });
+} & (
+	| {
+			kind: "range";
+			range: DiffLineRange;
+			/** Excerpt ranges have no git hunk to anchor a thread to; every other verb still works. */
+			commentable: boolean;
+	  }
+	| { kind: "prose"; reference: ChapterReference }
+);
 
 /** The verbs a selected range answers to, shared by the pointer menu and the composer footer. */
 const buildRangeMenu = ({
@@ -2367,6 +2411,7 @@ const buildRangeMenu = ({
 	copyLocation,
 	copyLink,
 	comment,
+	canComment = true,
 	keymap = KEYMAP,
 }: {
 	selectedText: string | null;
@@ -2375,6 +2420,7 @@ const buildRangeMenu = ({
 	copyLocation: () => void;
 	copyLink: () => void;
 	comment: () => void;
+	canComment?: boolean;
 	keymap?: readonly KeymapAction[];
 }): MenuEntry[] => [
 	...(selectedText
@@ -2397,7 +2443,13 @@ const buildRangeMenu = ({
 		action: copyLink,
 	},
 	{ kind: "separator", id: "copy" },
-	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
+	{
+		kind: "item",
+		label: "Comment on selection",
+		hint: "Enter",
+		disabled: !canComment,
+		action: comment,
+	},
 ];
 
 const noVerb = () => undefined;
@@ -2572,6 +2624,8 @@ export function App({
 	);
 	/** The excerpt the file cursor has stepped onto; excerpt rows carry no focus marker. */
 	const [focusedExcerpt, setFocusedExcerpt] = useState<string | null>(null);
+	/** A quoted range the gutter drag left behind. It has no composer to hold it, so it lives here. */
+	const [excerptSelection, setExcerptSelection] = useState<DiffLineRange | null>(null);
 	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
 	const [expansions, setExpansions] = useState<Map<string, FileExpansion>>(() => new Map());
 	const [expandedVariants, setExpandedVariants] = useState<Map<string, DiffFile>>(() => new Map());
@@ -3211,9 +3265,31 @@ export function App({
 		setContextMenu({
 			kind: "range",
 			range: highlightedRange(range) ?? range,
+			commentable: true,
 			position,
 			selected: 0,
 			selectedText: highlightedText(),
+		});
+	}
+	/** The quoted lines the yank verbs act on when nothing was dragged over the code itself. */
+	function excerptSelectionText(range = excerptSelection) {
+		return range ? excerptRangeText(chapterExcerpts, range) : null;
+	}
+	function selectExcerptRange(range: DiffLineRange) {
+		setCopyNotice(null);
+		setExcerptSelection(range);
+	}
+	function openExcerptContextMenu(range: DiffLineRange, position: { x: number; y: number }) {
+		setCopyNotice(null);
+		const resolved = highlightedRange(range) ?? range;
+		setExcerptSelection(resolved);
+		setContextMenu({
+			kind: "range",
+			range: resolved,
+			commentable: false,
+			position,
+			selected: 0,
+			selectedText: highlightedText() ?? excerptSelectionText(resolved),
 		});
 	}
 	function openProseContextMenu(reference: ChapterReference, position: { x: number; y: number }) {
@@ -3227,6 +3303,7 @@ export function App({
 		});
 	}
 	function selectThreadRange(range: DiffLineRange) {
+		setExcerptSelection(null);
 		setThreadDraft({ kind: "thread", range });
 		setThreadBody("");
 		setThreadNotice(null);
@@ -3841,6 +3918,7 @@ export function App({
 					copyLocation: () => copyLocation(contextMenu.range),
 					copyLink: () => copyLink(contextMenu.range),
 					comment: () => selectThreadRange(contextMenu.range),
+					canComment: contextMenu.commentable,
 					keymap,
 				});
 	const threadComposer = threadDraft ? (
@@ -4039,7 +4117,7 @@ export function App({
 				openThemePicker();
 				break;
 			case "copy-selection": {
-				const text = highlightedText();
+				const text = highlightedText() ?? excerptSelectionText();
 				if (text) copyText(text);
 				break;
 			}
@@ -4315,11 +4393,14 @@ export function App({
 									bodyPlans={bodyPlans}
 									excerpts={chapterExcerpts}
 									focusedExcerpt={focusedExcerpt}
+									excerptSelection={excerptSelection}
 									windowPlan={windowPlan}
 									width={contentWidth}
 									contextExpansion={contextExpansion}
 									onAttachmentNode={noteAttachmentNode}
 									onToggleExcerpt={toggleExcerpt}
+									onSelectExcerptRange={selectExcerptRange}
+									onExcerptRangeContextMenu={openExcerptContextMenu}
 									vs={vs}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
@@ -4328,7 +4409,9 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										(contextMenu?.kind === "range" ? contextMenu.range : undefined) ??
+										(contextMenu?.kind === "range" && contextMenu.commentable
+											? contextMenu.range
+											: undefined) ??
 										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
 									}
 									threadDraft={newThreadDraft}
@@ -4361,7 +4444,9 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										(contextMenu?.kind === "range" ? contextMenu.range : undefined) ??
+										(contextMenu?.kind === "range" && contextMenu.commentable
+											? contextMenu.range
+											: undefined) ??
 										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
 									}
 									threadDraft={newThreadDraft}

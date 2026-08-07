@@ -81,6 +81,7 @@ test("coverage validation accepts an interlude, a chapter that cites no review u
 				summary: "Prose only; the work it explains lands in the chapters around it.",
 				hunkRefs: [],
 				keyChanges: [],
+				excerpts: [],
 			},
 		],
 	};

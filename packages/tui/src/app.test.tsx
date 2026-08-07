@@ -299,6 +299,7 @@ const withInterlude: RevueChaptersFile = {
 			summary: "The retry work lands before the callers so nothing regresses mid-deploy.",
 			hunkRefs: [],
 			keyChanges: [],
+			excerpts: [],
 		},
 	],
 };

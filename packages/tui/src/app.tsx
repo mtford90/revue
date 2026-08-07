@@ -266,6 +266,7 @@ const allFilesChapter = (diffFiles: DiffFile[] | null, order: number): Chapter =
 			: [{ filePath: path, oldStart: 0 }];
 	}),
 	keyChanges: [],
+	excerpts: [],
 });
 
 function buildPages(file: RevueChaptersFile): Page[] {

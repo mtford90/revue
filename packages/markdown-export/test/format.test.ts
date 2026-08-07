@@ -37,6 +37,7 @@ const chapters: RevueChaptersFile = {
 			summary: "Uses the foundation.",
 			hunkRefs: [{ filePath: "src/later.ts", oldStart: 1 }],
 			keyChanges: [],
+			excerpts: [],
 		},
 		{
 			id: "foundation",
@@ -58,6 +59,7 @@ const chapters: RevueChaptersFile = {
 					],
 				},
 			],
+			excerpts: [],
 		},
 	],
 };
@@ -191,6 +193,7 @@ test("an interlude exports as prose with no file section", () => {
 					summary: "Prose only.",
 					hunkRefs: [],
 					keyChanges: [],
+					excerpts: [],
 				},
 			],
 		},

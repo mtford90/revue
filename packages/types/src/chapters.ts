@@ -46,6 +46,24 @@ export const keyChangeSchema = z.strictObject({
 export type KeyChange = z.infer<typeof keyChangeSchema>;
 
 /**
+ * A citation of unchanged code a chapter quotes alongside its hunks: a file path, an inclusive
+ * new-side line range, and an optional caption. It carries no text — the agent cites, and
+ * `revue context freeze` reads the bytes off disk, so quoted code is never a transcription.
+ */
+export const contextExcerptSchema = z
+	.strictObject({
+		filePath: z.string().min(1),
+		startLine: z.number().int().positive(),
+		endLine: z.number().int().positive(),
+		caption: z.string().min(1).optional(),
+	})
+	.refine((v) => v.startLine <= v.endLine, {
+		message: "endLine must be greater than or equal to startLine",
+		path: ["endLine"],
+	});
+export type ContextExcerpt = z.infer<typeof contextExcerptSchema>;
+
+/**
  * How much of the prepared diff the narrative sets out to cover. A partial depth carries the
  * words the reviewer sees — the `10,000ft` preset or whatever the agent was asked for — and is
  * the only thing that lets a narrative leave review units out.
@@ -64,5 +82,6 @@ export const chapterSchema = z.strictObject({
 	summary: z.string().min(1),
 	hunkRefs: z.array(hunkReferenceSchema),
 	keyChanges: z.array(keyChangeSchema),
+	excerpts: z.array(contextExcerptSchema).default([]),
 });
 export type Chapter = z.infer<typeof chapterSchema>;

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { keyChangeSchema } from "../src/chapters.ts";
+import { chapterSchema, contextExcerptSchema, keyChangeSchema } from "../src/chapters.ts";
 import { partialDepthLabel, RevueChaptersFileSchema } from "../src/file.ts";
 
 const keyChange = {
@@ -17,6 +17,35 @@ const keyChange = {
 test("key changes carry explicit severity while old runs default to info", () => {
 	expect(keyChangeSchema.parse(keyChange).severity).toBe("info");
 	expect(keyChangeSchema.parse({ ...keyChange, severity: "high" }).severity).toBe("high");
+});
+
+test("an excerpt citation quotes a forward line range and carries no code", () => {
+	const excerpt = { filePath: "src/api/client.ts", startLine: 118, endLine: 140 };
+
+	expect(contextExcerptSchema.parse(excerpt)).toEqual(excerpt);
+	expect(
+		contextExcerptSchema.parse({ ...excerpt, caption: "the caller this must satisfy" }),
+	).toEqual({ ...excerpt, caption: "the caller this must satisfy" });
+	expect(contextExcerptSchema.safeParse({ ...excerpt, endLine: 117 }).success).toBe(false);
+	expect(contextExcerptSchema.safeParse({ ...excerpt, startLine: 0 }).success).toBe(false);
+	expect(contextExcerptSchema.safeParse({ ...excerpt, startLine: 1.5 }).success).toBe(false);
+	// Quoting is the CLI's job, so a citation carrying its own text is not a citation.
+	expect(contextExcerptSchema.safeParse({ ...excerpt, lines: ["const x = 1;"] }).success).toBe(
+		false,
+	);
+});
+
+test("a chapter that cites nothing still has an excerpt list", () => {
+	const chapter = {
+		id: "chapter-1",
+		order: 1,
+		title: "Wire org ID through the API layer",
+		summary: "The handlers thread it through to the client.",
+		hunkRefs: [],
+		keyChanges: [],
+	};
+
+	expect(chapterSchema.parse(chapter).excerpts).toEqual([]);
 });
 
 test("a narrative declares its depth, and an undeclared one is full", () => {

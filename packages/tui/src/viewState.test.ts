@@ -23,6 +23,7 @@ const chapter = (id: string, order: number, paths: string[]): Chapter => ({
 	summary: "s",
 	hunkRefs: paths.map((filePath) => ({ filePath, oldStart: 0 })),
 	keyChanges: [],
+	excerpts: [],
 });
 
 const tmpDirs: string[] = [];

@@ -645,7 +645,10 @@ async function showRun(
 			import("./semantic.ts"),
 			import("./viewState.ts"),
 		]);
-	const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme);
+	let syntaxWarning: string | undefined;
+	const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme, (warning) => {
+		syntaxWarning = warning;
+	});
 	const store = await openRunStateStore(defaultStatePath(), run.manifest.runId, run.chapters);
 	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
 	const repositoryRoot = repositoryRootForRun(directory);
@@ -666,6 +669,7 @@ async function showRun(
 	};
 	await runApp(run.chapters, {
 		diffFiles,
+		syntaxWarning,
 		loadSemanticDiff: () => generateSemanticDiff(run),
 		loadFileLines,
 		initialViewState: store.get(),

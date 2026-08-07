@@ -18,7 +18,24 @@ if [ -n "$EXPECTED_VERSION" ] && [ "$reported" != "revuediff $EXPECTED_VERSION" 
 fi
 
 "$BIN" --help | grep -q 'revuediff'
-output="$(printf 'diff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n' | "$BIN" --paging=never --width 80 --theme ayu-dark)"
+workdir="$(mktemp -d)"
+patch='diff --git a/a.ts b/a.ts
+index 1111111..2222222 100644
+--- a/a.ts
++++ b/a.ts
+@@ -1 +1 @@
+-old
++new
+'
+# The adjacent product-specific addon must load from an arbitrary working directory.
+output="$(cd "$workdir" && printf '%s' "$patch" | REVUEDIFF_SYNTAX_ENGINE=syntect "$BIN" --paging=never --width 80 --theme ayu-dark)"
+# A missing addon remains syntax-mandatory by dynamically using Shiki, with a warning.
+addon="$(dirname "$BIN")/revuediff-highlighter.node"
+mv "$addon" "$addon.missing"
+fallback="$(cd "$workdir" && printf '%s' "$patch" | "$BIN" --paging=never --width 80 --theme ayu-dark 2>"$workdir/fallback.stderr")"
+mv "$addon.missing" "$addon"
+grep -q 'native Syntect unavailable; using Shiki' "$workdir/fallback.stderr"
+printf '%s' "$fallback" | grep -qF $'\033['
 printf '%s' "$output" | grep -q 'a.ts'
 printf '%s' "$output" | grep -qF $'\033['
 if printf '%s' "$output" | grep -qF $'\033[?1049h' || printf '%s' "$output" | grep -qF $'\033]'; then

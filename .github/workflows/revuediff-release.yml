@@ -48,16 +48,19 @@ jobs:
       - run: bun run lint
       - run: bun test --timeout 30000
       - name: Compile Revuediff
-        run: bun build --compile packages/revuediff/src/main.ts --outfile dist/revuediff
+        run: |
+          bun build --compile packages/revuediff/src/main.ts --outfile dist/revuediff
+          bash scripts/build-native-highlighter.sh revuediff dist/revuediff-highlighter.node
       - name: Smoke-test Revuediff
         run: bash scripts/revuediff-release-smoke.sh dist/revuediff "${RELEASE_TAG#revuediff-v}"
       - name: Package Revuediff
         run: |
           staging="dist/${RELEASE_TAG}-${{ matrix.target }}"
           mkdir -p "$staging"
-          cp dist/revuediff README.md LICENSE "$staging/"
+          cp dist/revuediff dist/revuediff-highlighter.node README.md LICENSE "$staging/"
           bun scripts/copy-local-notices.ts "$staging" revuediff
           bun scripts/collect-licenses.ts "$staging/BUNDLED_LICENSES.md" packages/revuediff/package.json Revuediff
+          bun scripts/collect-rust-licenses.ts >> "$staging/BUNDLED_LICENSES.md"
           tar -czf "$staging.tar.gz" -C "$staging" .
       - uses: actions/upload-artifact@v4
         with:

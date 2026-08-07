@@ -178,29 +178,34 @@ async function main() {
 		const binaryDigest = await fileDigest(executable);
 		const rows: TableRow[] = [];
 		const revuediff: Record<string, unknown> = {};
-		for (const scenario of scenarios) {
-			const forceFailure =
-				process.env.REVUEDIFF_PERF_FORCE_SAMPLE_FAILURE === "1" && scenario.id === "tiny-lazygit";
-			const command = forceFailure ? ["sh", "-c", "exit 97"] : [executable, ...scenario.args];
-			const validation = await validateExecutableScenario(command, scenario, options.timeoutMs);
-			if (!validation.passed) {
-				infrastructureFailures.push(
-					`${scenario.id} executable validation: ${validation.errors.join("; ")}`,
-				);
-				revuediff[scenario.id] = {
+		for (const engine of ["syntect", "shiki"] as const) {
+			for (const scenario of scenarios) {
+				const forceFailure =
+					process.env.REVUEDIFF_PERF_FORCE_SAMPLE_FAILURE === "1" && scenario.id === "tiny-lazygit";
+				// A forced Syntect process fails rather than falling back, proving the measured backend.
+				const command = forceFailure
+					? ["sh", "-c", "exit 97"]
+					: ["env", `REVUEDIFF_SYNTAX_ENGINE=${engine}`, executable, ...scenario.args];
+				const validation = await validateExecutableScenario(command, scenario, options.timeoutMs);
+				if (!validation.passed) {
+					infrastructureFailures.push(
+						`${engine}/${scenario.id} executable validation: ${validation.errors.join("; ")}`,
+					);
+					revuediff[`${engine}/${scenario.id}`] = {
+						...scenarioIdentity(scenario, options),
+						validation,
+						benchmark: null,
+					};
+					continue;
+				}
+				const result = await benchmark(command, scenario, options);
+				revuediff[`${engine}/${scenario.id}`] = {
 					...scenarioIdentity(scenario, options),
 					validation,
-					benchmark: null,
+					benchmark: result,
 				};
-				continue;
+				rows.push({ tool: `revuediff-${engine}`, id: scenario.id, ...result });
 			}
-			const result = await benchmark(command, scenario, options);
-			revuediff[scenario.id] = {
-				...scenarioIdentity(scenario, options),
-				validation,
-				benchmark: result,
-			};
-			rows.push({ tool: "revuediff", id: scenario.id, ...result });
 		}
 
 		const baselineScenario = scenarios.find((scenario) => scenario.id === "medium-mixed");

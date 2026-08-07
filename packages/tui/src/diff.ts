@@ -12,9 +12,14 @@ import type { Chapter, LineRef } from "@revue/types";
 // `metadata.hunks[].deletionStart` is that `oldStart`.
 
 /** Parse and prepare a pinned run patch for terminal rendering. */
-export async function preparePatch(text: string, syntaxTheme: string): Promise<DiffFile[]> {
+export async function preparePatch(
+	text: string,
+	syntaxTheme: string,
+	onSyntaxWarning?: (message: string) => void,
+): Promise<DiffFile[]> {
 	const files = parsePatch(text);
-	await prepareSyntaxHighlighting(files, syntaxTheme);
+	const highlighting = await prepareSyntaxHighlighting(files, syntaxTheme);
+	if (highlighting.warning) onSyntaxWarning?.(highlighting.warning.message);
 	return files;
 }
 

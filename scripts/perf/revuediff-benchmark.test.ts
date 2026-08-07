@@ -155,7 +155,9 @@ describe("Revuediff performance benchmark helpers", () => {
 			sequence: ["classify", "syntax-first-pass", "syntax-warmed", "format"],
 		});
 		expect(byId["tiny-wide-split"]).toMatchObject({ width: 160, layouts: ["split"] });
-		expect(stages[0]).toMatchObject({ syntaxFirstPassState: "cold-shiki-startup" });
+		expect(stages[0]).toMatchObject({
+			syntaxFirstPassState: expect.stringMatching(/^cold-(syntect|shiki)$/),
+		});
 		for (const stage of stages) {
 			if ("error" in stage) throw new Error(stage.error);
 			expect(stage.syntaxWarmedMs).toBeGreaterThanOrEqual(0);

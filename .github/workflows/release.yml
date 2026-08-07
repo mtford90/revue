@@ -53,16 +53,19 @@ jobs:
       # platforms; spawn-heavy CLI tests need more than bun's five-second default.
       - run: bun test --timeout 30000
       - name: Compile
-        run: bun build --compile packages/tui/src/main.tsx --outfile dist/revue
+        run: |
+          bun build --compile packages/tui/src/main.tsx --outfile dist/revue
+          bash scripts/build-native-highlighter.sh revue dist/revue-highlighter.node
       - name: Smoke-test the executable
         run: bash scripts/release-smoke.sh dist/revue "${RELEASE_TAG#v}"
       - name: Package
         run: |
           staging="dist/revue-${RELEASE_TAG}-${{ matrix.target }}"
           mkdir -p "$staging"
-          cp dist/revue README.md LICENSE "$staging/"
+          cp dist/revue dist/revue-highlighter.node README.md LICENSE "$staging/"
           bun scripts/copy-local-notices.ts "$staging"
           bun scripts/collect-licenses.ts "$staging/BUNDLED_LICENSES.md"
+          bun scripts/collect-rust-licenses.ts >> "$staging/BUNDLED_LICENSES.md"
           tar -czf "$staging.tar.gz" -C "$staging" .
       - uses: actions/upload-artifact@v4
         with:

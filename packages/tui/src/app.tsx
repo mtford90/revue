@@ -2298,6 +2298,7 @@ export function App({
 	initialPreferences = {},
 	initialTheme = resolveTheme(undefined),
 	initialSyntaxTheme = initialTheme.syntaxTheme,
+	syntaxWarning,
 	transparentSurfaces = false,
 	initialThreads = [],
 	threadActions,
@@ -2326,6 +2327,8 @@ export function App({
 	initialTheme?: Theme;
 	/** The syntax theme the caller already prepared highlights for. */
 	initialSyntaxTheme?: string;
+	/** A one-time native syntax fallback warning surfaced through the existing status bar. */
+	syntaxWarning?: string;
 	transparentSurfaces?: boolean;
 	initialThreads?: ReviewThread[];
 	threadActions?: ThreadActions;
@@ -3880,7 +3883,7 @@ export function App({
 			? { text: threadNotice, tone: "error" }
 			: copyNotice
 				? { text: copyNotice.text, tone: "success" }
-				: configIssuesNotice;
+				: (configIssuesNotice ?? (syntaxWarning ? { text: syntaxWarning, tone: "error" } : null));
 
 	return (
 		<ThemeProvider value={theme}>
@@ -4181,6 +4184,7 @@ export async function runApp(
 		resolveInitialTheme?: (appearance: Appearance | null) => Theme;
 		/** The syntax theme highlights were already prepared for, before the terminal replied. */
 		initialSyntaxTheme?: string;
+		syntaxWarning?: string;
 		transparentSurfaces?: boolean;
 		onViewStateChange?: (next: ViewState) => void;
 		onSessionStateChange?: (next: ReviewSessionState) => void;
@@ -4218,6 +4222,7 @@ export async function runApp(
 				initialPreferences={options.initialPreferences}
 				initialTheme={initialTheme}
 				initialSyntaxTheme={options.initialSyntaxTheme}
+				syntaxWarning={options.syntaxWarning}
 				transparentSurfaces={options.transparentSurfaces}
 				initialThreads={options.initialThreads}
 				threadActions={options.threadActions}

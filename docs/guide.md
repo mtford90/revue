@@ -267,7 +267,11 @@ bun run revue show examples/sample-run --transparent-bg
 Without `--theme`, Revue uses the remembered theme and otherwise starts with `ayu-dark`. Pass
 `--theme auto` to ask the terminal for its background colour and choose `ayu-light` or `ayu-dark`.
 Derivation enforces WCAG contrast floors, so body
-text, status colours, and diff row tints stay readable on light and dark themes alike.
+text, status colours, and diff row tints stay readable on light and dark themes alike. Syntax
+highlighting normally uses Revue's adjacent native Syntect addon; a missing or corrupt addon warns
+once in the status bar and dynamically uses Shiki instead, preserving syntax highlighting. For
+temporary diagnostics only, `REVUE_SYNTAX_ENGINE=syntect|shiki` selects a backend; forced Syntect
+fails rather than silently falling back, and the setting is not persisted.
 
 ## Review ignore rules
 

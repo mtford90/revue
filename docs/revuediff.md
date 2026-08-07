@@ -152,6 +152,12 @@ safe dark fallback because a buffered stdin filter cannot query terminal appeara
 not read custom Revue theme files. Neutral surfaces are transparent while changed rows retain their
 semantic tints.
 
+Syntax highlighting uses the adjacent native Syntect addon by default. If an archive is missing or
+cannot load its matching addon, Revuediff warns once on stderr and dynamically uses Shiki so syntax
+highlighting remains available. `REVUEDIFF_SYNTAX_ENGINE=syntect|shiki` is a temporary diagnostic
+selector: forcing Syntect fails rather than silently measuring a fallback, while forcing Shiki never
+loads the addon. It is not a persistent configuration option.
+
 ## Git
 
 Configure only Git's diff pager, not `core.pager`:

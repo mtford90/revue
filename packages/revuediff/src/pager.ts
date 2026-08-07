@@ -50,12 +50,17 @@ const shouldPage = (mode: PagingMode, output: string): boolean => {
 const pagerTheme = (requested: string | undefined): Theme =>
 	withTransparentSurfaces(resolveTheme(requested, null));
 
-export async function formatPagerInput(input: string, options: PagerOptions): Promise<string> {
+export async function formatPagerInput(
+	input: string,
+	options: PagerOptions,
+	onSyntaxWarning?: (message: string) => void,
+): Promise<string> {
 	const classified = classifyPagerInput(input);
 	if (classified.kind === "passthrough") return classified.text;
 	const width = resolvePagerWidth(options);
 	const theme = pagerTheme(options.theme);
-	await prepareSyntaxHighlighting(classified.files, theme.syntaxTheme);
+	const highlighting = await prepareSyntaxHighlighting(classified.files, theme.syntaxTheme);
+	if (highlighting.warning) onSyntaxWarning?.(highlighting.warning.message);
 	const files = classified.files.map((file) =>
 		formatAnsiDiffFile({
 			file,
@@ -123,7 +128,9 @@ async function writePager(command: string, output: string): Promise<number> {
 
 /** Format the complete buffered stream, then optionally deliver it to a downstream pager. */
 export async function runPager(input: string, options: PagerOptions): Promise<number> {
-	const output = await formatPagerInput(input, options);
+	const output = await formatPagerInput(input, options, (message) =>
+		process.stderr.write(`warning: ${message}\n`),
+	);
 	if (!shouldPage(options.paging, output)) return writeDirect(output);
 	const resolved = resolvePagerCommand(options);
 	if (!resolved.command) return writeDirect(output);

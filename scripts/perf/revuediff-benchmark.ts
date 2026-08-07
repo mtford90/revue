@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { prepareSyntaxHighlighting } from "../../packages/diff/src/index.ts";
 import { formatAnsiDiffFile } from "../../packages/diff-ansi/src/index.ts";
 import { layoutForFile } from "../../packages/revuediff/src/pager.ts";
@@ -349,7 +349,7 @@ const requestedWidth = (args: string[]): number => {
 export async function stageTimings(scenarios: Scenario[]) {
 	const theme = withTransparentSurfaces(resolveTheme("ayu-dark", null));
 	const results = [];
-	let shikiStarted = false;
+	let syntaxStarted = false;
 	for (const scenario of scenarios.filter((item) => item.expect.kind === "formatted")) {
 		const classifyStart = performance.now();
 		const classified = classifyPagerInput(scenario.input);
@@ -358,11 +358,11 @@ export async function stageTimings(scenarios: Scenario[]) {
 			results.push({ id: scenario.id, classifyMs, error: "scenario unexpectedly passed through" });
 			continue;
 		}
-		const syntaxFirstPassState = shikiStarted ? "warmed-shiki-runtime" : "cold-shiki-startup";
 		const syntaxStart = performance.now();
-		await prepareSyntaxHighlighting(classified.files, theme.syntaxTheme);
+		const firstPreparation = await prepareSyntaxHighlighting(classified.files, theme.syntaxTheme);
 		const syntaxFirstPassMs = performance.now() - syntaxStart;
-		shikiStarted = true;
+		const syntaxFirstPassState = `${syntaxStarted ? "warmed" : "cold"}-${firstPreparation.backend}`;
+		syntaxStarted = true;
 		const warmed = classifyPagerInput(scenario.input);
 		if (warmed.kind === "passthrough") {
 			results.push({
@@ -410,6 +410,13 @@ export async function compileRevuediff(output: string) {
 	);
 	if ((await result.exited) !== 0)
 		throw new Error(`compile failed: ${await new Response(result.stderr).text()}`);
+	const addon = Bun.spawn([
+		"bash",
+		"scripts/build-native-highlighter.sh",
+		"revuediff",
+		join(dirname(output), "revuediff-highlighter.node"),
+	]);
+	if ((await addon.exited) !== 0) throw new Error("native highlighter build failed");
 }
 export async function writeJson(path: string, report: unknown) {
 	await mkdir(dirname(resolve(path)), { recursive: true });

@@ -17,6 +17,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@pierre/diffs": "1.2.2",
+        "shiki": "^3.23.0",
       },
     },
     "packages/diff-ansi": {

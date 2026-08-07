@@ -2075,3 +2075,135 @@ test("commenting on a highlight anchors the thread to every line it covers", asy
 		endLine: 3,
 	});
 });
+
+/** A distinctive word of the current chapter's narration, in the sidebar. */
+const proseWord = (t: Awaited<ReturnType<typeof testRender>>, word: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes(word));
+	return { x: (lines[y] ?? "").indexOf(word), y, width: word.length };
+};
+
+async function dragOverProse(t: Awaited<ReturnType<typeof testRender>>, word: string) {
+	const prose = proseWord(t, word);
+	await act(async () => {
+		await t.mockMouse.drag(prose.x, prose.y, prose.x + prose.width, prose.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	return prose;
+}
+
+test("narration yanks with the selection key, like any other selected text", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	await dragOverProse(t, "Introduces");
+	await press(t, "y");
+
+	expect(copied).toEqual(["Introduces"]);
+	expect(t.captureCharFrame()).toContain("Copied 1 selected line");
+});
+
+test("right-clicking narration offers only the verbs prose can answer", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const prose = await dragOverProse(t, "Introduces");
+	await rightClick(t, prose.x, prose.y);
+	const menu = t.captureCharFrame();
+
+	expect(menu).toContain("Copy selected text");
+	expect(menu).toContain("Copy with chapter reference");
+	expect(menu).toContain("Copy path:line");
+	expect(menu).not.toContain("Copy GitHub link"); // prose has no line to point at
+	expect(menu).not.toContain("Comment on selection"); // narration takes no threads
+
+	// Copy path:line is offered but dead, so the keyboard cannot land on it.
+	const menuLines = menu.split("\n");
+	const pathY = menuLines.findIndex((line) => line.includes("Copy path:line"));
+	await click(t, (menuLines[pathY]?.indexOf("Copy path:line") ?? -1) + 1, pathY);
+	expect(copied).toEqual([]);
+	expect(t.captureCharFrame()).toContain("Copy path:line"); // a dead entry does not close the menu
+});
+
+test("copying narration with its reference quotes the prose under the chapter heading", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const prose = await dragOverProse(t, "Introduces");
+	await rightClick(t, prose.x, prose.y);
+	const menu = t.captureCharFrame().split("\n");
+	const referenceY = menu.findIndex((line) => line.includes("Copy with chapter reference"));
+	await click(t, (menu[referenceY]?.indexOf("Copy with chapter reference") ?? -1) + 1, referenceY);
+
+	expect(copied).toEqual(["Ch 1 · Add a reusable backoff helper\n> Introduces"]);
+	expect(t.captureCharFrame()).toContain("Copied narration · Ch 1");
+});
+
+test("an interlude's prose yanks and references like any other chapter summary", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={withInterlude}
+			diffFiles={diffFiles}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	for (let step = 0; step < 4; step += 1) await nextChapter(t);
+
+	const prose = await dragOverProse(t, "regresses");
+	await rightClick(t, prose.x, prose.y);
+	const menu = t.captureCharFrame().split("\n");
+	const referenceY = menu.findIndex((line) => line.includes("Copy with chapter reference"));
+	await click(t, (menu[referenceY]?.indexOf("Copy with chapter reference") ?? -1) + 1, referenceY);
+
+	expect(copied).toEqual(["Ch 4 · Why the migration is staged\n> regresses"]);
+	expect(t.captureCharFrame()).toContain("Copied narration · Ch 4");
+});

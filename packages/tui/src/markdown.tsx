@@ -1,4 +1,5 @@
-import { createTextAttributes } from "@opentui/core";
+// biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI pointer handlers use text renderables.
+import { createTextAttributes, type MouseEvent as OpenTUIMouseEvent } from "@opentui/core";
 import type { ReactNode } from "react";
 import { useTheme } from "./theme.ts";
 
@@ -31,20 +32,31 @@ const spanAttributes = (style: InlineStyle | undefined) =>
 	createTextAttributes({ bold: style === "bold", italic: style === "italic" });
 
 /** One paragraph of narration with `code`, **bold** and *italic* runs styled. */
-export function Narration({ text, fg, prefix }: { text: string; fg?: string; prefix?: ReactNode }) {
+export function Narration({
+	text,
+	fg,
+	prefix,
+	onMouseDown,
+}: {
+	text: string;
+	fg?: string;
+	prefix?: ReactNode;
+	/** Lets a caller hang pointer verbs off the prose; the narration itself has none. */
+	onMouseDown?: (event: OpenTUIMouseEvent) => void;
+}) {
 	const theme = useTheme();
 	const color = fg ?? theme.text;
 	const spans = parseInline(text);
 	if (spans.length <= 1 && !spans[0]?.style) {
 		return (
-			<text fg={color}>
+			<text fg={color} onMouseDown={onMouseDown}>
 				{prefix}
 				{text}
 			</text>
 		);
 	}
 	return (
-		<text fg={color}>
+		<text fg={color} onMouseDown={onMouseDown}>
 			{prefix}
 			{spans.map((span, index) => (
 				<span

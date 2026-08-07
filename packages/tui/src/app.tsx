@@ -94,6 +94,7 @@ import {
 	selectable,
 	useMenuController,
 } from "./menu.tsx";
+import { type ChapterReference, chapterReferenceCopy } from "./narrationCopy.ts";
 import {
 	abbreviatePath,
 	buildPathTree,
@@ -223,6 +224,7 @@ const centreContentOffset = ({
 	const centred = top - Math.floor((scroll.viewport.height - span) / 2);
 	scroll.scrollTo(Math.max(0, Math.min(centred, maximum)));
 };
+const RIGHT_MOUSE_BUTTON = 2;
 const COMPACT_NAV_WIDTH = 34;
 const COMPACT_STRIP_WIDTH = 60;
 // ── Page model ──────────────────────────────────────────────────────────────
@@ -481,6 +483,7 @@ function ChapterBrief({
 	onFocusKeyChange,
 	onToggleFileReview,
 	onToggleKeyChange,
+	onProseContextMenu,
 }: {
 	chapter: Chapter;
 	vs: ViewState;
@@ -493,8 +496,21 @@ function ChapterBrief({
 	onFocusKeyChange: (index: number) => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
+	/** Absent where the narration belongs to no real chapter, such as the Files surface. */
+	onProseContextMenu?: (reference: ChapterReference, position: { x: number; y: number }) => void;
 }) {
 	const theme = useTheme();
+	const proseMenu = onProseContextMenu
+		? (event: OpenTUIMouseEvent) => {
+				if (event.button !== RIGHT_MOUSE_BUTTON) return;
+				event.preventDefault();
+				event.stopPropagation();
+				onProseContextMenu(
+					{ order: chapter.order, title: chapter.title },
+					{ x: event.x, y: event.y },
+				);
+			}
+		: undefined;
 	if (isInterlude(chapter)) {
 		return (
 			<box flexDirection="column" width="100%" gap={1}>
@@ -502,14 +518,18 @@ function ChapterBrief({
 					<text fg={theme.accent}>{chapter.title}</text>
 					<text fg={theme.muted}>{INTERLUDE_NOTE}</text>
 				</box>
-				{chapter.summary ? <Narration text={chapter.summary} fg={theme.muted} /> : null}
+				{chapter.summary ? (
+					<Narration text={chapter.summary} fg={theme.muted} onMouseDown={proseMenu} />
+				) : null}
 			</box>
 		);
 	}
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
-			{chapter.summary ? <Narration text={chapter.summary} fg={theme.muted} /> : null}
+			{chapter.summary ? (
+				<Narration text={chapter.summary} fg={theme.muted} onMouseDown={proseMenu} />
+			) : null}
 			<KeyChanges
 				chapter={chapter}
 				vs={vs}
@@ -554,6 +574,7 @@ function ChapterPanel({
 	onToggleChapterReview,
 	onToggleFileReview,
 	onToggleKeyChange,
+	onProseContextMenu,
 }: {
 	page: Page | undefined;
 	pages: Page[];
@@ -577,6 +598,7 @@ function ChapterPanel({
 	onToggleChapterReview: () => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
+	onProseContextMenu: (reference: ChapterReference, position: { x: number; y: number }) => void;
 }) {
 	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
@@ -689,6 +711,7 @@ function ChapterPanel({
 						onFocusKeyChange={onFocusKeyChange}
 						onToggleFileReview={onToggleFileReview}
 						onToggleKeyChange={onToggleKeyChange}
+						onProseContextMenu={filesSurface ? undefined : onProseContextMenu}
 					/>
 				</scrollbox>
 			) : (
@@ -2275,12 +2298,11 @@ type ThreadDraft =
 	| { kind: "reply"; threadId: string; range: DiffLineRange };
 
 type ContextMenuState = {
-	range: DiffLineRange;
 	position: { x: number; y: number };
 	selected: number;
 	/** Whatever was dragged over when the menu opened, so the entry survives the menu taking focus. */
 	selectedText: string | null;
-};
+} & ({ kind: "range"; range: DiffLineRange } | { kind: "prose"; reference: ChapterReference });
 
 /** The verbs a selected range answers to, shared by the pointer menu and the composer footer. */
 const buildRangeMenu = ({
@@ -2321,6 +2343,37 @@ const buildRangeMenu = ({
 	},
 	{ kind: "separator", id: "copy" },
 	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
+];
+
+const noVerb = () => undefined;
+
+/** Narration answers to copying alone: it has no line to point at and takes no comments. */
+const buildProseMenu = ({
+	selectedText,
+	copyText,
+	copyWithReference,
+	keymap = KEYMAP,
+}: {
+	selectedText: string | null;
+	copyText: () => void;
+	copyWithReference: () => void;
+	keymap?: readonly KeymapAction[];
+}): MenuEntry[] => [
+	{
+		kind: "item",
+		label: "Copy selected text",
+		hint: keymapHint("copy-selection", keymap),
+		disabled: !selectedText,
+		action: copyText,
+	},
+	{
+		kind: "item",
+		label: "Copy with chapter reference",
+		disabled: !selectedText,
+		action: copyWithReference,
+	},
+	{ kind: "separator", id: "copy" },
+	{ kind: "item", label: "Copy path:line", hint: "Ctrl+Y", disabled: true, action: noVerb },
 ];
 
 const defaultHumanAuthor: ThreadAuthor = {
@@ -3039,7 +3092,18 @@ export function App({
 	function openRangeContextMenu(range: DiffLineRange, position: { x: number; y: number }) {
 		setCopyNotice(null);
 		setContextMenu({
+			kind: "range",
 			range: highlightedRange(range) ?? range,
+			position,
+			selected: 0,
+			selectedText: highlightedText(),
+		});
+	}
+	function openProseContextMenu(reference: ChapterReference, position: { x: number; y: number }) {
+		setCopyNotice(null);
+		setContextMenu({
+			kind: "prose",
+			reference,
 			position,
 			selected: 0,
 			selectedText: highlightedText(),
@@ -3620,19 +3684,36 @@ export function App({
 		keymap,
 	});
 	const menu = useMenuController(menus);
-	const contextMenuEntries = contextMenu
-		? buildRangeMenu({
-				selectedText: contextMenu.selectedText,
-				linkBlocker: permalinkBlocker({ context: permalinks, side: contextMenu.range.side }),
-				copyText: () => {
-					if (contextMenu.selectedText) copyText(contextMenu.selectedText);
-				},
-				copyLocation: () => copyLocation(contextMenu.range),
-				copyLink: () => copyLink(contextMenu.range),
-				comment: () => selectThreadRange(contextMenu.range),
-				keymap,
-			})
-		: [];
+	const contextMenuEntries = !contextMenu
+		? []
+		: contextMenu.kind === "prose"
+			? buildProseMenu({
+					selectedText: contextMenu.selectedText,
+					copyText: () => {
+						if (contextMenu.selectedText) copyText(contextMenu.selectedText);
+					},
+					copyWithReference: () => {
+						if (contextMenu.selectedText)
+							copy(
+								chapterReferenceCopy({
+									reference: contextMenu.reference,
+									text: contextMenu.selectedText,
+								}),
+							);
+					},
+					keymap,
+				})
+			: buildRangeMenu({
+					selectedText: contextMenu.selectedText,
+					linkBlocker: permalinkBlocker({ context: permalinks, side: contextMenu.range.side }),
+					copyText: () => {
+						if (contextMenu.selectedText) copyText(contextMenu.selectedText);
+					},
+					copyLocation: () => copyLocation(contextMenu.range),
+					copyLink: () => copyLink(contextMenu.range),
+					comment: () => selectThreadRange(contextMenu.range),
+					keymap,
+				});
 	const threadComposer = threadDraft ? (
 		<ThreadComposer
 			key={threadDraft.kind === "thread" ? "new-thread" : threadDraft.threadId}
@@ -4013,6 +4094,7 @@ export function App({
 							onToggleChapterReview={toggleChapterReview}
 							onToggleFileReview={toggleFileReview}
 							onToggleKeyChange={toggleSelectedKeyChange}
+							onProseContextMenu={openProseContextMenu}
 						/>
 					) : null}
 					<scrollbox
@@ -4055,6 +4137,7 @@ export function App({
 											onFocusKeyChange={focusKeyChange}
 											onToggleFileReview={toggleFileReview}
 											onToggleKeyChange={toggleSelectedKeyChange}
+											onProseContextMenu={openProseContextMenu}
 										/>
 										<text fg={theme.border}>{"─".repeat(Math.max(1, contentWidth))}</text>
 									</box>
@@ -4096,7 +4179,7 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										contextMenu?.range ??
+										(contextMenu?.kind === "range" ? contextMenu.range : undefined) ??
 										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
 									}
 									threadDraft={newThreadDraft}
@@ -4129,7 +4212,7 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										contextMenu?.range ??
+										(contextMenu?.kind === "range" ? contextMenu.range : undefined) ??
 										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
 									}
 									threadDraft={newThreadDraft}

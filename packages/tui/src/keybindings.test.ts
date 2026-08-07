@@ -241,3 +241,9 @@ test("the default ctrl fallback keeps working alongside user overrides elsewhere
 	expect(matchKeymapAction("page", { name: "d", ctrl: true }, keymap)).toBe("half-page-down");
 	expect(matchKeymapAction("page", { name: "u", ctrl: true }, keymap)).toBe("half-page-up");
 });
+
+test("copying is one action, so narration and diff text share the one key", () => {
+	const copying = KEYMAP.filter((action) => action.section === "Copying");
+	expect(copying.map((action) => action.id)).toEqual(["copy-selection"]);
+	expect(copying[0]?.keys).toEqual(["y"]);
+});

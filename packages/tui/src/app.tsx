@@ -2462,6 +2462,8 @@ export function App({
 		diff: diffPreference,
 	});
 	const page = commentsSurface ? COMMENTS_PAGE : allFiles ? filesPage : pages[current];
+	const surface: ReviewSurface =
+		page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story";
 	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
@@ -3113,13 +3115,15 @@ export function App({
 	}
 	/** The centralised thread list — a surface over the review, not a page in it. */
 	function toggleComments() {
-		selectSurface(commentsSurface ? (allFiles ? "files" : "story") : "comments");
+		if (!commentsSurface) {
+			selectSurface("comments");
+			return;
+		}
+		selectSurface(allFiles || !file ? "files" : "story");
 	}
 	function selectSurface(target: ReviewSurface) {
-		if (!file) return;
-		const active =
-			page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story";
-		if (target === active) return;
+		if (target === "story" && !file) return;
+		if (target === surface) return;
 		if (target === "comments") {
 			saveCurrentSession(COMMENTS_PAGE_ID);
 			setCommentsSurface(true);
@@ -3504,7 +3508,7 @@ export function App({
 		canChangeFiles: Boolean(chapter),
 		canMoveNextUnreviewed:
 			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate.id)),
-		allFiles: (allFiles && !commentsSurface) || !file,
+		allFiles: surface === "files",
 		canToggleAllFiles: Boolean(file),
 		toggleAllFiles,
 		commentsSurface,
@@ -3878,10 +3882,8 @@ export function App({
 				<MenuBar
 					activeMenuId={menu.activeMenuId}
 					terminalWidth={width}
-					surface={
-						page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story"
-					}
-					canSwitchSurface={Boolean(file)}
+					surface={surface}
+					hasStory={Boolean(file)}
 					openThreads={openThreadCount}
 					onSelectSurface={selectSurface}
 					onHover={(id) => {

@@ -196,7 +196,6 @@ export const buildAppMenus = ({
 			label: "Comments",
 			hint: keymapHint("toggle-comments", keymap),
 			checked: commentsSurface,
-			disabled: !canToggleAllFiles,
 			action: toggleComments,
 		},
 	],
@@ -327,29 +326,39 @@ const stopMouse = (event: OpenTUIMouseEvent) => {
 };
 
 export type ReviewSurface = "story" | "files" | "comments";
-const SURFACES: { id: ReviewSurface; label: string }[] = [
-	{ id: "story", label: "Story" },
-	{ id: "files", label: "Files" },
-	{ id: "comments", label: "Comments" },
-];
+const SURFACE_LABELS: Record<ReviewSurface, string> = {
+	story: "Story",
+	files: "Files",
+	comments: "Comments",
+};
+const SURFACES: readonly ReviewSurface[] = ["story", "files", "comments"];
 
 /** The Comments tab wears its open-thread count so triage state reads from anywhere. */
-const surfaceTabs = (openThreads: number): { id: ReviewSurface; label: string }[] =>
-	SURFACES.map(({ id, label }) =>
-		id === "comments" && openThreads > 0
-			? { id, label: `${label} · ${openThreads}` }
-			: { id, label },
-	);
+const surfaceTabs = (
+	surfaces: readonly ReviewSurface[],
+	openThreads: number,
+): { id: ReviewSurface; label: string }[] =>
+	surfaces.map((id) => ({
+		id,
+		label:
+			id === "comments" && openThreads > 0
+				? `${SURFACE_LABELS[id]} · ${openThreads}`
+				: SURFACE_LABELS[id],
+	}));
 
 const surfaceTabsWidth = (tabs: { label: string }[]) =>
 	tabs.reduce((total, { label }) => total + label.length + 2, 0);
 
 /** Narrow terminals shed detail in stages: first the thread count, then down to initials. */
-const fitSurfaceTabs = (openThreads: number, available: number) =>
+const fitSurfaceTabs = (
+	surfaces: readonly ReviewSurface[],
+	openThreads: number,
+	available: number,
+) =>
 	[
-		surfaceTabs(openThreads),
-		surfaceTabs(0),
-		SURFACES.map(({ id, label }) => ({ id, label: label.slice(0, 1) })),
+		surfaceTabs(surfaces, openThreads),
+		surfaceTabs(surfaces, 0),
+		surfaces.map((id) => ({ id, label: SURFACE_LABELS[id].slice(0, 1) })),
 	].find((tabs) => available >= surfaceTabsWidth(tabs) + 2);
 
 const MENU_BAR_WIDTH = menuSpecs.reduce((total, spec) => total + spec.width, 0);
@@ -358,7 +367,7 @@ export const MenuBar = ({
 	activeMenuId,
 	terminalWidth,
 	surface,
-	canSwitchSurface,
+	hasStory,
 	openThreads,
 	onSelectSurface,
 	onHover,
@@ -368,7 +377,8 @@ export const MenuBar = ({
 	activeMenuId: MenuId | null;
 	terminalWidth: number;
 	surface: ReviewSurface;
-	canSwitchSurface: boolean;
+	/** False for a chapterless run, where the story tab has nothing to show. */
+	hasStory: boolean;
 	openThreads: number;
 	onSelectSurface: (surface: ReviewSurface) => void;
 	onHover: (id: MenuId) => void;
@@ -376,9 +386,8 @@ export const MenuBar = ({
 	onClose: () => void;
 }) => {
 	const theme = useTheme();
-	const tabs = canSwitchSurface
-		? (fitSurfaceTabs(openThreads, terminalWidth - 2 - MENU_BAR_WIDTH) ?? [])
-		: [];
+	const surfaces = hasStory ? SURFACES : SURFACES.filter((id) => id !== "story");
+	const tabs = fitSurfaceTabs(surfaces, openThreads, terminalWidth - 2 - MENU_BAR_WIDTH) ?? [];
 	const surfaceBarWidth = surfaceTabsWidth(tabs);
 	const showSurfaces = tabs.length > 0;
 	const surfaceSlack = terminalWidth - 2 - MENU_BAR_WIDTH - surfaceBarWidth;

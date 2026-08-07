@@ -124,6 +124,28 @@ test("a chapterless run opens straight onto every file with file-based progress"
 	expect(t.captureCharFrame()).toContain("1/3 files");
 });
 
+test("a chapterless run still reaches the Comments surface", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={null} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	const bar = t.captureCharFrame().split("\n")[0] ?? "";
+	expect(bar).toContain("Files");
+	expect(bar).toContain("Comments");
+	expect(bar).not.toContain("Story"); // nothing to narrate
+
+	await press(t, "o");
+	expect(t.captureCharFrame()).toContain("No comments in this review yet.");
+	expect(statusLine(t)).toContain("Comments");
+
+	await press(t, "o"); // toggles back to the files
+	expect(t.captureCharFrame()).toContain("src/lib/apiClient.ts");
+	expect(statusLine(t)).not.toContain("Comments");
+});
+
 test("the Files surface never shows story paging, even without the sidebar", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {

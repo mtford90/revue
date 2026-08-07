@@ -9,6 +9,7 @@ import {
 	type DiffSide,
 	type DiffVisualPlan,
 	type ExcerptVisualPlan,
+	excerptLineRange,
 	findFocusedDecorationAnchor,
 	type PaintedDiffRow,
 	type PaintedSplitLineRow,
@@ -98,6 +99,115 @@ type GutterHandlers = {
 
 type CellInteractions = Partial<Record<DiffSide, GutterHandlers>>;
 type AttachmentCounts = Partial<Record<DiffSide, number>>;
+
+type RangeSelectionInput = {
+	selectedRange?: DiffLineRange;
+	onRangeSelect?: (range: DiffLineRange) => void;
+	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
+};
+
+/**
+ * Gutter-drag range selection, shared by diff bodies and excerpt blocks so a quoted line
+ * answers the pointer exactly as a reviewable one does.
+ */
+const useRangeSelection = ({
+	selectedRange,
+	onRangeSelect,
+	onRangeContextMenu,
+}: RangeSelectionInput) => {
+	const activeStart = useRef<DiffLineRange | null>(null);
+	const activeRange = useRef<DiffLineRange | null>(null);
+	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
+	const displayedRange = dragRange ?? selectedRange;
+	const updateRange = (target: DiffLineRange) => {
+		const start = activeStart.current;
+		if (
+			!start ||
+			start.filePath !== target.filePath ||
+			start.hunkOldStart !== target.hunkOldStart ||
+			start.side !== target.side
+		)
+			return;
+		const next = {
+			...start,
+			startLine: Math.min(start.startLine, target.startLine),
+			endLine: Math.max(start.endLine, target.endLine),
+		};
+		activeRange.current = next;
+		setDragRange(next);
+	};
+	const finishRange = () => {
+		if (!activeStart.current) return;
+		const completed = activeRange.current;
+		activeStart.current = null;
+		activeRange.current = null;
+		setDragRange(null);
+		if (completed) onRangeSelect?.(completed);
+	};
+	const cancelActiveRange = () => {
+		activeStart.current = null;
+		activeRange.current = null;
+		setDragRange(null);
+	};
+	/** A right click inside the live selection acts on all of it, not just the row beneath. */
+	const contextRange = (target: DiffLineRange): DiffLineRange =>
+		displayedRange &&
+		displayedRange.filePath === target.filePath &&
+		displayedRange.side === target.side &&
+		displayedRange.startLine <= target.startLine &&
+		target.endLine <= displayedRange.endLine
+			? displayedRange
+			: target;
+	const openContextMenu = (target: DiffLineRange, event: OpenTUIMouseEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		onRangeContextMenu?.(contextRange(target), { x: event.x, y: event.y });
+	};
+	const contextHandler = (target: DiffLineRange | null) =>
+		target && onRangeContextMenu
+			? (event: OpenTUIMouseEvent) => {
+					if (event.button === RIGHT_MOUSE_BUTTON) openContextMenu(target, event);
+				}
+			: undefined;
+	const gutterHandlers = (target: DiffLineRange | null): GutterHandlers | undefined =>
+		target && (onRangeSelect || onRangeContextMenu)
+			? {
+					onMouseDown: (event) => {
+						if (event.button === RIGHT_MOUSE_BUTTON) {
+							openContextMenu(target, event);
+							return;
+						}
+						if (event.button !== 0) return;
+						event.preventDefault();
+						event.stopPropagation();
+						activeStart.current = target;
+						activeRange.current = target;
+						setDragRange(target);
+					},
+					onMouseDrag: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+					},
+					onMouseOver: (event) => {
+						if (!activeStart.current) return;
+						event.preventDefault();
+						event.stopPropagation();
+						updateRange(target);
+					},
+					onMouseDragEnd: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						finishRange();
+					},
+					onMouseUp: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						finishRange();
+					},
+				}
+			: undefined;
+	return { displayedRange, gutterHandlers, contextHandler, cancelActiveRange };
+};
 
 const attachmentMarker = (count: number): string =>
 	count > 0 ? `${String(count).padStart(2)}●` : "   ";
@@ -514,10 +624,11 @@ export function DiffBody(props: DiffBodyProps) {
 		theme.syntaxTheme,
 	]);
 	const normalized = geometry.file;
-	const activeStart = useRef<DiffLineRange | null>(null);
-	const activeRange = useRef<DiffLineRange | null>(null);
-	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
-	const displayedRange = dragRange ?? selectedRange;
+	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
+		selectedRange,
+		onRangeSelect,
+		onRangeContextMenu,
+	});
 	const selectionDecoration = useMemo<RangeDecoration | null>(
 		() =>
 			displayedRange
@@ -580,88 +691,6 @@ export function DiffBody(props: DiffBodyProps) {
 			endLine: identity.lineNumber,
 		};
 	};
-	const updateRange = (target: DiffLineRange): DiffLineRange | null => {
-		const start = activeStart.current;
-		if (
-			!start ||
-			start.filePath !== target.filePath ||
-			start.hunkOldStart !== target.hunkOldStart ||
-			start.side !== target.side
-		)
-			return activeRange.current;
-		const next = {
-			...start,
-			startLine: Math.min(start.startLine, target.startLine),
-			endLine: Math.max(start.endLine, target.endLine),
-		};
-		activeRange.current = next;
-		setDragRange(next);
-		return next;
-	};
-	const finishRange = () => {
-		if (!activeStart.current) return;
-		const completed = activeRange.current;
-		activeStart.current = null;
-		activeRange.current = null;
-		setDragRange(null);
-		if (completed) onRangeSelect?.(completed);
-	};
-	const contextRange = (target: DiffLineRange): DiffLineRange =>
-		displayedRange &&
-		displayedRange.filePath === target.filePath &&
-		displayedRange.side === target.side &&
-		displayedRange.startLine <= target.startLine &&
-		target.endLine <= displayedRange.endLine
-			? displayedRange
-			: target;
-	const openContextMenu = (target: DiffLineRange, event: OpenTUIMouseEvent) => {
-		event.preventDefault();
-		event.stopPropagation();
-		onRangeContextMenu?.(contextRange(target), { x: event.x, y: event.y });
-	};
-	const contextHandler = (target: DiffLineRange | null) =>
-		target && onRangeContextMenu
-			? (event: OpenTUIMouseEvent) => {
-					if (event.button === RIGHT_MOUSE_BUTTON) openContextMenu(target, event);
-				}
-			: undefined;
-	const gutterHandlers = (target: DiffLineRange | null): GutterHandlers | undefined =>
-		target && (onRangeSelect || onRangeContextMenu)
-			? {
-					onMouseDown: (event) => {
-						if (event.button === RIGHT_MOUSE_BUTTON) {
-							openContextMenu(target, event);
-							return;
-						}
-						if (event.button !== 0) return;
-						event.preventDefault();
-						event.stopPropagation();
-						activeStart.current = target;
-						activeRange.current = target;
-						setDragRange(target);
-					},
-					onMouseDrag: (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-					},
-					onMouseOver: (event) => {
-						if (!activeStart.current) return;
-						event.preventDefault();
-						event.stopPropagation();
-						updateRange(target);
-					},
-					onMouseDragEnd: (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						finishRange();
-					},
-					onMouseUp: (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						finishRange();
-					},
-				}
-			: undefined;
 	const interaction = (cell: PaintedVisualCell, side: DiffSide): SideInteraction => {
 		const range = rangeForIdentity(cell.identities[side]);
 		return {
@@ -672,11 +701,6 @@ export function DiffBody(props: DiffBodyProps) {
 	};
 	const rowAttachments = (row: Exclude<PaintedDiffRow, { type: "hunk-header" }>) =>
 		attachmentsForRow({ row, attachments: inlineAttachments, resolveRange });
-	const cancelActiveRange = () => {
-		activeStart.current = null;
-		activeRange.current = null;
-		setDragRange(null);
-	};
 
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length)
 		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
@@ -808,7 +832,10 @@ export function ExcerptBlock({
 	focused = false,
 	window: rowWindow,
 	onToggle,
-}: {
+	selectedRange,
+	onRangeSelect,
+	onRangeContextMenu,
+}: RangeSelectionInput & {
 	plan: ExcerptVisualPlan;
 	theme: Theme;
 	/** The block, not a row: excerpt rows have no focus marker to carry it. */
@@ -817,6 +844,11 @@ export function ExcerptBlock({
 	onToggle?: (key: string) => void;
 }) {
 	const { chrome, digits } = plan;
+	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
+		selectedRange,
+		onRangeSelect,
+		onRangeContextMenu,
+	});
 	const start = Math.max(0, Math.min(plan.rows.length, rowWindow?.start ?? 0));
 	const end = Math.max(start, Math.min(plan.rows.length, rowWindow?.end ?? plan.rows.length));
 	const toggle = onToggle
@@ -829,7 +861,13 @@ export function ExcerptBlock({
 	const labelFg = focused ? theme.accent : theme.muted;
 	const emptyGutter = " ".repeat(chrome.focusMarker - 1 + digits + chrome.attachmentMarker);
 	return (
-		<box width="100%" flexDirection="column">
+		// biome-ignore lint/a11y/noStaticElementInteractions: the block clears gutter drags that end off a quoted line.
+		<box
+			width="100%"
+			flexDirection="column"
+			onMouseUp={cancelActiveRange}
+			onMouseDragEnd={cancelActiveRange}
+		>
 			{plan.rows.slice(start, end).map((row) => {
 				if (row.type === "excerpt-caption") {
 					return (
@@ -881,21 +919,37 @@ export function ExcerptBlock({
 						</box>
 					);
 				}
+				const range = excerptLineRange(row);
+				const selected = Boolean(
+					displayedRange &&
+						displayedRange.filePath === range.filePath &&
+						displayedRange.side === range.side &&
+						displayedRange.startLine <= range.startLine &&
+						range.endLine <= displayedRange.endLine,
+				);
 				return (
 					<box key={row.key} width="100%" flexDirection="column">
 						{row.visualRows.map(({ continuationIndex, spans }) => (
+							// biome-ignore lint/a11y/noStaticElementInteractions: a right click anywhere on the line acts on that line.
 							<box
 								key={continuationIndex}
 								width="100%"
 								height={1}
 								overflow="hidden"
-								backgroundColor={theme.contextBg}
+								backgroundColor={selected ? theme.selectedHunk : theme.contextBg}
 								flexDirection="row"
+								onMouseDown={contextHandler(range)}
 							>
 								<text flexShrink={0} fg={theme.lineNumberFg} wrapMode="none" selectable={false}>
 									{`│${emptyGutter}`}
 								</text>
-								<text flexShrink={0} fg={theme.lineNumberFg} wrapMode="none" selectable={false}>
+								<text
+									flexShrink={0}
+									fg={theme.lineNumberFg}
+									wrapMode="none"
+									selectable={false}
+									{...gutterHandlers(range)}
+								>
 									{" ".repeat(chrome.focusMarker)}
 									{continuationIndex === 0
 										? lineNumber(row.lineNumber, digits)
@@ -906,6 +960,7 @@ export function ExcerptBlock({
 									{" ".repeat(chrome.sign)}
 								</text>
 								<text
+									id={diffLineId(range)}
 									fg={theme.text}
 									selectionBg={theme.badgeModified}
 									selectionFg={theme.panelAlt}

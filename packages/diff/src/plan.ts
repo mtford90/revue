@@ -7,6 +7,7 @@ import type {
 	DiffCell,
 	DiffFile,
 	DiffLayout,
+	DiffLineRange,
 	DiffRow,
 	DiffSide,
 	DiffSourceLineIdentity,
@@ -498,6 +499,28 @@ export type PlanExcerptInput = {
 	width: number;
 	chrome: DiffChromeWidths;
 };
+
+/**
+ * An excerpt quotes unchanged content from the run's new endpoint, so a range over it is
+ * new-side and belongs to no git hunk. Zero is the same "no textual hunk" sentinel review
+ * units already use, and it keeps every quoted line of one file in a single draggable span.
+ */
+export const EXCERPT_HUNK_OLD_START = 0;
+
+/** The range one quoted line acts on, so excerpt lines answer the diff's verbs unchanged. */
+export const excerptLineRange = ({
+	filePath,
+	lineNumber,
+}: {
+	filePath: string;
+	lineNumber: number;
+}): DiffLineRange => ({
+	filePath,
+	hunkOldStart: EXCERPT_HUNK_OLD_START,
+	side: "additions",
+	startLine: lineNumber,
+	endLine: lineNumber,
+});
 
 /** Narrower than this the open header sheds its state word rather than truncating the path. */
 const EXCERPT_STATE_WIDTH = 100;

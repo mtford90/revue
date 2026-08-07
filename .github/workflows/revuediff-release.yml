@@ -51,7 +51,9 @@ jobs:
       # pollutes CLI assertions that expect a clean process.
       - name: Build native highlighter for tests
         run: bash scripts/build-native-highlighter.sh revue packages/diff/native/target/release/revue_highlighter.node
-      - run: bun test --timeout 30000
+      # Spawn-heavy CLI tests need more than bun's five-second default. Intel macOS
+      # runners are several times slower, so release builds keep a wider ceiling.
+      - run: bun test --timeout 120000
       - name: Compile Revuediff
         run: |
           bun build --compile packages/revuediff/src/main.ts --outfile dist/revuediff

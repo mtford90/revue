@@ -76,8 +76,11 @@ test("standalone help, version, and invalid options keep streams separate", asyn
 	const help = await runCliPager(["--help"], "");
 	expect(help).toMatchObject({ exitCode: 0, stderr: "" });
 	expect(help.stdout).toContain("Usage:\n  revuediff");
+	const { version: packageVersion } = await Bun.file(
+		resolve(import.meta.dir, "../package.json"),
+	).json();
 	const version = await runCliPager(["--version"], "");
-	expect(version).toEqual({ exitCode: 0, stdout: "revuediff 0.1.0\n", stderr: "" });
+	expect(version).toEqual({ exitCode: 0, stdout: `revuediff ${packageVersion}\n`, stderr: "" });
 	const invalid = await runCliPager(["--wat"], "unread input");
 	expect(invalid).toMatchObject({ exitCode: 1, stdout: "" });
 	expect(invalid.stderr).toContain("unknown revuediff option");

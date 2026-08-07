@@ -115,16 +115,18 @@ describe("release routing", () => {
 			"include-component-in-tag": true,
 			"initial-version": "0.1.0",
 		});
+		const revueVersion = (
+			await Bun.file(`${import.meta.dir}/../.release-please/revue/version.txt`).text()
+		).trim();
+		const revuediffVersion = (
+			await Bun.file(`${import.meta.dir}/../.release-please/revuediff/version.txt`).text()
+		).trim();
 		expect(manifest).toEqual({
-			".release-please/revue": "0.5.0",
-			".release-please/revuediff": "0.1.0",
+			".release-please/revue": revueVersion,
+			".release-please/revuediff": revuediffVersion,
 		});
-		expect(await Bun.file(`${import.meta.dir}/../.release-please/revue/version.txt`).text()).toBe(
-			"0.5.0\n",
-		);
-		expect(
-			await Bun.file(`${import.meta.dir}/../.release-please/revuediff/version.txt`).text(),
-		).toBe("0.1.0\n");
+		expect(revueVersion).toMatch(/^\d+\.\d+\.\d+$/);
+		expect(revuediffVersion).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(releaseWorkflow).toContain(".release-please/revue--release_created");
 		expect(releaseWorkflow).toContain(".release-please/revuediff--release_created");
 		expect(ciWorkflow).toContain("fetch-depth: 0");

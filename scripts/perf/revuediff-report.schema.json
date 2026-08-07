@@ -1,0 +1,138 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://revue.mtford.co.uk/schemas/revuediff-performance-v2.json",
+	"title": "Revuediff performance report",
+	"type": "object",
+	"required": ["schemaVersion", "status", "generatedAt", "infrastructureFailures"],
+	"properties": {
+		"schemaVersion": { "const": 2 },
+		"status": { "enum": ["ok", "failed"] },
+		"generatedAt": { "type": "string", "format": "date-time" },
+		"infrastructureFailures": {
+			"type": "array",
+			"items": { "type": "string" }
+		},
+		"sourceGit": {
+			"type": "object",
+			"required": ["revision", "dirty"],
+			"properties": {
+				"revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+				"dirty": { "type": "boolean" }
+			},
+			"additionalProperties": false
+		},
+		"compiledBinary": {
+			"type": "object",
+			"required": ["digest", "version"],
+			"properties": {
+				"digest": { "$ref": "#/$defs/sha256" },
+				"version": { "type": "string", "minLength": 1 }
+			},
+			"additionalProperties": false
+		},
+		"environment": { "type": "object" },
+		"methodology": {
+			"type": "object",
+			"required": [
+				"repetitions",
+				"warmups",
+				"timeoutMs",
+				"validationBeforeTiming",
+				"stageIsolation"
+			]
+		},
+		"revuediff": {
+			"type": "object",
+			"additionalProperties": { "$ref": "#/$defs/scenarioResult" }
+		},
+		"baseline": { "type": "object" },
+		"comparators": { "type": "object" },
+		"stages": { "type": ["array", "null"] }
+	},
+	"allOf": [
+		{
+			"if": { "required": ["revuediff"] },
+			"then": {
+				"required": [
+					"sourceGit",
+					"compiledBinary",
+					"environment",
+					"methodology",
+					"baseline",
+					"comparators"
+				]
+			}
+		}
+	],
+	"$defs": {
+		"sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+		"sample": {
+			"type": "object",
+			"required": ["ttfbMs", "totalMs", "inputBytes", "outputBytes", "exitCode", "timedOut"],
+			"properties": {
+				"ttfbMs": { "type": ["number", "null"] },
+				"totalMs": { "type": "number", "minimum": 0 },
+				"inputBytes": { "type": "integer", "minimum": 0 },
+				"outputBytes": { "type": "integer", "minimum": 0 },
+				"exitCode": { "type": ["integer", "null"] },
+				"timedOut": { "type": "boolean" },
+				"error": { "type": "string" }
+			}
+		},
+		"benchmark": {
+			"type": "object",
+			"required": [
+				"runs",
+				"failures",
+				"rawSamples",
+				"rawWarmupSamples",
+				"inputThroughputBytesPerSecondP50",
+				"outputThroughputBytesPerSecondP50"
+			],
+			"properties": {
+				"runs": { "type": "integer", "minimum": 0 },
+				"failures": { "type": "integer", "minimum": 0 },
+				"rawSamples": { "type": "array", "items": { "$ref": "#/$defs/sample" } },
+				"rawWarmupSamples": { "type": "array", "items": { "$ref": "#/$defs/sample" } },
+				"inputThroughputBytesPerSecondP50": { "type": ["integer", "null"] },
+				"outputThroughputBytesPerSecondP50": { "type": ["integer", "null"] }
+			}
+		},
+		"scenarioResult": {
+			"type": "object",
+			"required": [
+				"description",
+				"args",
+				"expect",
+				"input",
+				"source",
+				"timeoutMs",
+				"repetitions",
+				"warmups",
+				"validation",
+				"benchmark"
+			],
+			"properties": {
+				"description": { "type": "string" },
+				"args": { "type": "array", "items": { "type": "string" } },
+				"input": {
+					"type": "object",
+					"required": ["bytes", "sha256"],
+					"properties": {
+						"bytes": { "type": "integer", "minimum": 0 },
+						"sha256": { "$ref": "#/$defs/sha256" }
+					}
+				},
+				"source": { "type": "object" },
+				"timeoutMs": { "type": "integer", "minimum": 1 },
+				"repetitions": { "type": "integer", "minimum": 1 },
+				"warmups": { "type": "integer", "minimum": 1 },
+				"validation": {
+					"type": "object",
+					"required": ["passed", "errors", "exitCode", "timedOut", "outputBytes", "outputSha256"]
+				},
+				"benchmark": { "oneOf": [{ "$ref": "#/$defs/benchmark" }, { "type": "null" }] }
+			}
+		}
+	}
+}

@@ -206,11 +206,15 @@ choices do not weaken this whole-stream fallback.
 
 ## Development performance checks
 
-The repository includes a non-gating, deterministic compiled-executable benchmark under
+The repository includes a non-timing-gating, deterministic compiled-executable benchmark under
 [`scripts/perf/`](../scripts/perf/README.md). Run `bun run perf:revuediff` for end-to-end figures,
-add `-- --stages` for diagnostic classification/highlighting/formatting timing, or `-- --compare`
-when Delta/Difftastic are installed. Its README explains buffering, comparator contract differences,
-and JSON artifact comparison; it does not change pager behaviour or impose timing budgets.
+add `-- --stages` for serial classification/cold-and-warmed-highlighting/formatting diagnostics, or
+`-- --compare` when Delta/Difftastic are installed. Generated patches are verified against exact
+pre/post source trees through Git and the Revuediff parser, and executable output is validated before
+timing. Harness integrity, output-contract, sample, and timeout failures exit nonzero; aspirational
+target misses do not. Its README documents hard deadlines, comparator contract/feature differences,
+and the versioned JSON report schema. The harness does not change pager behaviour or impose timing
+budgets.
 
 ## Troubleshooting
 

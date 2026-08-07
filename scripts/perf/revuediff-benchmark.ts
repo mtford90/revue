@@ -3,11 +3,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { prepareSyntaxHighlighting } from "../../packages/diff/src/index.ts";
 import { formatAnsiDiffFile } from "../../packages/diff-ansi/src/index.ts";
+import { layoutForFile } from "../../packages/revuediff/src/pager.ts";
 import { classifyPagerInput } from "../../packages/revuediff/src/pagerInput.ts";
 import { resolveTheme, withTransparentSurfaces } from "../../packages/theme/src/index.ts";
 import type { Scenario } from "./revuediff-scenarios.ts";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const TARGETS = {
 	tinyTtfbP50Ms: 75,
 	tinyP95Ms: 100,
@@ -25,10 +26,16 @@ export type Options = {
 export type Sample = {
 	ttfbMs: number | null;
 	totalMs: number;
+	inputBytes: number;
 	outputBytes: number;
 	exitCode: number | null;
 	timedOut: boolean;
 	error?: string;
+};
+export type ProcessResult = Sample & { stdout: string; stderr: string };
+export type BenchmarkResult = ReturnType<typeof summary> & {
+	warmupFailures: number;
+	rawWarmupSamples: Sample[];
 };
 
 export function parseArgs(args: string[]): Options {
@@ -62,14 +69,19 @@ const integer = (value: string | undefined, name: string) => {
 export const percentile = (values: number[], p: number): number | null => {
 	if (!values.length) return null;
 	const sorted = [...values].sort((a, b) => a - b);
-	return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
+	return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)] ?? null;
 };
 export const summary = (samples: Sample[]) => {
 	const successful = samples.filter((sample) => sample.exitCode === 0 && !sample.timedOut);
 	const ttfb = successful.flatMap((sample) => (sample.ttfbMs === null ? [] : [sample.ttfbMs]));
 	const total = successful.map((sample) => sample.totalMs);
-	const bytes = successful.map((sample) => sample.outputBytes);
-	const p50TotalMs = percentile(total, 50);
+	const outputBytes = successful.map((sample) => sample.outputBytes);
+	const inputThroughput = successful
+		.filter((sample) => sample.totalMs > 0)
+		.map((sample) => Math.round(sample.inputBytes / (sample.totalMs / 1000)));
+	const outputThroughput = successful
+		.filter((sample) => sample.totalMs > 0)
+		.map((sample) => Math.round(sample.outputBytes / (sample.totalMs / 1000)));
 	return {
 		runs: samples.length,
 		failures: samples.length - successful.length,
@@ -82,23 +94,47 @@ export const summary = (samples: Sample[]) => {
 			})),
 		ttfbP50Ms: percentile(ttfb, 50),
 		ttfbP95Ms: percentile(ttfb, 95),
-		totalP50Ms: p50TotalMs,
+		totalP50Ms: percentile(total, 50),
 		totalP95Ms: percentile(total, 95),
-		outputBytes: percentile(bytes, 50),
-		throughputBytesPerSecond:
-			p50TotalMs && p50TotalMs > 0
-				? Math.round((percentile(bytes, 50) ?? 0) / (p50TotalMs / 1000))
-				: null,
+		outputBytesP50: percentile(outputBytes, 50),
+		inputThroughputBytesPerSecondP50: percentile(inputThroughput, 50),
+		outputThroughputBytesPerSecondP50: percentile(outputThroughput, 50),
+		rawSamples: samples,
 	};
 };
 
-/** Reads stdout while the process runs, avoiding a full-pipe deadlock before waiting for exit. */
+const delay = (milliseconds: number) =>
+	new Promise<void>((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+
+const killProcessTree = (
+	child: ReturnType<typeof Bun.spawn>,
+	signal: "SIGTERM" | "SIGKILL",
+): void => {
+	try {
+		// detached creates a POSIX process group on macOS/Linux; a negative pid targets descendants too.
+		process.kill(-child.pid, signal);
+		return;
+	} catch {
+		try {
+			child.kill(signal);
+		} catch {
+			// It may have exited between the state check and signal delivery.
+		}
+	}
+};
+
+/**
+ * Drain both output pipes concurrently, but enforce a bounded lifecycle: deadline, process-group
+ * SIGTERM, grace period, then process-group SIGKILL. A timeout is sticky even if TERM exits zero.
+ */
 export async function collectProcess(
 	cmd: string[],
 	input: string,
 	timeoutMs: number,
-): Promise<Sample> {
+	deadlines: { terminationGraceMs?: number; killGraceMs?: number } = {},
+): Promise<ProcessResult> {
 	const started = performance.now();
+	const inputBytes = Buffer.byteLength(input);
 	let child: ReturnType<typeof Bun.spawn>;
 	try {
 		child = Bun.spawn({
@@ -106,97 +142,265 @@ export async function collectProcess(
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",
+			detached: process.platform !== "win32",
 			env: { ...process.env, REVUEDIFF_CONFIG: "/dev/null" },
 		});
 	} catch (error) {
 		return {
 			ttfbMs: null,
 			totalMs: performance.now() - started,
+			inputBytes,
 			outputBytes: 0,
 			exitCode: null,
 			timedOut: false,
 			error: String(error),
+			stdout: "",
+			stderr: "",
 		};
 	}
 	let firstByte: number | null = null;
-	let outputBytes = 0;
-	let stderr = "";
+	let exitCode: number | null = null;
+	let settledComplete = false;
 	let timedOut = false;
-	const readOutput = (async () => {
-		const reader = child.stdout.getReader();
+	let inputError: string | undefined;
+	const stdoutChunks: Uint8Array[] = [];
+	const stderrChunks: Uint8Array[] = [];
+	const stdoutReader = child.stdout.getReader();
+	const stderrReader = child.stderr.getReader();
+	const drain = async (
+		reader: ReadableStreamDefaultReader<Uint8Array>,
+		chunks: Uint8Array[],
+		first: boolean,
+	) => {
 		try {
 			for (;;) {
 				const chunk = await reader.read();
 				if (chunk.done) break;
-				if (firstByte === null) firstByte = performance.now() - started;
-				outputBytes += chunk.value.byteLength;
+				if (first && firstByte === null && chunk.value.byteLength > 0)
+					firstByte = performance.now() - started;
+				chunks.push(chunk.value);
 			}
+		} catch (error) {
+			if (!timedOut) throw error;
 		} finally {
 			reader.releaseLock();
 		}
+	};
+	const readOutput = drain(stdoutReader, stdoutChunks, true);
+	const readError = drain(stderrReader, stderrChunks, false);
+	const writeInput = (async () => {
+		try {
+			await child.stdin.write(input);
+			child.stdin.end();
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "EPIPE" && !timedOut) inputError = String(error);
+		}
 	})();
-	const readError = new Response(child.stderr).text().then((text) => {
-		stderr = text;
+	const exited = child.exited.then((code) => {
+		exitCode = code;
 	});
+	const settled = Promise.all([exited, writeInput, readOutput, readError]).then(() => {
+		settledComplete = true;
+	});
+	let resolveDeadline: (() => void) | undefined;
+	const deadline = new Promise<void>((resolvePromise) => {
+		resolveDeadline = resolvePromise;
+	});
+	const terminationGraceMs = deadlines.terminationGraceMs ?? 500;
+	const killGraceMs = deadlines.killGraceMs ?? 500;
 	const timer = setTimeout(() => {
-		timedOut = true;
-		child.kill();
+		void (async () => {
+			timedOut = true;
+			killProcessTree(child, "SIGTERM");
+			await delay(terminationGraceMs);
+			if (!settledComplete) killProcessTree(child, "SIGKILL");
+			await Promise.race([
+				settled.then(
+					() => undefined,
+					() => undefined,
+				),
+				delay(killGraceMs),
+			]);
+			resolveDeadline?.();
+		})();
 	}, timeoutMs);
-	try {
-		await child.stdin.write(input);
-		child.stdin.end();
-		await Promise.all([child.exited, readOutput, readError]);
-	} finally {
-		clearTimeout(timer);
+	const outcome = await Promise.race([
+		settled.then(() => "settled" as const),
+		deadline.then(() => "deadline" as const),
+	]);
+	clearTimeout(timer);
+	if (outcome === "deadline") {
+		try {
+			child.stdin.end();
+		} catch {
+			// The descriptor may already be closed.
+		}
+		void stdoutReader.cancel().catch(() => undefined);
+		void stderrReader.cancel().catch(() => undefined);
 	}
-	const exitCode = await child.exited;
+	const stdout = Buffer.concat(stdoutChunks).toString();
+	const stderr = Buffer.concat(stderrChunks).toString();
+	const error = timedOut
+		? `timed out after ${timeoutMs}ms${stderr.trim() ? `: ${stderr.trim()}` : ""}`
+		: exitCode !== 0
+			? stderr.trim() || inputError
+			: inputError;
 	return {
 		ttfbMs: firstByte,
 		totalMs: performance.now() - started,
-		outputBytes,
+		inputBytes,
+		outputBytes: Buffer.byteLength(stdout),
 		exitCode,
 		timedOut,
-		error: exitCode === 0 ? undefined : stderr.trim() || undefined,
+		error,
+		stdout,
+		stderr,
 	};
 }
 
+const sampleOnly = ({ stdout: _stdout, stderr: _stderr, ...sample }: ProcessResult): Sample =>
+	sample;
+
 export async function benchmark(command: string[], scenario: Scenario, options: Options) {
+	const warmupSamples: Sample[] = [];
 	for (let i = 0; i < options.warmups; i += 1)
-		await collectProcess(command, scenario.input, options.timeoutMs);
+		warmupSamples.push(
+			sampleOnly(await collectProcess(command, scenario.input, options.timeoutMs)),
+		);
 	const samples: Sample[] = [];
 	for (let i = 0; i < options.repetitions; i += 1)
-		samples.push(await collectProcess(command, scenario.input, options.timeoutMs));
-	return summary(samples);
+		samples.push(sampleOnly(await collectProcess(command, scenario.input, options.timeoutMs)));
+	const measured = summary(samples);
+	const warmupFailures = warmupSamples.filter(
+		(sample) => sample.exitCode !== 0 || sample.timedOut,
+	).length;
+	return {
+		...measured,
+		failures: measured.failures + warmupFailures,
+		warmupFailures,
+		rawWarmupSamples: warmupSamples,
+	};
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI is the formatted-output contract.
+const ANSI_CONTROL = /\x1b\[[0-?]*[ -/]*[@-~]/;
+
+export function validateScenarioOutput(
+	scenario: Scenario,
+	result: Pick<ProcessResult, "exitCode" | "timedOut" | "stdout" | "stderr">,
+): string[] {
+	const errors: string[] = [];
+	if (result.timedOut) errors.push("validation process timed out");
+	if (result.exitCode !== 0) errors.push(`validation exited ${String(result.exitCode)}`);
+	if (result.stderr.trim()) errors.push(`validation wrote stderr: ${result.stderr.trim()}`);
+	if (scenario.expect.kind === "help") {
+		for (const text of scenario.expect.contains)
+			if (!result.stdout.includes(text))
+				errors.push(`help output is missing ${JSON.stringify(text)}`);
+	} else if (scenario.expect.kind === "passthrough") {
+		if (result.stdout !== scenario.expect.output)
+			errors.push("passthrough output was not sanitised exactly");
+		if (ANSI_CONTROL.test(result.stdout)) errors.push("passthrough output contained ANSI controls");
+	} else {
+		if (!ANSI_CONTROL.test(result.stdout))
+			errors.push("formatted output did not contain ANSI styling");
+		if (result.stdout === scenario.input) errors.push("formatted output was unchanged passthrough");
+		for (const file of scenario.expect.files) {
+			const header = `${file.path}  +${file.additions} -${file.deletions}`;
+			if (!result.stdout.includes(header))
+				errors.push(`formatted output is missing changed-row header ${header}`);
+		}
+	}
+	return errors;
+}
+
+export async function validateExecutableScenario(
+	command: string[],
+	scenario: Scenario,
+	timeoutMs: number,
+) {
+	const result = await collectProcess(command, scenario.input, timeoutMs);
+	const errors = validateScenarioOutput(scenario, result);
+	return {
+		passed: errors.length === 0,
+		errors,
+		exitCode: result.exitCode,
+		timedOut: result.timedOut,
+		outputBytes: result.outputBytes,
+		outputSha256: digest(result.stdout),
+	};
+}
+
+export function hasBenchmarkFailures(results: Record<string, { failures: number }>): boolean {
+	return Object.values(results).some((result) => result.failures > 0);
+}
+
+const requestedWidth = (args: string[]): number => {
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument?.startsWith("--width=")) return Number(argument.slice("--width=".length));
+		if (argument === "--width") return Number(args[index + 1]);
+	}
+	return 80;
+};
+
+/** Diagnostic stages run serially; setup for each next stage begins only after the prior one ends. */
 export async function stageTimings(scenarios: Scenario[]) {
 	const theme = withTransparentSurfaces(resolveTheme("ayu-dark", null));
-	return Promise.all(
-		scenarios
-			.filter((scenario) => scenario.expect === "formatted")
-			.map(async (scenario) => {
-				const classifyStart = performance.now();
-				const classified = classifyPagerInput(scenario.input);
-				const classifyMs = performance.now() - classifyStart;
-				if (classified.kind === "passthrough")
-					return { id: scenario.id, classifyMs, syntaxMs: null, formatMs: null };
-				const syntaxStart = performance.now();
-				await prepareSyntaxHighlighting(classified.files, theme.syntaxTheme);
-				const syntaxMs = performance.now() - syntaxStart;
-				const formatStart = performance.now();
-				classified.files.forEach((file) => {
-					formatAnsiDiffFile({
-						file,
-						layout: scenario.args.includes("--width=60") ? "stack" : "split",
-						width: scenario.args.includes("--width=60") ? 60 : 100,
-						theme,
-						lineNumbers: false,
-						changeMarkers: false,
-					});
-				});
-				return { id: scenario.id, classifyMs, syntaxMs, formatMs: performance.now() - formatStart };
-			}),
-	);
+	const results = [];
+	let shikiStarted = false;
+	for (const scenario of scenarios.filter((item) => item.expect.kind === "formatted")) {
+		const classifyStart = performance.now();
+		const classified = classifyPagerInput(scenario.input);
+		const classifyMs = performance.now() - classifyStart;
+		if (classified.kind === "passthrough") {
+			results.push({ id: scenario.id, classifyMs, error: "scenario unexpectedly passed through" });
+			continue;
+		}
+		const syntaxFirstPassState = shikiStarted ? "warmed-shiki-runtime" : "cold-shiki-startup";
+		const syntaxStart = performance.now();
+		await prepareSyntaxHighlighting(classified.files, theme.syntaxTheme);
+		const syntaxFirstPassMs = performance.now() - syntaxStart;
+		shikiStarted = true;
+		const warmed = classifyPagerInput(scenario.input);
+		if (warmed.kind === "passthrough") {
+			results.push({
+				id: scenario.id,
+				classifyMs,
+				error: "warm scenario unexpectedly passed through",
+			});
+			continue;
+		}
+		const warmedStart = performance.now();
+		await prepareSyntaxHighlighting(warmed.files, theme.syntaxTheme);
+		const syntaxWarmedMs = performance.now() - warmedStart;
+		const width = requestedWidth(scenario.args);
+		const layouts = [...new Set(warmed.files.map((file) => layoutForFile(file, width)))];
+		const formatStart = performance.now();
+		for (const file of warmed.files) {
+			formatAnsiDiffFile({
+				file,
+				layout: layoutForFile(file, width),
+				width,
+				theme,
+				lineNumbers: false,
+				changeMarkers: false,
+			});
+		}
+		results.push({
+			id: scenario.id,
+			width,
+			layouts,
+			sequence: ["classify", "syntax-first-pass", "syntax-warmed", "format"],
+			classifyMs,
+			syntaxFirstPassState,
+			syntaxFirstPassMs,
+			syntaxWarmedMs,
+			formatMs: performance.now() - formatStart,
+		});
+	}
+	return results;
 }
 
 export async function compileRevuediff(output: string) {
@@ -212,11 +416,27 @@ export async function writeJson(path: string, report: unknown) {
 	await writeFile(path, `${JSON.stringify(report, null, "\t")}\n`);
 }
 export const commandAvailable = async (name: string) => {
-	const process = Bun.spawn(["sh", "-c", `command -v ${name} >/dev/null`], {
+	const command = Bun.spawn(["sh", "-c", 'command -v -- "$1" >/dev/null', "sh", name], {
 		stdout: "ignore",
 		stderr: "ignore",
 	});
-	return (await process.exited) === 0;
+	return (await command.exited) === 0;
 };
+export const commandVersion = async (command: string[]): Promise<string> => {
+	const result = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
+	const [exitCode, stdout, stderr] = await Promise.all([
+		result.exited,
+		new Response(result.stdout).text(),
+		new Response(result.stderr).text(),
+	]);
+	return exitCode === 0 ? (stdout.trim() || stderr.trim()).split("\n")[0] || "unknown" : "unknown";
+};
+export const digest = (value: string | Uint8Array): string => {
+	const hasher = new Bun.CryptoHasher("sha256");
+	hasher.update(value);
+	return `sha256:${hasher.digest("hex")}`;
+};
+export const fileDigest = async (path: string) =>
+	digest(new Uint8Array(await Bun.file(path).arrayBuffer()));
 export const catCommand = existsSync("/bin/cat") ? "/bin/cat" : "cat";
 export const short = (value: number | null) => (value === null ? "-" : `${value.toFixed(1)}ms`);

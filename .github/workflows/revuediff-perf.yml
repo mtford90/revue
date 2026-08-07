@@ -9,6 +9,7 @@ permissions:
 jobs:
   benchmark:
     runs-on: macos-14
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -17,7 +18,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Run non-gating compiled benchmark sample
         run: bun run perf:revuediff -- --repetitions 5 --warmups 1 --json artifacts/revuediff-perf.json
-      - uses: actions/upload-artifact@v4
+      - name: Upload benchmark report, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: revuediff-performance-${{ github.run_id }}
           path: artifacts/revuediff-perf.json

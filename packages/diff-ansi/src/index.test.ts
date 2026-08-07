@@ -21,6 +21,8 @@ test("formats a complete split envelope with bounded visible rows and resets", (
 		file,
 		layout: "split",
 		width: 80,
+		lineNumbers: true,
+		changeMarkers: true,
 		theme: withTransparentSurfaces(resolveTheme("ayu-dark")),
 	});
 	expect(output).toContain("a.ts  +1 -1");
@@ -46,6 +48,8 @@ index 1111111..2222222 100644
 		file,
 		layout: "stack",
 		width: 12,
+		lineNumbers: true,
+		changeMarkers: true,
 		theme: resolveTheme("ayu-dark"),
 	})
 		.split("\n")
@@ -64,7 +68,14 @@ index 1111111..2222222 100644
 `)[0];
 	if (!file) throw new Error("fixture did not parse");
 	const output = strip(
-		formatAnsiDiffFile({ file, layout: "stack", width: 40, theme: resolveTheme("ayu-dark") }),
+		formatAnsiDiffFile({
+			file,
+			layout: "stack",
+			width: 40,
+			lineNumbers: true,
+			changeMarkers: true,
+			theme: resolveTheme("ayu-dark"),
+		}),
 	);
 	expect(output).toContain(" 3  9    context one");
 	expect(output).toContain(" 4 10    context two");
@@ -74,10 +85,67 @@ test("uses both planned stack gutters for changed lines", () => {
 	const file = parsePatch(patch)[0];
 	if (!file) throw new Error("fixture did not parse");
 	const output = strip(
-		formatAnsiDiffFile({ file, layout: "stack", width: 40, theme: resolveTheme("ayu-dark") }),
+		formatAnsiDiffFile({
+			file,
+			layout: "stack",
+			width: 40,
+			lineNumbers: true,
+			changeMarkers: true,
+			theme: resolveTheme("ayu-dark"),
+		}),
 	);
-	expect(output).toContain("1    - const old");
-	expect(output).toContain("  1  + const next");
+	expect(output).toContain("1   -  const old");
+	expect(output).toContain("  1 +  const next");
+});
+
+test("renders all chrome combinations at exact narrow and wide bounds", () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("fixture did not parse");
+	for (const layout of ["stack", "split"] as const) {
+		for (const width of [24, 80]) {
+			for (const lineNumbers of [false, true]) {
+				for (const changeMarkers of [false, true]) {
+					const output = formatAnsiDiffFile({
+						file,
+						layout,
+						width,
+						lineNumbers,
+						changeMarkers,
+						theme: resolveTheme("ayu-dark"),
+					});
+					for (const line of strip(output).split("\n").filter(Boolean))
+						expect(Bun.stringWidth(line)).toBeLessThanOrEqual(width);
+					const body = strip(output).split("\n").slice(2).join("\n");
+					expect(body.includes("-")).toBe(changeMarkers);
+				}
+			}
+		}
+	}
+});
+
+test("colours changed numbers by side and context numbers neutrally in both layouts", () => {
+	const file = parsePatch(
+		`diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n context\n-old\n+new\n`,
+	)[0];
+	if (!file) throw new Error("fixture did not parse");
+	const theme = resolveTheme("ayu-dark");
+	const rgb = (colour: string) => {
+		const hex = colour.slice(1);
+		return `${Number.parseInt(hex.slice(0, 2), 16)};${Number.parseInt(hex.slice(2, 4), 16)};${Number.parseInt(hex.slice(4, 6), 16)}`;
+	};
+	for (const layout of ["stack", "split"] as const) {
+		const output = formatAnsiDiffFile({
+			file,
+			layout,
+			width: 80,
+			lineNumbers: true,
+			changeMarkers: false,
+			theme,
+		});
+		expect(output).toContain(`\x1b[38;2;${rgb(theme.lineNumberFg)};`);
+		expect(output).toContain(`\x1b[38;2;${rgb(theme.removedSignColor)};`);
+		expect(output).toContain(`\x1b[38;2;${rgb(theme.addedSignColor)};`);
+	}
 });
 
 test.each([
@@ -121,7 +189,14 @@ deleted file mode 100644
 	if (!file) throw new Error("fixture did not parse");
 	expect(
 		strip(
-			formatAnsiDiffFile({ file, layout: "stack", width: 40, theme: resolveTheme("ayu-dark") }),
+			formatAnsiDiffFile({
+				file,
+				layout: "stack",
+				width: 40,
+				lineNumbers: true,
+				changeMarkers: true,
+				theme: resolveTheme("ayu-dark"),
+			}),
 		),
 	).toContain(message);
 });
@@ -140,7 +215,14 @@ test("formats generic and too-large metadata outcomes visibly", () => {
 	] as const)
 		expect(
 			strip(
-				formatAnsiDiffFile({ file, layout: "stack", width: 40, theme: resolveTheme("ayu-dark") }),
+				formatAnsiDiffFile({
+					file,
+					layout: "stack",
+					width: 40,
+					lineNumbers: true,
+					changeMarkers: true,
+					theme: resolveTheme("ayu-dark"),
+				}),
 			),
 		).toContain(message);
 });
@@ -153,7 +235,14 @@ Binary files a/blob and b/blob differ
 	if (!file) throw new Error("fixture did not parse");
 	expect(
 		strip(
-			formatAnsiDiffFile({ file, layout: "stack", width: 40, theme: resolveTheme("ayu-dark") }),
+			formatAnsiDiffFile({
+				file,
+				layout: "stack",
+				width: 40,
+				lineNumbers: true,
+				changeMarkers: true,
+				theme: resolveTheme("ayu-dark"),
+			}),
 		),
 	).toContain("Binary file differs.");
 });

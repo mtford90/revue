@@ -22,6 +22,8 @@ test("reviewer preferences round-trip theme, layout, and view choices", async ()
 		indexExpanded: false,
 		sidebarPreference: "hidden" as const,
 		diffPreference: "stacked" as const,
+		lineNumbers: false,
+		changeMarkers: true,
 		fileDisplay: "focused" as const,
 		pathDisplay: "tree" as const,
 		viewMode: "semantic" as const,
@@ -31,4 +33,12 @@ test("reviewer preferences round-trip theme, layout, and view choices", async ()
 	savePreferences(path, preferences);
 
 	expect(await loadPreferences(path)).toEqual(preferences);
+});
+
+test("older preference files load leniently without inventing chrome keys", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "revue-preferences-old-"));
+	tmpDirs.push(directory);
+	const path = join(directory, "preferences.json");
+	await Bun.write(path, '{"themeId":"ayu-dark","unknownLegacyValue":true}\n');
+	expect(await loadPreferences(path)).toEqual({ themeId: "ayu-dark" });
 });

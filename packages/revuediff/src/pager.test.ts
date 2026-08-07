@@ -38,7 +38,9 @@ test("does not consult GIT_PAGER when resolving the downstream pager", () => {
 	delete process.env.REVUEDIFF_PAGER;
 	delete process.env.PAGER;
 	try {
-		expect(resolvePagerCommand({ paging: "auto" }).command).toBe("less");
+		expect(
+			resolvePagerCommand({ lineNumbers: false, changeMarkers: false, paging: "auto" }).command,
+		).toBe("less");
 	} finally {
 		for (const [key, value] of Object.entries(original)) {
 			if (value === undefined) delete process.env[key];
@@ -51,7 +53,9 @@ test("falls back from non-positive terminal columns and counts an unterminated l
 	const columns = process.stdout.columns;
 	Object.defineProperty(process.stdout, "columns", { configurable: true, value: 0 });
 	try {
-		expect(resolvePagerWidth({ paging: "auto" })).toBe(80);
+		expect(resolvePagerWidth({ lineNumbers: false, changeMarkers: false, paging: "auto" })).toBe(
+			80,
+		);
 	} finally {
 		Object.defineProperty(process.stdout, "columns", { configurable: true, value: columns });
 	}
@@ -72,12 +76,26 @@ test("delivers ANSI to a fake pager, falls back for missing environment commands
 	Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
 	try {
 		const source = `diff --git a/a b/a\nindex 1111111..2222222 100644\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n`;
-		expect(await runPager(source, { paging: "always", pager: fake })).toBe(0);
+		expect(
+			await runPager(source, {
+				lineNumbers: false,
+				changeMarkers: false,
+				paging: "always",
+				pager: fake,
+			}),
+		).toBe(0);
 		expect(await readFile(received, "utf8")).toContain("\x1b[");
 		process.env.PAGER = "definitely-not-a-pager";
-		expect(await runPager(source, { paging: "always" })).toBe(0);
+		expect(
+			await runPager(source, { lineNumbers: false, changeMarkers: false, paging: "always" }),
+		).toBe(0);
 		await expect(
-			runPager(source, { paging: "always", pager: "definitely-not-a-pager" }),
+			runPager(source, {
+				lineNumbers: false,
+				changeMarkers: false,
+				paging: "always",
+				pager: "definitely-not-a-pager",
+			}),
 		).rejects.toThrow("could not start pager");
 	} finally {
 		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: oldTTY });

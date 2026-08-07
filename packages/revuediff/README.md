@@ -12,3 +12,6 @@ printf '%s\n' '--- a/file' '+++ b/file' '@@ -1 +1 @@' '-old' '+new' |
 
 The CLI depends only on `@revue/diff`, `@revue/diff-ansi`, and `@revue/theme`. It does not load
 OpenTUI, prepared runs, chapters, review threads, skills, or narrative Revue state.
+
+See the complete [Revuediff user reference](../../docs/revuediff.md) for installation, options,
+persistent configuration, Git/Lazygit integration, paging, fail-open behaviour, and troubleshooting.

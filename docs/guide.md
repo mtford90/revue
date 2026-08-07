@@ -39,40 +39,11 @@ examples/
 
 ## Revuediff ANSI diff pager
 
-[Revuediff](../packages/revuediff/) is a standalone buffered stdin filter for Git or plain unified
-diffs. It shares the `@revue/diff` Patch engine, syntax spans, wrapping, and changed-line emphasis
-with Revue, but it does not depend on or start OpenTUI, chapters, prepared runs, threads, skills, or
-narrative TUI code. The narrative `revue` executable intentionally has no `pager` command.
-
-```bash
-git config --global pager.diff revuediff
-```
-
-Use `--paging auto|always|never`, `--pager <command>`, `--width <columns>`, and `--theme <name>`.
-Width resolves from `--width`, `LAZYGIT_COLUMNS`, `COLUMNS`, terminal width, then 80. Layout is
-stacked at 79 columns and below; at 80 it is split independently for files with both additions and
-deletions. Pager commands resolve from `--pager`, `REVUEDIFF_PAGER`, `PAGER`, then `less`;
-`GIT_PAGER` is deliberately never used. `less` is optional because a missing default pager falls
-back to direct output.
-
-Neutral rows use the terminal's default background while change tints remain coloured. Revuediff
-supports bundled theme names; `--theme auto` uses the dark default because a stdin filter cannot
-query terminal appearance safely. It deliberately does not read Revue's remembered preferences or
-custom themes under `~/.revue`. The complete input and output are intentionally buffered so
-Revuediff can prepare syntax, make exact auto-paging decisions, and fail open: unsupported,
-combined, submodule, or ambiguous input is emitted in full as sanitised text rather than partially
-formatted.
-
-Current Lazygit configuration:
-
-```yaml
-git:
-  diffRenderers:
-    - type: stdinFilter
-      name: revuediff
-      command: revuediff --paging=never
-      colorArg: never
-```
+[Revuediff](revuediff.md) is the independent buffered ANSI formatter for Git, Lazygit, and ordinary
+unified diffs. It shares Revue's Patch engine but never loads narrative state or OpenTUI. The
+narrative `revue` executable intentionally has no pager command. Its complete standalone reference
+covers installation, CLI and persistent configuration, paging, integrations, fail-open behaviour,
+and troubleshooting.
 
 ## Installing the agent skill
 
@@ -246,8 +217,15 @@ is taking columns from the thing under review — and a split body is used only 
 sides of the file have changed lines. That threshold is measured against the panel's default width,
 so dragging the divider never makes it disappear under the pointer. Asking for `split` outranks an
 `auto` sidebar, which matters once the divider has been dragged wide, but an explicit sidebar
-preference is never overridden. Both preferences, along with the panel width, chosen diff view, and file display, are remembered
-across repositories in `~/.revue/preferences.json`; they do not belong to one run's view state.
+preference is never overridden.
+
+Patch view shows line numbers and `+`/`-` change markers by default. **View → Line numbers** and
+**View → Change markers (+/-)** toggle them independently. Hidden line numbers remove the selectable
+gutter and return its columns to code; comments and selections already anchored to source lines
+remain valid. These toggles deliberately do not reinterpret Semantic view's Difftastic output.
+Both choices, along with the panel width, chosen diff view, layout, and file display, are remembered
+across repositories in `~/.revue/preferences.json`; existing preference files without the new keys
+retain the on/on defaults. They do not belong to one run's view state.
 
 Losing the sidebar never costs the chapter. The narrative it holds—title, summary, key changes and
 file list—stacks above the diff in a single column instead, the way the prologue already renders,

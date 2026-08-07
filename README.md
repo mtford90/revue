@@ -86,9 +86,9 @@ staged, unstaged, the working tree.
 
 ### Just the diff
 
-No agent handy? `revue diff` opens the same scopes immediately as a flat, file-by-file diff -
-`revue diff main`, `revue diff --pr 123`, `revue diff --ref staged`. No narration, but you get
-the rest of the reviewer: inline comment threads, review progress, copying, themes.
+For a fast review without narration, `revue diff` opens any scope immediately as a flat,
+file-by-file diff - `revue diff main`, `revue diff --pr 123`, `revue diff --ref staged`. You still
+get the full reviewer: inline comment threads, review progress, copying, and themes.
 
 ### Format diffs with Revuediff
 
@@ -99,20 +99,20 @@ diff pager (not `core.pager`):
 git config --global pager.diff revuediff
 ```
 
-Current Lazygit uses its stdin renderer:
+Current Lazygit uses named Git pagers:
 
 ```yaml
 git:
-  diffRenderers:
-    - type: stdinFilter
-      name: revuediff
-      command: revuediff --paging=never
+  pagers:
+    - name: Revuediff
       colorArg: never
+      pager: revuediff --paging=never
 ```
 
+Add more entries under `git.pagers` and use `|` / `\` in Lazygit to cycle forward/backward.
 `less` improves automatic paging but is optional; unsupported input is safely emitted as sanitised
-plain output. The `revue` CLI intentionally has no `pager` command. See the guide for Revuediff's
-paging and theme details.
+plain output. The `revue` CLI intentionally has no `pager` command. See the complete
+[Revuediff reference](docs/revuediff.md) for options, configuration, integrations, and troubleshooting.
 
 ### While you review
 

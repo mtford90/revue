@@ -22,6 +22,14 @@ case "$mode" in
 		printf '%s\n' '== Narrow wrapped layout =='
 		revuediff --paging=never --width=48 --theme=ayu-dark < "$fixtures/feature.patch"
 		;;
+	chrome)
+		for flags in '' '--line-numbers' '--change-markers' '--line-numbers --change-markers'; do
+			printf '\n== Chrome: %s ==\n' "${flags:-both off (default)}"
+			# Intentional word splitting exercises the four independent flag combinations.
+			# shellcheck disable=SC2086
+			revuediff --paging=never --width=48 $flags < "$fixtures/plain.patch"
+		done
+		;;
 	themes)
 		for theme in ayu-dark github-light dracula; do
 			printf '\n== Theme: %s ==\n' "$theme"
@@ -43,7 +51,7 @@ case "$mode" in
 		fi
 		;;
 	all)
-		for selected in basic split narrow themes passthrough paging; do
+		for selected in basic split narrow chrome themes passthrough paging; do
 			"$0" "$selected"
 		done
 		;;
@@ -51,7 +59,7 @@ case "$mode" in
 		cat <<'USAGE'
 Usage: ./examples/revuediff/demo.sh <mode>
 
-Modes: basic, split, narrow, themes, passthrough, paging, all
+Modes: basic, split, narrow, chrome, themes, passthrough, paging, all
 USAGE
 		;;
 	*)

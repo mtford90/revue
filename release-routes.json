@@ -56,6 +56,7 @@
 	],
 	"revuediff": [
 		".github/workflows/revuediff-release.yml",
+		"docs/revuediff.md",
 		"docs/plans/ansi-diff-pager.md",
 		"packages/diff-ansi/",
 		"packages/revuediff/",

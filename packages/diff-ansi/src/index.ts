@@ -103,10 +103,39 @@ const cellText = (
 	width: number,
 	digits: number,
 	gutterSides: readonly ("deletions" | "additions")[],
+	visibility: { lineNumbers: boolean; changeMarkers: boolean },
+	theme: Theme,
 ) => {
-	const prefix = `${gutterSides
-		.map((side) => number(cell.gutters?.[side]?.lineNumber, digits))
-		.join(" ")}  ${cell.changeSign} `;
+	const numberColour =
+		cell.kind === "deletion"
+			? theme.removedSignColor
+			: cell.kind === "addition"
+				? theme.addedSignColor
+				: theme.lineNumberFg;
+	const gutters = visibility.lineNumbers
+		? gutterSides
+				.map(
+					(side) =>
+						`${sgr({ fg: numberColour, bg: cell.backgroundColor })}${number(cell.gutters?.[side]?.lineNumber, digits)} `,
+				)
+				.join("")
+		: "";
+	const marker = visibility.changeMarkers
+		? `${sgr({
+				fg:
+					cell.kind === "deletion"
+						? theme.removedSignColor
+						: cell.kind === "addition"
+							? theme.addedSignColor
+							: theme.lineNumberFg,
+				bg: cell.backgroundColor,
+			})}${cell.changeSign} `
+		: "";
+	const prefix = `${gutters}${marker}${sgr({ bg: cell.backgroundColor })} `;
+	const plainPrefixWidth =
+		(visibility.lineNumbers ? gutterSides.length * (digits + 1) : 0) +
+		(visibility.changeMarkers ? 2 : 0) +
+		1;
 	const spans = cell.spans
 		.map(
 			(span) =>
@@ -114,7 +143,7 @@ const cellText = (
 		)
 		.join("");
 	// Fill with the cell background so semantic tints cover the entire planned pane.
-	const used = widthOf(prefix) + cell.spans.reduce((total, span) => total + widthOf(span.text), 0);
+	const used = plainPrefixWidth + cell.spans.reduce((total, span) => total + widthOf(span.text), 0);
 	return fitStyled(
 		`${sgr({ bg: cell.backgroundColor })}${prefix}${spans}${" ".repeat(Math.max(0, width - used))}`,
 		width,
@@ -149,11 +178,15 @@ export function formatAnsiDiffFile({
 	layout,
 	width,
 	theme,
+	lineNumbers,
+	changeMarkers,
 }: {
 	file: DiffFile;
 	layout: DiffLayout;
 	width: number;
 	theme: Theme;
+	lineNumbers: boolean;
+	changeMarkers: boolean;
 }): string {
 	const safeWidth = Math.max(1, width);
 	let output = header(file, theme, safeWidth);
@@ -165,7 +198,7 @@ export function formatAnsiDiffFile({
 		file,
 		layout,
 		width: safeWidth,
-		visibility: { lineNumbers: true, hunkHeaders: true },
+		visibility: { lineNumbers, changeMarkers, hunkHeaders: true },
 		chrome: ANSI_DIFF_CHROME,
 		syntaxTheme: theme.syntaxTheme,
 	});
@@ -178,12 +211,33 @@ export function formatAnsiDiffFile({
 		}
 		if (row.type === "stack-line") {
 			for (const visual of row.visualRows)
-				output += `${cellText(visual.cell, safeWidth, plan.digits, plan.stackGutterSides)}\n`;
+				output += `${cellText(
+					visual.cell,
+					safeWidth,
+					plan.digits,
+					plan.stackGutterSides,
+					plan.visibility,
+					theme,
+				)}\n`;
 			continue;
 		}
 		for (const visual of row.visualRows) {
-			const oldText = cellText(visual.old, plan.paneWidths.old, plan.digits, ["deletions"]);
-			const newText = cellText(visual.new, plan.paneWidths.new, plan.digits, ["additions"]);
+			const oldText = cellText(
+				visual.old,
+				plan.paneWidths.old,
+				plan.digits,
+				["deletions"],
+				plan.visibility,
+				theme,
+			);
+			const newText = cellText(
+				visual.new,
+				plan.paneWidths.new,
+				plan.digits,
+				["additions"],
+				plan.visibility,
+				theme,
+			);
 			output += `${oldText}${sgr({ fg: theme.border })}│${newText}${reset}\n`;
 		}
 	}

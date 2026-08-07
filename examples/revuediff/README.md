@@ -9,6 +9,7 @@ From the repository root:
 ./examples/revuediff/demo.sh basic
 ./examples/revuediff/demo.sh split
 ./examples/revuediff/demo.sh narrow
+./examples/revuediff/demo.sh chrome
 ./examples/revuediff/demo.sh themes
 ./examples/revuediff/demo.sh passthrough
 ./examples/revuediff/demo.sh paging
@@ -16,8 +17,9 @@ From the repository root:
 ```
 
 `basic` renders a realistic multi-file Git patch with additions, deletions, edits, and TypeScript
-syntax highlighting. `split` uses a 120-column split layout; `narrow` uses a wrapped 48-column
-stacked layout. `themes` shows three bundled themes, and `passthrough` shows safe handling of
+syntax highlighting using Revuediff's default hidden chrome. `split` uses a 120-column split layout;
+`narrow` uses a wrapped 48-column stacked layout. `chrome` demonstrates marker-only, numbers-only,
+both-on, and both-off. `themes` shows three bundled themes, and `passthrough` shows safe handling of
 unsupported input. `paging` uses `cat -` as a safe explicit downstream pager in a terminal, so it
 is passed to a downstream child process rather than treated as Revuediff's direct-output `cat`
 sentinel. In a non-TTY shell (including most agents), Revuediff intentionally bypasses downstream
@@ -49,20 +51,29 @@ git config --local pager.diff "$previous"  # only when $previous was non-empty
 ```
 
 For an installed `revuediff` binary, the usual persistent configuration is
-`git config --global pager.diff revuediff`; this demo deliberately does not run it.
+`git config --global pager.diff revuediff`; this demo deliberately does not run it. To try a
+checkout-local Revuediff config without touching your XDG directory:
+
+```bash
+bun run packages/revuediff/src/main.ts config init --config /tmp/revuediff-demo.toml
+bun run packages/revuediff/src/main.ts config show --config /tmp/revuediff-demo.toml
+bun run packages/revuediff/src/main.ts --config /tmp/revuediff-demo.toml --paging=never \
+  < examples/revuediff/feature.patch
+```
 
 ## Lazygit
 
-Use Lazygit's stdin renderer (replace the command with `revuediff --paging=never` after
-installation):
+Use Lazygit's current named pager configuration (replace the command with
+`revuediff --paging=never` after installation):
 
 ```yaml
 git:
-  diffRenderers:
-    - type: stdinFilter
-      name: revuediff-local
-      command: bun run /absolute/path/to/revue/packages/revuediff/src/main.ts --paging=never
+  pagers:
+    - name: Revuediff local
       colorArg: never
+      pager: bun run /absolute/path/to/revue/packages/revuediff/src/main.ts --paging=never
 ```
 
-Remove this `diffRenderers` entry from your Lazygit configuration to restore its previous renderer.
+Add another entry under `git.pagers` to keep multiple renderers and use `|` / `\` in Lazygit to
+cycle forward/backward. Remove the entry to restore the previous configuration. The complete
+configuration and troubleshooting reference is in [`docs/revuediff.md`](../../docs/revuediff.md).

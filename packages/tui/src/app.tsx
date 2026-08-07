@@ -2413,6 +2413,8 @@ export function App({
 	const [diffPreference, setDiffPreferenceState] = useState<DiffLayoutPreference>(
 		initialPreferences.diffPreference ?? "auto",
 	);
+	const [lineNumbers, setLineNumbersState] = useState(initialPreferences.lineNumbers ?? true);
+	const [changeMarkers, setChangeMarkersState] = useState(initialPreferences.changeMarkers ?? true);
 	const [fileDisplay, setFileDisplayState] = useState<FileDisplayPreference>(
 		initialPreferences.fileDisplay ?? "all",
 	);
@@ -2516,6 +2518,8 @@ export function App({
 							displayed,
 							collapsed: collapsedFiles.has(path),
 							separator: index > 0,
+							showLineNumbers: lineNumbers,
+							showChangeMarkers: changeMarkers,
 							layout: layoutForFile({ file: displayed, preference: diffPreference, splitFits }),
 							expanderActions: lines
 								? (boundary: number) =>
@@ -2544,6 +2548,8 @@ export function App({
 			expansions,
 			collapsedFiles,
 			diffPreference,
+			lineNumbers,
+			changeMarkers,
 			splitFits,
 			diffFiles,
 		],
@@ -2680,6 +2686,14 @@ export function App({
 	function changeDiffPreference(next: DiffLayoutPreference) {
 		setDiffPreferenceState(next);
 		updatePreferences({ diffPreference: next });
+	}
+	function changeLineNumbers(next: boolean) {
+		setLineNumbersState(next);
+		updatePreferences({ lineNumbers: next });
+	}
+	function changeChangeMarkers(next: boolean) {
+		setChangeMarkersState(next);
+		updatePreferences({ changeMarkers: next });
 	}
 	function changeFileDisplay(next: FileDisplayPreference) {
 		setFileDisplayState(next);
@@ -3516,11 +3530,15 @@ export function App({
 		pathDisplay,
 		sidebarPreference,
 		diffPreference,
+		lineNumbers,
+		changeMarkers,
 		splitReachable,
 		setFileDisplay: changeFileDisplay,
 		setPathDisplay: changePathDisplay,
 		setSidebarPreference: changeSidebarPreference,
 		setDiffPreference: changeDiffPreference,
+		setLineNumbers: changeLineNumbers,
+		setChangeMarkers: changeChangeMarkers,
 		requestQuit: quit,
 		movePrevious: () => movePage(-1),
 		moveNext: () => movePage(1),

@@ -31,6 +31,7 @@ export type DiffPlanStyles = {
 
 export type DiffPlanVisibility = {
 	lineNumbers: boolean;
+	changeMarkers: boolean;
 	hunkHeaders: boolean;
 };
 
@@ -267,6 +268,7 @@ const plannedCells = ({
 	wrapped,
 	height,
 	sides,
+	visibility,
 }: {
 	file: DiffFile;
 	row: DiffRow;
@@ -274,6 +276,7 @@ const plannedCells = ({
 	wrapped: RenderSpan[][];
 	height: number;
 	sides: readonly DiffSide[];
+	visibility: DiffPlanVisibility;
 }): PlannedVisualCell[] => {
 	const identities: Partial<Record<DiffSide, DiffSourceLineIdentity>> = {};
 	for (const side of sides) {
@@ -288,7 +291,7 @@ const plannedCells = ({
 	return Array.from({ length: height }, (_, continuationIndex) => {
 		const spans = wrapped[continuationIndex] ?? [];
 		const gutters: Partial<Record<DiffSide, PlannedGutter>> = {};
-		if (continuationIndex === 0) {
+		if (visibility.lineNumbers && continuationIndex === 0) {
 			for (const side of sides) {
 				gutters[side] = { side, lineNumber: identities[side]?.lineNumber };
 			}
@@ -297,12 +300,12 @@ const plannedCells = ({
 			kind: cell.kind,
 			continuationIndex,
 			padding: continuationIndex >= wrapped.length,
-			changeSign: continuationIndex === 0 ? signFor(cell.kind) : " ",
+			changeSign: visibility.changeMarkers && continuationIndex === 0 ? signFor(cell.kind) : " ",
 			spans,
 			sourceOffset,
 			paintSource,
 			identities,
-			gutters: continuationIndex === 0 ? gutters : undefined,
+			gutters: visibility.lineNumbers && continuationIndex === 0 ? gutters : undefined,
 		};
 		sourceOffset += spans.reduce((length, span) => length + span.text.length, 0);
 		return planned;
@@ -320,6 +323,7 @@ export const measureDiff = ({
 		layout: structure.layout,
 		digits: structure.digits,
 		showLineNumbers: visibility.lineNumbers,
+		showChangeMarkers: visibility.changeMarkers,
 		stackGutters: structure.stackGutterSides.length,
 		chrome,
 	});
@@ -353,6 +357,7 @@ export function planDiff(input: PlanDiffInput): DiffVisualPlan {
 		layout: source.layout,
 		digits,
 		showLineNumbers: visibility.lineNumbers,
+		showChangeMarkers: visibility.changeMarkers,
 		stackGutters: stackSides.length,
 		chrome,
 	});
@@ -383,6 +388,7 @@ export function planDiff(input: PlanDiffInput): DiffVisualPlan {
 				wrapped,
 				height: wrapped.length,
 				sides: stackSides,
+				visibility,
 			});
 			return {
 				type: "stack-line",
@@ -402,6 +408,7 @@ export function planDiff(input: PlanDiffInput): DiffVisualPlan {
 			wrapped: oldRows,
 			height,
 			sides: ["deletions"],
+			visibility,
 		});
 		const newCells = plannedCells({
 			file,
@@ -410,6 +417,7 @@ export function planDiff(input: PlanDiffInput): DiffVisualPlan {
 			wrapped: newRows,
 			height,
 			sides: ["additions"],
+			visibility,
 		});
 		return {
 			type: "split-line",

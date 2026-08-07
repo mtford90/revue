@@ -4,7 +4,14 @@ import { resolveTheme, type Theme, withTransparentSurfaces } from "@revue/theme"
 import { classifyPagerInput } from "./pagerInput.ts";
 
 export type PagingMode = "auto" | "always" | "never";
-export type PagerOptions = { paging: PagingMode; pager?: string; width?: number; theme?: string };
+export type PagerOptions = {
+	paging: PagingMode;
+	lineNumbers: boolean;
+	changeMarkers: boolean;
+	pager?: string;
+	width?: number;
+	theme?: string;
+};
 
 const positive = (value: string | undefined): number | undefined =>
 	value && /^[1-9]\d*$/.test(value) ? Number(value) : undefined;
@@ -50,7 +57,14 @@ export async function formatPagerInput(input: string, options: PagerOptions): Pr
 	const theme = pagerTheme(options.theme);
 	await prepareSyntaxHighlighting(classified.files, theme.syntaxTheme);
 	const files = classified.files.map((file) =>
-		formatAnsiDiffFile({ file, layout: layoutForFile(file, width), width, theme }),
+		formatAnsiDiffFile({
+			file,
+			layout: layoutForFile(file, width),
+			width,
+			theme,
+			lineNumbers: options.lineNumbers,
+			changeMarkers: options.changeMarkers,
+		}),
 	);
 	return [classified.preamble, ...files].filter(Boolean).join("\n");
 }

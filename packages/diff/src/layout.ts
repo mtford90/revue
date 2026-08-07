@@ -19,7 +19,7 @@ const gutterColumns = ({
 	digits: number;
 	showLineNumbers: boolean;
 	chrome: DiffChromeWidths;
-}): number => chrome.focusMarker + (showLineNumbers ? digits : 0) + chrome.attachmentMarker;
+}): number => (showLineNumbers ? chrome.focusMarker + digits + chrome.attachmentMarker : 0);
 
 /** The two panes a split row divides `width` into after its declared divider. */
 export const splitPaneWidths = (
@@ -38,13 +38,19 @@ const codeColumns = ({
 	pane,
 	gutters,
 	gutter,
+	showChangeMarkers,
 	chrome,
 }: {
 	pane: number;
 	gutters: number;
 	gutter: number;
+	showChangeMarkers: boolean;
 	chrome: DiffChromeWidths;
-}) => Math.max(chrome.minimumCode, pane - gutters * gutter - chrome.sign - chrome.edge);
+}) =>
+	Math.max(
+		chrome.minimumCode,
+		pane - gutters * gutter - (showChangeMarkers ? chrome.sign : 0) - chrome.edge,
+	);
 
 /** Resolve the code budgets for one explicit adapter chrome request. */
 export const diffCodeWidths = ({
@@ -52,6 +58,7 @@ export const diffCodeWidths = ({
 	layout,
 	digits,
 	showLineNumbers,
+	showChangeMarkers,
 	stackGutters,
 	chrome,
 }: {
@@ -59,18 +66,37 @@ export const diffCodeWidths = ({
 	layout: DiffLayout;
 	digits: number;
 	showLineNumbers: boolean;
+	showChangeMarkers: boolean;
 	stackGutters: number;
 	chrome: DiffChromeWidths;
 }): CodeWidths => {
 	const gutter = gutterColumns({ digits, showLineNumbers, chrome });
 	if (layout === "stack") {
-		const columns = codeColumns({ pane: width, gutters: stackGutters, gutter, chrome });
+		const columns = codeColumns({
+			pane: width,
+			gutters: stackGutters,
+			gutter,
+			showChangeMarkers,
+			chrome,
+		});
 		return { deletions: columns, additions: columns };
 	}
 	const panes = splitPaneWidths(width, chrome.divider);
 	return {
-		deletions: codeColumns({ pane: panes.old, gutters: 1, gutter, chrome }),
-		additions: codeColumns({ pane: panes.new, gutters: 1, gutter, chrome }),
+		deletions: codeColumns({
+			pane: panes.old,
+			gutters: 1,
+			gutter,
+			showChangeMarkers,
+			chrome,
+		}),
+		additions: codeColumns({
+			pane: panes.new,
+			gutters: 1,
+			gutter,
+			showChangeMarkers,
+			chrome,
+		}),
 	};
 };
 

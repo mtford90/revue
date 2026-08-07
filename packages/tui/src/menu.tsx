@@ -106,11 +106,15 @@ export const buildAppMenus = ({
 	pathDisplay,
 	sidebarPreference,
 	diffPreference,
+	lineNumbers,
+	changeMarkers,
 	splitReachable,
 	setFileDisplay,
 	setPathDisplay,
 	setSidebarPreference,
 	setDiffPreference,
+	setLineNumbers,
+	setChangeMarkers,
 	requestQuit,
 	movePrevious,
 	moveNext,
@@ -140,11 +144,15 @@ export const buildAppMenus = ({
 	pathDisplay: PathDisplayMode;
 	sidebarPreference: SidebarPreference;
 	diffPreference: DiffLayoutPreference;
+	lineNumbers: boolean;
+	changeMarkers: boolean;
 	splitReachable: boolean;
 	setFileDisplay: (preference: FileDisplayPreference) => void;
 	setPathDisplay: (preference: PathDisplayMode) => void;
 	setSidebarPreference: (preference: SidebarPreference) => void;
 	setDiffPreference: (preference: DiffLayoutPreference) => void;
+	setLineNumbers: (visible: boolean) => void;
+	setChangeMarkers: (visible: boolean) => void;
 	requestQuit: () => void;
 	movePrevious: () => void;
 	moveNext: () => void;
@@ -215,6 +223,19 @@ export const buildAppMenus = ({
 			action: showSemantic,
 		},
 		{ kind: "separator", id: "view-mode" },
+		{
+			kind: "item",
+			label: "Line numbers",
+			checked: lineNumbers,
+			action: () => setLineNumbers(!lineNumbers),
+		},
+		{
+			kind: "item",
+			label: "Change markers (+/-)",
+			checked: changeMarkers,
+			action: () => setChangeMarkers(!changeMarkers),
+		},
+		{ kind: "separator", id: "diff-chrome" },
 		...FILE_DISPLAY_PREFERENCES.map(
 			({ preference, label }): MenuEntry => ({
 				kind: "item",

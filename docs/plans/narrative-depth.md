@@ -1,6 +1,9 @@
 # Plan — Narrative depth
 
-Context excerpts, interludes, zoomed-out narratives, and prose yank.
+Context excerpts, interludes, zoomed-out narratives, and prose yank. **Delivered** — every phase
+below shipped. What ended up different from the plan is recorded under
+[What shipped differently](#what-shipped-differently); ADR
+`docs/adr/0014-narrative-depth-and-frozen-context.md` records the decision.
 
 - PRD: `./docs/plans/narrative-depth-prd.md` — published at https://trello.com/c/eOlXatsI
 - Brief: `./docs/design-briefs/2026-08-07-narrative-depth.md`
@@ -157,6 +160,31 @@ orphan path.
   supersedes ADR 0007 and ADR 0003, which both remain correct in substance and gain pointer lines.
   Extension is a new convention here; the only precedent is supersession (0002 over 0001).
 - Golden snapshots and the vhs screenshot sweep.
+
+## What shipped differently
+
+- **Depth is a top-level `depth` field on the chapters file**, not the nested `narrative.depth`
+  phase 1 sketched. Its two shapes are `{ kind: "full" }` and `{ kind: "partial", label }`, and an
+  absent field reads as full through the single helper `partialDepthLabel`.
+- **Excerpt placement within a chapter is inferred, not declared.** The schema carries no anchor, so
+  the nth citation follows the nth file section, a citation past the last file closes the chapter,
+  and a chapter with no files leads with its excerpts. A repeated range renders as one block.
+- **Quoted excerpt lines render unhighlighted.** The row plan emits plain sanitised text rather than
+  syntax spans, so the PRD's "syntax-highlighted" is not yet true of quoted code. Everything else
+  about the block — gutter column, fold behaviour, selection, comments, links — is as designed.
+- **Diagrams come from fenced blocks in the chapter summary**, not a schema field: an `ascii` or
+  `mermaid` info string moves the block out of the prose and into the content column wearing the
+  excerpt's chrome. Every other fence stays inline as a snippet.
+- **Freezing found a gap the plan did not anticipate.** Under a worktree endpoint, a cited file that
+  prep never captured has no baseline to compare against, so drift cannot be detected for it. Freeze
+  pins it with its digest and warns rather than failing — failing would forbid quoting exactly the
+  untouched files the feature exists for.
+- **Markdown export states depth and coverage, renders interludes, attributes excerpt-anchored
+  threads to the chapter that cites them, and adds an orphaned-threads section — but does not print
+  the quoted excerpt bodies.** Because it never resolves an excerpt to a file, the manifest lookup
+  phase 8 expected to have to relax was left untouched.
+- **`--check` reports coverage at every depth**, including full (`N of M review units narrated`).
+  Only the depth label and the TUI's two coverage places are conditional on a partial depth.
 
 ## Risks
 

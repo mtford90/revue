@@ -13,6 +13,30 @@ afterEach(() => {
 	setNativeHighlighterForTesting(undefined);
 });
 
+test("keeps exact ordered multiline text when Shiki is forced", async () => {
+	process.env.REVUE_SYNTAX_ENGINE = "shiki";
+	const [file] = parsePatch(`diff --git a/example.py b/example.py
+--- a/example.py
++++ b/example.py
+@@ -1,4 +1,5 @@
+-def greeting():
+-	return "hello"
++def greeting(name):
++	return f"hello, {name} 👋"
++
++# end
+ `);
+	if (!file) throw new Error("missing source fixture");
+
+	const preparation = await prepareSyntaxHighlighting([file], "catppuccin-mocha");
+	const additions = highlightedLines(file, "catppuccin-mocha")?.additions ?? [];
+
+	expect(preparation).toEqual({ backend: "shiki" });
+	expect(additions.map((line) => line.map((span) => span.text).join(""))).toEqual(
+		file.metadata.additionLines,
+	);
+});
+
 test("uses Shiki spans after an already-loaded native highlighter throws", async () => {
 	delete process.env.REVUE_SYNTAX_ENGINE;
 	setNativeHighlighterForTesting({

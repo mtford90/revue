@@ -1,11 +1,6 @@
 import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
-import { toPierreMetadata } from "./model.ts";
 import type { DiffFile, RenderSpan } from "./types.ts";
-
-type HastNode =
-	| { type: "text"; value: string }
-	| { type: "element"; properties?: Record<string, unknown>; children?: HastNode[] };
 
 type NativeSpan = { text: string; fg?: string };
 type NativeResponse = { files: { deletions: NativeSpan[][]; additions: NativeSpan[][] }[] };
@@ -117,48 +112,27 @@ const loadNative = (): NativeHighlighter | null => {
 	return null;
 };
 
-function colorFromStyle(style: unknown): string | undefined {
-	if (typeof style !== "string") return undefined;
-	return /(?:^|;)\s*color\s*:\s*(#[0-9a-f]{3,8})/i.exec(style)?.[1];
-}
-
-function flatten(node: HastNode | undefined, inheritedColor?: string): RenderSpan[] {
-	if (!node) return [];
-	if (node.type === "text") return node.value ? [{ text: node.value, fg: inheritedColor }] : [];
-	const color = colorFromStyle(node.properties?.style) ?? inheritedColor;
-	return (node.children ?? []).flatMap((child) => flatten(child, color));
-}
-
 const cacheKey = (syntaxTheme: string, selected: SyntaxBackend) => `${selected}:${syntaxTheme}`;
 
 async function prepareShiki(files: readonly DiffFile[], syntaxTheme: string): Promise<void> {
-	const { getHighlighterOptions, getSharedHighlighter, renderDiffWithHighlighter } = await import(
-		"@pierre/diffs"
-	);
+	const { highlightWithShiki } = await import("./shikiFallback.ts");
 	for (const file of files) {
 		const cached = highlightsFor(file);
 		const key = cacheKey(syntaxTheme, "shiki");
 		if (cached.has(key)) continue;
 		try {
-			const options = getHighlighterOptions(file.language, { theme: syntaxTheme });
-			const highlighter = await getSharedHighlighter({
-				...options,
-				preferredHighlighter: "shiki-wasm",
-			});
-			const rendered = renderDiffWithHighlighter(
-				toPierreMetadata(file.metadata, file.language),
-				highlighter,
-				{
-					theme: syntaxTheme,
-					useTokenTransformer: false,
-					tokenizeMaxLineLength: 1_000,
-					lineDiffType: "word-alt",
-					maxLineDiffLength: 10_000,
-				},
-			);
 			cached.set(key, {
-				deletions: rendered.code.deletionLines.map((line) => flatten(line as HastNode)),
-				additions: rendered.code.additionLines.map((line) => flatten(line as HastNode)),
+				// Each side is tokenised as one document so multiline grammars retain state.
+				deletions: await highlightWithShiki(
+					file.metadata.deletionLines,
+					file.language,
+					syntaxTheme,
+				),
+				additions: await highlightWithShiki(
+					file.metadata.additionLines,
+					file.language,
+					syntaxTheme,
+				),
 			});
 		} catch {
 			cached.set(key, { deletions: [], additions: [] });

@@ -1,5 +1,5 @@
+use std::cell::RefCell;
 use std::io::Cursor;
-use std::sync::OnceLock;
 
 use bat::assets::HighlightingAssets;
 use napi_derive::napi;
@@ -40,15 +40,10 @@ pub struct HighlightResponse {
     pub files: Vec<HighlightedFile>,
 }
 
-fn syntax_set() -> &'static SyntaxSet {
-    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
-    SYNTAXES.get_or_init(|| {
-        let assets = HighlightingAssets::from_binary();
-        assets
-            .get_syntax_set()
-            .expect("Bat's integrated syntax assets are valid")
-            .clone()
-    })
+thread_local! {
+    // Bat's assets use unsynchronised lazy cells, so retain them once per N-API thread rather than
+    // cloning their complete SyntaxSet into a process-wide OnceLock.
+    static ASSETS: RefCell<HighlightingAssets> = RefCell::new(HighlightingAssets::from_binary());
 }
 
 fn theme(id: &str) -> napi::Result<Theme> {
@@ -119,18 +114,23 @@ fn highlight_side(
 #[napi]
 pub fn highlight(request: HighlightRequest) -> napi::Result<HighlightResponse> {
     let theme = theme(&request.theme)?;
-    let syntaxes = syntax_set();
-    Ok(HighlightResponse {
-        files: request
-            .files
-            .iter()
-            .map(|file| {
-                let syntax = syntax_for(syntaxes, &file.path, file.language.as_deref());
-                HighlightedFile {
-                    deletions: highlight_side(&file.deletions, syntax, &theme, syntaxes),
-                    additions: highlight_side(&file.additions, syntax, &theme, syntaxes),
-                }
-            })
-            .collect(),
+    ASSETS.with(|assets| {
+        let assets = assets.borrow();
+        let syntaxes = assets
+            .get_syntax_set()
+            .expect("Bat's integrated syntax assets are valid");
+        Ok(HighlightResponse {
+            files: request
+                .files
+                .iter()
+                .map(|file| {
+                    let syntax = syntax_for(syntaxes, &file.path, file.language.as_deref());
+                    HighlightedFile {
+                        deletions: highlight_side(&file.deletions, syntax, &theme, syntaxes),
+                        additions: highlight_side(&file.additions, syntax, &theme, syntaxes),
+                    }
+                })
+                .collect(),
+        })
     })
 }

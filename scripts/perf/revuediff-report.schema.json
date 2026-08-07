@@ -174,6 +174,60 @@
 				"outputSha256": { "$ref": "#/$defs/sha256" }
 			}
 		},
+		"successfulSample": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["ttfbMs", "totalMs", "inputBytes", "outputBytes", "exitCode", "timedOut"],
+			"properties": {
+				"ttfbMs": { "type": "number", "minimum": 0 },
+				"totalMs": { "type": "number", "minimum": 0 },
+				"inputBytes": { "type": "integer", "minimum": 0 },
+				"outputBytes": { "type": "integer", "minimum": 0 },
+				"exitCode": { "const": 0 },
+				"timedOut": { "const": false }
+			}
+		},
+		"successfulBenchmark": {
+			"allOf": [
+				{ "$ref": "#/$defs/benchmark" },
+				{
+					"type": "object",
+					"properties": {
+						"failures": { "const": 0 },
+						"warmupFailures": { "const": 0 },
+						"failureDetails": { "type": "array", "maxItems": 0 },
+						"rawSamples": { "type": "array", "items": { "$ref": "#/$defs/successfulSample" } },
+						"rawWarmupSamples": { "type": "array", "items": { "$ref": "#/$defs/successfulSample" } }
+					}
+				}
+			]
+		},
+		"successfulValidation": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["passed", "errors", "exitCode", "timedOut", "outputBytes", "outputSha256"],
+			"properties": {
+				"passed": { "const": true },
+				"errors": { "type": "array", "maxItems": 0, "items": { "type": "string" } },
+				"exitCode": { "const": 0 },
+				"timedOut": { "const": false },
+				"outputBytes": { "type": "integer", "minimum": 0 },
+				"outputSha256": { "$ref": "#/$defs/sha256" }
+			}
+		},
+		"failedValidation": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["passed", "errors", "exitCode", "timedOut", "outputBytes", "outputSha256"],
+			"properties": {
+				"passed": { "const": false },
+				"errors": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+				"exitCode": { "type": ["integer", "null"] },
+				"timedOut": { "type": "boolean" },
+				"outputBytes": { "type": "integer", "minimum": 0 },
+				"outputSha256": { "$ref": "#/$defs/sha256" }
+			}
+		},
 		"scenarioResult": {
 			"allOf": [
 				{ "$ref": "#/$defs/identity" },
@@ -212,6 +266,24 @@
 						"validation": { "$ref": "#/$defs/validation" },
 						"benchmark": { "oneOf": [{ "$ref": "#/$defs/benchmark" }, { "type": "null" }] }
 					}
+				},
+				{
+					"oneOf": [
+						{
+							"type": "object",
+							"properties": {
+								"validation": { "$ref": "#/$defs/successfulValidation" },
+								"benchmark": { "$ref": "#/$defs/successfulBenchmark" }
+							}
+						},
+						{
+							"type": "object",
+							"properties": {
+								"validation": { "$ref": "#/$defs/failedValidation" },
+								"benchmark": { "type": "null" }
+							}
+						}
+					]
 				}
 			]
 		},
@@ -497,7 +569,51 @@
 					"additionalProperties": { "$ref": "#/$defs/comparator" }
 				},
 				"stages": { "type": "array", "items": { "$ref": "#/$defs/stage" } }
-			}
+			},
+			"allOf": [
+				{
+					"if": { "properties": { "status": { "const": "ok" } } },
+					"then": {
+						"properties": {
+							"infrastructureFailures": { "type": "array", "maxItems": 0 },
+							"revuediff": {
+								"type": "object",
+								"additionalProperties": {
+									"allOf": [
+										{ "$ref": "#/$defs/scenarioResult" },
+										{
+											"type": "object",
+											"properties": {
+												"validation": { "$ref": "#/$defs/successfulValidation" },
+												"benchmark": { "$ref": "#/$defs/successfulBenchmark" }
+											}
+										}
+									]
+								}
+							},
+							"baseline": {
+								"type": "object",
+								"properties": { "benchmark": { "$ref": "#/$defs/successfulBenchmark" } }
+							},
+							"comparators": {
+								"type": "object",
+								"additionalProperties": {
+									"type": "object",
+									"properties": {
+										"scenarios": {
+											"type": "object",
+											"additionalProperties": {
+												"type": "object",
+												"properties": { "benchmark": { "$ref": "#/$defs/successfulBenchmark" } }
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			]
 		}
 	}
 }

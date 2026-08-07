@@ -104,6 +104,22 @@ const successReport = () => ({
 	],
 });
 
+const forcedFailureReport = (): Record<string, any> => {
+	const report: Record<string, any> = successReport();
+	report.status = "failed";
+	report.infrastructureFailures = ["tiny executable validation failed"];
+	report.revuediff.tiny.validation = {
+		passed: false,
+		errors: ["validation exited 97"],
+		exitCode: 97,
+		timedOut: false,
+		outputBytes: 0,
+		outputSha256: hash,
+	};
+	report.revuediff.tiny.benchmark = null;
+	return report;
+};
+
 const validateReport = async () => {
 	const schema = JSON.parse(
 		await readFile(`${import.meta.dir}/revuediff-report.schema.json`, "utf8"),
@@ -117,6 +133,7 @@ describe("revuediff report schema v2", () => {
 	test("accepts representative success and minimal forced infrastructure failure reports", async () => {
 		const validate = await validateReport();
 		expect(validate(successReport()), JSON.stringify(validate.errors)).toBe(true);
+		expect(validate(forcedFailureReport()), JSON.stringify(validate.errors)).toBe(true);
 		expect(
 			validate({
 				schemaVersion: 2,
@@ -131,6 +148,19 @@ describe("revuediff report schema v2", () => {
 	test("rejects corrupted report contracts", async () => {
 		const validate = await validateReport();
 		const corruptions: [string, (report: ReturnType<typeof successReport>) => void][] = [
+			[
+				"forced validation failure relabelled successful",
+				(report) => {
+					const failed = forcedFailureReport();
+					Object.assign(report, failed, { status: "ok" });
+				},
+			],
+			[
+				"passed validation without a benchmark",
+				(report) => {
+					report.revuediff.tiny.benchmark = null as never;
+				},
+			],
 			[
 				"null expectation",
 				(report) => {

@@ -633,6 +633,9 @@ export function planExcerpt({
 		layout: "stack",
 		digits,
 		showLineNumbers: true,
+		// Quoted code carries no sign, but the slot stays reserved so it starts in the same
+		// column as diff code and the eye reads one edge down the page.
+		showChangeMarkers: true,
 		stackGutters: 2,
 		chrome,
 	}).additions;
@@ -760,6 +763,7 @@ export function planDiagram({
 		layout: "stack",
 		digits,
 		showLineNumbers: true,
+		showChangeMarkers: true,
 		stackGutters: 2,
 		chrome,
 	}).additions;

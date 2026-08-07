@@ -276,7 +276,7 @@ test("quoted lines land on the same column as reviewable code, with one gutter a
 		file,
 		layout: "split",
 		width: 110,
-		visibility: { lineNumbers: true, hunkHeaders: true },
+		visibility: { lineNumbers: true, changeMarkers: true, hunkHeaders: true },
 		chrome: openTuiChrome,
 	});
 

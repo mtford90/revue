@@ -46,9 +46,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.8
+      - uses: dtolnay/rust-toolchain@stable
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
+      # Bun source tests load the checkout addon; without it, auto mode warns on stderr and
+      # pollutes CLI assertions that expect a clean process.
+      - name: Build native highlighter for tests
+        run: bash scripts/build-native-highlighter.sh revue packages/diff/native/target/release/revue_highlighter.node
       # The Intel macOS runner starts processes several times slower than the other
       # platforms; spawn-heavy CLI tests need more than bun's five-second default.
       - run: bun test --timeout 30000

@@ -1,0 +1,15 @@
+# excerpt-folded--w110 — the default state: one expander band naming the quoted range
+# grid 110x4 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+0 |  ⋯  context · src/api/client.ts 118–124  [▼ show 7 lines]
+1 |
+2 |
+3 |
+
+# styles: row: cols fg bg [attributes]
+
+0: 0-39 fg=#acadb0 bg=#1e2228  40-57 fg=#73b8ff bg=#1e2228  58-109 fg=#ffffff bg=#1e2228
+1: 0-109 fg=#ffffff bg=#00000000
+2: 0-109 fg=#ffffff bg=#00000000
+3: 0-109 fg=#ffffff bg=#00000000

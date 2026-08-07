@@ -108,6 +108,23 @@ export type PlannedStackLineRow = {
 
 export type PlannedDiffRow = PlannedHunkHeaderRow | PlannedSplitLineRow | PlannedStackLineRow;
 
+/** The band a folded excerpt collapses to, and the header and body an open one expands into. */
+export type PlannedExcerptRow =
+	| { type: "excerpt-band"; key: string; height: 1; label: string; action: string }
+	| { type: "excerpt-header"; key: string; height: 1; label: string; action: string }
+	| { type: "excerpt-caption"; key: string; height: number; lines: string[] }
+	| {
+			type: "excerpt-line";
+			key: string;
+			height: number;
+			filePath: string;
+			lineNumber: number;
+			visualRows: { continuationIndex: number; spans: RenderSpan[] }[];
+	  };
+
+/** Every row kind the engine plans, across file bodies and standalone excerpt blocks. */
+export type PlannedRow = PlannedDiffRow | PlannedExcerptRow;
+
 /** Stable geometry and source identities. Paint-only inputs are intentionally absent. */
 export type DiffVisualPlan = {
 	file: DiffFile;
@@ -442,6 +459,163 @@ export function planDiff(input: PlanDiffInput): DiffVisualPlan {
 		paneWidths,
 		stackGutterSides: stackSides,
 		rows: planned,
+	};
+}
+
+// ── Context excerpts ───────────────────────────────────────────────────────
+// A quotation of unchanged code a chapter cites. It is scenery rather than work: the quoted
+// lines keep the additions gutter so they land on the same column as reviewable code in the
+// same file, the sign slot stays empty because nothing changed, and the block never divides
+// into two panes — an unchanged quotation has no old side to compare against.
+
+/** One cited range together with the bytes frozen for it. */
+export type ExcerptQuotation = {
+	filePath: string;
+	startLine: number;
+	endLine: number;
+	caption?: string;
+	lines: readonly string[];
+};
+
+export type ExcerptVisualPlan = {
+	key: string;
+	quotation: ExcerptQuotation;
+	folded: boolean;
+	width: number;
+	digits: number;
+	chrome: DiffChromeWidths;
+	/** Columns of chrome every excerpt row reserves before its code. */
+	gutterColumns: number;
+	codeWidth: number;
+	totalHeight: number;
+	rows: PlannedExcerptRow[];
+};
+
+export type PlanExcerptInput = {
+	key: string;
+	quotation: ExcerptQuotation;
+	folded: boolean;
+	width: number;
+	chrome: DiffChromeWidths;
+};
+
+/** Narrower than this the open header sheds its state word rather than truncating the path. */
+const EXCERPT_STATE_WIDTH = 100;
+/** The caption is a figure label, indented under the block rather than heading it. */
+const EXCERPT_CAPTION_INDENT = 3;
+
+const plainLine = (text: string): string => sanitizeTerminalLine(text).replaceAll("\t", "  ");
+
+const excerptLabel = ({ filePath, startLine, endLine }: ExcerptQuotation): string =>
+	`context · ${plainLine(filePath)} ${startLine}–${endLine}`;
+
+const excerptDigits = ({ startLine, endLine }: ExcerptQuotation): number =>
+	String(Math.max(startLine, endLine)).length;
+
+const captionRow = (key: string, caption: string, width: number): PlannedExcerptRow => {
+	const indent = " ".repeat(EXCERPT_CAPTION_INDENT);
+	const lines = wrapSpans(
+		[{ text: plainLine(caption) }],
+		Math.max(1, width - EXCERPT_CAPTION_INDENT),
+	).map((row) => indent + row.map((span) => span.text).join(""));
+	return { type: "excerpt-caption", key: `${key}:caption`, height: lines.length, lines };
+};
+
+const excerptLineRow = ({
+	key,
+	quotation,
+	index,
+	codeWidth,
+}: {
+	key: string;
+	quotation: ExcerptQuotation;
+	index: number;
+	codeWidth: number;
+}): PlannedExcerptRow => {
+	const wrapped = wrapSpans([{ text: plainLine(quotation.lines[index] ?? "") }], codeWidth);
+	const lineNumber = quotation.startLine + index;
+	return {
+		type: "excerpt-line",
+		key: `${key}:line:${lineNumber}`,
+		height: wrapped.length,
+		filePath: quotation.filePath,
+		lineNumber,
+		visualRows: wrapped.map((spans, continuationIndex) => ({ continuationIndex, spans })),
+	};
+};
+
+const openExcerptRows = ({
+	key,
+	quotation,
+	width,
+	codeWidth,
+}: {
+	key: string;
+	quotation: ExcerptQuotation;
+	width: number;
+	codeWidth: number;
+}): PlannedExcerptRow[] => {
+	const label = excerptLabel(quotation);
+	return [
+		...(quotation.caption ? [captionRow(key, quotation.caption, width)] : []),
+		{
+			type: "excerpt-header",
+			key: `${key}:header`,
+			height: 1,
+			label: width < EXCERPT_STATE_WIDTH ? label : `${label} · unchanged`,
+			action: "▲ hide",
+		},
+		...quotation.lines.map((_, index) => excerptLineRow({ key, quotation, index, codeWidth })),
+	];
+};
+
+const foldedExcerptRow = (key: string, quotation: ExcerptQuotation): PlannedExcerptRow => {
+	const count = quotation.lines.length;
+	return {
+		type: "excerpt-band",
+		key: `${key}:band`,
+		height: 1,
+		label: excerptLabel(quotation),
+		action: `▼ show ${count} line${count === 1 ? "" : "s"}`,
+	};
+};
+
+/**
+ * Plan one excerpt block at a known width. Fold state is an input rather than something
+ * measured after mount, so the viewport can window a folded block as one row and an open one
+ * as its header, caption and quoted lines without rendering either first.
+ */
+export function planExcerpt({
+	key,
+	quotation,
+	folded,
+	width,
+	chrome,
+}: PlanExcerptInput): ExcerptVisualPlan {
+	const digits = excerptDigits(quotation);
+	const gutterColumns = 2 * (chrome.focusMarker + digits + chrome.attachmentMarker) + chrome.sign;
+	const codeWidth = diffCodeWidths({
+		width,
+		layout: "stack",
+		digits,
+		showLineNumbers: true,
+		stackGutters: 2,
+		chrome,
+	}).additions;
+	const rows = folded
+		? [foldedExcerptRow(key, quotation)]
+		: openExcerptRows({ key, quotation, width, codeWidth });
+	return {
+		key,
+		quotation,
+		folded,
+		width,
+		digits,
+		chrome,
+		gutterColumns,
+		codeWidth,
+		totalHeight: rows.reduce((height, row) => height + row.height, 0),
+		rows,
 	};
 }
 

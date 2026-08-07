@@ -3,10 +3,12 @@ import {
 	anchorRowIndex,
 	type DiffChromeWidths,
 	type DiffPlanStyles,
+	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	paintDiff,
 	parsePatch,
 	planDiff,
+	planExcerpt,
 } from "../src/index.ts";
 
 const styles: DiffPlanStyles = {
@@ -222,4 +224,87 @@ test("split paint keeps multi-line decoration focus isolated to its requested si
 			newMarker: false,
 		},
 	]);
+});
+
+const quotation: ExcerptQuotation = {
+	filePath: "src/api/client.ts",
+	startLine: 118,
+	endLine: 120,
+	caption: "the caller this change has to satisfy",
+	lines: ["export class ApiClient {", "  send(request) {}", "}"],
+};
+
+const openTuiChrome: DiffChromeWidths = {
+	focusMarker: 1,
+	attachmentMarker: 3,
+	sign: 3,
+	edge: 1,
+	divider: 1,
+	minimumCode: 8,
+};
+
+test("an excerpt's fold state is an input to planning, not something measured after mount", () => {
+	const shared = { key: "e", quotation, width: 110, chrome: openTuiChrome };
+	const folded = planExcerpt({ ...shared, folded: true });
+	const open = planExcerpt({ ...shared, folded: false });
+
+	expect(folded.rows.map((row) => row.type)).toEqual(["excerpt-band"]);
+	expect(folded.totalHeight).toBe(1);
+	expect(open.rows.map((row) => row.type)).toEqual([
+		"excerpt-caption",
+		"excerpt-header",
+		"excerpt-line",
+		"excerpt-line",
+		"excerpt-line",
+	]);
+	expect(open.totalHeight).toBe(2 + quotation.lines.length);
+	expect(open.rows.flatMap((row) => (row.type === "excerpt-line" ? [row.lineNumber] : []))).toEqual(
+		[118, 119, 120],
+	);
+});
+
+test("quoted lines land on the same column as reviewable code, with one gutter at any width", () => {
+	const plan = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+	});
+	const split = planDiff({
+		file,
+		layout: "split",
+		width: 110,
+		visibility: { lineNumbers: true, hunkHeaders: true },
+		chrome: openTuiChrome,
+	});
+
+	// Deletions gutter (rule plus blanks), additions gutter, then the always-empty sign slot.
+	expect(plan.gutterColumns).toBe(17);
+	expect(plan.digits).toBe(3);
+	// A split diff halves its code budget between two panes; an excerpt never divides.
+	expect(plan.codeWidth).toBe(110 - plan.gutterColumns - openTuiChrome.edge);
+	expect(plan.codeWidth).toBeGreaterThan(split.paneWidths.new);
+});
+
+test("an open excerpt sheds its state word rather than truncating the range it names", () => {
+	const wide = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+	});
+	const narrow = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 80,
+		chrome: openTuiChrome,
+	});
+	const header = (plan: typeof wide) =>
+		plan.rows.find((row) => row.type === "excerpt-header")?.label;
+
+	expect(header(wide)).toBe("context · src/api/client.ts 118–120 · unchanged");
+	expect(header(narrow)).toBe("context · src/api/client.ts 118–120");
 });

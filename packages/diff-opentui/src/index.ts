@@ -6,6 +6,7 @@ export {
 	type DiffBodySuppliedPlanProps,
 	DiffFileHeader,
 	type DiffFileHeaderProps,
+	ExcerptBlock,
 	type ExpandDirection,
 } from "./components.tsx";
 export { decorationAnchorId } from "./ids.ts";

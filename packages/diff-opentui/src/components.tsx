@@ -8,6 +8,7 @@ import {
 	type DiffLineRange,
 	type DiffSide,
 	type DiffVisualPlan,
+	type ExcerptVisualPlan,
 	findFocusedDecorationAnchor,
 	type PaintedDiffRow,
 	type PaintedSplitLineRow,
@@ -791,6 +792,134 @@ export function DiffBody(props: DiffBodyProps) {
 					onExpand={expanders.onExpand}
 				/>
 			) : null}
+		</box>
+	);
+}
+
+/**
+ * Quoted unchanged code a chapter cites. It reads as scenery: the rule replaces the focus
+ * marker because an excerpt row never focuses, the deletions gutter stays blank because there
+ * is no old side, the sign slot stays empty because nothing changed, and the body sits on the
+ * unstyled page. Folded — the default — the whole block collapses to one expander band.
+ */
+export function ExcerptBlock({
+	plan,
+	theme,
+	focused = false,
+	window: rowWindow,
+	onToggle,
+}: {
+	plan: ExcerptVisualPlan;
+	theme: Theme;
+	/** The block, not a row: excerpt rows have no focus marker to carry it. */
+	focused?: boolean;
+	window?: { start: number; end: number };
+	onToggle?: (key: string) => void;
+}) {
+	const { chrome, digits } = plan;
+	const start = Math.max(0, Math.min(plan.rows.length, rowWindow?.start ?? 0));
+	const end = Math.max(start, Math.min(plan.rows.length, rowWindow?.end ?? plan.rows.length));
+	const toggle = onToggle
+		? (event: OpenTUIMouseEvent) => {
+				event.preventDefault();
+				event.stopPropagation();
+				onToggle(plan.key);
+			}
+		: undefined;
+	const labelFg = focused ? theme.accent : theme.muted;
+	const emptyGutter = " ".repeat(chrome.focusMarker - 1 + digits + chrome.attachmentMarker);
+	return (
+		<box width="100%" flexDirection="column">
+			{plan.rows.slice(start, end).map((row) => {
+				if (row.type === "excerpt-caption") {
+					return (
+						<box key={row.key} width="100%" flexDirection="column">
+							{row.lines.map((line, index) => (
+								<text
+									// biome-ignore lint/suspicious/noArrayIndexKey: wrapped caption rows have no identity beyond position.
+									key={`${index}:${line}`}
+									fg={theme.muted}
+									wrapMode="none"
+									truncate
+									selectable={false}
+								>
+									{line}
+								</text>
+							))}
+						</box>
+					);
+				}
+				if (row.type === "excerpt-band" || row.type === "excerpt-header") {
+					const band = row.type === "excerpt-band";
+					return (
+						// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI pointer affordances live on text renderables.
+						<box
+							key={row.key}
+							width="100%"
+							height={1}
+							backgroundColor={theme.panel}
+							flexDirection="row"
+							onMouseDown={toggle}
+						>
+							<text flexShrink={0} fg={band ? theme.muted : theme.lineNumberFg} selectable={false}>
+								{band ? "  ⋯" : "│"}
+							</text>
+							<text
+								flexGrow={band ? 0 : 1}
+								flexShrink={1}
+								minWidth={0}
+								fg={labelFg}
+								wrapMode="none"
+								truncate
+								selectable={false}
+							>
+								{band ? `  ${row.label}` : ` ${row.label}`}
+							</text>
+							<text flexShrink={0} fg={theme.accent} selectable={false}>
+								{band ? `  [${row.action}]` : `[${row.action}] `}
+							</text>
+						</box>
+					);
+				}
+				return (
+					<box key={row.key} width="100%" flexDirection="column">
+						{row.visualRows.map(({ continuationIndex, spans }) => (
+							<box
+								key={continuationIndex}
+								width="100%"
+								height={1}
+								overflow="hidden"
+								backgroundColor={theme.contextBg}
+								flexDirection="row"
+							>
+								<text flexShrink={0} fg={theme.lineNumberFg} wrapMode="none" selectable={false}>
+									{`│${emptyGutter}`}
+								</text>
+								<text flexShrink={0} fg={theme.lineNumberFg} wrapMode="none" selectable={false}>
+									{" ".repeat(chrome.focusMarker)}
+									{continuationIndex === 0
+										? lineNumber(row.lineNumber, digits)
+										: lineNumber(undefined, digits)}
+									{attachmentMarker(0)}
+								</text>
+								<text flexShrink={0} fg={theme.text} wrapMode="none" selectable={false}>
+									{" ".repeat(chrome.sign)}
+								</text>
+								<text
+									fg={theme.text}
+									selectionBg={theme.badgeModified}
+									selectionFg={theme.panelAlt}
+									wrapMode="none"
+									flexShrink={0}
+									selectable
+								>
+									<CellContent spans={spans} theme={theme} />
+								</text>
+							</box>
+						))}
+					</box>
+				);
+			})}
 		</box>
 	);
 }

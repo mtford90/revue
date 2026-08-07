@@ -87,6 +87,9 @@ describe("release routing", () => {
 		[".github/workflows/revuediff-release.yml", ["revuediff"]],
 		["packages/diff/src/index.ts", ["revue", "revuediff"]],
 		["packages/theme/src/index.ts", ["revue", "revuediff"]],
+		["CHANGELOG.md", []],
+		["packages/revuediff/CHANGELOG.md", []],
+		[".release-please-manifest.json", []],
 	] as const)("routes %s only to its affected products", (path, products) => {
 		expect(productsForPath(path, config)).toEqual(products);
 	});
@@ -112,7 +115,10 @@ describe("release routing", () => {
 			"include-component-in-tag": true,
 			"initial-version": "0.1.0",
 		});
-		expect(manifest).toEqual({ ".release-please/revue": "0.5.0" });
+		expect(manifest).toEqual({
+			".release-please/revue": "0.5.0",
+			".release-please/revuediff": "0.1.0",
+		});
 		expect(await Bun.file(`${import.meta.dir}/../.release-please/revue/version.txt`).text()).toBe(
 			"0.5.0\n",
 		);

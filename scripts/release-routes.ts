@@ -25,6 +25,9 @@ export function classifyPath(path: string, config: RouteConfig): RouteName {
 	const matchesByRoute = (Object.keys(config) as RouteName[]).filter((route) =>
 		config[route].some((rule) => matches(path, rule)),
 	);
+	// release-managed changelogs sit under a product tree but must stay ignored, otherwise the
+	// first release that creates them fails the tip check with an ignored/product overlap.
+	if (matchesByRoute.includes("ignored")) return "ignored";
 	if (matchesByRoute.length !== 1) {
 		throw new Error(
 			matchesByRoute.length === 0

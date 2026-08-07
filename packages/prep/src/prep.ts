@@ -56,9 +56,11 @@ const expectedSnapshots = async (
 ): Promise<[Snapshot | null | "gitlink", Snapshot | null | "gitlink"]> => {
 	const oldPath = file.previousPath ?? file.path;
 	const old =
-		file.metadata.type === "new" ? null : await readSnapshot(plan, plan.oldSource, oldPath);
+		file.metadata.type === "new" ? null : await readSnapshot(plan.context, plan.oldSource, oldPath);
 	const current =
-		file.metadata.type === "deleted" ? null : await readSnapshot(plan, plan.newSource, file.path);
+		file.metadata.type === "deleted"
+			? null
+			: await readSnapshot(plan.context, plan.newSource, file.path);
 	return [old, current];
 };
 
@@ -164,7 +166,7 @@ const verifyWorktreeSnapshots = async (plan: ScopePlan, files: PreparedFile[]): 
 	if (plan.newSource.kind !== RUN_ENDPOINT_KIND.WORKTREE) return;
 	for (const file of files) {
 		if (file.newSnapshot) {
-			const current = await readSnapshot(plan, plan.newSource, file.diff.path);
+			const current = await readSnapshot(plan.context, plan.newSource, file.diff.path);
 			if (
 				current === null ||
 				current === "gitlink" ||

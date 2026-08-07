@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -7,7 +8,9 @@ import {
 	type MarkdownExportSelection,
 } from "@revue/markdown-export";
 import {
+	freezeRunContext,
 	GitError,
+	loadPreparedRun,
 	PrepArgumentError,
 	type PreparedRun,
 	PrepError,
@@ -17,6 +20,7 @@ import {
 } from "@revue/prep";
 import { isBundledShikiThemeId, resolveTheme, type Theme } from "@revue/theme";
 import {
+	excerptRangeLabel,
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
 	THREAD_AUTHOR_KIND,
@@ -28,7 +32,7 @@ import { splitFileLines } from "./expand.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
 import { KEYMAP } from "./keymap.ts";
-import { ChaptersFileError, loadReviewRun } from "./load.ts";
+import { ChaptersFileError, loadChaptersFile, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
@@ -63,6 +67,7 @@ Usage:
              [--ignore <pattern>]... [--show-ignored]
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
+  revue context freeze <run-directory> pin the code the narration quotes into context.json
   revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
   revue comments <operation>           compatibility alias for revue threads
@@ -311,6 +316,83 @@ async function cmdExport(args: string[]): Promise<number> {
 		return 1;
 	}
 	process.stderr.write(`Wrote Markdown export to ${parsed.output}\n`);
+	return 0;
+}
+
+const CONTEXT_HELP = `usage: revue context freeze <run-directory>
+
+freeze  resolve every excerpt citation in the run's chapters.json against the run's own
+        recorded endpoint and pin the quoted lines into context.json beside it, so the
+        reviewer reads code that came off disk rather than a transcription`;
+
+async function cmdContext(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${CONTEXT_HELP}\n`);
+		return 0;
+	}
+	const [operation, ...rest] = args;
+	let directory: string | undefined;
+	try {
+		if (operation !== "freeze") {
+			throw new Error(operation ? `unknown context operation: ${operation}` : "missing operation");
+		}
+		const options = parseCommandOptions(rest, []);
+		directory = options.positionals[0];
+		if (!directory || options.positionals.length !== 1) {
+			throw new Error("context freeze requires one run directory");
+		}
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${CONTEXT_HELP}\n`,
+		);
+		return 1;
+	}
+	try {
+		return await freezeContext(directory);
+	} catch (error) {
+		if (
+			error instanceof ChaptersFileError ||
+			error instanceof RunArtifactError ||
+			error instanceof GitError
+		) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
+}
+
+async function freezeContext(directory: string): Promise<number> {
+	const run = await loadPreparedRun(directory);
+	const chaptersPath = join(directory, "chapters.json");
+	if (!existsSync(chaptersPath)) {
+		throw new ChaptersFileError(
+			`${chaptersPath} does not exist; narrate the run before freezing its context`,
+		);
+	}
+	const { path, context, unverifiable } = await freezeRunContext(
+		run,
+		await loadChaptersFile(chaptersPath),
+	);
+	for (const cited of unverifiable) {
+		process.stderr.write(
+			`warning: ${JSON.stringify(cited)} is not part of this run, so its worktree content could not be checked against what prep captured\n`,
+		);
+	}
+	if (context.unresolved.length) {
+		for (const entry of context.unresolved) {
+			process.stderr.write(
+				`Could not freeze excerpt ${excerptRangeLabel(entry)}: ${entry.reason}\n`,
+			);
+		}
+		return 1;
+	}
+	const { kind, revision } = context.source;
+	const count = context.excerpts.length;
+	process.stderr.write(
+		`Froze ${count} excerpt${count === 1 ? "" : "s"} from ${kind}:${revision.slice(0, 12)}\n`,
+	);
+	process.stdout.write(`${path}\n`);
 	return 0;
 }
 
@@ -922,6 +1004,7 @@ async function main(): Promise<number> {
 	if (command === "diff") return cmdDiff(args);
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
+	if (command === "context") return cmdContext(args);
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);

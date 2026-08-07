@@ -362,6 +362,89 @@ test("prep prints only the run path and show validates that same run", async () 
 	}
 });
 
+test("context freeze pins cited code and --check refuses a narrative that skipped it", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-context-cli-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "value.ts"), "export const value = 1;\n");
+		await writeFile(
+			join(root, "src", "caller.ts"),
+			"import { value } from './value';\nuse(value);\n",
+		);
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "value.ts"), "export const value = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Change value");
+
+		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+		const reference = manifest.files[0];
+		const oldStart = reference?.referenceStarts[0];
+		if (!reference || oldStart === undefined) throw new Error("Expected a prepared review unit");
+		const chapter = {
+			id: "chapter-1",
+			order: 1,
+			title: "Change the value",
+			summary: "The value now reflects the new behaviour.",
+			hunkRefs: [{ filePath: reference.path, oldStart }],
+			keyChanges: [],
+			// A file no change touched: the caller the change has to satisfy.
+			excerpts: [{ filePath: "src/caller.ts", startLine: 1, endLine: 2 }],
+		};
+		const chaptersPath = join(runDirectory, "chapters.json");
+		await writeFile(chaptersPath, `${JSON.stringify({ chapters: [chapter] })}\n`);
+
+		const unfrozen = await run(root, ["show", runDirectory, "--check"]);
+		expect(unfrozen).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(unfrozen.stderr).toContain(
+			`has no frozen content; run \`revue context freeze ${runDirectory}\``,
+		);
+
+		const frozen = await run(root, ["context", "freeze", runDirectory]);
+		expect(frozen.exitCode).toBe(0);
+		expect(frozen.stdout).toBe(`${join(runDirectory, "context.json")}\n`);
+		expect(frozen.stderr).toContain("Froze 1 excerpt from commit:");
+		expect(await Bun.file(join(runDirectory, "context.json")).json()).toMatchObject({
+			runId: manifest.runId,
+			excerpts: [{ lines: ["import { value } from './value';", "use(value);"] }],
+		});
+
+		const checked = await run(root, ["show", runDirectory, "--check"]);
+		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
+
+		await writeFile(
+			chaptersPath,
+			`${JSON.stringify({
+				chapters: [
+					{ ...chapter, excerpts: [{ filePath: "src/caller.ts", startLine: 40, endLine: 41 }] },
+				],
+			})}\n`,
+		);
+		const unresolvable = await run(root, ["context", "freeze", runDirectory]);
+		expect(unresolvable).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(unresolvable.stderr).toContain(
+			'Could not freeze excerpt "src/caller.ts" 40-41: the file has 2 lines',
+		);
+		const rechecked = await run(root, ["show", runDirectory, "--check"]);
+		expect(rechecked).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(rechecked.stderr).toContain("could not be frozen: the file has 2 lines");
+
+		const missingOperation = await run(root, ["context"]);
+		expect(missingOperation).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(missingOperation.stderr).toContain("missing operation");
+		const tooManyRuns = await run(root, ["context", "freeze", runDirectory, runDirectory]);
+		expect(tooManyRuns).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(tooManyRuns.stderr).toContain("context freeze requires one run directory");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("a run without chapters.json validates, opens flat, and still takes threads", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-chapterless-"));
 	try {

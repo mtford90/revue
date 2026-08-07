@@ -1,21 +1,30 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { loadPreparedRun, type PreparedRun, validateReviewCoverage } from "@revue/prep";
-import { type RevueChaptersFile, RevueChaptersFileSchema } from "@revue/types";
+import {
+	loadPreparedRun,
+	loadRunContext,
+	type PreparedRun,
+	validateReviewCoverage,
+} from "@revue/prep";
+import { type RevueChaptersFile, RevueChaptersFileSchema, type RunContextFile } from "@revue/types";
 import { z } from "zod";
 
 export class ChaptersFileError extends Error {}
 
 /** `chapters` is null for a chapterless run — a prepared diff nobody has narrated. */
-export type ReviewRun = PreparedRun & { chapters: RevueChaptersFile | null };
+export type ReviewRun = PreparedRun & {
+	chapters: RevueChaptersFile | null;
+	context: RunContextFile | null;
+};
 
 export async function loadReviewRun(directory: string): Promise<ReviewRun> {
 	const prepared = await loadPreparedRun(directory);
 	const path = join(directory, "chapters.json");
 	const chapters = existsSync(path) ? await loadChaptersFile(path) : null;
-	if (chapters) validateReviewCoverage(prepared, chapters);
-	return { ...prepared, chapters };
+	const context = await loadRunContext(prepared);
+	if (chapters) validateReviewCoverage(prepared, chapters, context);
+	return { ...prepared, chapters, context };
 }
 
 /** Read, JSON-parse and validate a chapters file written by the revue skill. */

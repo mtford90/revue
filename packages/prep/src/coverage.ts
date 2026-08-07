@@ -1,10 +1,13 @@
 import { type DiffFile, parsePatch } from "@revue/diff";
 import {
 	type Chapter,
+	excerptKey,
+	excerptRangeLabel,
 	type LineRef,
 	partialDepthLabel,
 	type RevueChaptersFile,
 	RUN_EXCLUSION_REASON,
+	type RunContextFile,
 	type RunExclusion,
 } from "@revue/types";
 import type { PreparedRun } from "./artifact.ts";
@@ -182,13 +185,46 @@ const lineReferenceIssues = (
 	);
 };
 
-export function validateReviewCoverage(run: PreparedRun, file: RevueChaptersFile): void {
+/**
+ * An excerpt cites code the agent never transcribed, so the citation is only worth anything once
+ * `revue context freeze` has pinned its bytes. A citation may legitimately name a file outside the
+ * diff — quoting the untouched caller a change has to satisfy is the point — so the frozen context,
+ * not the manifest, is what a citation is checked against.
+ */
+const excerptIssues = (
+	run: PreparedRun,
+	file: RevueChaptersFile,
+	context: RunContextFile | null,
+): string[] => {
+	const frozen = new Set((context?.excerpts ?? []).map(excerptKey));
+	const unresolved = new Map(
+		(context?.unresolved ?? []).map((entry) => [excerptKey(entry), entry]),
+	);
+	return file.chapters.flatMap((chapter) =>
+		chapter.excerpts.flatMap((excerpt) => {
+			const label = `chapter ${JSON.stringify(chapter.id)} excerpt ${excerptRangeLabel(excerpt)}`;
+			const failure = unresolved.get(excerptKey(excerpt));
+			if (failure) return [`${label} could not be frozen: ${failure.reason}`];
+			if (frozen.has(excerptKey(excerpt))) return [];
+			return [
+				`${label} has no frozen content; run \`revue context freeze ${run.directory}\` after writing chapters.json`,
+			];
+		}),
+	);
+};
+
+export function validateReviewCoverage(
+	run: PreparedRun,
+	file: RevueChaptersFile,
+	context: RunContextFile | null = null,
+): void {
 	const files = parsePatch(run.patch);
 	const issues = [
 		...preparedUnitIssues(run, files),
 		...chapterIdentityIssues(file.chapters),
 		...reviewUnitIssues(run, file),
 		...lineReferenceIssues(run, new Map(files.map((entry) => [entry.path, entry])), file.chapters),
+		...excerptIssues(run, file, context),
 	];
 	if (issues.length) {
 		throw new ReviewCoverageError(

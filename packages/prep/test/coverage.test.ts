@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { type RevueChaptersFile, RevueChaptersFileSchema } from "@revue/types";
+import { type RevueChaptersFile, RevueChaptersFileSchema, type RunContextFile } from "@revue/types";
 import { loadPreparedRun } from "../src/artifact.ts";
 import { validateReviewCoverage } from "../src/coverage.ts";
 
@@ -87,6 +87,57 @@ test("coverage validation accepts an interlude, a chapter that cites no review u
 	};
 
 	expect(() => validateReviewCoverage(run, withInterlude)).not.toThrow();
+});
+
+test("an excerpt citation is only valid once the CLI has frozen its content", async () => {
+	const { run, chapters } = await sample();
+	const excerpt = { filePath: "src/lib/untouched.ts", startLine: 10, endLine: 12 };
+	const citing = {
+		...chapters,
+		chapters: chapters.chapters.map((chapter, index) =>
+			index === 0 ? { ...chapter, excerpts: [excerpt] } : chapter,
+		),
+	};
+	const context = (overrides: Partial<RunContextFile>): RunContextFile => ({
+		runId: run.manifest.runId,
+		source: { kind: "commit", revision: "f".repeat(40) },
+		excerpts: [],
+		unresolved: [],
+		...overrides,
+	});
+
+	expect(() => validateReviewCoverage(run, citing)).toThrow(
+		`excerpt "src/lib/untouched.ts" 10-12 has no frozen content; run \`revue context freeze ${run.directory}\``,
+	);
+	expect(() => validateReviewCoverage(run, citing, context({}))).toThrow("has no frozen content");
+	expect(() =>
+		validateReviewCoverage(
+			run,
+			citing,
+			context({ excerpts: [{ ...excerpt, lines: ["a", "b", "c"], fileSha256: "0".repeat(64) }] }),
+		),
+	).not.toThrow();
+});
+
+test("coverage validation reports an excerpt citation that could not be resolved at all", async () => {
+	const { run, chapters } = await sample();
+	const excerpt = { filePath: "src/lib/untouched.ts", startLine: 400, endLine: 402 };
+	const citing = {
+		...chapters,
+		chapters: chapters.chapters.map((chapter, index) =>
+			index === 0 ? { ...chapter, excerpts: [excerpt] } : chapter,
+		),
+	};
+	const frozen: RunContextFile = {
+		runId: run.manifest.runId,
+		source: { kind: "commit", revision: "f".repeat(40) },
+		excerpts: [],
+		unresolved: [{ ...excerpt, reason: "the file has 120 lines" }],
+	};
+
+	expect(() => validateReviewCoverage(run, citing, frozen)).toThrow(
+		'excerpt "src/lib/untouched.ts" 400-402 could not be frozen: the file has 120 lines',
+	);
 });
 
 test("coverage validation explains references to paths omitted during prep", async () => {

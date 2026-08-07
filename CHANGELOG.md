@@ -2,6 +2,13 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.6.1](https://github.com/mtford90/revue/compare/v0.6.0...v0.6.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* unblock release builds after version bumps ([6d1d599](https://github.com/mtford90/revue/commit/6d1d59980a2ba1877a8e5e8180bcf369fef983b4))
+
 ## [0.6.0](https://github.com/mtford90/revue/compare/v0.5.0...v0.6.0) (2026-08-07)
 
 

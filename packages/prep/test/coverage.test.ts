@@ -36,6 +36,26 @@ test("coverage validation requires each prepared unit exactly once", async () =>
 	);
 });
 
+test("coverage validation accepts an interlude, a chapter that cites no review units", async () => {
+	const { run, chapters } = await sample();
+	const withInterlude = {
+		...chapters,
+		chapters: [
+			...chapters.chapters,
+			{
+				id: "interlude",
+				order: chapters.chapters.length + 1,
+				title: "Why the migration is staged",
+				summary: "Prose only; the work it explains lands in the chapters around it.",
+				hunkRefs: [],
+				keyChanges: [],
+			},
+		],
+	};
+
+	expect(() => validateReviewCoverage(run, withInterlude)).not.toThrow();
+});
+
 test("coverage validation explains references to paths omitted during prep", async () => {
 	const { run, chapters } = await sample();
 	const first = chapters.chapters[0];

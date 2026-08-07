@@ -238,6 +238,16 @@ export const ALL_FILES_CHAPTER_ID = "__files__";
 const ALL_FILES_LABEL = "All files";
 const COMMENTS_PAGE_ID = "__comments__";
 const COMMENTS_PAGE: Page = { kind: "comments", label: "Comments" };
+const INTERLUDE_GLYPH = "¶";
+const INTERLUDE_NOTE = `${INTERLUDE_GLYPH} interlude · nothing to review here`;
+const INTERLUDE_CLOSE = "── end of chapter ──";
+
+/**
+ * A prose-only page: a chapter that cites no review units. The synthetic Files
+ * chapter never counts, since an empty diff is not a narrative choice.
+ */
+const isInterlude = (chapter: Chapter) =>
+	chapter.id !== ALL_FILES_CHAPTER_ID && chapter.hunkRefs.length === 0;
 
 /** The whole diff as one synthetic chapter, so the flat page reuses the chapter pipeline. */
 const allFilesChapter = (diffFiles: DiffFile[] | null, order: number): Chapter => ({
@@ -296,7 +306,9 @@ function PageIndexRows({
 	return pages.map((page, index) => {
 		const active = index === current;
 		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
-		const label = page.kind === "chapter" ? `${page.chapter.order}. ${page.label}` : page.label;
+		const glyph = page.kind === "chapter" && isInterlude(page.chapter) ? `${INTERLUDE_GLYPH} ` : "";
+		const label =
+			page.kind === "chapter" ? `${glyph}${page.chapter.order}. ${page.label}` : page.label;
 		return (
 			<box
 				key={page.label}
@@ -481,6 +493,17 @@ function ChapterBrief({
 	onToggleKeyChange: (index: number) => void;
 }) {
 	const theme = useTheme();
+	if (isInterlude(chapter)) {
+		return (
+			<box flexDirection="column" width="100%" gap={1}>
+				<box flexDirection="column" width="100%">
+					<text fg={theme.accent}>{chapter.title}</text>
+					<text fg={theme.muted}>{INTERLUDE_NOTE}</text>
+				</box>
+				{chapter.summary ? <Narration text={chapter.summary} fg={theme.muted} /> : null}
+			</box>
+		);
+	}
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
@@ -1562,6 +1585,19 @@ type ContextExpansionUi = {
 	expandersFor: (path: string, base: DiffFileInput) => DiffBodyProps["expanders"];
 };
 
+/** An interlude has no diff, so its content column is just the close and the keys that follow it. */
+function InterludeClose({ keymap }: { keymap: readonly KeymapAction[] }) {
+	const theme = useTheme();
+	const markRead = keymapHint("toggle-chapter-review", keymap) ?? "";
+	const nextPage = keymapHint("next-page", keymap) ?? "";
+	return (
+		<box flexDirection="column" width="100%">
+			<text fg={theme.muted}>{INTERLUDE_CLOSE}</text>
+			<text fg={theme.muted}>{`${markRead} mark this page read · ${nextPage} next page`}</text>
+		</box>
+	);
+}
+
 function ChapterView({
 	chapter,
 	diffTheme,
@@ -2470,6 +2506,7 @@ export function App({
 	const surface: ReviewSurface =
 		page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story";
 	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
+	const interlude = chapter ? isInterlude(chapter) : false;
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
@@ -3977,7 +4014,7 @@ export function App({
 								}}
 							>
 								{semanticNotice ? <text fg={theme.badgeModified}>{semanticNotice}</text> : null}
-								{chapter && viewMode === "semantic" && semantic ? (
+								{chapter && !interlude && viewMode === "semantic" && semantic ? (
 									<text fg={theme.muted}>{semantic.version} · semantic view</text>
 								) : null}
 								{chapter && !showChapterPanel ? (
@@ -4015,7 +4052,8 @@ export function App({
 									onJump={jumpToThread}
 								/>
 							) : null}
-							{chapter && viewMode === "patch" ? (
+							{interlude ? <InterludeClose keymap={keymap} /> : null}
+							{chapter && !interlude && viewMode === "patch" ? (
 								<ChapterView
 									chapter={chapter}
 									diffTheme={diffTheme}
@@ -4050,7 +4088,7 @@ export function App({
 									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
-							{chapter && viewMode === "semantic" && semantic ? (
+							{chapter && !interlude && viewMode === "semantic" && semantic ? (
 								<SemanticChapterView
 									chapter={chapter}
 									semantic={semantic}

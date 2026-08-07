@@ -177,6 +177,42 @@ test("threads retain duplicate anchors, authored replies, status, and chapter sc
 	expect(later).not.toContain("Review threads");
 });
 
+test("an interlude exports as prose with no file section", () => {
+	const withInterlude: MarkdownReview = {
+		...review,
+		chapters: {
+			...chapters,
+			chapters: [
+				...chapters.chapters,
+				{
+					id: "aside",
+					order: 3,
+					title: "Why the migration is staged",
+					summary: "Prose only.",
+					hunkRefs: [],
+					keyChanges: [],
+				},
+			],
+		},
+	};
+
+	const markdown = formatMarkdownReview(withInterlude);
+
+	expect(markdown).toContain(
+		[
+			"## Chapter 3: Why the migration is staged",
+			"",
+			"Chapter ID: `aside`",
+			"",
+			"- [ ] Chapter reviewed",
+			"",
+			"Prose only.",
+			"",
+		].join("\n"),
+	);
+	expect(markdown.slice(markdown.indexOf("## Chapter 3"))).not.toContain("### Files");
+});
+
 test("prologue and chapter selections remain self-contained", () => {
 	const withPrologue: MarkdownReview = {
 		...review,

@@ -165,12 +165,12 @@ const formatChapter = (
 		`- [${checked(state.chapters.includes(chapter.id))}] Chapter reviewed`,
 		"",
 		prose(chapter.summary),
-		"",
-		heading(level + 1, "Files"),
-		"",
 	];
-	for (const path of chapterFilePaths(chapter)) {
-		lines.push(formatFile(chapter, findRunFile(files, path), state));
+	const paths = chapterFilePaths(chapter);
+	// An interlude cites no review units, so it gets no file section at all.
+	if (paths.length) {
+		lines.push("", heading(level + 1, "Files"), "");
+		for (const path of paths) lines.push(formatFile(chapter, findRunFile(files, path), state));
 	}
 	if (chapter.keyChanges.length) {
 		lines.push("", heading(level + 1, "Review questions"), "");

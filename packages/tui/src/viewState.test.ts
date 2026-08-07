@@ -44,6 +44,17 @@ test("marking all files in a chapter auto-completes the chapter; unmarking one r
 	expect(isChapterReviewed(vs, "c1")).toBe(false); // chapter reverts
 });
 
+test("an interlude completes only on the explicit mark, never vacuously", () => {
+	const c = chapter("interlude", 1, []);
+
+	// No file of its own can complete it, and a stray file id must not either.
+	expect(isChapterReviewed(toggleFile(emptyViewState(), c, "a.ts"), "interlude")).toBe(false);
+
+	const marked = toggleChapter(emptyViewState(), c);
+	expect(isChapterReviewed(marked, "interlude")).toBe(true);
+	expect(isChapterReviewed(toggleChapter(marked, c), "interlude")).toBe(false);
+});
+
 test("toggling a chapter cascades to its files", () => {
 	const c = chapter("c1", 1, ["a.ts", "b.ts"]);
 	const vs = toggleChapter(emptyViewState(), c);

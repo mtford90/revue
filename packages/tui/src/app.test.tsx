@@ -5,6 +5,7 @@ import { parsePatch } from "@revue/diff";
 import { resolveTheme, THEME_IDS, THEMES } from "@revue/theme";
 import {
 	type ReviewThread,
+	type RevueChaptersFile,
 	RevueChaptersFileSchema,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
@@ -285,6 +286,52 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("1. Add a re"); // sidebar chapter label (single-line truncated)
 	expect(frame).toContain("Dashboards stay up during deploys now"); // prologue outcome
 	expect(frame).toContain("0/3 files"); // none reviewed yet
+});
+
+const withInterlude: RevueChaptersFile = {
+	...file,
+	chapters: [
+		...file.chapters,
+		{
+			id: "interlude",
+			order: file.chapters.length + 1,
+			title: "Why the migration is staged",
+			summary: "The retry work lands before the callers so nothing regresses mid-deploy.",
+			hunkRefs: [],
+			keyChanges: [],
+		},
+	],
+};
+
+test("an interlude is an ordinary page that says plainly it has nothing to review", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const seen: ViewState[] = [];
+	const t = await testRender(
+		<App
+			file={withInterlude}
+			diffFiles={diffFiles}
+			onViewStateChange={(next) => seen.push(next)}
+		/>,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("¶ 4. Why the migration"); // the index marks it
+
+	for (let step = 0; step < 4; step += 1) await nextChapter(t);
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Why the migration is staged");
+	expect(frame).toContain("¶ interlude · nothing to review here");
+	expect(frame).toContain("The retry work lands"); // the prose, which the sidebar wraps
+	expect(frame).not.toContain("Files ("); // no file list
+	expect(frame).not.toContain("What to review");
+	expect(frame).toContain("── end of chapter ──");
+	expect(frame).toContain("x mark this page read · ]c next page");
+	expect(statusLine(t)).toContain("Ch 4/4");
+
+	await press(t, "x");
+	expect(seen.at(-1)?.chapters).toContain("interlude");
+	expect(t.captureCharFrame()).toContain("[x] ¶ 4. Why the migration");
 });
 
 test("reopening restores the page, collapsed files, scroll, and reviewer settings", async () => {

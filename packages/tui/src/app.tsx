@@ -17,6 +17,7 @@ import {
 	type DiffLineRange,
 	type DiffSide,
 	type DiffVisualPlan,
+	EXCERPT_HUNK_OLD_START,
 	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	parsePatch,
@@ -48,13 +49,16 @@ import {
 	type ContextExcerpt,
 	emptyViewState,
 	excerptKey,
+	frozenExcerptContaining,
 	frozenExcerptFor,
+	isExcerptAnchor,
 	narratedUnitCount,
 	type Prologue,
 	partialDepthLabel,
 	type ReviewThread,
 	type RevueChaptersFile,
 	type RunContextFile,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	type ThreadAnchor,
@@ -62,7 +66,15 @@ import {
 	type ThreadMessage,
 	type ViewState,
 } from "@revue/types";
-import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type ReactNode,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { copyToClipboard } from "./clipboard.ts";
 import { type ChapterDiffFile, type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
 import {
@@ -1202,16 +1214,60 @@ const semanticViewportFiles = ({
 	});
 };
 
-const threadAnchorRange = (thread: ReviewThread | undefined): DiffLineRange | undefined =>
-	thread
+/**
+ * The display range an anchor acts on. Quoted code has no old side and belongs to no git hunk,
+ * so it borrows the excerpt sentinel the renderer already uses for a quoted line's own range.
+ */
+const diffRangeForAnchor = (anchor: ThreadAnchor): DiffLineRange =>
+	isExcerptAnchor(anchor)
 		? {
-				filePath: thread.anchor.filePath,
-				hunkOldStart: thread.anchor.oldStart,
-				side: thread.anchor.side,
-				startLine: thread.anchor.startLine,
-				endLine: thread.anchor.endLine,
+				filePath: anchor.filePath,
+				hunkOldStart: EXCERPT_HUNK_OLD_START,
+				side: "additions",
+				startLine: anchor.startLine,
+				endLine: anchor.endLine,
 			}
+		: {
+				filePath: anchor.filePath,
+				hunkOldStart: anchor.oldStart,
+				side: anchor.side,
+				startLine: anchor.startLine,
+				endLine: anchor.endLine,
+			};
+
+const threadAnchorRange = (thread: ReviewThread | undefined): DiffLineRange | undefined =>
+	thread ? diffRangeForAnchor(thread.anchor) : undefined;
+
+/** The chapter citation whose quoted range contains this thread's anchor, if it has one. */
+const citationFor = (chapter: Chapter, { anchor }: ReviewThread): ContextExcerpt | undefined =>
+	isExcerptAnchor(anchor)
+		? chapter.excerpts.find(
+				(excerpt) =>
+					excerpt.filePath === anchor.filePath &&
+					excerpt.startLine <= anchor.startLine &&
+					anchor.endLine <= excerpt.endLine,
+			)
 		: undefined;
+
+/** A chapter owns a thread through the review unit it narrates or the range it quotes. */
+const chapterOwnsThread = (chapter: Chapter, thread: ReviewThread): boolean => {
+	const { anchor } = thread;
+	if (isExcerptAnchor(anchor)) return citationFor(chapter, thread) !== undefined;
+	return chapter.hunkRefs.some(
+		(reference) => reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
+	);
+};
+
+/** Threads on quoted code this chapter cites; they render inside its excerpt block, not a diff. */
+const chapterExcerptThreads = (
+	chapter: Chapter,
+	threads: readonly ReviewThread[],
+): ReviewThread[] =>
+	threads.filter((thread) => isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread));
+
+/** Threads on this chapter's own review units. */
+const chapterHunkThreads = (chapter: Chapter, threads: readonly ReviewThread[]): ReviewThread[] =>
+	threads.filter((thread) => !isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread));
 
 function KeyChanges({
 	chapter,
@@ -1412,15 +1468,20 @@ const threadLocation = (thread: ReviewThread) =>
 		thread.anchor.endLine === thread.anchor.startLine ? "" : `-${thread.anchor.endLine}`
 	}`;
 
+/** The narration stopped quoting this thread's code; it is kept and shown, never pruned. */
+const ORPHANED_THREAD_NOTE = " · no longer quoted";
+
 function CommentRow({
 	thread,
 	index,
 	active,
+	orphaned,
 	onJump,
 }: {
 	thread: ReviewThread;
 	index: number;
 	active: boolean;
+	orphaned: boolean;
 	onJump: (thread: ReviewThread) => void;
 }) {
 	const theme = useTheme();
@@ -1443,9 +1504,18 @@ function CommentRow({
 			<text flexShrink={0} fg={dealtWith ? theme.badgeAdded : theme.badgeModified}>
 				{dealtWith ? "✓ " : "! "}
 			</text>
-			<text flexShrink={0} wrapMode="none" fg={active ? theme.accent : theme.text}>
+			<text
+				flexShrink={0}
+				wrapMode="none"
+				fg={orphaned ? theme.muted : active ? theme.accent : theme.text}
+			>
 				{threadLocation(thread)}
 			</text>
+			{orphaned ? (
+				<text flexShrink={0} wrapMode="none" fg={theme.badgeModified}>
+					{ORPHANED_THREAD_NOTE}
+				</text>
+			) : null}
 			<text flexShrink={0} fg={theme.muted}>{` ${root?.author.name ?? ""} `}</text>
 			<text
 				flexGrow={1}
@@ -1469,10 +1539,12 @@ function CommentRow({
 function CommentsView({
 	threads,
 	selected,
+	orphaned,
 	onJump,
 }: {
 	threads: ReviewThread[];
 	selected: number;
+	orphaned: ReadonlySet<string>;
 	onJump: (thread: ReviewThread) => void;
 }) {
 	const theme = useTheme();
@@ -1499,6 +1571,7 @@ function CommentsView({
 					thread={thread}
 					index={index}
 					active={index === selected}
+					orphaned={orphaned.has(thread.id)}
 					onJump={onJump}
 				/>
 			))}
@@ -1708,6 +1781,7 @@ function ChapterView({
 	threads,
 	selectedThreadRange,
 	threadDraft,
+	excerptDraft,
 	replyDraft,
 	contextExpansion,
 	onAttachmentNode,
@@ -1743,6 +1817,8 @@ function ChapterView({
 	threads: ReviewThread[];
 	selectedThreadRange: DiffLineRange | undefined;
 	threadDraft: DiffInlineAttachment | undefined;
+	/** The composer for a new thread on quoted code, which mounts inside its excerpt block. */
+	excerptDraft: DiffInlineAttachment | undefined;
 	replyDraft: { threadId: string; content: ReactNode } | undefined;
 	contextExpansion?: ContextExpansionUi;
 	onAttachmentNode: (id: string, node: { height: number } | null) => void;
@@ -1776,35 +1852,27 @@ function ChapterView({
 			showGutterMarker: false,
 		}));
 	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
-	const chapterThreads = threads.filter((thread) =>
-		chapter.hunkRefs.some(
-			(reference) =>
-				reference.filePath === thread.anchor.filePath &&
-				reference.oldStart === thread.anchor.oldStart,
+	const mountThread = (thread: ReviewThread): DiffInlineAttachment => ({
+		id: thread.id,
+		anchor: diffRangeForAnchor(thread.anchor),
+		content: (
+			<InlineThread
+				thread={thread}
+				replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
+				onReply={onReplyThread}
+				onDeleteThread={onDeleteThread}
+				onDeleteMessage={onDeleteThreadMessage}
+				onToggleStatus={onToggleThreadStatus}
+			/>
 		),
-	);
+	});
 	const inlineAttachments: DiffInlineAttachment[] = [
-		...chapterThreads.map((thread) => ({
-			id: thread.id,
-			anchor: {
-				filePath: thread.anchor.filePath,
-				hunkOldStart: thread.anchor.oldStart,
-				side: thread.anchor.side,
-				startLine: thread.anchor.startLine,
-				endLine: thread.anchor.endLine,
-			},
-			content: (
-				<InlineThread
-					thread={thread}
-					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
-					onReply={onReplyThread}
-					onDeleteThread={onDeleteThread}
-					onDeleteMessage={onDeleteThreadMessage}
-					onToggleStatus={onToggleThreadStatus}
-				/>
-			),
-		})),
+		...chapterHunkThreads(chapter, threads).map(mountThread),
 		...(threadDraft ? [threadDraft] : []),
+	];
+	const excerptAttachments: DiffInlineAttachment[] = [
+		...chapterExcerptThreads(chapter, threads).map(mountThread),
+		...(excerptDraft ? [excerptDraft] : []),
 	];
 
 	return (
@@ -1835,6 +1903,8 @@ function ChapterView({
 									? excerptSelection
 									: undefined
 							}
+							inlineAttachments={excerptAttachments}
+							onAttachmentNode={onAttachmentNode}
 							onRangeSelect={onSelectExcerptRange}
 							onRangeContextMenu={onExcerptRangeContextMenu}
 						/>
@@ -2042,17 +2112,14 @@ function SemanticChapterView({
 		}
 		return emphasis;
 	}, [semantic, theme.badgeRemoved, theme.badgeAdded]);
-	const chapterThreads = threads.filter((thread) => paths.includes(thread.anchor.filePath));
+	// Semantic view renders no excerpts, so threads on quoted code have nowhere to sit here.
+	const chapterThreads = threads.filter(
+		(thread) => !isExcerptAnchor(thread.anchor) && paths.includes(thread.anchor.filePath),
+	);
 	const inlineAttachments: DiffInlineAttachment[] = [
 		...chapterThreads.map((thread) => ({
 			id: thread.id,
-			anchor: {
-				filePath: thread.anchor.filePath,
-				hunkOldStart: thread.anchor.oldStart,
-				side: thread.anchor.side,
-				startLine: thread.anchor.startLine,
-				endLine: thread.anchor.endLine,
-			},
+			anchor: diffRangeForAnchor(thread.anchor),
 			content: (
 				<InlineThread
 					thread={thread}
@@ -2385,7 +2452,7 @@ function ConfirmDialog({
 
 // ── App shell ───────────────────────────────────────────────────────────────
 type ThreadDraft =
-	| { kind: "thread"; range: DiffLineRange }
+	| { kind: "thread"; anchor: ThreadAnchor; range: DiffLineRange }
 	| { kind: "reply"; threadId: string; range: DiffLineRange };
 
 type ContextMenuState = {
@@ -2397,8 +2464,8 @@ type ContextMenuState = {
 	| {
 			kind: "range";
 			range: DiffLineRange;
-			/** Excerpt ranges have no git hunk to anchor a thread to; every other verb still works. */
-			commentable: boolean;
+			/** Which anchor a comment on this range would take; quoted code takes an excerpt one. */
+			anchorKind: (typeof THREAD_ANCHOR_KIND)[keyof typeof THREAD_ANCHOR_KIND];
 	  }
 	| { kind: "prose"; reference: ChapterReference }
 );
@@ -2411,7 +2478,6 @@ const buildRangeMenu = ({
 	copyLocation,
 	copyLink,
 	comment,
-	canComment = true,
 	keymap = KEYMAP,
 }: {
 	selectedText: string | null;
@@ -2420,7 +2486,6 @@ const buildRangeMenu = ({
 	copyLocation: () => void;
 	copyLink: () => void;
 	comment: () => void;
-	canComment?: boolean;
 	keymap?: readonly KeymapAction[];
 }): MenuEntry[] => [
 	...(selectedText
@@ -2443,13 +2508,7 @@ const buildRangeMenu = ({
 		action: copyLink,
 	},
 	{ kind: "separator", id: "copy" },
-	{
-		kind: "item",
-		label: "Comment on selection",
-		hint: "Enter",
-		disabled: !canComment,
-		action: comment,
-	},
+	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
 ];
 
 const noVerb = () => undefined;
@@ -2488,12 +2547,14 @@ const defaultHumanAuthor: ThreadAuthor = {
 	name: "Reviewer",
 };
 
-const diffRangeForThread = (thread: ReviewThread): DiffLineRange => ({
-	filePath: thread.anchor.filePath,
-	hunkOldStart: thread.anchor.oldStart,
-	side: thread.anchor.side,
-	startLine: thread.anchor.startLine,
-	endLine: thread.anchor.endLine,
+const diffRangeForThread = (thread: ReviewThread): DiffLineRange =>
+	diffRangeForAnchor(thread.anchor);
+
+/** A thread reduced to what the viewport needs to reserve room for it. */
+const measuredAnchor = (thread: ReviewThread): DiffInlineAttachment => ({
+	id: thread.id,
+	anchor: diffRangeForAnchor(thread.anchor),
+	content: null,
 });
 
 export function App({
@@ -2839,16 +2900,33 @@ export function App({
 		if (!chapter) return [];
 		if (viewMode === "semantic") {
 			const paths = chapterFilePaths(chapter);
-			return threads.filter((thread) => paths.includes(thread.anchor.filePath));
+			return threads.filter(
+				(thread) => !isExcerptAnchor(thread.anchor) && paths.includes(thread.anchor.filePath),
+			);
 		}
-		return threads.filter((thread) =>
-			chapter.hunkRefs.some(
-				(reference) =>
-					reference.filePath === thread.anchor.filePath &&
-					reference.oldStart === thread.anchor.oldStart,
-			),
-		);
+		return chapterHunkThreads(chapter, threads);
 	}, [chapter, threads, viewMode]);
+	const chapterQuotedThreads = useMemo(
+		() => (chapter && viewMode === "patch" ? chapterExcerptThreads(chapter, threads) : []),
+		[chapter, threads, viewMode],
+	);
+	/**
+	 * Threads on code the frozen context no longer quotes. Re-narrating at another depth can
+	 * legitimately drop an excerpt, so these stay in the store and stay listed rather than being
+	 * pruned; they simply have no quoted line to render against.
+	 */
+	const orphanedThreads = useMemo(
+		() =>
+			new Set(
+				threads
+					.filter(
+						(thread) =>
+							isExcerptAnchor(thread.anchor) && !frozenExcerptContaining(context, thread.anchor),
+					)
+					.map((thread) => thread.id),
+			),
+		[threads, context],
+	);
 	const orderedThreads = useMemo(
 		() =>
 			[...threads].sort(
@@ -2860,24 +2938,24 @@ export function App({
 			),
 		[threads],
 	);
+	const quotedDraft = threadDraft?.kind === "thread" && isExcerptAnchor(threadDraft.anchor);
 	const attachmentAnchors = useMemo<DiffInlineAttachment[]>(
 		() => [
-			...chapterThreadList.map((thread) => ({
-				id: thread.id,
-				anchor: {
-					filePath: thread.anchor.filePath,
-					hunkOldStart: thread.anchor.oldStart,
-					side: thread.anchor.side,
-					startLine: thread.anchor.startLine,
-					endLine: thread.anchor.endLine,
-				},
-				content: null,
-			})),
-			...(threadDraft?.kind === "thread"
+			...chapterThreadList.map(measuredAnchor),
+			...(threadDraft?.kind === "thread" && !quotedDraft
 				? [{ id: THREAD_COMPOSER_ID, anchor: threadDraft.range, content: null }]
 				: []),
 		],
-		[chapterThreadList, threadDraft],
+		[chapterThreadList, threadDraft, quotedDraft],
+	);
+	const excerptAttachmentAnchors = useMemo<DiffInlineAttachment[]>(
+		() => [
+			...chapterQuotedThreads.map(measuredAnchor),
+			...(threadDraft?.kind === "thread" && quotedDraft
+				? [{ id: THREAD_COMPOSER_ID, anchor: threadDraft.range, content: null }]
+				: []),
+		],
+		[chapterQuotedThreads, threadDraft, quotedDraft],
 	);
 	const plannedViewportFiles = useMemo<PlannedViewportFile[]>(
 		() =>
@@ -2895,9 +2973,16 @@ export function App({
 				files: plannedViewportFiles,
 				excerpts: chapterExcerpts,
 				attachments: attachmentAnchors,
+				excerptAttachments: excerptAttachmentAnchors,
 				attachmentHeight: (id) => attachmentHeights.get(id) ?? ESTIMATED_ATTACHMENT_HEIGHT,
 			}),
-		[plannedViewportFiles, chapterExcerpts, attachmentAnchors, attachmentHeights],
+		[
+			plannedViewportFiles,
+			chapterExcerpts,
+			attachmentAnchors,
+			excerptAttachmentAnchors,
+			attachmentHeights,
+		],
 	);
 	const windowPlan = useMemo(
 		() =>
@@ -2926,10 +3011,36 @@ export function App({
 	// or replan never re-triggers a scroll on its own.
 	const chapterSegmentsRef = useRef(chapterSegments);
 	chapterSegmentsRef.current = chapterSegments;
+	const chapterExcerptsRef = useRef(chapterExcerpts);
+	chapterExcerptsRef.current = chapterExcerpts;
 	const viewportFilesRef = useRef(plannedViewportFiles);
 	viewportFilesRef.current = plannedViewportFiles;
 	const threadsRef = useRef(threads);
 	threadsRef.current = threads;
+	/**
+	 * Where an inline attachment sits in the planned content. Quoted code is measured against its
+	 * own excerpt segment: a chapter can both diff and quote one file, and matching an excerpt
+	 * anchor against diff rows would scroll to the wrong place.
+	 */
+	const attachmentOffset = useCallback((anchor: ThreadAnchor, range: DiffLineRange) => {
+		if (isExcerptAnchor(anchor)) {
+			const excerpt = chapterExcerptsRef.current.find((candidate) =>
+				excerptCovers(candidate.plan.quotation, range),
+			);
+			const row =
+				excerpt?.plan.rows.findIndex(
+					(entry) => entry.type === "excerpt-line" && entry.lineNumber === range.endLine,
+				) ?? -1;
+			if (!excerpt || row < 0) return null;
+			return segmentOffset(chapterSegmentsRef.current, excerptSegmentId(excerpt.key), row);
+		}
+		const file = viewportFilesRef.current.find((candidate) => candidate.path === range.filePath);
+		if (!file) return null;
+		const row = attachmentRowIndex(file, range);
+		return row >= 0
+			? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row)
+			: null;
+	}, []);
 	function noteAttachmentNode(id: string, node: { height: number } | null) {
 		if (node) attachmentNodes.current.set(id, node);
 		else attachmentNodes.current.delete(id);
@@ -3143,24 +3254,18 @@ export function App({
 
 	useEffect(() => {
 		if (!threadFocusTarget) return;
-		const anchor = threadAnchorRange(
-			threadsRef.current.find((thread) => thread.id === threadFocusTarget.threadId),
+		const thread = threadsRef.current.find(
+			(candidate) => candidate.id === threadFocusTarget.threadId,
 		);
-		const file = anchor
-			? viewportFilesRef.current.find((candidate) => candidate.path === anchor.filePath)
-			: undefined;
-		if (file && anchor) {
-			const row = attachmentRowIndex(file, anchor);
-			const offset =
-				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
-			if (offset !== null) {
-				centreContentOffset({
-					scroll: pageScroll.current,
-					leadingHeight: leadingContent.current?.height ?? 0,
-					offset,
-					span: ESTIMATED_ATTACHMENT_HEIGHT,
-				});
-			}
+		const anchor = threadAnchorRange(thread);
+		const offset = thread && anchor ? attachmentOffset(thread.anchor, anchor) : null;
+		if (offset !== null) {
+			centreContentOffset({
+				scroll: pageScroll.current,
+				leadingHeight: leadingContent.current?.height ?? 0,
+				offset,
+				span: ESTIMATED_ATTACHMENT_HEIGHT,
+			});
 		}
 		const revealThread = () => pageScroll.current?.scrollChildIntoView(threadFocusTarget.threadId);
 		const retry = setTimeout(revealThread, 50);
@@ -3169,7 +3274,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [threadFocusTarget]);
+	}, [threadFocusTarget, attachmentOffset]);
 
 	useEffect(() => {
 		if (!copyNotice) return;
@@ -3181,25 +3286,20 @@ export function App({
 
 	useEffect(() => {
 		if (!threadDraft) return;
-		const anchor =
-			threadDraft.kind === "thread"
-				? threadDraft.range
-				: threadAnchorRange(threads.find((thread) => thread.id === threadDraft.threadId));
-		const file = anchor
-			? viewportFilesRef.current.find((candidate) => candidate.path === anchor.filePath)
-			: undefined;
-		if (file && anchor) {
-			const row = attachmentRowIndex(file, anchor);
-			const offset =
-				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
-			if (offset !== null) {
-				revealContentOffset({
-					scroll: pageScroll.current,
-					leadingHeight: leadingContent.current?.height ?? 0,
-					offset,
-					span: ESTIMATED_ATTACHMENT_HEIGHT + 1,
-				});
-			}
+		const replied =
+			threadDraft.kind === "reply"
+				? threads.find((thread) => thread.id === threadDraft.threadId)
+				: undefined;
+		const threadAnchor = threadDraft.kind === "thread" ? threadDraft.anchor : replied?.anchor;
+		const anchor = threadDraft.kind === "thread" ? threadDraft.range : threadAnchorRange(replied);
+		const offset = threadAnchor && anchor ? attachmentOffset(threadAnchor, anchor) : null;
+		if (offset !== null) {
+			revealContentOffset({
+				scroll: pageScroll.current,
+				leadingHeight: leadingContent.current?.height ?? 0,
+				offset,
+				span: ESTIMATED_ATTACHMENT_HEIGHT + 1,
+			});
 		}
 		const revealThreadComposer = () => pageScroll.current?.scrollChildIntoView(THREAD_COMPOSER_ID);
 		const retry = setTimeout(revealThreadComposer, 50);
@@ -3208,7 +3308,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [threadDraft, threads]);
+	}, [threadDraft, threads, attachmentOffset]);
 
 	function previousPathFor(filePath: string) {
 		return diffFiles?.find((candidate) => candidate.path === filePath)?.previousPath;
@@ -3265,7 +3365,7 @@ export function App({
 		setContextMenu({
 			kind: "range",
 			range: highlightedRange(range) ?? range,
-			commentable: true,
+			anchorKind: THREAD_ANCHOR_KIND.HUNK,
 			position,
 			selected: 0,
 			selectedText: highlightedText(),
@@ -3286,7 +3386,7 @@ export function App({
 		setContextMenu({
 			kind: "range",
 			range: resolved,
-			commentable: false,
+			anchorKind: THREAD_ANCHOR_KIND.EXCERPT,
 			position,
 			selected: 0,
 			selectedText: highlightedText() ?? excerptSelectionText(resolved),
@@ -3302,11 +3402,40 @@ export function App({
 			selectedText: highlightedText(),
 		});
 	}
-	function selectThreadRange(range: DiffLineRange) {
-		setExcerptSelection(null);
-		setThreadDraft({ kind: "thread", range });
+	function startThread(anchor: ThreadAnchor, range: DiffLineRange) {
+		setThreadDraft({ kind: "thread", anchor, range });
 		setThreadBody("");
 		setThreadNotice(null);
+	}
+	function selectThreadRange(range: DiffLineRange) {
+		setExcerptSelection(null);
+		startThread(
+			{
+				kind: THREAD_ANCHOR_KIND.HUNK,
+				filePath: range.filePath,
+				oldStart: range.hunkOldStart,
+				side: range.side,
+				startLine: range.startLine,
+				endLine: range.endLine,
+			},
+			range,
+		);
+	}
+	/**
+	 * Quoted code takes its own anchor kind: it belongs to no review unit, so it is keyed to the
+	 * run and answers to the frozen context instead. The selection stays tinted under the composer.
+	 */
+	function commentOnExcerptRange(range: DiffLineRange) {
+		setExcerptSelection(range);
+		startThread(
+			{
+				kind: THREAD_ANCHOR_KIND.EXCERPT,
+				filePath: range.filePath,
+				startLine: range.startLine,
+				endLine: range.endLine,
+			},
+			range,
+		);
 	}
 	function startThreadReply(thread: ReviewThread) {
 		setThreadDraft({ kind: "reply", threadId: thread.id, range: diffRangeForThread(thread) });
@@ -3317,6 +3446,7 @@ export function App({
 		setThreadDraft(null);
 		setThreadBody("");
 		setThreadNotice(null);
+		setExcerptSelection(null);
 	}
 	function saveThreadDraft() {
 		if (!threadDraft) return;
@@ -3327,14 +3457,7 @@ export function App({
 		}
 		try {
 			if (threadDraft.kind === "thread") {
-				const range = threadDraft.range;
-				const anchor: ThreadAnchor = {
-					filePath: range.filePath,
-					oldStart: range.hunkOldStart,
-					side: range.side,
-					startLine: range.startLine,
-					endLine: range.endLine,
-				};
+				const anchor = threadDraft.anchor;
 				const thread =
 					threadActions?.create(anchor, humanAuthor, body) ??
 					createThread("0".repeat(64), anchor, humanAuthor, body);
@@ -3481,13 +3604,7 @@ export function App({
 	}
 	function jumpToThread(thread: ReviewThread) {
 		const chapterIndex = pages.findIndex(
-			(candidate) =>
-				candidate.kind === "chapter" &&
-				candidate.chapter.hunkRefs.some(
-					(reference) =>
-						reference.filePath === thread.anchor.filePath &&
-						reference.oldStart === thread.anchor.oldStart,
-				),
+			(candidate) => candidate.kind === "chapter" && chapterOwnsThread(candidate.chapter, thread),
 		);
 		const nextPage = chapterIndex >= 0 ? pages[chapterIndex] : filesPage;
 		const nextPageId = pageId(nextPage);
@@ -3509,6 +3626,12 @@ export function App({
 			(currentCollapsed) =>
 				new Set([...currentCollapsed].filter((entry) => entry !== thread.anchor.filePath)),
 		);
+		// A folded excerpt renders none of its threads, so landing on one has to open it.
+		const citation = targetChapter ? citationFor(targetChapter, thread) : undefined;
+		if (citation) {
+			const key = excerptKey(citation);
+			setOpenExcerpts((currentOpen) => new Set([...currentOpen, key]));
+		}
 		setThreadFocusTarget((currentTarget) => ({
 			threadId: thread.id,
 			request: (currentTarget?.request ?? 0) + 1,
@@ -3917,8 +4040,10 @@ export function App({
 					},
 					copyLocation: () => copyLocation(contextMenu.range),
 					copyLink: () => copyLink(contextMenu.range),
-					comment: () => selectThreadRange(contextMenu.range),
-					canComment: contextMenu.commentable,
+					comment: () =>
+						contextMenu.anchorKind === THREAD_ANCHOR_KIND.EXCERPT
+							? commentOnExcerptRange(contextMenu.range)
+							: selectThreadRange(contextMenu.range),
 					keymap,
 				});
 	const threadComposer = threadDraft ? (
@@ -3937,7 +4062,7 @@ export function App({
 			onCopyLink={() => copyLink(threadDraft.range)}
 		/>
 	) : undefined;
-	const newThreadDraft: DiffInlineAttachment | undefined =
+	const mountedDraft: DiffInlineAttachment | undefined =
 		threadDraft?.kind === "thread" && threadComposer
 			? {
 					id: THREAD_COMPOSER_ID,
@@ -3945,6 +4070,8 @@ export function App({
 					content: threadComposer,
 				}
 			: undefined;
+	const newThreadDraft = quotedDraft ? undefined : mountedDraft;
+	const newExcerptDraft = quotedDraft ? mountedDraft : undefined;
 	const replyDraft =
 		threadDraft?.kind === "reply" && threadComposer
 			? { threadId: threadDraft.threadId, content: threadComposer }
@@ -4170,6 +4297,12 @@ export function App({
 			}
 			case "toggle-file-diff": {
 				if (!chapter) break;
+				// A standing quoted selection is what the reviewer is acting on, so Enter comments on
+				// it rather than folding the block it sits in.
+				if (excerptSelection) {
+					commentOnExcerptRange(excerptSelection);
+					break;
+				}
 				if (focusedExcerpt) {
 					toggleExcerpt(focusedExcerpt);
 					break;
@@ -4380,6 +4513,7 @@ export function App({
 								<CommentsView
 									threads={orderedThreads}
 									selected={selectedThread}
+									orphaned={orphanedThreads}
 									onJump={jumpToThread}
 								/>
 							) : null}
@@ -4409,12 +4543,13 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										(contextMenu?.kind === "range" && contextMenu.commentable
+										(contextMenu?.kind === "range" &&
+										contextMenu.anchorKind === THREAD_ANCHOR_KIND.HUNK
 											? contextMenu.range
-											: undefined) ??
-										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
+											: undefined) ?? newThreadDraft?.anchor
 									}
 									threadDraft={newThreadDraft}
+									excerptDraft={newExcerptDraft}
 									replyDraft={replyDraft}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
@@ -4444,10 +4579,10 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										(contextMenu?.kind === "range" && contextMenu.commentable
+										(contextMenu?.kind === "range" &&
+										contextMenu.anchorKind === THREAD_ANCHOR_KIND.HUNK
 											? contextMenu.range
-											: undefined) ??
-										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
+											: undefined) ?? newThreadDraft?.anchor
 									}
 									threadDraft={newThreadDraft}
 									replyDraft={replyDraft}

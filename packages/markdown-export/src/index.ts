@@ -1,6 +1,7 @@
 import type { Chapter } from "@revue/types";
 import {
 	emptyViewState,
+	isExcerptAnchor,
 	narratedUnitCount,
 	type Prologue,
 	partialDepthLabel,
@@ -110,19 +111,28 @@ const formatQuestion = (chapter: Chapter, index: number, state: ViewState): stri
 	return lines;
 };
 
-const threadsForChapter = (chapter: Chapter, threads: readonly ReviewThread[]): ReviewThread[] =>
-	threads
-		.filter((thread) =>
-			chapter.hunkRefs.some(
+const byCreation = (left: ReviewThread, right: ReviewThread): number =>
+	left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+
+/**
+ * A thread belongs to the chapter that owns its review unit, or — for quoted code, which owns no
+ * review unit — to the chapter that cites an excerpt containing it.
+ */
+const chapterOwnsThread = (chapter: Chapter, { anchor }: ReviewThread): boolean =>
+	isExcerptAnchor(anchor)
+		? chapter.excerpts.some(
+				(excerpt) =>
+					excerpt.filePath === anchor.filePath &&
+					excerpt.startLine <= anchor.startLine &&
+					anchor.endLine <= excerpt.endLine,
+			)
+		: chapter.hunkRefs.some(
 				(reference) =>
-					reference.filePath === thread.anchor.filePath &&
-					reference.oldStart === thread.anchor.oldStart,
-			),
-		)
-		.sort(
-			(left, right) =>
-				left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
-		);
+					reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
+			);
+
+const threadsForChapter = (chapter: Chapter, threads: readonly ReviewThread[]): ReviewThread[] =>
+	threads.filter((thread) => chapterOwnsThread(chapter, thread)).sort(byCreation);
 
 const formatMessage = (message: ThreadMessage, level: number): string[] => {
 	const body = message.body.replace(/\r\n?/g, "\n").split("\n");
@@ -136,17 +146,23 @@ const formatMessage = (message: ThreadMessage, level: number): string[] => {
 	];
 };
 
-const formatThread = (thread: ReviewThread, level: number): string[] => {
+const describeAnchor = (anchor: ReviewThread["anchor"]): string => {
 	const range =
-		thread.anchor.startLine === thread.anchor.endLine
-			? `line ${thread.anchor.startLine}`
-			: `lines ${thread.anchor.startLine}-${thread.anchor.endLine}`;
+		anchor.startLine === anchor.endLine
+			? `line ${anchor.startLine}`
+			: `lines ${anchor.startLine}-${anchor.endLine}`;
+	return isExcerptAnchor(anchor)
+		? `${codeSpan(anchor.filePath)} — quoted context ${range}`
+		: `${codeSpan(anchor.filePath)} — ${anchor.side} ${range}; review unit oldStart ${anchor.oldStart}`;
+};
+
+const formatThread = (thread: ReviewThread, level: number): string[] => {
 	const lines = [
 		heading(level, `Thread ${codeSpan(thread.id)}`),
 		"",
 		`- Status: ${codeSpan(thread.status)}`,
 		`- Created: ${codeSpan(thread.createdAt)}`,
-		`- Anchor: ${codeSpan(thread.anchor.filePath)} — ${thread.anchor.side} ${range}; review unit oldStart ${thread.anchor.oldStart}`,
+		`- Anchor: ${describeAnchor(thread.anchor)}`,
 	];
 	for (const message of thread.messages) lines.push("", ...formatMessage(message, level + 1));
 	return lines;
@@ -199,6 +215,28 @@ const formatCoverage = (review: MarkdownReview): string[] => {
 		"",
 		`Narrative depth: ${label} — ${narratedUnitCount(review.chapters)} of ${prepared} review units narrated; the rest are in the run but outside this narrative.`,
 	];
+};
+
+/**
+ * Feedback the narration no longer has a home for. Re-narrating at another depth can stop quoting
+ * a commented excerpt, and a document that silently dropped that thread would lose it.
+ */
+const formatOrphanedThreads = (
+	chapters: readonly Chapter[],
+	threads: readonly ReviewThread[],
+): string[] => {
+	const orphaned = threads
+		.filter((thread) => !chapters.some((chapter) => chapterOwnsThread(chapter, thread)))
+		.sort(byCreation);
+	if (!orphaned.length) return [];
+	const lines = [
+		"",
+		heading(2, "Orphaned threads"),
+		"",
+		"These threads are anchored to code this narrative no longer covers.",
+	];
+	for (const thread of orphaned) lines.push("", ...formatThread(thread, 3));
+	return lines;
 };
 
 const selectChapter = (
@@ -261,6 +299,7 @@ export function formatMarkdownReview(
 		if (review.chapters.prologue) lines.push("", ...formatPrologue(review.chapters.prologue, 2));
 		for (const chapter of ordered)
 			lines.push("", ...formatChapter(chapter, files, state, threads, 2));
+		lines.push(...formatOrphanedThreads(ordered, threads));
 	}
 
 	return `${lines.join("\n")}\n`;

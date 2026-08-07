@@ -15,6 +15,26 @@ export type DiffInlineAttachment = {
 	content: ReactNode;
 };
 
+/**
+ * The inline attachments anchored after one quoted line. Excerpt attachments are kept in a list
+ * of their own rather than sharing the diff's: a quoted range and a new file's hunk can occupy
+ * identical `(filePath, side, line)` coordinates, so the two must never be matched against
+ * one another.
+ */
+export const attachmentsForExcerptLine = ({
+	filePath,
+	lineNumber,
+	attachments,
+}: {
+	filePath: string;
+	lineNumber: number;
+	attachments: readonly DiffInlineAttachment[];
+}): DiffInlineAttachment[] =>
+	attachments.filter(
+		(attachment) =>
+			attachment.anchor.filePath === filePath && attachment.anchor.endLine === lineNumber,
+	);
+
 /** The React-valued inline attachments anchored after this exact planned logical row. */
 export const attachmentsForRow = ({
 	row,

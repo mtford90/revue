@@ -5,7 +5,10 @@ import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parsePatch } from "@revue/diff";
 import {
+	type ExcerptThreadAnchor,
 	emptyThreadStoreFile,
+	frozenExcerptContaining,
+	isExcerptAnchor,
 	type ReviewThread,
 	reviewThreadSchema,
 	THREAD_AUTHOR_KIND,
@@ -381,43 +384,75 @@ export function openThreadStore(path: string, runId: string): ThreadStore {
 	};
 }
 
-export function validateThreadsForRun(run: ReviewRun, threads: readonly ReviewThread[]): void {
+/** A thread the narration stopped quoting: kept, listed, and never rendered inline. */
+export type OrphanedThread = { thread: ReviewThread; reason: string };
+
+export const excerptAnchorLabel = (anchor: ExcerptThreadAnchor): string =>
+	`${JSON.stringify(anchor.filePath)} ${anchor.startLine}-${anchor.endLine}`;
+
+/**
+ * Quoted code belongs to the narration, not the patch, so a regenerated narrative may honestly
+ * stop covering a commented range. That is not corruption and must never fail a load: the thread
+ * is reported as orphaned so callers can keep it, show it, and leave it in the store.
+ */
+const excerptOrphan = (run: ReviewRun, thread: ReviewThread): OrphanedThread | null => {
+	if (!isExcerptAnchor(thread.anchor)) return null;
+	if (frozenExcerptContaining(run.context, thread.anchor)) return null;
+	return {
+		thread,
+		reason: `no frozen excerpt of this run still quotes ${excerptAnchorLabel(thread.anchor)}`,
+	};
+};
+
+/**
+ * Reject every anchor that does not belong to exactly one pinned review unit, and report — rather
+ * than reject — excerpt anchors the frozen context no longer covers.
+ */
+export function validateThreadsForRun(
+	run: ReviewRun,
+	threads: readonly ReviewThread[],
+): OrphanedThread[] {
 	const files = parsePatch(run.patch);
+	const orphaned: OrphanedThread[] = [];
 	for (const thread of threads) {
 		if (thread.runId !== run.manifest.runId) {
 			throw new ThreadStoreError(
 				`Thread ${thread.id} belongs to run ${thread.runId}, not verified run ${run.manifest.runId}`,
 			);
 		}
+		if (isExcerptAnchor(thread.anchor)) {
+			const orphan = excerptOrphan(run, thread);
+			if (orphan) orphaned.push(orphan);
+			continue;
+		}
+		const anchor = thread.anchor;
 		const file = files.find(
 			(candidate) =>
-				candidate.path === thread.anchor.filePath ||
-				candidate.metadata.name === thread.anchor.filePath,
+				candidate.path === anchor.filePath || candidate.metadata.name === anchor.filePath,
 		);
 		if (!file) {
-			throw staleAnchor(thread, `file ${JSON.stringify(thread.anchor.filePath)} is absent`);
+			throw staleAnchor(thread, `file ${JSON.stringify(anchor.filePath)} is absent`);
 		}
 		const hunk = file.metadata.hunks.find(
-			(candidate) => candidate.deletionStart === thread.anchor.oldStart,
+			(candidate) => candidate.deletionStart === anchor.oldStart,
 		);
 		if (!hunk) {
-			throw staleAnchor(thread, `review unit oldStart ${thread.anchor.oldStart} is absent`);
+			throw staleAnchor(thread, `review unit oldStart ${anchor.oldStart} is absent`);
 		}
-		const sideStart = thread.anchor.side === "additions" ? hunk.additionStart : hunk.deletionStart;
-		const sideCount = thread.anchor.side === "additions" ? hunk.additionCount : hunk.deletionCount;
+		const sideStart = anchor.side === "additions" ? hunk.additionStart : hunk.deletionStart;
+		const sideCount = anchor.side === "additions" ? hunk.additionCount : hunk.deletionCount;
 		const sideEnd = sideStart + sideCount - 1;
-		if (sideCount === 0 || thread.anchor.startLine < sideStart || thread.anchor.endLine > sideEnd) {
+		if (sideCount === 0 || anchor.startLine < sideStart || anchor.endLine > sideEnd) {
 			throw staleAnchor(
 				thread,
-				`${thread.anchor.side} range ${thread.anchor.startLine}-${thread.anchor.endLine} is outside that review unit`,
+				`${anchor.side} range ${anchor.startLine}-${anchor.endLine} is outside that review unit`,
 			);
 		}
 		if (run.chapters) {
 			const owners = run.chapters.chapters.filter((chapter) =>
 				chapter.hunkRefs.some(
 					(reference) =>
-						reference.filePath === thread.anchor.filePath &&
-						reference.oldStart === thread.anchor.oldStart,
+						reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
 				),
 			);
 			if (owners.length !== 1) {
@@ -425,12 +460,14 @@ export function validateThreadsForRun(run: ReviewRun, threads: readonly ReviewTh
 			}
 		}
 	}
+	return orphaned;
 }
 
-export function loadValidatedThreads(path: string, run: ReviewRun): ReviewThread[] {
+export type LoadedThreads = { threads: ReviewThread[]; orphaned: OrphanedThread[] };
+
+export function loadValidatedThreads(path: string, run: ReviewRun): LoadedThreads {
 	const threads = sortThreads(readThreadStoreFile(path).runs[run.manifest.runId] ?? []);
-	validateThreadsForRun(run, threads);
-	return threads;
+	return { threads, orphaned: validateThreadsForRun(run, threads) };
 }
 
 const staleAnchor = (thread: ReviewThread, reason: string): ThreadStoreError =>

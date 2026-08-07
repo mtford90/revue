@@ -9,6 +9,7 @@ import {
 	type RevueChaptersFile,
 	RevueChaptersFileSchema,
 	type RunContextFile,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	type ThreadAnchor,
@@ -1331,6 +1332,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 		id: "00000000-0000-4000-8000-000000000001",
 		runId,
 		anchor: {
+			kind: THREAD_ANCHOR_KIND.HUNK,
 			filePath: "thread.ts",
 			oldStart: 1,
 			side: "additions",
@@ -1505,6 +1507,7 @@ test("o opens the Comments surface and Enter jumps back into the owning chapter"
 	if (!diffFile) throw new Error("missing diff fixture");
 	const runId = "a".repeat(64);
 	const anchor: ThreadAnchor = {
+		kind: THREAD_ANCHOR_KIND.HUNK,
 		filePath: "thread.ts",
 		oldStart: 1,
 		side: "additions",
@@ -2258,10 +2261,16 @@ const renderExcerptChapter = async ({
 	onViewStateChange,
 	onCopy,
 	permalinkContext,
+	initialThreads,
+	threadActions,
+	openChapter = true,
 }: {
 	onViewStateChange?: (next: ViewState) => void;
 	onCopy?: (text: string) => boolean;
 	permalinkContext?: PermalinkContext;
+	initialThreads?: ReviewThread[];
+	threadActions?: Parameters<typeof App>[0]["threadActions"];
+	openChapter?: boolean;
 } = {}) => {
 	const diffFiles = await loadPatch(PATCH);
 	const t = await testRender(
@@ -2272,11 +2281,13 @@ const renderExcerptChapter = async ({
 			permalinks={permalinkContext}
 			onCopy={onCopy}
 			onViewStateChange={onViewStateChange}
+			initialThreads={initialThreads}
+			threadActions={threadActions}
 		/>,
-		{ width: 130, height: 44 },
+		{ width: 130, height: 44, kittyKeyboard: true },
 	);
 	await t.renderOnce();
-	await nextChapter(t);
+	if (openChapter) await nextChapter(t);
 	return t;
 };
 
@@ -2432,4 +2443,149 @@ test("the file cursor steps onto an excerpt so the existing toggle key opens it"
 	await press(t, "RETURN");
 
 	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+});
+
+const excerptThread = ({
+	id,
+	startLine,
+	endLine,
+	body,
+}: {
+	id: string;
+	startLine: number;
+	endLine: number;
+	body: string;
+}): ReviewThread => ({
+	id,
+	runId: frozenContext.runId,
+	anchor: {
+		kind: THREAD_ANCHOR_KIND.EXCERPT,
+		filePath: CITATION.filePath,
+		startLine,
+		endLine,
+	},
+	status: THREAD_STATUS.OPEN,
+	createdAt: "2026-08-02T10:00:00.000Z",
+	messages: [
+		{
+			id: `${id.slice(0, -1)}9`,
+			author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Matt Reviewer" },
+			body,
+			createdAt: "2026-08-02T10:00:00.000Z",
+		},
+	],
+});
+
+test("Enter on a quoted selection starts a thread anchored to the excerpt, not to a hunk", async () => {
+	const created: ThreadAnchor[] = [];
+	const t = await renderExcerptChapter({
+		threadActions: {
+			create: (anchor, author, body) => {
+				created.push(anchor);
+				return {
+					...excerptThread({
+						id: "00000000-0000-4000-8000-000000000021",
+						startLine: 12,
+						endLine: 13,
+						body,
+					}),
+					anchor,
+					messages: [
+						{
+							id: "00000000-0000-4000-8000-000000000022",
+							author,
+							body,
+							createdAt: "2026-08-02T10:00:01.000Z",
+						},
+					],
+				};
+			},
+			reply: () => {
+				throw new Error("unused");
+			},
+			delete: () => {
+				throw new Error("unused");
+			},
+			deleteMessage: () => {
+				throw new Error("unused");
+			},
+			markDealt: () => {
+				throw new Error("unused");
+			},
+			reopen: () => {
+				throw new Error("unused");
+			},
+		},
+	});
+	await clickAction(t, "[▼ show");
+
+	const first = excerptGutter(t, "export class Transport {", "12");
+	const second = excerptGutter(t, "dispatch(request)", "13");
+	await act(async () => {
+		await t.mockMouse.drag(first.x, first.y, second.x, second.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain("New review thread");
+
+	await act(async () => t.mockInput.typeText("Does this caller still hold?"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+
+	// The load-bearing assertion: quoted code takes its own anchor kind. Borrowing oldStart 0
+	// would make it indistinguishable from a thread on a metadata review unit.
+	expect(created).toEqual([
+		{
+			kind: THREAD_ANCHOR_KIND.EXCERPT,
+			filePath: "src/lib/transport.ts",
+			startLine: 12,
+			endLine: 13,
+		},
+	]);
+	const settled = t.captureCharFrame();
+	expect(settled).not.toContain("New review thread");
+	expect(settled).toContain("Does this caller still hold?");
+	// The attachment marker slot in the excerpt gutter now carries the count.
+	const quotedRow = settled.split("\n")[excerptGutter(t, "dispatch(request)", "13").y] ?? "";
+	expect(quotedRow).toContain("13 1●");
+});
+
+test("excerpt threads list in the Comments surface, marked when the narrative stopped quoting them", async () => {
+	const t = await renderExcerptChapter({
+		openChapter: false,
+		initialThreads: [
+			excerptThread({
+				id: "00000000-0000-4000-8000-000000000031",
+				startLine: 12,
+				endLine: 12,
+				body: "Why does this stay synchronous?",
+			}),
+			excerptThread({
+				id: "00000000-0000-4000-8000-000000000032",
+				startLine: 90,
+				endLine: 90,
+				body: "Raised against a range the narrative dropped",
+			}),
+		],
+	});
+
+	await press(t, "o");
+	const list = t.captureCharFrame();
+
+	expect(list).toContain("src/lib/transport.ts:12");
+	expect(list).toContain("Why does this stay synchronous?");
+	// Kept and shown rather than pruned, and visibly distinguished from a live anchor.
+	expect(list).toContain("src/lib/transport.ts:90 · no longer quoted");
+	expect(list).toContain("Raised against a range the narrative dropped");
+
+	await press(t, "RETURN");
+	const chapterFrame = t.captureCharFrame();
+
+	expect(statusLine(t)).toContain("Ch 1/");
+	// Jumping opens the folded excerpt the thread hangs off, so the feedback is actually visible.
+	expect(chapterFrame).toContain("export class Transport {");
+	expect(chapterFrame).toContain("Why does this stay synchronous?");
 });

@@ -57,3 +57,19 @@ export const frozenExcerptFor = (
 	range: ExcerptRange,
 ): FrozenExcerpt | undefined =>
 	context?.excerpts.find((entry) => excerptKey(entry) === excerptKey(range));
+
+/**
+ * The frozen excerpt whose quoted lines contain this range. Thread anchors on quoted code
+ * resolve through here: a range is only anchorable while some pinned excerpt still covers it,
+ * and re-narrating at another depth can legitimately stop covering it.
+ */
+export const frozenExcerptContaining = (
+	context: RunContextFile | null,
+	range: ExcerptRange,
+): FrozenExcerpt | undefined =>
+	context?.excerpts.find(
+		(entry) =>
+			entry.filePath === range.filePath &&
+			entry.startLine <= range.startLine &&
+			range.endLine <= entry.endLine,
+	);

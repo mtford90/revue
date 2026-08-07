@@ -23,6 +23,7 @@ import {
 	excerptRangeLabel,
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	type ThreadAnchor,
 	type ThreadAuthor,
@@ -102,8 +103,11 @@ const EXPORT_HELP = `usage: revue export <run-directory>
                      [--prologue | --chapter-id <id> | --chapter-order <number>]
                      [--output <path>]`;
 const THREADS_HELP = `usage: revue threads list <run-directory> --json [--all]
-       revue threads create <run-directory> --file <path> --old-start <number>
+       revue threads create <run-directory> [--kind hunk] --file <path> --old-start <number>
                             --side additions|deletions --start-line <number> --end-line <number>
+                            --author <agent-name> (--body <text> | --body-file <path|->)
+       revue threads create <run-directory> --kind excerpt --file <path>
+                            --start-line <number> --end-line <number>
                             --author <agent-name> (--body <text> | --body-file <path|->)
        revue threads reply <run-directory> <thread-id> --author <agent-name>
                            (--body <text> | --body-file <path|->)
@@ -277,7 +281,7 @@ async function cmdExport(args: string[]): Promise<number> {
 
 	let threads: ReviewThread[];
 	try {
-		threads = loadValidatedThreads(defaultThreadsPath(parsed.directory), run);
+		threads = loadValidatedThreads(defaultThreadsPath(parsed.directory), run).threads;
 	} catch (error) {
 		if (error instanceof ThreadStoreError) {
 			process.stderr.write(`${error.message}\n`);
@@ -475,8 +479,44 @@ const threadBody = async (options: CommandOptions): Promise<string> => {
 const loadThreadCommand = async (directory: string) => {
 	const run = await loadReviewRun(directory);
 	const path = defaultThreadsPath(directory);
-	const threads = loadValidatedThreads(path, run);
-	return { run, store: openThreadStore(path, run.manifest.runId), threads };
+	const { threads, orphaned } = loadValidatedThreads(path, run);
+	return { run, store: openThreadStore(path, run.manifest.runId), threads, orphaned };
+};
+
+/**
+ * The anchor a `threads create` invocation names. A hunk anchor pins a review unit and a side; an
+ * excerpt anchor names quoted code, which has neither, so the two option sets are disjoint.
+ */
+const threadAnchorFrom = (options: CommandOptions): ThreadAnchor => {
+	const kind = options.values.get("--kind") ?? THREAD_ANCHOR_KIND.HUNK;
+	if (kind !== THREAD_ANCHOR_KIND.HUNK && kind !== THREAD_ANCHOR_KIND.EXCERPT) {
+		throw new Error("--kind must be hunk or excerpt");
+	}
+	if (kind === THREAD_ANCHOR_KIND.EXCERPT) {
+		for (const rejected of ["--old-start", "--side"]) {
+			if (options.values.has(rejected)) {
+				throw new Error(`${rejected} does not apply to an excerpt anchor`);
+			}
+		}
+		return {
+			kind,
+			filePath: requiredOption(options, "--file"),
+			startLine: integerOption(options, "--start-line"),
+			endLine: integerOption(options, "--end-line"),
+		};
+	}
+	const side = requiredOption(options, "--side");
+	if (side !== "additions" && side !== "deletions") {
+		throw new Error("--side must be additions or deletions");
+	}
+	return {
+		kind,
+		filePath: requiredOption(options, "--file"),
+		oldStart: integerOption(options, "--old-start", true),
+		side,
+		startLine: integerOption(options, "--start-line"),
+		endLine: integerOption(options, "--end-line"),
+	};
 };
 
 async function cmdThreads(args: string[], commandName = "threads"): Promise<number> {
@@ -493,17 +533,26 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 				throw new Error(`${commandName} list requires one run directory`);
 			}
 			if (!options.booleans.has("--json")) throw new Error(`${commandName} list requires --json`);
-			const { run, threads } = await loadThreadCommand(directory);
+			const { run, threads, orphaned } = await loadThreadCommand(directory);
 			const selected = threads.filter(
 				(thread) => options.booleans.has("--all") || thread.status === "open",
 			);
 			process.stdout.write(
-				`${JSON.stringify({ runId: run.manifest.runId, threads: selected }, null, 2)}\n`,
+				`${JSON.stringify(
+					{
+						runId: run.manifest.runId,
+						threads: selected,
+						orphaned: orphaned.map((entry) => ({ id: entry.thread.id, reason: entry.reason })),
+					},
+					null,
+					2,
+				)}\n`,
 			);
 			return 0;
 		}
 		if (operation === "create") {
 			const options = parseCommandOptions(rest, [
+				"--kind",
 				"--file",
 				"--old-start",
 				"--side",
@@ -517,22 +566,15 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 			if (!directory || options.positionals.length !== 1) {
 				throw new Error(`${commandName} create requires one run directory`);
 			}
-			const side = requiredOption(options, "--side");
-			if (side !== "additions" && side !== "deletions") {
-				throw new Error("--side must be additions or deletions");
-			}
-			const anchor: ThreadAnchor = {
-				filePath: requiredOption(options, "--file"),
-				oldStart: integerOption(options, "--old-start", true),
-				side,
-				startLine: integerOption(options, "--start-line"),
-				endLine: integerOption(options, "--end-line"),
-			};
+			const anchor = threadAnchorFrom(options);
 			const author = agentAuthor(options);
 			const body = await threadBody(options);
 			const { run, store } = await loadThreadCommand(directory);
 			const candidate = createThread(run.manifest.runId, anchor, author, body);
-			validateThreadsForRun(run, [candidate]);
+			const unanchored = validateThreadsForRun(run, [candidate])[0];
+			if (unanchored) {
+				throw new ThreadStoreError(`Cannot anchor a thread there: ${unanchored.reason}`);
+			}
 			const root = candidate.messages[0];
 			if (!root) throw new ThreadStoreError("A new thread requires a root message");
 			const thread = store.create(anchor, author, body, {
@@ -695,7 +737,7 @@ async function showRun(
 
 	let threads: ReviewThread[];
 	try {
-		threads = loadValidatedThreads(defaultThreadsPath(directory), run);
+		threads = loadValidatedThreads(defaultThreadsPath(directory), run).threads;
 	} catch (error) {
 		if (error instanceof ThreadStoreError) {
 			process.stderr.write(`${error.message}\n`);

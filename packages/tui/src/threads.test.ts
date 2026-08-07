@@ -1,22 +1,29 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
+	type ContextExcerpt,
+	type RevueChaptersFile,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	type ThreadAnchor,
 	threadStoreFileSchema,
 } from "@revue/types";
+import { loadReviewRun } from "./load.ts";
 import {
 	defaultThreadsPath,
+	loadValidatedThreads,
 	openThreadStore,
 	readThreadStoreFile,
 	resolveHumanAuthor,
+	ThreadStoreError,
 } from "./threads.ts";
 
 const anchor: ThreadAnchor = {
+	kind: THREAD_ANCHOR_KIND.HUNK,
 	filePath: "src/value.ts",
 	oldStart: 4,
 	side: "additions",
@@ -176,5 +183,99 @@ test("thread stores preserve duplicate anchors, authored replies, and lifecycle 
 		).toEqual([]);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+// ── Excerpt anchors against the frozen context ────────────────────────────
+const sampleRun = resolve(import.meta.dir, "../../../examples/sample-run");
+const CITED: ContextExcerpt = { filePath: "src/lib/apiClient.ts", startLine: 1, endLine: 3 };
+const QUOTED_LINES = ["export class ApiClient {", "  constructor() {}", "}"];
+
+/**
+ * A copy of the committed run narrated with one frozen citation, so re-narrating it is a matter
+ * of rewriting two files rather than of reaching for a fixture per scenario.
+ */
+const narratedRun = async (root: string, cited: ContextExcerpt[]) => {
+	const directory = join(root, "run");
+	if (!(await Bun.file(join(directory, "run.json")).exists())) {
+		await mkdir(join(root, ".git"), { recursive: true });
+		await cp(sampleRun, directory, { recursive: true });
+	}
+	const chapters = (await Bun.file(join(sampleRun, "chapters.json")).json()) as RevueChaptersFile;
+	await writeFile(
+		join(directory, "chapters.json"),
+		`${JSON.stringify({
+			...chapters,
+			chapters: chapters.chapters.map((chapter, index) =>
+				index === 0 ? { ...chapter, excerpts: cited } : chapter,
+			),
+		})}\n`,
+	);
+	const runId = (await Bun.file(join(directory, "run.json")).json()).runId as string;
+	await writeFile(
+		join(directory, "context.json"),
+		`${JSON.stringify({
+			runId,
+			source: { kind: "commit", revision: "0".repeat(40) },
+			excerpts: cited.map((excerpt) => ({
+				...excerpt,
+				lines: QUOTED_LINES,
+				fileSha256: "c".repeat(64),
+			})),
+			unresolved: [],
+		})}\n`,
+	);
+	return { directory, runId, threadsPath: join(root, ".revue", "threads.json") };
+};
+
+const excerptAnchor = (startLine: number, endLine: number): ThreadAnchor => ({
+	kind: THREAD_ANCHOR_KIND.EXCERPT,
+	filePath: CITED.filePath,
+	startLine,
+	endLine,
+});
+
+test("excerpt anchors resolve against the frozen context, and orphans neither throw nor vanish", async () => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-excerpt-threads-"));
+	try {
+		const { directory, runId, threadsPath } = await narratedRun(root, [CITED]);
+		const store = openThreadStore(threadsPath, runId);
+		const quoted = store.create(excerptAnchor(2, 3), agent, "Does this caller still hold?");
+		const outside = store.create(excerptAnchor(9, 9), agent, "Anchored past the quotation");
+
+		const narrated = await loadReviewRun(directory);
+		const loaded = loadValidatedThreads(threadsPath, narrated);
+
+		expect(loaded.threads.map((thread) => thread.id)).toEqual([quoted.id, outside.id]);
+		expect(loaded.orphaned.map((entry) => entry.thread.id)).toEqual([outside.id]);
+		expect(loaded.orphaned[0]?.reason).toContain("no frozen excerpt");
+
+		// Re-narrating at another depth drops the citation. That is narration changing, not
+		// corruption: the run must still load and the feedback must still be there.
+		await narratedRun(root, []);
+		const rezoomed = await loadReviewRun(directory);
+		const afterRezoom = loadValidatedThreads(threadsPath, rezoomed);
+
+		expect(afterRezoom.threads.map((thread) => thread.id)).toEqual([quoted.id, outside.id]);
+		expect(afterRezoom.orphaned.map((entry) => entry.thread.id)).toEqual([quoted.id, outside.id]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a corrupt hunk anchor still refuses to load", async () => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-hunk-anchor-"));
+	try {
+		const { directory, runId, threadsPath } = await narratedRun(root, [CITED]);
+		openThreadStore(threadsPath, runId).create(
+			{ ...anchor, filePath: "src/lib/backoff.ts", oldStart: 0, startLine: 999, endLine: 999 },
+			agent,
+			"Stale feedback",
+		);
+		const run = await loadReviewRun(directory);
+		expect(() => loadValidatedThreads(threadsPath, run)).toThrow(ThreadStoreError);
+		expect(() => loadValidatedThreads(threadsPath, run)).toThrow("outside that review unit");
+	} finally {
+		await rm(root, { recursive: true, force: true });
 	}
 });

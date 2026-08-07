@@ -1,4 +1,8 @@
-export { attachmentsForRow, type DiffInlineAttachment } from "./attachments.ts";
+export {
+	attachmentsForExcerptLine,
+	attachmentsForRow,
+	type DiffInlineAttachment,
+} from "./attachments.ts";
 export {
 	DiffBody,
 	type DiffBodyProps,

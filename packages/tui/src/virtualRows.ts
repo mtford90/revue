@@ -21,6 +21,7 @@ import {
 	planDiff,
 } from "@revue/diff";
 import {
+	attachmentsForExcerptLine,
 	attachmentsForRow,
 	type DiffInlineAttachment,
 	type ExpandDirection,
@@ -331,20 +332,42 @@ export type ViewportExcerpt = {
 	plan: ExcerptVisualPlan;
 };
 
-const excerptSegments = (excerpt: ViewportExcerpt): SegmentRows[] => [
+const excerptSegments = ({
+	excerpt,
+	attachments,
+	attachmentHeight,
+}: {
+	excerpt: ViewportExcerpt;
+	attachments: readonly DiffInlineAttachment[];
+	attachmentHeight: (id: string) => number;
+}): SegmentRows[] => [
 	{ id: excerptPadSegmentId(excerpt.key), heights: [1] },
-	{ id: excerptSegmentId(excerpt.key), heights: excerpt.plan.rows.map((row) => row.height) },
+	{
+		id: excerptSegmentId(excerpt.key),
+		heights: excerpt.plan.rows.map((row) => {
+			if (row.type !== "excerpt-line") return row.height;
+			const attached = attachmentsForExcerptLine({
+				filePath: row.filePath,
+				lineNumber: row.lineNumber,
+				attachments,
+			});
+			return row.height + attached.reduce((sum, entry) => sum + attachmentHeight(entry.id), 0);
+		}),
+	},
 ];
 
 export const viewportSegments = ({
 	files,
 	excerpts = [],
 	attachments,
+	excerptAttachments = [],
 	attachmentHeight,
 }: {
 	files: readonly PlannedViewportFile[];
 	excerpts?: readonly ViewportExcerpt[];
 	attachments: readonly DiffInlineAttachment[];
+	/** Threads on quoted code, matched against excerpt rows rather than diff rows. */
+	excerptAttachments?: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
 }): SegmentRows[] => {
 	const segments: SegmentRows[] = [];
@@ -353,7 +376,9 @@ export const viewportSegments = ({
 		for (const excerpt of excerpts) {
 			if (excerpt.after !== path || placed.has(excerpt.key)) continue;
 			placed.add(excerpt.key);
-			segments.push(...excerptSegments(excerpt));
+			segments.push(
+				...excerptSegments({ excerpt, attachments: excerptAttachments, attachmentHeight }),
+			);
 		}
 	};
 	placeAfter(null);
@@ -379,7 +404,11 @@ export const viewportSegments = ({
 	}
 	// An excerpt whose anchor is not on screen still belongs to the chapter, so it closes it.
 	for (const excerpt of excerpts) {
-		if (!placed.has(excerpt.key)) segments.push(...excerptSegments(excerpt));
+		if (!placed.has(excerpt.key)) {
+			segments.push(
+				...excerptSegments({ excerpt, attachments: excerptAttachments, attachmentHeight }),
+			);
+		}
 	}
 	return segments;
 };

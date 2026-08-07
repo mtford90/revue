@@ -24,7 +24,11 @@ import {
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
-import { attachmentsForRow, type DiffInlineAttachment } from "./attachments.ts";
+import {
+	attachmentsForExcerptLine,
+	attachmentsForRow,
+	type DiffInlineAttachment,
+} from "./attachments.ts";
 import { decorationAnchorId } from "./ids.ts";
 import { diffLineId } from "./selectionIds.ts";
 import { diffPlanStyles, OPENTUI_DIFF_CHROME } from "./styles.ts";
@@ -831,7 +835,9 @@ export function ExcerptBlock({
 	theme,
 	focused = false,
 	window: rowWindow,
+	inlineAttachments = EMPTY_ATTACHMENTS,
 	onToggle,
+	onAttachmentNode,
 	selectedRange,
 	onRangeSelect,
 	onRangeContextMenu,
@@ -841,7 +847,10 @@ export function ExcerptBlock({
 	/** The block, not a row: excerpt rows have no focus marker to carry it. */
 	focused?: boolean;
 	window?: { start: number; end: number };
+	/** Threads anchored to quoted lines, kept apart from the diff's own attachment list. */
+	inlineAttachments?: readonly DiffInlineAttachment[];
 	onToggle?: (key: string) => void;
+	onAttachmentNode?: (id: string, node: { height: number } | null) => void;
 }) {
 	const { chrome, digits } = plan;
 	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
@@ -927,6 +936,11 @@ export function ExcerptBlock({
 						displayedRange.startLine <= range.startLine &&
 						range.endLine <= displayedRange.endLine,
 				);
+				const attachments = attachmentsForExcerptLine({
+					filePath: row.filePath,
+					lineNumber: row.lineNumber,
+					attachments: inlineAttachments,
+				});
 				return (
 					<box key={row.key} width="100%" flexDirection="column">
 						{row.visualRows.map(({ continuationIndex, spans }) => (
@@ -954,7 +968,7 @@ export function ExcerptBlock({
 									{continuationIndex === 0
 										? lineNumber(row.lineNumber, digits)
 										: lineNumber(undefined, digits)}
-									{attachmentMarker(0)}
+									{attachmentMarker(continuationIndex === 0 ? attachments.length : 0)}
 								</text>
 								<text flexShrink={0} fg={theme.text} wrapMode="none" selectable={false}>
 									{" ".repeat(chrome.sign)}
@@ -970,6 +984,17 @@ export function ExcerptBlock({
 								>
 									<CellContent spans={spans} theme={theme} />
 								</text>
+							</box>
+						))}
+						{attachments.map((attachment) => (
+							<box
+								key={attachment.id}
+								id={attachment.id}
+								width="100%"
+								flexDirection="column"
+								ref={(node) => onAttachmentNode?.(attachment.id, node)}
+							>
+								{attachment.content}
 							</box>
 						))}
 					</box>

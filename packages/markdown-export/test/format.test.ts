@@ -4,6 +4,7 @@ import {
 	RUN_FILE_STATUS,
 	RUN_OBJECT_KIND,
 	type RunFile,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	viewStateFileId,
@@ -110,6 +111,7 @@ test("threads retain duplicate anchors, authored replies, status, and chapter sc
 	const firstId = "00000000-0000-4000-8000-000000000001";
 	const secondId = "00000000-0000-4000-8000-000000000002";
 	const sharedAnchor = {
+		kind: THREAD_ANCHOR_KIND.HUNK,
 		filePath: "src/core.ts",
 		oldStart: 1,
 		side: "additions" as const,
@@ -177,6 +179,63 @@ test("threads retain duplicate anchors, authored replies, status, and chapter sc
 		threads,
 	});
 	expect(later).not.toContain("Review threads");
+});
+
+test("excerpt threads export under the chapter that quotes them, orphans under their own heading", () => {
+	const quoted = {
+		...review,
+		chapters: {
+			...chapters,
+			chapters: chapters.chapters.map((chapter) =>
+				chapter.id === "foundation"
+					? {
+							...chapter,
+							excerpts: [{ filePath: "src/api/client.ts", startLine: 118, endLine: 140 }],
+						}
+					: chapter,
+			),
+		},
+	};
+	const excerptThread = (id: string, startLine: number, endLine: number) => ({
+		id,
+		runId: review.runId,
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.EXCERPT,
+			filePath: "src/api/client.ts",
+			startLine,
+			endLine,
+		},
+		status: THREAD_STATUS.OPEN,
+		createdAt: "2026-08-02T10:00:00.000Z",
+		messages: [
+			{
+				id: `${id.slice(0, -1)}9`,
+				author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada Reviewer" },
+				body: `Question about ${startLine}`,
+				createdAt: "2026-08-02T10:00:00.000Z",
+			},
+		],
+	});
+	const placed = excerptThread("00000000-0000-4000-8000-000000000001", 120, 121);
+	const orphan = excerptThread("00000000-0000-4000-8000-000000000002", 400, 400);
+
+	const markdown = formatMarkdownReview(quoted, { threads: [placed, orphan] });
+
+	const foundation = markdown.slice(
+		markdown.indexOf("## Chapter 1"),
+		markdown.indexOf("## Chapter 2"),
+	);
+	expect(foundation).toContain("### Review threads");
+	expect(foundation).toContain("- Anchor: `src/api/client.ts` — quoted context lines 120-121");
+	expect(foundation).toContain("> Question about 120");
+	// The narrative stopped quoting line 400, so the thread is reported rather than dropped.
+	expect(foundation).not.toContain("Question about 400");
+	expect(markdown).toContain("## Orphaned threads");
+	expect(markdown.slice(markdown.indexOf("## Orphaned threads"))).toContain(
+		"- Anchor: `src/api/client.ts` — quoted context line 400",
+	);
+	// A run whose narration still covers everything reads exactly as before.
+	expect(formatMarkdownReview(quoted, { threads: [placed] })).not.toContain("Orphaned threads");
 });
 
 test("an interlude exports as prose with no file section", () => {
@@ -272,9 +331,10 @@ test("prologue and chapter selections remain self-contained", () => {
 				id: "00000000-0000-4000-8000-000000000003",
 				runId: review.runId,
 				anchor: {
+					kind: THREAD_ANCHOR_KIND.HUNK,
 					filePath: "src/core.ts",
 					oldStart: 1,
-					side: "additions",
+					side: "additions" as const,
 					startLine: 4,
 					endLine: 4,
 				},

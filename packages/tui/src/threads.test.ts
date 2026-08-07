@@ -240,8 +240,13 @@ test("excerpt anchors resolve against the frozen context, and orphans neither th
 	try {
 		const { directory, runId, threadsPath } = await narratedRun(root, [CITED]);
 		const store = openThreadStore(threadsPath, runId);
-		const quoted = store.create(excerptAnchor(2, 3), agent, "Does this caller still hold?");
-		const outside = store.create(excerptAnchor(9, 9), agent, "Anchored past the quotation");
+		// Pinned creation times, because same-millisecond threads otherwise sort by random UUID.
+		const quoted = store.create(excerptAnchor(2, 3), agent, "Does this caller still hold?", {
+			createdAt: "2026-08-07T10:00:00.000Z",
+		});
+		const outside = store.create(excerptAnchor(9, 9), agent, "Anchored past the quotation", {
+			createdAt: "2026-08-07T10:00:01.000Z",
+		});
 
 		const narrated = await loadReviewRun(directory);
 		const loaded = loadValidatedThreads(threadsPath, narrated);

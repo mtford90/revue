@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { toPierreMetadata } from "./model.ts";
 import type { DiffFile, RenderSpan } from "./types.ts";
 
@@ -85,11 +85,19 @@ const engine = (): SyntaxBackend | "auto" => {
 
 const nativeCandidates = () => {
 	const executableDirectory = dirname(process.execPath);
-	return [
-		join(executableDirectory, "revuediff-highlighter.node"),
-		join(executableDirectory, "revue-highlighter.node"),
-		join(import.meta.dir, "../native/target/release/revue_highlighter.node"),
-	];
+	const executable = basename(process.execPath).replace(/\.exe$/i, "");
+	const addon =
+		executable === "revuediff"
+			? "revuediff-highlighter.node"
+			: executable === "revue"
+				? "revue-highlighter.node"
+				: undefined;
+	if (addon) return [join(executableDirectory, addon)];
+	// Bun source execution has its runtime named "bun"; compiled products retain
+	// their product name. Never let an unrecognised executable reach a checkout.
+	return executable === "bun"
+		? [join(import.meta.dir, "../native/target/release/revue_highlighter.node")]
+		: [];
 };
 
 const loadNative = (): NativeHighlighter | null => {

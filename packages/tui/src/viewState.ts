@@ -105,6 +105,9 @@ const ReviewPageStateSchema = z.object({
 	selectedHunk: z.number().int().nonnegative(),
 	selectedKeyChange: z.number().int().nonnegative(),
 	collapsedFiles: z.array(z.string()),
+	// Excerpts are scenery, so their default is folded and the session records only the ones
+	// the reviewer opened. An older saved page simply restores every excerpt folded.
+	openExcerpts: z.array(z.string()).default([]),
 	scrollTop: z.number().nonnegative(),
 	panelScrollTop: z.number().nonnegative(),
 });

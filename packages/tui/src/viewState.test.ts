@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Chapter } from "@revue/types";
@@ -98,6 +98,7 @@ test("file store round-trips review progress and session position per run key", 
 				selectedHunk: 1,
 				selectedKeyChange: 3,
 				collapsedFiles: ["src/a.ts"],
+				openExcerpts: ['["src/api/client.ts",118,140]'],
 				scrollTop: 27,
 				panelScrollTop: 4,
 			},
@@ -119,6 +120,7 @@ test("file store round-trips review progress and session position per run key", 
 				selectedHunk: 1,
 				selectedKeyChange: 3,
 				collapsedFiles: ["src/a.ts"],
+				openExcerpts: ['["src/api/client.ts",118,140]'],
 				scrollTop: 27,
 				panelScrollTop: 4,
 			},
@@ -150,4 +152,37 @@ test("a chapterless run keys on the snapshot alone and seeds its later narration
 	upgraded.set({ chapters: ["c1"], files: [], keyChanges: [] });
 	const reopened = await openRunStateStore(path, "run-a", narrated);
 	expect(reopened.get()).toEqual({ chapters: ["c1"], files: [], keyChanges: [] });
+});
+
+test("a session saved before excerpts existed restores every excerpt folded", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "revue-vs-"));
+	tmpDirs.push(dir);
+	const path = join(dir, "state.json");
+	await writeFile(
+		path,
+		JSON.stringify({
+			runA: {
+				chapters: [],
+				files: [],
+				keyChanges: [],
+				session: {
+					pageId: "c1",
+					pages: {
+						c1: {
+							selectedFile: 0,
+							selectedHunk: 0,
+							selectedKeyChange: 0,
+							collapsedFiles: [],
+							scrollTop: 0,
+							panelScrollTop: 0,
+						},
+					},
+				},
+			},
+		}),
+	);
+
+	const store = await openFileStore(path, "runA");
+
+	expect(store.getSession().pages.c1?.openExcerpts).toEqual([]);
 });

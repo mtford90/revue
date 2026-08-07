@@ -16,6 +16,7 @@ import {
 	type DiffSide,
 	type DiffVisualPlan,
 	diffStructure,
+	type ExcerptVisualPlan,
 	measureDiff,
 	planDiff,
 } from "@revue/diff";
@@ -130,6 +131,8 @@ export const separatorSegmentId = (path: string) => `sep:${path}`;
 export const headerSegmentId = (path: string) => `head:${path}`;
 export const notesSegmentId = (path: string) => `notes:${path}`;
 export const bodySegmentId = (path: string) => `body:${path}`;
+export const excerptPadSegmentId = (key: string) => `excpad:${key}`;
+export const excerptSegmentId = (key: string) => `exc:${key}`;
 export const segmentKind = (id: string) => id.slice(0, id.indexOf(":"));
 export const segmentPath = (id: string) => id.slice(id.indexOf(":") + 1);
 
@@ -316,16 +319,44 @@ export const attachmentRowIndex = (file: PlannedViewportFile, anchor: DiffLineRa
 	);
 };
 
+/**
+ * A quoted excerpt placed in narration order: it follows one file's section rather than being
+ * pinned to the end of the chapter. Its plan already carries the fold, so a folded excerpt
+ * occupies exactly one planned row here.
+ */
+export type ViewportExcerpt = {
+	key: string;
+	/** The file section this excerpt follows, or null to sit above the first one. */
+	after: string | null;
+	plan: ExcerptVisualPlan;
+};
+
+const excerptSegments = (excerpt: ViewportExcerpt): SegmentRows[] => [
+	{ id: excerptPadSegmentId(excerpt.key), heights: [1] },
+	{ id: excerptSegmentId(excerpt.key), heights: excerpt.plan.rows.map((row) => row.height) },
+];
+
 export const viewportSegments = ({
 	files,
+	excerpts = [],
 	attachments,
 	attachmentHeight,
 }: {
 	files: readonly PlannedViewportFile[];
+	excerpts?: readonly ViewportExcerpt[];
 	attachments: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
 }): SegmentRows[] => {
 	const segments: SegmentRows[] = [];
+	const placed = new Set<string>();
+	const placeAfter = (path: string | null) => {
+		for (const excerpt of excerpts) {
+			if (excerpt.after !== path || placed.has(excerpt.key)) continue;
+			placed.add(excerpt.key);
+			segments.push(...excerptSegments(excerpt));
+		}
+	};
+	placeAfter(null);
 	for (const file of files) {
 		if (file.leadingBlank) segments.push({ id: padSegmentId(file.path), heights: [1] });
 		if (file.separator) segments.push({ id: separatorSegmentId(file.path), heights: [1] });
@@ -344,6 +375,11 @@ export const viewportSegments = ({
 				});
 			}
 		}
+		placeAfter(file.path);
+	}
+	// An excerpt whose anchor is not on screen still belongs to the chapter, so it closes it.
+	for (const excerpt of excerpts) {
+		if (!placed.has(excerpt.key)) segments.push(...excerptSegments(excerpt));
 	}
 	return segments;
 };

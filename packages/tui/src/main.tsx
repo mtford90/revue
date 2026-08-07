@@ -750,6 +750,7 @@ async function showRun(
 		return promise;
 	};
 	await runApp(run.chapters, {
+		context: run.context,
 		diffFiles,
 		syntaxWarning,
 		loadSemanticDiff: () => generateSemanticDiff(run),

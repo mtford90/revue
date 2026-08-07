@@ -7,6 +7,7 @@ import {
 	type ReviewThread,
 	type RevueChaptersFile,
 	RevueChaptersFileSchema,
+	type RunContextFile,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	type ThreadAnchor,
@@ -379,6 +380,7 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 				selectedHunk: 0,
 				selectedKeyChange: 0,
 				collapsedFiles: ["src/lib/apiClient.ts"],
+				openExcerpts: [],
 				scrollTop: 0,
 				panelScrollTop: 0,
 			},
@@ -415,6 +417,7 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 		pages: {
 			"chapter-2": {
 				collapsedFiles: ["src/lib/apiClient.ts"],
+				openExcerpts: [],
 				scrollTop: expect.any(Number),
 			},
 		},
@@ -812,6 +815,7 @@ ${additions}
 						selectedHunk: 0,
 						selectedKeyChange: 0,
 						collapsedFiles: [],
+						openExcerpts: [],
 						scrollTop: 16,
 						panelScrollTop: 0,
 					},
@@ -2207,4 +2211,110 @@ test("an interlude's prose yanks and references like any other chapter summary",
 
 	expect(copied).toEqual(["Ch 4 · Why the migration is staged\n> regresses"]);
 	expect(t.captureCharFrame()).toContain("Copied narration · Ch 4");
+});
+
+const CITATION = {
+	filePath: "src/lib/transport.ts",
+	startLine: 12,
+	endLine: 14,
+	caption: "the caller this change has to satisfy",
+};
+
+const withExcerpt: RevueChaptersFile = {
+	...file,
+	chapters: file.chapters.map((chapter) =>
+		chapter.id === "chapter-1" ? { ...chapter, excerpts: [CITATION] } : chapter,
+	),
+};
+
+/** What `revue context freeze` pinned for that citation; the TUI never re-reads the file. */
+const frozenContext: RunContextFile = {
+	runId: "a".repeat(64),
+	source: { kind: "commit", revision: "0123456789abcdef0123456789abcdef01234567" },
+	excerpts: [
+		{
+			filePath: CITATION.filePath,
+			startLine: CITATION.startLine,
+			endLine: CITATION.endLine,
+			lines: ["export class Transport {", "  dispatch(request) {}", "}"],
+			fileSha256: "b".repeat(64),
+		},
+	],
+	unresolved: [],
+};
+
+const FOLDED_BAND = "⋯  context · src/lib/transport.ts 12–14  [▼ show 3 lines]";
+
+/** Click a bracketed excerpt action wherever the current frame happens to place it. */
+const clickAction = async (t: Awaited<ReturnType<typeof testRender>>, marker: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const row = lines.findIndex((line) => line.includes(marker));
+	if (row < 0) throw new Error(`no row shows ${marker}`);
+	await click(t, (lines[row] ?? "").indexOf(marker) + 2, row);
+};
+
+const renderExcerptChapter = async (onViewStateChange?: (next: ViewState) => void) => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App
+			file={withExcerpt}
+			context={frozenContext}
+			diffFiles={diffFiles}
+			onViewStateChange={onViewStateChange}
+		/>,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	return t;
+};
+
+test("a cited excerpt is folded scenery that contributes nothing to review progress", async () => {
+	const seen: ViewState[] = [];
+	const t = await renderExcerptChapter((next) => seen.push(next));
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain(FOLDED_BAND);
+	expect(frame).not.toContain("[▲ hide]");
+	expect(frame).not.toContain("export class Transport");
+	// The quoted file is neither a reviewable file nor a checkbox anywhere.
+	expect(frame).toContain("0/3 files");
+	expect(frame).not.toContain("[ ] src/lib/transport.ts");
+
+	await press(t, "x");
+
+	expect(seen.at(-1)?.files).toEqual(["chapter-1::src/lib/backoff.ts"]);
+	expect(t.captureCharFrame()).toContain("1/3 files");
+});
+
+test("clicking the band opens the excerpt in place, caption above its header", async () => {
+	const t = await renderExcerptChapter();
+
+	await clickAction(t, "[▼ show");
+	const opened = t.captureCharFrame().split("\n");
+	const captionRow = opened.findIndex((line) => line.includes("the caller this change"));
+	const headerRow = opened.findIndex((line) => line.includes("context · src/lib/transport.ts"));
+
+	expect(opened.join("\n")).toContain("[▲ hide]");
+	expect(opened.join("\n")).toContain("export class Transport {");
+	expect(opened.join("\n")).toContain("  dispatch(request) {}");
+	expect(captionRow).toBeGreaterThanOrEqual(0);
+	expect(captionRow).toBe(headerRow - 1);
+
+	await clickAction(t, "[▲ hide]");
+
+	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+});
+
+test("the file cursor steps onto an excerpt so the existing toggle key opens it", async () => {
+	const t = await renderExcerptChapter();
+
+	await press(t, "TAB"); // off the chapter's only file, onto the excerpt that follows it
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain("export class Transport {");
+
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
 });

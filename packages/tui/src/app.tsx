@@ -17,8 +17,10 @@ import {
 	type DiffLineRange,
 	type DiffSide,
 	type DiffVisualPlan,
+	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	parsePatch,
+	planExcerpt,
 	prepareSyntaxHighlighting,
 	type RangeDecoration,
 	type SpanEmphasis,
@@ -30,6 +32,7 @@ import {
 	type DiffInlineAttachment,
 	decorationAnchorId,
 	diffRangeWithin,
+	ExcerptBlock,
 	type ExpandDirection,
 	OPENTUI_DIFF_CHROME,
 } from "@revue/diff-opentui";
@@ -42,12 +45,16 @@ import {
 } from "@revue/theme";
 import {
 	type Chapter,
+	type ContextExcerpt,
 	emptyViewState,
+	excerptKey,
+	frozenExcerptFor,
 	narratedUnitCount,
 	type Prologue,
 	partialDepthLabel,
 	type ReviewThread,
 	type RevueChaptersFile,
+	type RunContextFile,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	type ThreadAnchor,
@@ -140,6 +147,7 @@ import {
 	attachmentRowIndex,
 	bodySegmentId,
 	ESTIMATED_ATTACHMENT_HEIGHT,
+	excerptSegmentId,
 	headerSegmentId,
 	OVERSCAN_ROWS,
 	type PlannedViewportFile,
@@ -150,6 +158,7 @@ import {
 	segmentKind,
 	segmentOffset,
 	segmentPath,
+	type ViewportExcerpt,
 	type ViewportFile,
 	viewportSegments,
 	type WindowPlanItem,
@@ -290,9 +299,31 @@ const emptyReviewPageState = () => ({
 	selectedHunk: 0,
 	selectedKeyChange: 0,
 	collapsedFiles: [] as string[],
+	openExcerpts: [] as string[],
 	scrollTop: 0,
 	panelScrollTop: 0,
 });
+
+/**
+ * Excerpts sit in narration order rather than being pinned to the end of a chapter: the nth
+ * citation follows the nth file section, and any citation past the last file closes the chapter.
+ * A chapter with no files — an interlude — leads with them.
+ */
+const excerptAnchor = (paths: readonly string[], index: number): string | null =>
+	paths.length ? (paths[Math.min(index, paths.length - 1)] ?? null) : null;
+
+type ChapterFocusTarget = { kind: "file"; index: number } | { kind: "excerpt"; key: string };
+
+/** Distinct citations in declared order; a repeated range is one block, opened once. */
+const distinctExcerpts = (chapter: Chapter): { key: string; excerpt: ContextExcerpt }[] => {
+	const seen = new Set<string>();
+	return chapter.excerpts.flatMap((excerpt) => {
+		const key = excerptKey(excerpt);
+		if (seen.has(key)) return [];
+		seen.add(key);
+		return [{ key, excerpt }];
+	});
+};
 
 const pageRowId = (index: number) => `page-index-row:${index}`;
 
@@ -1640,6 +1671,8 @@ function ChapterView({
 	diffFiles,
 	visibleDiffFiles,
 	bodyPlans,
+	excerpts,
+	focusedExcerpt,
 	windowPlan,
 	width,
 	vs,
@@ -1655,6 +1688,7 @@ function ChapterView({
 	contextExpansion,
 	onAttachmentNode,
 	onSelectFile,
+	onToggleExcerpt,
 	onToggleCollapse,
 	onToggleFileReview,
 	onSelectThreadRange,
@@ -1669,6 +1703,8 @@ function ChapterView({
 	diffFiles: DiffFile[] | null;
 	visibleDiffFiles: ChapterDiffFile[];
 	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
+	excerpts: readonly ViewportExcerpt[];
+	focusedExcerpt: string | null;
 	windowPlan: WindowPlanItem[];
 	width: number;
 	vs: ViewState;
@@ -1684,6 +1720,7 @@ function ChapterView({
 	contextExpansion?: ContextExpansionUi;
 	onAttachmentNode: (id: string, node: { height: number } | null) => void;
 	onSelectFile: (index: number) => void;
+	onToggleExcerpt: (key: string) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
 	onSelectThreadRange: (range: DiffLineRange) => void;
@@ -1749,9 +1786,26 @@ function ChapterView({
 					return <box key={`gap:${planIndex}`} height={item.height} flexShrink={0} width="100%" />;
 				}
 				const path = segmentPath(item.id);
+				const kind = segmentKind(item.id);
+				if (kind === "excpad") {
+					return <box key={item.id} height={1} flexShrink={0} width="100%" />;
+				}
+				if (kind === "exc") {
+					const excerpt = excerpts.find((candidate) => candidate.key === path);
+					if (!excerpt) return null;
+					return (
+						<ExcerptBlock
+							key={item.id}
+							plan={excerpt.plan}
+							theme={diffTheme}
+							focused={focusedExcerpt === excerpt.key}
+							window={item.window}
+							onToggle={onToggleExcerpt}
+						/>
+					);
+				}
 				const diffFile = filesByPath.get(path);
 				if (!diffFile) return null;
-				const kind = segmentKind(item.id);
 				const fileIndex = paths.indexOf(path);
 				const focused = fileIndex === selectedFile;
 				if (kind === "sep") {
@@ -2392,6 +2446,7 @@ const diffRangeForThread = (thread: ReviewThread): DiffLineRange => ({
 
 export function App({
 	file,
+	context = null,
 	diffFiles = null,
 	loadSemanticDiff,
 	loadFileLines,
@@ -2419,6 +2474,8 @@ export function App({
 }: {
 	/** Null for a chapterless run: the review opens straight onto the All files page. */
 	file: RevueChaptersFile | null;
+	/** Frozen quotations for the narration's excerpt citations; null until `context freeze` runs. */
+	context?: RunContextFile | null;
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 	/** The pinned new-side blob for a path, split into lines; null when unavailable. */
@@ -2510,6 +2567,11 @@ export function App({
 	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
 		() => new Set(initialPageState.collapsedFiles),
 	);
+	const [openExcerpts, setOpenExcerpts] = useState<Set<string>>(
+		() => new Set(initialPageState.openExcerpts),
+	);
+	/** The excerpt the file cursor has stepped onto; excerpt rows carry no focus marker. */
+	const [focusedExcerpt, setFocusedExcerpt] = useState<string | null>(null);
 	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
 	const [expansions, setExpansions] = useState<Map<string, FileExpansion>>(() => new Map());
 	const [expandedVariants, setExpandedVariants] = useState<Map<string, DiffFile>>(() => new Map());
@@ -2673,6 +2735,52 @@ export function App({
 			diffFiles,
 		],
 	);
+	// Quoted code comes from the frozen context, never re-resolved from Git; a citation nothing
+	// was frozen for simply does not appear.
+	const chapterExcerpts = useMemo<ViewportExcerpt[]>(() => {
+		if (!chapter || viewMode !== "patch") return [];
+		const paths = viewportFiles.map((entry) => entry.path);
+		return distinctExcerpts(chapter).flatMap(({ key, excerpt }, index) => {
+			const frozen = frozenExcerptFor(context, excerpt);
+			if (!frozen) return [];
+			const quotation: ExcerptQuotation = { ...excerpt, lines: frozen.lines };
+			return [
+				{
+					key,
+					after: excerptAnchor(paths, index),
+					plan: planExcerpt({
+						key,
+						quotation,
+						folded: !openExcerpts.has(key),
+						width: contentWidth,
+						chrome: OPENTUI_DIFF_CHROME,
+					}),
+				},
+			];
+		});
+	}, [chapter, context, viewMode, viewportFiles, openExcerpts, contentWidth]);
+	/**
+	 * What the file cursor steps through, in narration order. An excerpt is a stop on that walk
+	 * so `toggle-file-diff` can open it, which is why folding needs no shortcut of its own.
+	 */
+	const focusTargets = useMemo<ChapterFocusTarget[]>(() => {
+		const paths = chapter ? chapterFilePaths(chapter) : [];
+		const anchored = new Set(paths);
+		const excerptsAfter = (path: string | null): ChapterFocusTarget[] =>
+			chapterExcerpts
+				.filter((entry) => entry.after === path)
+				.map((entry) => ({ kind: "excerpt", key: entry.key }));
+		return [
+			...excerptsAfter(null),
+			...paths.flatMap((path, index): ChapterFocusTarget[] => [
+				{ kind: "file", index },
+				...excerptsAfter(path),
+			]),
+			...chapterExcerpts
+				.filter((entry) => entry.after !== null && !anchored.has(entry.after))
+				.map((entry): ChapterFocusTarget => ({ kind: "excerpt", key: entry.key })),
+		];
+	}, [chapter, chapterExcerpts]);
 	const chapterThreadList = useMemo(() => {
 		if (!chapter) return [];
 		if (viewMode === "semantic") {
@@ -2731,10 +2839,11 @@ export function App({
 		() =>
 			viewportSegments({
 				files: plannedViewportFiles,
+				excerpts: chapterExcerpts,
 				attachments: attachmentAnchors,
 				attachmentHeight: (id) => attachmentHeights.get(id) ?? ESTIMATED_ATTACHMENT_HEIGHT,
 			}),
-		[plannedViewportFiles, attachmentAnchors, attachmentHeights],
+		[plannedViewportFiles, chapterExcerpts, attachmentAnchors, attachmentHeights],
 	);
 	const windowPlan = useMemo(
 		() =>
@@ -2835,6 +2944,7 @@ export function App({
 					selectedHunk: selectedHunkIndex,
 					selectedKeyChange,
 					collapsedFiles: [...collapsedFiles],
+					openExcerpts: [...openExcerpts],
 					scrollTop: pageScroll.current?.scrollTop ?? 0,
 					panelScrollTop: panelScroll.current?.scrollTop ?? 0,
 				},
@@ -2914,8 +3024,13 @@ export function App({
 	useEffect(() => {
 		if (!chapter || fileFocusRequest === 0) return;
 		const path = chapterFilePaths(chapter)[selectedFile];
-		if (path !== undefined) {
-			const offset = segmentOffset(chapterSegmentsRef.current, headerSegmentId(path));
+		const segment = focusedExcerpt
+			? excerptSegmentId(focusedExcerpt)
+			: path !== undefined
+				? headerSegmentId(path)
+				: null;
+		if (segment !== null) {
+			const offset = segmentOffset(chapterSegmentsRef.current, segment);
 			if (offset !== null) {
 				revealContentOffset({
 					scroll: pageScroll.current,
@@ -2924,6 +3039,7 @@ export function App({
 				});
 			}
 		}
+		if (focusedExcerpt) return;
 		const anchorFocusedFile = () =>
 			pageScroll.current?.scrollChildIntoView(fileHeaderId(chapter.id, selectedFile));
 		const retry = setTimeout(anchorFocusedFile, 50);
@@ -2932,7 +3048,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [chapter, selectedFile, fileFocusRequest]);
+	}, [chapter, selectedFile, focusedExcerpt, fileFocusRequest]);
 
 	useEffect(() => {
 		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
@@ -3229,6 +3345,8 @@ export function App({
 		setSelectedHunkIndex(restored.selectedHunk);
 		setSelectedKeyChange(restored.selectedKeyChange);
 		setCollapsedFiles(new Set(restored.collapsedFiles));
+		setOpenExcerpts(new Set(restored.openExcerpts));
+		setFocusedExcerpt(null);
 		setExpansions(new Map());
 		setExpandedVariants(new Map());
 		setFileFocusRequest(0);
@@ -3390,10 +3508,20 @@ export function App({
 		if (!chapter) return;
 		const paths = chapterFilePaths(chapter);
 		if (index >= 0 && index < paths.length) {
+			setFocusedExcerpt(null);
 			setSelectedFile(index);
 			setSelectedHunkIndex(0);
 			requestFileFocus();
 		}
+	}
+	function toggleExcerpt(key: string) {
+		setOpenExcerpts((current) => {
+			const next = new Set(current);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+		setFocusedExcerpt(key);
 	}
 	function toggleCollapsedFile(path: string) {
 		setCollapsedFiles((currentCollapsed) => {
@@ -3942,15 +4070,32 @@ export function App({
 			case "scroll-top":
 				pageScroll.current?.scrollTo(0);
 				break;
-			case "focus-file":
-				if (paths.length) {
-					const delta = key.shift ? -1 : 1;
-					setSelectedFile((selected) => (selected + delta + paths.length) % paths.length);
-					requestFileFocus();
-				}
+			case "focus-file": {
+				if (!focusTargets.length) break;
+				const delta = key.shift ? -1 : 1;
+				const at = focusedExcerpt
+					? focusTargets.findIndex(
+							(target) => target.kind === "excerpt" && target.key === focusedExcerpt,
+						)
+					: focusTargets.findIndex(
+							(target) => target.kind === "file" && target.index === selectedFile,
+						);
+				const next =
+					focusTargets[(Math.max(0, at) + delta + focusTargets.length) % focusTargets.length];
+				if (!next) break;
+				if (next.kind === "file") {
+					setFocusedExcerpt(null);
+					setSelectedFile(next.index);
+				} else setFocusedExcerpt(next.key);
+				requestFileFocus();
 				break;
+			}
 			case "toggle-file-diff": {
 				if (!chapter) break;
+				if (focusedExcerpt) {
+					toggleExcerpt(focusedExcerpt);
+					break;
+				}
 				const path = paths[selectedFile];
 				if (path) toggleCollapsedFile(path);
 				break;
@@ -4168,10 +4313,13 @@ export function App({
 									diffFiles={diffFiles}
 									visibleDiffFiles={visibleChapterFiles}
 									bodyPlans={bodyPlans}
+									excerpts={chapterExcerpts}
+									focusedExcerpt={focusedExcerpt}
 									windowPlan={windowPlan}
 									width={contentWidth}
 									contextExpansion={contextExpansion}
 									onAttachmentNode={noteAttachmentNode}
+									onToggleExcerpt={toggleExcerpt}
 									vs={vs}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
@@ -4319,6 +4467,8 @@ const THEME_MODE_TIMEOUT_MS = 100;
 export async function runApp(
 	file: RevueChaptersFile | null,
 	options: {
+		/** Frozen quotations for the narration's excerpt citations. */
+		context?: RunContextFile | null;
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 		loadFileLines?: (path: string) => Promise<string[] | null>;
@@ -4363,6 +4513,7 @@ export async function runApp(
 		root.render(
 			<App
 				file={file}
+				context={options.context ?? null}
 				diffFiles={options.diffFiles ?? null}
 				loadSemanticDiff={options.loadSemanticDiff}
 				loadFileLines={options.loadFileLines}

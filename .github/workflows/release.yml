@@ -45,7 +45,7 @@ jobs:
           test "$(jq -r '.version' packages/tui/package.json)" = "$release_version"
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.8
+          bun-version: 1.3.14
       - uses: dtolnay/rust-toolchain@stable
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
@@ -54,9 +54,9 @@ jobs:
       # pollutes CLI assertions that expect a clean process.
       - name: Build native highlighter for tests
         run: bash scripts/build-native-highlighter.sh revue packages/diff/native/target/release/revue_highlighter.node
-      # Spawn-heavy CLI tests need more than bun's five-second default. Intel macOS
-      # runners are several times slower, so release builds keep a wider ceiling.
-      - run: bun test --timeout 120000
+      # The Intel macOS runner starts processes several times slower than the other
+      # platforms; spawn-heavy CLI tests need more than bun's five-second default.
+      - run: bun test --timeout 30000
       - name: Compile
         run: |
           bun build --compile packages/tui/src/main.tsx --outfile dist/revue

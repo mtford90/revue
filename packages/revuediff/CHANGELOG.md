@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/mtford90/revue/compare/revuediff-v0.1.1...revuediff-v0.1.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* unblock release builds after version bumps ([6d1d599](https://github.com/mtford90/revue/commit/6d1d59980a2ba1877a8e5e8180bcf369fef983b4))
+
 ## [0.1.1](https://github.com/mtford90/revue/compare/revuediff-v0.1.0...revuediff-v0.1.1) (2026-08-07)
 
 

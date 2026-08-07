@@ -78,7 +78,11 @@ included, so stage values are independent diagnostics rather than an additive wa
 ## JSON reports
 
 Reports use stable `schemaVersion: 2`; the maintained schema is
-[`revuediff-report.schema.json`](revuediff-report.schema.json). A normal report includes:
+[`revuediff-report.schema.json`](revuediff-report.schema.json). Contract tests validate it locally
+with Ajv 2020 and `ajv-formats` (including the `date-time` timestamp format), so report consumers
+should validate with Draft 2020-12 plus those formats rather than treating the JSON as best effort.
+The schema permits both complete reports and the minimal failed artifact written when setup fails
+before report identity can be collected. A normal report includes:
 
 - scenario arguments, expectations, timeout, repetitions, and warmups;
 - input byte count and SHA-256 plus source-tree file count, changed-row stats, paths, size, and digest;

@@ -2,88 +2,47 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://revue.mtford.co.uk/schemas/revuediff-performance-v2.json",
 	"title": "Revuediff performance report",
-	"type": "object",
-	"required": ["schemaVersion", "status", "generatedAt", "infrastructureFailures"],
-	"properties": {
-		"schemaVersion": { "const": 2 },
-		"status": { "enum": ["ok", "failed"] },
-		"generatedAt": { "type": "string", "format": "date-time" },
-		"infrastructureFailures": {
-			"type": "array",
-			"items": { "type": "string" }
-		},
-		"sourceGit": {
-			"type": "object",
-			"required": ["revision", "dirty"],
-			"properties": {
-				"revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-				"dirty": { "type": "boolean" }
-			},
-			"additionalProperties": false
-		},
-		"compiledBinary": {
-			"type": "object",
-			"required": ["digest", "version"],
-			"properties": {
-				"digest": { "$ref": "#/$defs/sha256" },
-				"version": { "type": "string", "minLength": 1 }
-			},
-			"additionalProperties": false
-		},
-		"environment": { "type": "object" },
-		"methodology": {
-			"type": "object",
-			"required": [
-				"repetitions",
-				"warmups",
-				"timeoutMs",
-				"validationBeforeTiming",
-				"stageIsolation"
-			]
-		},
-		"revuediff": {
-			"type": "object",
-			"additionalProperties": { "$ref": "#/$defs/scenarioResult" }
-		},
-		"baseline": { "type": "object" },
-		"comparators": { "type": "object" },
-		"stages": { "type": ["array", "null"] }
-	},
-	"allOf": [
-		{
-			"if": { "required": ["revuediff"] },
-			"then": {
-				"required": [
-					"sourceGit",
-					"compiledBinary",
-					"environment",
-					"methodology",
-					"baseline",
-					"comparators"
-				]
-			}
-		}
-	],
+	"oneOf": [{ "$ref": "#/$defs/fullReport" }, { "$ref": "#/$defs/infrastructureFailureReport" }],
 	"$defs": {
 		"sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+		"nonEmptyString": { "type": "string", "minLength": 1 },
 		"sample": {
 			"type": "object",
+			"additionalProperties": false,
 			"required": ["ttfbMs", "totalMs", "inputBytes", "outputBytes", "exitCode", "timedOut"],
 			"properties": {
-				"ttfbMs": { "type": ["number", "null"] },
+				"ttfbMs": { "type": ["number", "null"], "minimum": 0 },
 				"totalMs": { "type": "number", "minimum": 0 },
 				"inputBytes": { "type": "integer", "minimum": 0 },
 				"outputBytes": { "type": "integer", "minimum": 0 },
 				"exitCode": { "type": ["integer", "null"] },
 				"timedOut": { "type": "boolean" },
-				"error": { "type": "string" }
+				"error": { "$ref": "#/$defs/nonEmptyString" }
+			}
+		},
+		"failureDetail": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["exitCode", "timedOut"],
+			"properties": {
+				"exitCode": { "type": ["integer", "null"] },
+				"timedOut": { "type": "boolean" },
+				"error": { "$ref": "#/$defs/nonEmptyString" }
 			}
 		},
 		"benchmark": {
 			"type": "object",
+			"additionalProperties": false,
 			"required": [
 				"runs",
 				"failures",
+				"warmupFailures",
+				"failureDetails",
+				"ttfbP50Ms",
+				"ttfbP95Ms",
+				"totalP50Ms",
+				"totalP95Ms",
+				"outputBytesP50",
 				"rawSamples",
 				"rawWarmupSamples",
 				"inputThroughputBytesPerSecondP50",
@@ -92,13 +51,86 @@
 			"properties": {
 				"runs": { "type": "integer", "minimum": 0 },
 				"failures": { "type": "integer", "minimum": 0 },
+				"warmupFailures": { "type": "integer", "minimum": 0 },
+				"failureDetails": { "type": "array", "items": { "$ref": "#/$defs/failureDetail" } },
+				"ttfbP50Ms": { "type": ["number", "null"], "minimum": 0 },
+				"ttfbP95Ms": { "type": ["number", "null"], "minimum": 0 },
+				"totalP50Ms": { "type": ["number", "null"], "minimum": 0 },
+				"totalP95Ms": { "type": ["number", "null"], "minimum": 0 },
+				"outputBytesP50": { "type": ["integer", "null"], "minimum": 0 },
+				"inputThroughputBytesPerSecondP50": { "type": ["integer", "null"], "minimum": 0 },
+				"outputThroughputBytesPerSecondP50": { "type": ["integer", "null"], "minimum": 0 },
 				"rawSamples": { "type": "array", "items": { "$ref": "#/$defs/sample" } },
-				"rawWarmupSamples": { "type": "array", "items": { "$ref": "#/$defs/sample" } },
-				"inputThroughputBytesPerSecondP50": { "type": ["integer", "null"] },
-				"outputThroughputBytesPerSecondP50": { "type": ["integer", "null"] }
+				"rawWarmupSamples": { "type": "array", "items": { "$ref": "#/$defs/sample" } }
 			}
 		},
-		"scenarioResult": {
+		"expectation": {
+			"oneOf": [
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "ansi", "fileCount", "additions", "deletions", "files"],
+					"properties": {
+						"kind": { "const": "formatted" },
+						"ansi": { "const": true },
+						"fileCount": { "type": "integer", "minimum": 1 },
+						"additions": { "type": "integer", "minimum": 1 },
+						"deletions": { "type": "integer", "minimum": 1 },
+						"files": {
+							"type": "array",
+							"minItems": 1,
+							"items": {
+								"type": "object",
+								"additionalProperties": false,
+								"required": ["path", "additions", "deletions"],
+								"properties": {
+									"path": { "$ref": "#/$defs/nonEmptyString" },
+									"additions": { "type": "integer", "minimum": 1 },
+									"deletions": { "type": "integer", "minimum": 1 }
+								}
+							}
+						}
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "ansi", "output"],
+					"properties": {
+						"kind": { "const": "passthrough" },
+						"ansi": { "const": false },
+						"output": { "type": "string" }
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "contains"],
+					"properties": {
+						"kind": { "const": "help" },
+						"contains": {
+							"type": "array",
+							"minItems": 1,
+							"items": { "$ref": "#/$defs/nonEmptyString" }
+						}
+					}
+				}
+			]
+		},
+		"source": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["fileCount", "additions", "deletions", "bytes", "digest", "paths"],
+			"properties": {
+				"fileCount": { "type": "integer", "minimum": 0 },
+				"additions": { "type": "integer", "minimum": 0 },
+				"deletions": { "type": "integer", "minimum": 0 },
+				"bytes": { "type": "integer", "minimum": 0 },
+				"digest": { "$ref": "#/$defs/sha256" },
+				"paths": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } }
+			}
+		},
+		"identity": {
 			"type": "object",
 			"required": [
 				"description",
@@ -108,30 +140,363 @@
 				"source",
 				"timeoutMs",
 				"repetitions",
-				"warmups",
-				"validation",
-				"benchmark"
+				"warmups"
 			],
 			"properties": {
-				"description": { "type": "string" },
+				"description": { "$ref": "#/$defs/nonEmptyString" },
 				"args": { "type": "array", "items": { "type": "string" } },
+				"expect": { "$ref": "#/$defs/expectation" },
 				"input": {
 					"type": "object",
+					"additionalProperties": false,
 					"required": ["bytes", "sha256"],
 					"properties": {
 						"bytes": { "type": "integer", "minimum": 0 },
 						"sha256": { "$ref": "#/$defs/sha256" }
 					}
 				},
-				"source": { "type": "object" },
+				"source": { "$ref": "#/$defs/source" },
 				"timeoutMs": { "type": "integer", "minimum": 1 },
 				"repetitions": { "type": "integer", "minimum": 1 },
-				"warmups": { "type": "integer", "minimum": 1 },
-				"validation": {
+				"warmups": { "type": "integer", "minimum": 1 }
+			}
+		},
+		"validation": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["passed", "errors", "exitCode", "timedOut", "outputBytes", "outputSha256"],
+			"properties": {
+				"passed": { "type": "boolean" },
+				"errors": { "type": "array", "items": { "type": "string" } },
+				"exitCode": { "type": ["integer", "null"] },
+				"timedOut": { "type": "boolean" },
+				"outputBytes": { "type": "integer", "minimum": 0 },
+				"outputSha256": { "$ref": "#/$defs/sha256" }
+			}
+		},
+		"scenarioResult": {
+			"allOf": [
+				{ "$ref": "#/$defs/identity" },
+				{
 					"type": "object",
-					"required": ["passed", "errors", "exitCode", "timedOut", "outputBytes", "outputSha256"]
+					"additionalProperties": false,
+					"required": [
+						"description",
+						"args",
+						"expect",
+						"input",
+						"source",
+						"timeoutMs",
+						"repetitions",
+						"warmups",
+						"validation",
+						"benchmark"
+					],
+					"properties": {
+						"description": { "$ref": "#/$defs/nonEmptyString" },
+						"args": { "type": "array", "items": { "type": "string" } },
+						"expect": { "$ref": "#/$defs/expectation" },
+						"input": {
+							"type": "object",
+							"additionalProperties": false,
+							"required": ["bytes", "sha256"],
+							"properties": {
+								"bytes": { "type": "integer", "minimum": 0 },
+								"sha256": { "$ref": "#/$defs/sha256" }
+							}
+						},
+						"source": { "$ref": "#/$defs/source" },
+						"timeoutMs": { "type": "integer", "minimum": 1 },
+						"repetitions": { "type": "integer", "minimum": 1 },
+						"warmups": { "type": "integer", "minimum": 1 },
+						"validation": { "$ref": "#/$defs/validation" },
+						"benchmark": { "oneOf": [{ "$ref": "#/$defs/benchmark" }, { "type": "null" }] }
+					}
+				}
+			]
+		},
+		"comparatorScenario": {
+			"allOf": [
+				{ "$ref": "#/$defs/identity" },
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": [
+						"description",
+						"args",
+						"expect",
+						"input",
+						"source",
+						"timeoutMs",
+						"repetitions",
+						"warmups",
+						"invocation",
+						"benchmark"
+					],
+					"properties": {
+						"description": { "$ref": "#/$defs/nonEmptyString" },
+						"args": { "type": "array", "items": { "type": "string" } },
+						"expect": { "$ref": "#/$defs/expectation" },
+						"input": {
+							"type": "object",
+							"additionalProperties": false,
+							"required": ["bytes", "sha256"],
+							"properties": {
+								"bytes": { "type": "integer", "minimum": 0 },
+								"sha256": { "$ref": "#/$defs/sha256" }
+							}
+						},
+						"source": { "$ref": "#/$defs/source" },
+						"timeoutMs": { "type": "integer", "minimum": 1 },
+						"repetitions": { "type": "integer", "minimum": 1 },
+						"warmups": { "type": "integer", "minimum": 1 },
+						"invocation": { "$ref": "#/$defs/nonEmptyString" },
+						"processStdinBytes": { "type": "integer", "minimum": 0 },
+						"benchmark": { "$ref": "#/$defs/benchmark" }
+					}
+				}
+			]
+		},
+		"comparator": {
+			"oneOf": [
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["skipped", "version"],
+					"properties": {
+						"skipped": { "$ref": "#/$defs/nonEmptyString" },
+						"version": { "type": "null" }
+					}
 				},
-				"benchmark": { "oneOf": [{ "$ref": "#/$defs/benchmark" }, { "type": "null" }] }
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["version", "contract", "featureDifferences", "scenarios"],
+					"properties": {
+						"version": { "$ref": "#/$defs/nonEmptyString" },
+						"contract": { "$ref": "#/$defs/nonEmptyString" },
+						"featureDifferences": { "$ref": "#/$defs/nonEmptyString" },
+						"scenarios": {
+							"type": "object",
+							"minProperties": 1,
+							"additionalProperties": { "$ref": "#/$defs/comparatorScenario" }
+						}
+					}
+				}
+			]
+		},
+		"stage": {
+			"oneOf": [
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["id", "classifyMs", "error"],
+					"properties": {
+						"id": { "$ref": "#/$defs/nonEmptyString" },
+						"classifyMs": { "type": "number", "minimum": 0 },
+						"error": { "$ref": "#/$defs/nonEmptyString" }
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": [
+						"id",
+						"width",
+						"layouts",
+						"sequence",
+						"classifyMs",
+						"syntaxFirstPassState",
+						"syntaxFirstPassMs",
+						"syntaxWarmedMs",
+						"formatMs"
+					],
+					"properties": {
+						"id": { "$ref": "#/$defs/nonEmptyString" },
+						"width": { "type": "integer", "minimum": 1 },
+						"layouts": { "type": "array", "minItems": 1, "items": { "enum": ["split", "stack"] } },
+						"sequence": { "const": ["classify", "syntax-first-pass", "syntax-warmed", "format"] },
+						"classifyMs": { "type": "number", "minimum": 0 },
+						"syntaxFirstPassState": { "enum": ["cold-shiki-startup", "warmed-shiki-runtime"] },
+						"syntaxFirstPassMs": { "type": "number", "minimum": 0 },
+						"syntaxWarmedMs": { "type": "number", "minimum": 0 },
+						"formatMs": { "type": "number", "minimum": 0 }
+					}
+				}
+			]
+		},
+		"infrastructureFailureReport": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["schemaVersion", "status", "generatedAt", "infrastructureFailures"],
+			"properties": {
+				"schemaVersion": { "const": 2 },
+				"status": { "const": "failed" },
+				"generatedAt": { "type": "string", "format": "date-time" },
+				"infrastructureFailures": {
+					"type": "array",
+					"minItems": 1,
+					"items": { "$ref": "#/$defs/nonEmptyString" }
+				}
+			}
+		},
+		"fullReport": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": [
+				"schemaVersion",
+				"status",
+				"generatedAt",
+				"sourceGit",
+				"compiledBinary",
+				"environment",
+				"methodology",
+				"infrastructureFailures",
+				"revuediff",
+				"baseline",
+				"comparators"
+			],
+			"properties": {
+				"schemaVersion": { "const": 2 },
+				"status": { "enum": ["ok", "failed"] },
+				"generatedAt": { "type": "string", "format": "date-time" },
+				"sourceGit": {
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["revision", "dirty"],
+					"properties": {
+						"revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+						"dirty": { "type": "boolean" }
+					}
+				},
+				"compiledBinary": {
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["digest", "version"],
+					"properties": {
+						"digest": { "$ref": "#/$defs/sha256" },
+						"version": { "$ref": "#/$defs/nonEmptyString" }
+					}
+				},
+				"environment": {
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["platform", "release", "arch", "runtime", "tools"],
+					"properties": {
+						"platform": { "$ref": "#/$defs/nonEmptyString" },
+						"release": { "$ref": "#/$defs/nonEmptyString" },
+						"arch": { "$ref": "#/$defs/nonEmptyString" },
+						"runtime": {
+							"type": "object",
+							"additionalProperties": false,
+							"required": ["name", "version"],
+							"properties": {
+								"name": { "const": "Bun" },
+								"version": { "$ref": "#/$defs/nonEmptyString" }
+							}
+						},
+						"tools": {
+							"type": "object",
+							"additionalProperties": false,
+							"required": ["git", "cat"],
+							"properties": {
+								"git": { "$ref": "#/$defs/nonEmptyString" },
+								"cat": { "$ref": "#/$defs/nonEmptyString" }
+							}
+						}
+					}
+				},
+				"methodology": {
+					"type": "object",
+					"additionalProperties": false,
+					"required": [
+						"repetitions",
+						"warmups",
+						"timeoutMs",
+						"freshProcessPerRun",
+						"bufferedOutput",
+						"validationBeforeTiming",
+						"stageIsolation",
+						"targets"
+					],
+					"properties": {
+						"repetitions": { "type": "integer", "minimum": 1 },
+						"warmups": { "type": "integer", "minimum": 1 },
+						"timeoutMs": { "type": "integer", "minimum": 1 },
+						"freshProcessPerRun": { "const": true },
+						"bufferedOutput": { "const": true },
+						"validationBeforeTiming": { "const": true },
+						"stageIsolation": { "const": "serial, non-overlapping in declared sequence" },
+						"targets": {
+							"type": "object",
+							"additionalProperties": false,
+							"required": ["tinyTtfbP50Ms", "tinyP95Ms", "mediumP50Ms", "largeRegression"],
+							"properties": {
+								"tinyTtfbP50Ms": { "type": "number", "minimum": 0 },
+								"tinyP95Ms": { "type": "number", "minimum": 0 },
+								"mediumP50Ms": { "type": "number", "minimum": 0 },
+								"largeRegression": { "$ref": "#/$defs/nonEmptyString" }
+							}
+						}
+					}
+				},
+				"infrastructureFailures": {
+					"type": "array",
+					"items": { "$ref": "#/$defs/nonEmptyString" }
+				},
+				"revuediff": {
+					"type": "object",
+					"minProperties": 1,
+					"additionalProperties": { "$ref": "#/$defs/scenarioResult" }
+				},
+				"baseline": {
+					"allOf": [
+						{ "$ref": "#/$defs/identity" },
+						{
+							"type": "object",
+							"additionalProperties": false,
+							"required": [
+								"tool",
+								"contract",
+								"description",
+								"args",
+								"expect",
+								"input",
+								"source",
+								"timeoutMs",
+								"repetitions",
+								"warmups",
+								"benchmark"
+							],
+							"properties": {
+								"tool": { "const": "cat" },
+								"contract": { "$ref": "#/$defs/nonEmptyString" },
+								"description": { "$ref": "#/$defs/nonEmptyString" },
+								"args": { "type": "array", "items": { "type": "string" } },
+								"expect": { "$ref": "#/$defs/expectation" },
+								"input": {
+									"type": "object",
+									"additionalProperties": false,
+									"required": ["bytes", "sha256"],
+									"properties": {
+										"bytes": { "type": "integer", "minimum": 0 },
+										"sha256": { "$ref": "#/$defs/sha256" }
+									}
+								},
+								"source": { "$ref": "#/$defs/source" },
+								"timeoutMs": { "type": "integer", "minimum": 1 },
+								"repetitions": { "type": "integer", "minimum": 1 },
+								"warmups": { "type": "integer", "minimum": 1 },
+								"benchmark": { "$ref": "#/$defs/benchmark" }
+							}
+						}
+					]
+				},
+				"comparators": {
+					"type": "object",
+					"additionalProperties": { "$ref": "#/$defs/comparator" }
+				},
+				"stages": { "type": "array", "items": { "$ref": "#/$defs/stage" } }
 			}
 		}
 	}

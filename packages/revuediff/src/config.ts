@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { isBundledShikiThemeId } from "@revue/theme";
+import { isBundledShikiThemeId } from "@revue/theme/runtime";
 import { TOML } from "bun";
 import type { PagingMode } from "./pager.ts";
 

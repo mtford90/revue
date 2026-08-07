@@ -1,6 +1,6 @@
 import { type DiffFile, type DiffLayout, prepareSyntaxHighlighting } from "@revue/diff";
 import { formatAnsiDiffFile } from "@revue/diff-ansi";
-import { resolveTheme, type Theme, withTransparentSurfaces } from "@revue/theme";
+import { resolveBundledTheme, type Theme, withTransparentSurfaces } from "@revue/theme/runtime";
 import { classifyPagerInput } from "./pagerInput.ts";
 
 export type PagingMode = "auto" | "always" | "never";
@@ -48,7 +48,7 @@ const shouldPage = (mode: PagingMode, output: string): boolean => {
 };
 
 const pagerTheme = (requested: string | undefined): Theme =>
-	withTransparentSurfaces(resolveTheme(requested, null));
+	withTransparentSurfaces(resolveBundledTheme(requested, null));
 
 export async function formatPagerInput(
 	input: string,

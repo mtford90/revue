@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { isBundledShikiThemeId } from "@revue/theme";
+import { isBundledShikiThemeId } from "@revue/theme/runtime";
 import {
 	discoverConfigPath,
 	effectiveConfig,

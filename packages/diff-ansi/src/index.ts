@@ -8,7 +8,7 @@ import {
 	planDiff,
 	sanitizeTerminalLine,
 } from "@revue/diff";
-import type { Theme } from "@revue/theme";
+import type { Theme } from "@revue/theme/runtime";
 
 /** Chrome emitted by this linear adapter. Gutters reserve a trailing separator space. */
 export const ANSI_DIFF_CHROME: DiffChromeWidths = {

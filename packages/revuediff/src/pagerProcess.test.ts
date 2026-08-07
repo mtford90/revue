@@ -215,19 +215,15 @@ test("forwards SIGINT and SIGTERM to the active pager and exits nonzero", async 
 		for (const signal of ["SIGINT", "SIGTERM"] as const) {
 			const ready = join(directory, `${signal}-ready`);
 			const seen = join(directory, `${signal}-seen`);
-			const pager = join(directory, `${signal}-pager`);
-			// Drain stdin before advertising readiness so the parent is waiting on the
-			// pager exit rather than an in-flight stdin write that a signal can wedge.
-			await writeFile(
-				pager,
-				`#!/bin/sh
-cat >/dev/null
-echo ready > ${JSON.stringify(ready)}
-trap 'echo ${signal} > ${JSON.stringify(seen)}; exit 1' ${signal}
-while :; do sleep 0.05; done
-`,
-			);
-			await chmod(pager, 0o755);
+			// Inline shell keeps the trap on the same process writePager spawns via
+			// `sh -c`. A script path nests another interpreter, so Linux can deliver
+			// the signal to the outer shell and leave the trap waiting forever.
+			const pager = [
+				"cat >/dev/null",
+				`echo ready > ${JSON.stringify(ready)}`,
+				`trap 'echo ${signal} > ${JSON.stringify(seen)}; exit 1' ${signal}`,
+				"while :; do sleep 0.05; done",
+			].join("; ");
 			const child = Bun.spawn([process.execPath, runner], {
 				env: { ...process.env, PATCH: patch, FAKE_PAGER: pager },
 				stdout: "pipe",

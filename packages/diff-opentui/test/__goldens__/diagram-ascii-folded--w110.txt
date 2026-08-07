@@ -1,0 +1,13 @@
+# diagram-ascii-folded--w110 — the default state: one band naming the figure's kind
+# grid 110x3 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+0 |  ⋯  diagram · ascii  [▼ show 3 lines]
+1 |
+2 |
+
+# styles: row: cols fg bg [attributes]
+
+0: 0-19 fg=#acadb0 bg=#1e2228  20-37 fg=#73b8ff bg=#1e2228  38-109 fg=#ffffff bg=#1e2228
+1: 0-109 fg=#ffffff bg=#00000000
+2: 0-109 fg=#ffffff bg=#00000000

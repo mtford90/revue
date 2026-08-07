@@ -123,8 +123,19 @@ export type PlannedExcerptRow =
 			visualRows: { continuationIndex: number; spans: RenderSpan[] }[];
 	  };
 
-/** Every row kind the engine plans, across file bodies and standalone excerpt blocks. */
-export type PlannedRow = PlannedDiffRow | PlannedExcerptRow;
+/** The band a folded diagram collapses to, and the header and figure an open one expands into. */
+export type PlannedDiagramRow =
+	| { type: "diagram-band"; key: string; height: 1; label: string; action: string }
+	| { type: "diagram-header"; key: string; height: 1; label: string; action: string }
+	| {
+			type: "diagram-line";
+			key: string;
+			height: number;
+			visualRows: { continuationIndex: number; spans: RenderSpan[] }[];
+	  };
+
+/** Every row kind the engine plans, across file bodies and standalone quoted blocks. */
+export type PlannedRow = PlannedDiffRow | PlannedExcerptRow | PlannedDiagramRow;
 
 /** Stable geometry and source identities. Paint-only inputs are intentionally absent. */
 export type DiffVisualPlan = {
@@ -634,6 +645,132 @@ export function planExcerpt({
 		folded,
 		width,
 		digits,
+		chrome,
+		gutterColumns,
+		codeWidth,
+		totalHeight: rows.reduce((height, row) => height + row.height, 0),
+		rows,
+	};
+}
+
+// ── Diagrams ───────────────────────────────────────────────────────────────
+// A figure a chapter draws rather than a range it quotes. It wears the excerpt's chrome so the
+// two read as one family, but it cites no file: nothing is numbered, and the gutter is blank
+// width whose only job is to land the figure on the column quoted code starts on.
+
+export type DiagramKind = "ascii" | "mermaid";
+
+/** One figure, already separated from the narration that carried it. */
+export type Diagram = { kind: DiagramKind; lines: readonly string[] };
+
+export type DiagramVisualPlan = {
+	key: string;
+	diagram: Diagram;
+	folded: boolean;
+	width: number;
+	chrome: DiffChromeWidths;
+	/** Columns of blank chrome every figure row reserves before its text. */
+	gutterColumns: number;
+	codeWidth: number;
+	totalHeight: number;
+	rows: PlannedDiagramRow[];
+};
+
+export type PlanDiagramInput = {
+	key: string;
+	diagram: Diagram;
+	folded: boolean;
+	width: number;
+	chrome: DiffChromeWidths;
+};
+
+/**
+ * A diagram numbers nothing, but keeping the excerpt's default numbering width means a figure
+ * and a quotation start on the same column.
+ */
+const DIAGRAM_GUTTER_DIGITS = 3;
+
+const DIAGRAM_LABELS: Record<DiagramKind, string> = {
+	ascii: "diagram · ascii",
+	mermaid: "diagram · mermaid source",
+};
+
+const diagramLineRow = ({
+	key,
+	line,
+	index,
+	codeWidth,
+}: {
+	key: string;
+	line: string;
+	index: number;
+	codeWidth: number;
+}): PlannedDiagramRow => {
+	const wrapped = wrapSpans([{ text: plainLine(line) }], codeWidth);
+	return {
+		type: "diagram-line",
+		key: `${key}:line:${index}`,
+		height: wrapped.length,
+		visualRows: wrapped.map((spans, continuationIndex) => ({ continuationIndex, spans })),
+	};
+};
+
+const openDiagramRows = ({
+	key,
+	diagram,
+	codeWidth,
+}: {
+	key: string;
+	diagram: Diagram;
+	codeWidth: number;
+}): PlannedDiagramRow[] => [
+	{
+		type: "diagram-header",
+		key: `${key}:header`,
+		height: 1,
+		label: DIAGRAM_LABELS[diagram.kind],
+		action: "▲ hide",
+	},
+	...diagram.lines.map((line, index) => diagramLineRow({ key, line, index, codeWidth })),
+];
+
+const foldedDiagramRow = (key: string, diagram: Diagram): PlannedDiagramRow => {
+	const count = diagram.lines.length;
+	return {
+		type: "diagram-band",
+		key: `${key}:band`,
+		height: 1,
+		label: DIAGRAM_LABELS[diagram.kind],
+		action: `▼ show ${count} line${count === 1 ? "" : "s"}`,
+	};
+};
+
+/** Plan one diagram block at a known width, with the fold an input exactly as for an excerpt. */
+export function planDiagram({
+	key,
+	diagram,
+	folded,
+	width,
+	chrome,
+}: PlanDiagramInput): DiagramVisualPlan {
+	const digits = DIAGRAM_GUTTER_DIGITS;
+	const gutterColumns = 2 * (chrome.focusMarker + digits + chrome.attachmentMarker) + chrome.sign;
+	const codeWidth = diffCodeWidths({
+		width,
+		layout: "stack",
+		digits,
+		showLineNumbers: true,
+		stackGutters: 2,
+		chrome,
+	}).additions;
+	const rows = folded
+		? [foldedDiagramRow(key, diagram)]
+		: openDiagramRows({ key, diagram, codeWidth });
+	return {
+		key,
+		diagram,
+		folded,
+		width,
 		chrome,
 		gutterColumns,
 		codeWidth,

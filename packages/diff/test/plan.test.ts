@@ -7,6 +7,7 @@ import {
 	findFocusedDecorationAnchor,
 	paintDiff,
 	parsePatch,
+	planDiagram,
 	planDiff,
 	planExcerpt,
 } from "../src/index.ts";
@@ -307,4 +308,52 @@ test("an open excerpt sheds its state word rather than truncating the range it n
 
 	expect(header(wide)).toBe("context · src/api/client.ts 118–120 · unchanged");
 	expect(header(narrow)).toBe("context · src/api/client.ts 118–120");
+});
+
+const figure = {
+	kind: "ascii",
+	lines: ["prep ──▶ chapters.json ──▶ show", "        └─ blobs"],
+} as const;
+
+test("a diagram plans to a known height folded and open, on the excerpt's own column", () => {
+	const shared = { key: "d", diagram: figure, width: 110, chrome: openTuiChrome };
+	const folded = planDiagram({ ...shared, folded: true });
+	const open = planDiagram({ ...shared, folded: false });
+	const quoted = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+	});
+
+	expect(folded.rows.map((row) => row.type)).toEqual(["diagram-band"]);
+	expect(folded.totalHeight).toBe(1);
+	expect(open.rows.map((row) => row.type)).toEqual([
+		"diagram-header",
+		"diagram-line",
+		"diagram-line",
+	]);
+	expect(open.totalHeight).toBe(1 + figure.lines.length);
+	// A figure numbers nothing, yet lands where a quotation's code does.
+	expect(open.gutterColumns).toBe(quoted.gutterColumns);
+	expect(open.codeWidth).toBe(quoted.codeWidth);
+});
+
+test("a diagram's header names its kind, and mermaid is labelled as the source it is", () => {
+	const label = (kind: "ascii" | "mermaid", folded: boolean) =>
+		planDiagram({
+			key: "d",
+			diagram: { kind, lines: ["a --> b"] },
+			folded,
+			width: 110,
+			chrome: openTuiChrome,
+		}).rows[0];
+
+	expect(label("ascii", false)).toMatchObject({ label: "diagram · ascii", action: "▲ hide" });
+	expect(label("mermaid", false)).toMatchObject({ label: "diagram · mermaid source" });
+	expect(label("mermaid", true)).toMatchObject({
+		label: "diagram · mermaid source",
+		action: "▼ show 1 line",
+	});
 });

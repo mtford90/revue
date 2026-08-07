@@ -2,6 +2,7 @@ import { type MouseEvent as OpenTUIMouseEvent, TextAttributes } from "@opentui/c
 import {
 	anchorRowIndex,
 	createDiffFile,
+	type DiagramVisualPlan,
 	type DiffFile,
 	type DiffFileInput,
 	type DiffLayout,
@@ -825,6 +826,132 @@ export function DiffBody(props: DiffBodyProps) {
 }
 
 /**
+ * The one row a folded block collapses to, and the header an open one leads with. Excerpts and
+ * diagrams share it so the two blocks cannot drift apart visually.
+ */
+function BlockBand({
+	band,
+	label,
+	action,
+	labelFg,
+	theme,
+	onToggle,
+}: {
+	band: boolean;
+	label: string;
+	action: string;
+	labelFg: string;
+	theme: Theme;
+	onToggle?: (event: OpenTUIMouseEvent) => void;
+}) {
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI pointer affordances live on text renderables.
+		<box
+			width="100%"
+			height={1}
+			backgroundColor={theme.panel}
+			flexDirection="row"
+			onMouseDown={onToggle}
+		>
+			<text flexShrink={0} fg={band ? theme.muted : theme.lineNumberFg} selectable={false}>
+				{band ? "  ⋯" : "│"}
+			</text>
+			<text
+				flexGrow={band ? 0 : 1}
+				flexShrink={1}
+				minWidth={0}
+				fg={labelFg}
+				wrapMode="none"
+				truncate
+				selectable={false}
+			>
+				{band ? `  ${label}` : ` ${label}`}
+			</text>
+			<text flexShrink={0} fg={theme.accent} selectable={false}>
+				{band ? `  [${action}]` : `[${action}] `}
+			</text>
+		</box>
+	);
+}
+
+/**
+ * A figure a chapter draws. It borrows the excerpt's chrome and fold, but cites no file: the
+ * gutter is blank rather than numbered, and Mermaid renders in `muted` because it is source
+ * text rather than a picture.
+ */
+export function DiagramBlock({
+	plan,
+	theme,
+	window: rowWindow,
+	onToggle,
+}: {
+	plan: DiagramVisualPlan;
+	theme: Theme;
+	window?: { start: number; end: number };
+	onToggle?: (key: string) => void;
+}) {
+	const start = Math.max(0, Math.min(plan.rows.length, rowWindow?.start ?? 0));
+	const end = Math.max(start, Math.min(plan.rows.length, rowWindow?.end ?? plan.rows.length));
+	const toggle = onToggle
+		? (event: OpenTUIMouseEvent) => {
+				event.preventDefault();
+				event.stopPropagation();
+				onToggle(plan.key);
+			}
+		: undefined;
+	const bodyFg = plan.diagram.kind === "mermaid" ? theme.muted : theme.text;
+	const blankGutter = " ".repeat(Math.max(0, plan.gutterColumns - 1));
+	return (
+		<box width="100%" flexDirection="column">
+			{plan.rows.slice(start, end).map((row) => {
+				if (row.type === "diagram-band" || row.type === "diagram-header") {
+					return (
+						<BlockBand
+							key={row.key}
+							band={row.type === "diagram-band"}
+							label={row.label}
+							action={row.action}
+							labelFg={theme.muted}
+							theme={theme}
+							onToggle={toggle}
+						/>
+					);
+				}
+				return (
+					<box key={row.key} width="100%" flexDirection="column">
+						{row.visualRows.map(({ continuationIndex, spans }) => (
+							<box
+								key={continuationIndex}
+								width="100%"
+								height={1}
+								overflow="hidden"
+								backgroundColor={theme.contextBg}
+								flexDirection="row"
+							>
+								<text flexShrink={0} fg={theme.lineNumberFg} wrapMode="none" selectable={false}>
+									{`│${blankGutter}`}
+								</text>
+								{/* A figure carries no syntax, so its spans are plain text under one colour. */}
+								<text
+									fg={bodyFg}
+									selectionBg={theme.badgeModified}
+									selectionFg={theme.panelAlt}
+									wrapMode="none"
+									flexShrink={0}
+									selectable
+								>
+									{spans.map((span) => span.text).join("")}
+								</text>
+							</box>
+						))}
+					</box>
+				);
+			})}
+		</box>
+	);
+}
+
+/**
  * Quoted unchanged code a chapter cites. It reads as scenery: the rule replaces the focus
  * marker because an excerpt row never focuses, the deletions gutter stays blank because there
  * is no old side, the sign slot stays empty because nothing changed, and the body sits on the
@@ -897,35 +1024,16 @@ export function ExcerptBlock({
 					);
 				}
 				if (row.type === "excerpt-band" || row.type === "excerpt-header") {
-					const band = row.type === "excerpt-band";
 					return (
-						// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI pointer affordances live on text renderables.
-						<box
+						<BlockBand
 							key={row.key}
-							width="100%"
-							height={1}
-							backgroundColor={theme.panel}
-							flexDirection="row"
-							onMouseDown={toggle}
-						>
-							<text flexShrink={0} fg={band ? theme.muted : theme.lineNumberFg} selectable={false}>
-								{band ? "  ⋯" : "│"}
-							</text>
-							<text
-								flexGrow={band ? 0 : 1}
-								flexShrink={1}
-								minWidth={0}
-								fg={labelFg}
-								wrapMode="none"
-								truncate
-								selectable={false}
-							>
-								{band ? `  ${row.label}` : ` ${row.label}`}
-							</text>
-							<text flexShrink={0} fg={theme.accent} selectable={false}>
-								{band ? `  [${row.action}]` : `[${row.action}] `}
-							</text>
-						</box>
+							band={row.type === "excerpt-band"}
+							label={row.label}
+							action={row.action}
+							labelFg={labelFg}
+							theme={theme}
+							onToggle={toggle}
+						/>
 					);
 				}
 				const range = excerptLineRange(row);

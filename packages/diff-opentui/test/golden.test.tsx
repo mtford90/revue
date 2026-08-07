@@ -2,15 +2,17 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
-import { type DiffLayout, parsePatch, planDiff, planExcerpt } from "@revue/diff";
+import { type DiffLayout, parsePatch, planDiagram, planDiff, planExcerpt } from "@revue/diff";
 import { resolveTheme } from "@revue/theme";
 import { act } from "react";
-import { DiffBody, ExcerptBlock, OPENTUI_DIFF_CHROME } from "../src/index.ts";
+import { DiagramBlock, DiffBody, ExcerptBlock, OPENTUI_DIFF_CHROME } from "../src/index.ts";
 import { unifiedDiff } from "./goldens/diffText.ts";
 import {
+	GOLDEN_DIAGRAM_SCENARIOS,
 	GOLDEN_EXCERPT_SCENARIOS,
 	GOLDEN_LAYOUTS,
 	GOLDEN_SCENARIOS,
+	type GoldenDiagramScenario,
 	type GoldenExcerptScenario,
 	type GoldenScenario,
 } from "./goldens/scenarios.ts";
@@ -129,5 +131,39 @@ const renderExcerpt = async ({ scenario, width }: ExcerptCase): Promise<string> 
 for (const testCase of excerptCases) {
 	test(`golden: ${excerptCaseName(testCase)}`, async () => {
 		await checkGolden(excerptCaseName(testCase), await renderExcerpt(testCase));
+	});
+}
+
+type DiagramCase = { scenario: GoldenDiagramScenario; width: number };
+
+const diagramCases: DiagramCase[] = GOLDEN_DIAGRAM_SCENARIOS.flatMap((scenario) =>
+	scenario.widths.map((width) => ({ scenario, width })),
+);
+
+const diagramCaseName = ({ scenario, width }: DiagramCase) => `${scenario.name}--w${width}`;
+
+const renderDiagram = async ({ scenario, width }: DiagramCase): Promise<string> => {
+	const plan = planDiagram({
+		key: scenario.name,
+		diagram: scenario.diagram,
+		folded: scenario.folded,
+		width,
+		chrome: OPENTUI_DIFF_CHROME,
+	});
+	const rendered = await renderOpenTui(<DiagramBlock plan={plan} theme={theme} />, {
+		width,
+		height: scenario.height,
+	});
+	activeRenderers.push(rendered.renderer);
+	await rendered.renderOnce();
+	return serialiseFrame(
+		rendered.captureSpans(),
+		`${diagramCaseName({ scenario, width })} — ${scenario.covers}`,
+	);
+};
+
+for (const testCase of diagramCases) {
+	test(`golden: ${diagramCaseName(testCase)}`, async () => {
+		await checkGolden(diagramCaseName(testCase), await renderDiagram(testCase));
 	});
 }

@@ -1,0 +1,19 @@
+# diagram-mermaid-open--w110 — mermaid labelled and coloured as the source it is, not a picture
+# grid 110x6 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+0 |│ diagram · mermaid source                                                                           [▲ hide]
+1 |│                graph LR
+2 |│                  prep --> chapters
+3 |│                  chapters --> show
+4 |
+5 |
+
+# styles: row: cols fg bg [attributes]
+
+0: 0 fg=#a4a6a9 bg=#1e2228  1-25 fg=#acadb0 bg=#1e2228  26-100 fg=#ffffff bg=#1e2228  101-109 fg=#73b8ff bg=#1e2228
+1: 0-16 fg=#a4a6a9 bg=#10141c  17-24 fg=#acadb0 bg=#10141c  25-109 fg=#ffffff bg=#10141c
+2: 0-16 fg=#a4a6a9 bg=#10141c  17-35 fg=#acadb0 bg=#10141c  36-109 fg=#ffffff bg=#10141c
+3: 0-16 fg=#a4a6a9 bg=#10141c  17-35 fg=#acadb0 bg=#10141c  36-109 fg=#ffffff bg=#10141c
+4: 0-109 fg=#ffffff bg=#00000000
+5: 0-109 fg=#ffffff bg=#00000000

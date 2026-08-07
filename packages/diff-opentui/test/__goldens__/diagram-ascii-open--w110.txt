@@ -1,0 +1,19 @@
+# diagram-ascii-open--w110 — the figure on the column quoted code starts on, over a blank gutter
+# grid 110x6 (trailing spaces trimmed; styles below carry the full row)
+# style columns are terminal columns, so a wide glyph spans two of them
+
+0 |│ diagram · ascii                                                                                    [▲ hide]
+1 |│                prep ──▶ chapters.json ──▶ show
+2 |│                  │                        │
+3 |│                  └── blobs ───────────────┘
+4 |
+5 |
+
+# styles: row: cols fg bg [attributes]
+
+0: 0 fg=#a4a6a9 bg=#1e2228  1-16 fg=#acadb0 bg=#1e2228  17-100 fg=#ffffff bg=#1e2228  101-109 fg=#73b8ff bg=#1e2228
+1: 0-16 fg=#a4a6a9 bg=#10141c  17-47 fg=#bfbdb6 bg=#10141c  48-109 fg=#ffffff bg=#10141c
+2: 0-16 fg=#a4a6a9 bg=#10141c  17-44 fg=#bfbdb6 bg=#10141c  45-109 fg=#ffffff bg=#10141c
+3: 0-16 fg=#a4a6a9 bg=#10141c  17-44 fg=#bfbdb6 bg=#10141c  45-109 fg=#ffffff bg=#10141c
+4: 0-109 fg=#ffffff bg=#00000000
+5: 0-109 fg=#ffffff bg=#00000000

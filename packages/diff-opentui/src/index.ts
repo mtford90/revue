@@ -4,6 +4,7 @@ export {
 	type DiffInlineAttachment,
 } from "./attachments.ts";
 export {
+	DiagramBlock,
 	DiffBody,
 	type DiffBodyProps,
 	type DiffBodyStandaloneProps,

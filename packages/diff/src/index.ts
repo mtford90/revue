@@ -9,6 +9,9 @@ export {
 export type { DiffChromeWidths } from "./layout.ts";
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export {
+	type Diagram,
+	type DiagramKind,
+	type DiagramVisualPlan,
 	type DiffMeasurement,
 	type DiffPlanStyles,
 	type DiffPlanVisibility,
@@ -28,8 +31,10 @@ export {
 	type PaintedSplitLineRow,
 	type PaintedStackLineRow,
 	type PaintedVisualCell,
+	type PlanDiagramInput,
 	type PlanDiffInput,
 	type PlanExcerptInput,
+	type PlannedDiagramRow,
 	type PlannedDiffRow,
 	type PlannedExcerptRow,
 	type PlannedGutter,
@@ -39,6 +44,7 @@ export {
 	type PlannedStackLineRow,
 	type PlannedVisualCell,
 	paintDiff,
+	planDiagram,
 	planDiff,
 	planExcerpt,
 	structureRowIdentity,

@@ -1,4 +1,4 @@
-import type { DiffLayout, ExcerptQuotation } from "@revue/diff";
+import type { Diagram, DiffLayout, ExcerptQuotation } from "@revue/diff";
 
 export type GoldenScenario = {
 	/** File-name stem for this scenario's goldens. */
@@ -238,5 +238,59 @@ export const GOLDEN_EXCERPT_SCENARIOS: readonly GoldenExcerptScenario[] = [
 		quotation: QUOTATION,
 		widths: EXCERPT_WIDTHS,
 		height: 14,
+	},
+];
+
+/**
+ * A diagram wears the excerpt's chrome with a blank gutter, so its goldens hold the two things
+ * characters alone cannot show: where the figure starts, and that Mermaid reads as source.
+ */
+export type GoldenDiagramScenario = {
+	name: string;
+	covers: string;
+	folded: boolean;
+	diagram: Diagram;
+	widths: readonly number[];
+	height: number;
+};
+
+const ASCII: Diagram = {
+	kind: "ascii",
+	lines: [
+		"prep ──▶ chapters.json ──▶ show",
+		"  │                        │",
+		"  └── blobs ───────────────┘",
+	],
+};
+
+const MERMAID: Diagram = {
+	kind: "mermaid",
+	lines: ["graph LR", "  prep --> chapters", "  chapters --> show"],
+};
+
+export const GOLDEN_DIAGRAM_SCENARIOS: readonly GoldenDiagramScenario[] = [
+	{
+		name: "diagram-ascii-folded",
+		covers: "the default state: one band naming the figure's kind",
+		folded: true,
+		diagram: ASCII,
+		widths: [110],
+		height: 3,
+	},
+	{
+		name: "diagram-ascii-open",
+		covers: "the figure on the column quoted code starts on, over a blank gutter",
+		folded: false,
+		diagram: ASCII,
+		widths: [110],
+		height: 6,
+	},
+	{
+		name: "diagram-mermaid-open",
+		covers: "mermaid labelled and coloured as the source it is, not a picture",
+		folded: false,
+		diagram: MERMAID,
+		widths: [110],
+		height: 6,
 	},
 ];

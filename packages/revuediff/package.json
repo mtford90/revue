@@ -1,0 +1,15 @@
+{
+	"name": "@revue/revuediff",
+	"version": "0.1.0",
+	"private": true,
+	"description": "A standalone ANSI diff formatter and pager for Git and Lazygit.",
+	"type": "module",
+	"bin": {
+		"revuediff": "./src/main.ts"
+	},
+	"dependencies": {
+		"@revue/diff": "workspace:*",
+		"@revue/diff-ansi": "workspace:*",
+		"@revue/theme": "workspace:*"
+	}
+}

@@ -2,12 +2,16 @@
 
 Domain language and load-bearing concepts for revue. Keep this current as the design firms up.
 
-## What revue is
+## What Revue and Revuediff are
 
-A terminal-native tool for reviewing a git diff — a branch, a PR, arbitrary refs, or local
-changes — as a **narrated sequence of chapters**. Narration is the product's point but not a
-prerequisite: a run without chapters opens as a flat, file-by-file diff (`revue diff`, bare
-`revue`), and gains the narrative lens when an agent adds one.
+This monorepo ships two independent products over one shared Patch engine:
+
+- **Revue** (`revue`) is a terminal-native tool for reviewing a git diff — a branch, a PR,
+  arbitrary refs, or local changes — as a **narrated sequence of chapters**. Narration is the
+  product's point but not a prerequisite: a run without chapters opens as a flat, file-by-file diff
+  (`revue diff`, bare `revue`), and gains the narrative lens when an agent adds one.
+
+Its narrative architecture follows these boundaries:
 
 - **Stage** (`ReviewStage/stage-cli`) contributes the *chapter model* and the *agent skill* that
   clusters a diff into chapters. Stage renders to a browser; we discard that part.
@@ -16,11 +20,20 @@ prerequisite: a run without chapters opens as a flat, file-by-file diff (`revue 
 - **Revue** owns Git scope capture, immutable run artifacts, the terminal renderer, and the
   chapter-navigation shell. Its Patch engine and OpenTUI adapter selectively adapt
   a bounded set of Hunk v0.15.3 concepts under MIT, but does not depend on Hunk at runtime.
+- **Revuediff** (`revuediff`) is a standalone buffered ANSI formatter and pager for Git and
+  Lazygit. It shares `@revue/diff`, `@revue/diff-ansi`, and `@revue/theme`, but has no OpenTUI,
+  chapter, prepared-run, thread, skill, narrative TUI, or Revue preference dependency.
 
-revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
+Revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body. `@revue/diff-ansi`
+serialises the same Patch plans for Revuediff; the adapter itself has no React/OpenTUI or process
+boundary. The `revue` executable intentionally does not expose a pager command.
 
 ## Glossary
 
+- **Revuediff pager** — `revuediff`, a standalone Git/Lazygit stdin diff filter. It buffers and
+  sanitises the full stream, renders only complete supported ordinary unified-diff envelopes through
+  `@revue/diff-ansi`, and otherwise fails open to full sanitised passthrough. It owns downstream
+  pagination and never starts OpenTUI or reads prepared-run, narrative Revue, or `~/.revue` state.
 - **Chapter** — one narrative beat: a coherent group of diff hunks the reviewer absorbs as a unit,
   with a `title`, a narrated `summary`, the `hunkRefs` it covers, and any `keyChanges`. Ordered.
 - **Hunk reference (`hunkRef`)** — `(filePath, oldStart)`. The stable identity of a review unit; the
@@ -200,11 +213,14 @@ revue is Stage's narrative brain plus a Revue-owned Pierre/OpenTUI body.
   `~/.revue` holds machine-wide reviewer state, split into machine-written (`preferences.json`)
   and hand-edited (`keybindings.json`, `themes/`) files that never mix; `./.revue` holds run
   progress, session state, and threads. All such writes are non-fatal.
-- **Native per-platform executables, gated by a PTY smoke test.** See `docs/adr/0011`. No
-  cross-compilation (OpenTUI ships native libraries per platform), the git tag is the single
-  version source for binary and embedded skill alike, and every artefact must survive a real-PTY
-  alternate-screen check before release. No npm distribution; difftastic is never bundled, only
-  detected and advised.
+- **Independent native release trains.** Revue retains `vX.Y.Z` tags, synchronises the root and
+  TUI package versions, and gates each platform artefact with the real-PTY alternate-screen smoke
+  test recorded by `docs/adr/0011`. Revuediff starts at 0.1.0, uses `revuediff-vX.Y.Z` tags, versions
+  only `packages/revuediff`, and runs a separate stdin-formatting smoke test with the same native
+  platform matrix but no OpenTUI alternate-screen requirement. Release Please uses path-specific
+  outputs to dispatch only the matching build workflow; Homebrew formulae, installers, assets, and
+  checksums are product-specific. Neither product is distributed through npm, and difftastic remains
+  an optional Revue-only runtime probe.
 - **The TUI owns viewport windowing.** See `docs/adr/0012`. OpenTUI culling still pays full layout
   cost, so Revue mounts only near-window row segments and preserves scroll geometry with
   fixed-height gaps; reveals are offset-based, and diff-body components need measurable heights.

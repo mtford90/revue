@@ -1,34 +1,57 @@
-# revue
+# Revue
 
 Narrative code review in your terminal.
 
-revue organises a branch's diff into ordered, narrated **chapters** - a guided tour of the
+This repository contains two independently released products that share the same Patch engine:
+
+- **Revue** (`revue`) is the narrated, interactive code-review product.
+- **Revuediff** (`revuediff`) is a standalone ANSI diff formatter and pager for Git and Lazygit.
+
+Revue organises a branch's diff into ordered, narrated **chapters** - a guided tour of the
 change rather than a wall of files. Your agent writes the narrative; you read it in the TUI,
 comment on exact lines as you go, and hand the comments straight back to the agent to fix.
 Everything happens on your machine.
 
 <img width="1518" height="1155" alt="CleanShot 2026-08-04 at 16 47 02" src="https://github.com/user-attachments/assets/836d541a-43ab-43ec-87b4-4c753b5cf294" />
 
-## Install
+## Install Revue
 
 ```bash
 brew install mtford90/tap/revue
 ```
 
-Or without Homebrew - grabs the right executable, checks the checksum & installs to
+Or without Homebrew — grabs the right executable, checks the checksum, and installs to
 `~/.local/bin`:
 
 ```bash
 curl -fsSL https://revue.mtford.co.uk/install.sh | sh
 ```
 
-Prebuilt executables for macOS (arm64 & x64) & Linux x64, with checksums, are on the
-[releases page](https://github.com/mtford90/revue/releases). You'll need git for `revue prep`;
-[difftastic](https://difftastic.wilfred.me.uk/) is optional & unlocks the Semantic view
-(`brew install difftastic`).
+You'll need Git for `revue prep`; [difftastic](https://difftastic.wilfred.me.uk/) is optional
+and unlocks the Semantic view (`brew install difftastic`).
 
-Running from a checkout instead: install [Bun](https://bun.sh) ≥ 1.3, `bun install`, and prefix
-the commands below with `bun run`.
+## Install Revuediff
+
+Revuediff is installed and released independently from Revue:
+
+```bash
+brew install mtford90/tap/revuediff
+```
+
+Or use its direct installer:
+
+```bash
+curl -fsSL https://revue.mtford.co.uk/revuediff/install.sh | sh
+```
+
+Prebuilt executables for both products and their checksums are on the
+[releases page](https://github.com/mtford90/revue/releases). Revue keeps `vX.Y.Z` tags and
+`revue-vX.Y.Z-{darwin-arm64,darwin-x64,linux-x64}.tar.gz` assets. Revuediff starts at 0.1.0
+and uses `revuediff-vX.Y.Z` tags and matching
+`revuediff-vX.Y.Z-{darwin-arm64,darwin-x64,linux-x64}.tar.gz` assets.
+
+Running from a checkout instead: install [Bun](https://bun.sh) ≥ 1.3, run `bun install`, and use
+`bun run revue` or `bun run revuediff`.
 
 Register the chapter-writing agent skill (auto-detects your coding agents):
 
@@ -63,9 +86,33 @@ staged, unstaged, the working tree.
 
 ### Just the diff
 
-No agent handy? `revue diff` opens the same scopes immediately as a flat, file-by-file diff -
-`revue diff main`, `revue diff --pr 123`, `revue diff --ref staged`. No narration, but you get
-the rest of the reviewer: inline comment threads, review progress, copying, themes.
+For a fast review without narration, `revue diff` opens any scope immediately as a flat,
+file-by-file diff - `revue diff main`, `revue diff --pr 123`, `revue diff --ref staged`. You still
+get the full reviewer: inline comment threads, review progress, copying, and themes.
+
+### Format diffs with Revuediff
+
+Revuediff formats Git diffs without starting Revue's full-screen reviewer. Configure only Git's
+diff pager (not `core.pager`):
+
+```bash
+git config --global pager.diff revuediff
+```
+
+Current Lazygit uses named Git pagers:
+
+```yaml
+git:
+  pagers:
+    - name: Revuediff
+      colorArg: never
+      pager: revuediff --paging=never
+```
+
+Add more entries under `git.pagers` and use `|` / `\` in Lazygit to cycle forward/backward.
+`less` improves automatic paging but is optional; unsupported input is safely emitted as sanitised
+plain output. The `revue` CLI intentionally has no `pager` command. See the complete
+[Revuediff reference](docs/revuediff.md) for options, configuration, integrations, and troubleshooting.
 
 ### While you review
 

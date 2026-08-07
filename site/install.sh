@@ -23,11 +23,41 @@ esac
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 
-latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")"
-tag="${latest_url##*/}"
+resolve_latest_tag() {
+	page=1
+	while :; do
+		body="$(
+			curl -fsSL -H 'Accept: application/vnd.github+json' \
+				"https://api.github.com/repos/$repo/releases?per_page=100&page=$page"
+		)"
+		tag="$(
+			printf '%s\n' "$body" | awk '
+				/^  \{/ { tag = ""; stable = 0; draft = 0 }
+				/^    "tag_name":/ {
+					tag = $0
+					sub(/^[^:]*:[[:space:]]*"/, "", tag)
+					sub(/"[,]?$/, "", tag)
+				}
+				/^    "draft": false/ { draft = 1 }
+				/^    "prerelease": false/ { stable = 1 }
+				/^  }[,]?$/ {
+					if (draft && stable && tag ~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/) {
+						print tag
+						exit
+					}
+				}
+			'
+		)"
+		[ -z "$tag" ] || { printf '%s\n' "$tag"; return; }
+		printf '%s\n' "$body" | grep -q '^  {' || return 1
+		page=$((page + 1))
+	done
+}
+
+tag="$(resolve_latest_tag)" || fail "could not determine the latest stable Revue release"
 case "$tag" in
-v*) ;;
-*) fail "could not determine the latest release from $latest_url" ;;
+v[0-9]*.[0-9]*.[0-9]*) ;;
+*) fail "could not determine the latest stable Revue release" ;;
 esac
 
 archive="revue-$tag-$target.tar.gz"
@@ -51,6 +81,7 @@ fi
 mkdir -p "$tmp/extract" "$install_dir"
 tar -xzf "$tmp/$archive" -C "$tmp/extract"
 install -m 755 "$tmp/extract/revue" "$install_dir/revue"
+install -m 755 "$tmp/extract/revue-highlighter.node" "$install_dir/revue-highlighter.node"
 
 echo "installed $("$install_dir/revue" --version) to $install_dir/revue"
 case ":$PATH:" in

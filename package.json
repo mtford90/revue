@@ -2,23 +2,31 @@
 	"name": "revue-monorepo",
 	"version": "0.5.0",
 	"private": true,
-	"description": "Narrative code review in your terminal — Stage's chapters with a Revue-owned TUI renderer.",
+	"description": "Revue narrative code review and the standalone Revuediff ANSI diff pager.",
 	"type": "module",
 	"workspaces": [
 		"packages/*"
 	],
 	"scripts": {
 		"revue": "bun run packages/tui/src/main.tsx",
+		"revuediff": "bun run packages/revuediff/src/main.ts",
 		"check": "bun run packages/tui/src/main.tsx show examples/sample-run --check",
 		"test": "bun test",
 		"goldens:update": "UPDATE_GOLDENS=1 bun test packages/diff-opentui/test/golden.test.tsx",
-		"typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/theme/tsconfig.json && tsc --noEmit -p packages/diff/tsconfig.json && tsc --noEmit -p packages/diff-opentui/tsconfig.json && tsc --noEmit -p packages/prep/tsconfig.json && tsc --noEmit -p packages/markdown-export/tsconfig.json && tsc --noEmit -p packages/tui/tsconfig.json",
+		"release-routes:update": "bun scripts/release-routes.ts update",
+		"release-routes:check": "bun scripts/release-routes.ts check",
+		"release-routes:check-range": "bun scripts/release-routes.ts check-range",
+		"typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/theme/tsconfig.json && tsc --noEmit -p packages/diff/tsconfig.json && tsc --noEmit -p packages/diff-opentui/tsconfig.json && tsc --noEmit -p packages/diff-ansi/tsconfig.json && tsc --noEmit -p packages/revuediff/tsconfig.json && tsc --noEmit -p packages/prep/tsconfig.json && tsc --noEmit -p packages/markdown-export/tsconfig.json && tsc --noEmit -p packages/tui/tsconfig.json && tsc --noEmit -p scripts/perf/tsconfig.json",
 		"lint": "biome check .",
-		"screenshots": "bun run scripts/screenshots/capture.ts"
+		"screenshots": "bun run scripts/screenshots/capture.ts",
+		"perf:revuediff": "bun run scripts/perf/revuediff.ts",
+		"native:themes": "bun run scripts/generate-syntect-themes.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.0.0",
 		"@types/bun": "^1.3.0",
+		"ajv": "^8.20.0",
+		"ajv-formats": "^3.0.1",
 		"typescript": "^5.7.0"
 	},
 	"engines": {

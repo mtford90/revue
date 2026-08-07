@@ -1,0 +1,116 @@
+name: Revuediff Release
+
+on:
+  push:
+    tags: ["revuediff-v*"]
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Revuediff release tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-14
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: linux-x64
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Verify Revuediff release version
+        run: |
+          git describe --tags --exact-match HEAD | grep -Fx "$RELEASE_TAG"
+          case "$RELEASE_TAG" in revuediff-v*) ;; *) exit 1 ;; esac
+          release_version="${RELEASE_TAG#revuediff-v}"
+          test "$(jq -r '.version' packages/revuediff/package.json)" = "$release_version"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun test --timeout 30000
+      - name: Compile Revuediff
+        run: |
+          bun build --compile packages/revuediff/src/main.ts --outfile dist/revuediff
+          bash scripts/build-native-highlighter.sh revuediff dist/revuediff-highlighter.node
+      - name: Smoke-test Revuediff
+        run: bash scripts/revuediff-release-smoke.sh dist/revuediff "${RELEASE_TAG#revuediff-v}"
+      - name: Package Revuediff
+        run: |
+          staging="dist/${RELEASE_TAG}-${{ matrix.target }}"
+          mkdir -p "$staging"
+          cp dist/revuediff dist/revuediff-highlighter.node README.md LICENSE "$staging/"
+          bun scripts/copy-local-notices.ts "$staging" revuediff
+          bun scripts/collect-licenses.ts "$staging/BUNDLED_LICENSES.md" packages/revuediff/package.json Revuediff
+          bun scripts/collect-rust-licenses.ts >> "$staging/BUNDLED_LICENSES.md"
+          tar -czf "$staging.tar.gz" -C "$staging" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: revuediff-${{ matrix.target }}
+          path: dist/revuediff-v*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Generate checksums
+        run: cd artifacts && sha256sum *.tar.gz > checksums.txt
+      - name: Create a draft release when needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Revuediff ${RELEASE_TAG#revuediff-v}" \
+              --draft \
+              --generate-notes
+          fi
+      - name: Upload Revuediff release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" artifacts/*.tar.gz artifacts/checksums.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+      - name: Publish Revuediff release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+      - name: Update Revuediff Homebrew formula
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          version="${RELEASE_TAG#revuediff-v}"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/mtford90/homebrew-tap.git" tap
+          bash scripts/generate-revuediff-tap-formula.sh "$version" artifacts/checksums.txt > tap/Formula/revuediff.rb
+          cd tap
+          git add Formula/revuediff.rb
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "revuediff ${version}"
+          git push

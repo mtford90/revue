@@ -144,8 +144,9 @@ export type ViewportFile = {
 	/** One-row-each note lines shown above the body while expanded. */
 	noteCount?: number;
 	showHunkHeaders?: boolean;
-	/** Mirrors the body's own prop, since a numbered gutter narrows the wrap budget. */
+	/** Mirrors the body's own props because visible chrome narrows the wrap budget. */
 	showLineNumbers?: boolean;
+	showChangeMarkers?: boolean;
 	layout: DiffLayout;
 	expanderActions?: (boundary: number) => readonly ExpandDirection[];
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
@@ -182,6 +183,7 @@ const geometryKey = ({
 		file.layout,
 		width,
 		file.showLineNumbers !== false,
+		file.showChangeMarkers !== false,
 		file.showHunkHeaders !== false,
 		syntaxTheme ?? "",
 		chrome.focusMarker,
@@ -227,6 +229,7 @@ export const planViewportFiles = ({
 				width,
 				visibility: {
 					lineNumbers: file.showLineNumbers !== false,
+					changeMarkers: file.showChangeMarkers !== false,
 					hunkHeaders: file.showHunkHeaders !== false,
 				},
 				chrome,

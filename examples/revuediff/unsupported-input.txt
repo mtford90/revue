@@ -1,0 +1,6 @@
+commit 1234567890abcdef
+Author: Demo <demo@example.test>
+
+    This intentionally unsupported input should pass through safely.
+
+[31mUntrusted terminal colour is removed before passthrough.

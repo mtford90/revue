@@ -1,0 +1,47 @@
+diff --git a/src/formatGreeting.ts b/src/formatGreeting.ts
+index 7a5b3cd..c9f6f7e 100644
+--- a/src/formatGreeting.ts
++++ b/src/formatGreeting.ts
+@@ -1,6 +1,12 @@
+-export function formatGreeting(name: string): string {
+-  return `Hello, ${name}!`;
++type GreetingOptions = {
++  excited?: boolean;
++};
++
++export function formatGreeting(name: string, options: GreetingOptions = {}): string {
++  const subject = name.trim() || "friend";
++  const punctuation = options.excited ? "!" : ".";
++  return `Hello, ${subject}${punctuation}`;
+ }
+ export function formatFarewell(name: string): string {
+-  return `Goodbye, ${name}.`;
++  return `See you soon, ${name.trim() || "friend"}.`;
+ }
+diff --git a/src/greeting.ts b/src/greeting.ts
+new file mode 100644
+index 0000000..6f3c4d2
+--- /dev/null
++++ b/src/greeting.ts
+@@ -0,0 +1,9 @@
++import { formatGreeting } from "./formatGreeting.ts";
++
++const guest = process.env.GUEST_NAME ?? "Ada";
++
++console.log(
++  formatGreeting(guest, {
++    excited: process.argv.includes("--excited"),
++  }),
++);
+diff --git a/package.json b/package.json
+index 5c2ee0b..d1a745a 100644
+--- a/package.json
++++ b/package.json
+@@ -1,5 +1,6 @@
+   "type": "module",
+   "scripts": {
+-    "greet": "bun src/formatGreeting.ts"
++    "greet": "bun src/greeting.ts",
++    "greet:excited": "bun src/greeting.ts --excited"
+   }
+ }

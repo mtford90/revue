@@ -463,6 +463,32 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	expect(statusLine(t)).toContain("Prologue");
 });
 
+test("View menu independently persists line-number and change-marker toggles", async () => {
+	const preferences: Preferences[] = [];
+	const t = await testRender(
+		<App file={file} onPreferencesChange={(next) => preferences.push(next)} />,
+		{ width: 120, height: 42 },
+	);
+	await t.renderOnce();
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "right");
+	let lines = t.captureCharFrame().split("\n");
+	let y = lines.findIndex((line) => line.includes("Line numbers"));
+	expect(lines[y]).toContain("[x]");
+	await click(t, (lines[y]?.indexOf("Line numbers") ?? -1) + 1, y);
+	expect(preferences.at(-1)?.lineNumbers).toBe(false);
+
+	await press(t, "F10");
+	await arrow(t, "right");
+	await arrow(t, "right");
+	lines = t.captureCharFrame().split("\n");
+	y = lines.findIndex((line) => line.includes("Change markers"));
+	expect(lines[y]).toContain("[x]");
+	await click(t, (lines[y]?.indexOf("Change markers") ?? -1) + 1, y);
+	expect(preferences.at(-1)).toMatchObject({ lineNumbers: false, changeMarkers: false });
+});
+
 test("View menu shows only the focused file and file navigation replaces it", async () => {
 	const combined = RevueChaptersFileSchema.parse({
 		chapters: [
@@ -493,6 +519,8 @@ test("View menu shows only the focused file and file navigation replaces it", as
 	await press(t, "F10");
 	await arrow(t, "right");
 	await arrow(t, "right");
+	await arrow(t, "down");
+	await arrow(t, "down");
 	await arrow(t, "down");
 	await arrow(t, "down");
 	await arrow(t, "down");

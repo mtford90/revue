@@ -2298,6 +2298,7 @@ export function App({
 	initialPreferences = {},
 	initialTheme = resolveTheme(undefined),
 	initialSyntaxTheme = initialTheme.syntaxTheme,
+	syntaxWarning,
 	transparentSurfaces = false,
 	initialThreads = [],
 	threadActions,
@@ -2326,6 +2327,8 @@ export function App({
 	initialTheme?: Theme;
 	/** The syntax theme the caller already prepared highlights for. */
 	initialSyntaxTheme?: string;
+	/** A one-time native syntax fallback warning surfaced through the existing status bar. */
+	syntaxWarning?: string;
 	transparentSurfaces?: boolean;
 	initialThreads?: ReviewThread[];
 	threadActions?: ThreadActions;
@@ -2413,6 +2416,8 @@ export function App({
 	const [diffPreference, setDiffPreferenceState] = useState<DiffLayoutPreference>(
 		initialPreferences.diffPreference ?? "auto",
 	);
+	const [lineNumbers, setLineNumbersState] = useState(initialPreferences.lineNumbers ?? true);
+	const [changeMarkers, setChangeMarkersState] = useState(initialPreferences.changeMarkers ?? true);
 	const [fileDisplay, setFileDisplayState] = useState<FileDisplayPreference>(
 		initialPreferences.fileDisplay ?? "all",
 	);
@@ -2518,6 +2523,8 @@ export function App({
 							displayed,
 							collapsed: collapsedFiles.has(path),
 							separator: index > 0,
+							showLineNumbers: lineNumbers,
+							showChangeMarkers: changeMarkers,
 							layout: layoutForFile({ file: displayed, preference: diffPreference, splitFits }),
 							expanderActions: lines
 								? (boundary: number) =>
@@ -2546,6 +2553,8 @@ export function App({
 			expansions,
 			collapsedFiles,
 			diffPreference,
+			lineNumbers,
+			changeMarkers,
 			splitFits,
 			diffFiles,
 		],
@@ -2682,6 +2691,14 @@ export function App({
 	function changeDiffPreference(next: DiffLayoutPreference) {
 		setDiffPreferenceState(next);
 		updatePreferences({ diffPreference: next });
+	}
+	function changeLineNumbers(next: boolean) {
+		setLineNumbersState(next);
+		updatePreferences({ lineNumbers: next });
+	}
+	function changeChangeMarkers(next: boolean) {
+		setChangeMarkersState(next);
+		updatePreferences({ changeMarkers: next });
 	}
 	function changeFileDisplay(next: FileDisplayPreference) {
 		setFileDisplayState(next);
@@ -3520,11 +3537,15 @@ export function App({
 		pathDisplay,
 		sidebarPreference,
 		diffPreference,
+		lineNumbers,
+		changeMarkers,
 		splitReachable,
 		setFileDisplay: changeFileDisplay,
 		setPathDisplay: changePathDisplay,
 		setSidebarPreference: changeSidebarPreference,
 		setDiffPreference: changeDiffPreference,
+		setLineNumbers: changeLineNumbers,
+		setChangeMarkers: changeChangeMarkers,
 		requestQuit: quit,
 		movePrevious: () => movePage(-1),
 		moveNext: () => movePage(1),
@@ -3866,7 +3887,7 @@ export function App({
 			? { text: threadNotice, tone: "error" }
 			: copyNotice
 				? { text: copyNotice.text, tone: "success" }
-				: configIssuesNotice;
+				: (configIssuesNotice ?? (syntaxWarning ? { text: syntaxWarning, tone: "error" } : null));
 
 	return (
 		<ThemeProvider value={theme}>
@@ -4165,6 +4186,7 @@ export async function runApp(
 		resolveInitialTheme?: (appearance: Appearance | null) => Theme;
 		/** The syntax theme highlights were already prepared for, before the terminal replied. */
 		initialSyntaxTheme?: string;
+		syntaxWarning?: string;
 		transparentSurfaces?: boolean;
 		onViewStateChange?: (next: ViewState) => void;
 		onSessionStateChange?: (next: ReviewSessionState) => void;
@@ -4202,6 +4224,7 @@ export async function runApp(
 				initialPreferences={options.initialPreferences}
 				initialTheme={initialTheme}
 				initialSyntaxTheme={options.initialSyntaxTheme}
+				syntaxWarning={options.syntaxWarning}
 				transparentSurfaces={options.transparentSurfaces}
 				initialThreads={options.initialThreads}
 				threadActions={options.threadActions}

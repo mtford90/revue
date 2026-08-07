@@ -13,6 +13,8 @@ const PreferencesSchema = z.object({
 	indexExpanded: z.boolean().optional(),
 	sidebarPreference: z.enum(["auto", "shown", "hidden"]).optional(),
 	diffPreference: z.enum(["auto", "split", "stacked"]).optional(),
+	lineNumbers: z.boolean().optional(),
+	changeMarkers: z.boolean().optional(),
 	fileDisplay: z.enum(["all", "focused"]).optional(),
 	pathDisplay: z.enum(PATH_DISPLAY_MODES).optional(),
 	viewMode: z.enum(["patch", "semantic"]).optional(),

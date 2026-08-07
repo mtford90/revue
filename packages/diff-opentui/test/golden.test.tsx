@@ -44,7 +44,7 @@ const render = async ({ scenario, layout, width }: Case): Promise<string> => {
 		file,
 		layout,
 		width,
-		visibility: { lineNumbers: true, hunkHeaders: true },
+		visibility: { lineNumbers: true, changeMarkers: true, hunkHeaders: true },
 		chrome: OPENTUI_DIFF_CHROME,
 		syntaxTheme: theme.syntaxTheme,
 	});

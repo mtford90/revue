@@ -6,6 +6,13 @@ This package uses the public parsing and syntax-highlighting APIs of
 [`@pierre/diffs`](https://github.com/pierrecomputer/diffs), version 1.2.2. Pierre remains a runtime
 dependency and its dependency licence is also included in release `BUNDLED_LICENSES.md`.
 
+## Native Syntect highlighter
+
+The optional adjacent N-API addon under `native/` uses Bat's integrated syntax assets, Syntect,
+Oniguruma, and napi-rs. Their complete dependency licence texts are collected into each release
+archive after the native build; the addon remains outside the Bun executable so either product can
+ship and update its matching companion independently.
+
 ## Hunk
 
 This package selectively adapts row-model, line-geometry, syntax-highlighting, and terminal-text

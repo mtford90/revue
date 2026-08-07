@@ -42,7 +42,7 @@ test("the visual planner resolves stable wrapping, source identities, and split 
 		file,
 		layout: "split",
 		width: 36,
-		visibility: { lineNumbers: true, hunkHeaders: true },
+		visibility: { lineNumbers: true, changeMarkers: true, hunkHeaders: true },
 		chrome: reservedChrome,
 	});
 	const line = plan.rows.find((row) => row.type === "split-line");
@@ -72,14 +72,14 @@ test("a non-OpenTUI zero-chrome request receives the full adapter-neutral code b
 		file,
 		layout: "stack",
 		width: 36,
-		visibility: { lineNumbers: false, hunkHeaders: false },
+		visibility: { lineNumbers: false, changeMarkers: false, hunkHeaders: false },
 		chrome: zeroChrome,
 	});
 	const reserved = planDiff({
 		file,
 		layout: "stack",
 		width: 36,
-		visibility: { lineNumbers: false, hunkHeaders: false },
+		visibility: { lineNumbers: false, changeMarkers: false, hunkHeaders: false },
 		chrome: reservedChrome,
 	});
 	const isAddition = (row: (typeof zero.rows)[number]) =>
@@ -89,7 +89,15 @@ test("a non-OpenTUI zero-chrome request receives the full adapter-neutral code b
 
 	expect(zero.chrome).toEqual(zeroChrome);
 	expect(zero.rows[0]?.height).toBe(0);
-	expect(zeroLine?.height).toBeLessThan(reservedLine?.height ?? 0);
+	if (zeroLine?.type !== "stack-line" || reservedLine?.type !== "stack-line")
+		throw new Error("missing addition rows");
+	const fragmentWidth = (row: typeof zeroLine) =>
+		row.visualRows[0]?.cell.spans.reduce((sum, span) => sum + Bun.stringWidth(span.text), 0) ?? 0;
+	// Hidden gutters and markers reserve no columns; only the adapter's always-on edge remains.
+	expect(fragmentWidth(zeroLine)).toBe(36);
+	expect(fragmentWidth(reservedLine)).toBe(35);
+	expect(zeroLine.visualRows[0]?.cell.gutters).toBeUndefined();
+	expect(zeroLine.visualRows[0]?.cell.changeSign).toBe(" ");
 });
 
 test("paint-only focus and hunk selection decorate only the requested window", () => {
@@ -97,7 +105,7 @@ test("paint-only focus and hunk selection decorate only the requested window", (
 		file,
 		layout: "stack",
 		width: 24,
-		visibility: { lineNumbers: true, hunkHeaders: true },
+		visibility: { lineNumbers: true, changeMarkers: true, hunkHeaders: true },
 		chrome: reservedChrome,
 	});
 	const geometryRows = plan.rows;
@@ -155,7 +163,7 @@ test("split paint keeps multi-line decoration focus isolated to its requested si
 		file: decoratedFile,
 		layout: "split",
 		width: 80,
-		visibility: { lineNumbers: true, hunkHeaders: true },
+		visibility: { lineNumbers: true, changeMarkers: true, hunkHeaders: true },
 		chrome: reservedChrome,
 	});
 	const painted = paintDiff({

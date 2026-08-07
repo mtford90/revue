@@ -57,17 +57,21 @@ function CellContent({ spans, theme }: { spans: readonly RenderSpan[]; theme: Th
 function LineContent({
 	cell,
 	lineId,
+	showChangeMarkers,
 	theme,
 }: {
 	cell: PaintedVisualCell;
 	lineId?: string;
+	showChangeMarkers: boolean;
 	theme: Theme;
 }) {
 	return (
 		<>
-			<text fg={theme.text} wrapMode="none" flexShrink={0} selectable={false}>
-				{` ${cell.changeSign} `}
-			</text>
+			{showChangeMarkers ? (
+				<text fg={theme.text} wrapMode="none" flexShrink={0} selectable={false}>
+					{` ${cell.changeSign} `}
+				</text>
+			) : null}
 			<text
 				id={lineId}
 				fg={theme.text}
@@ -134,6 +138,7 @@ function SplitCell({
 	side,
 	digits,
 	showLineNumbers,
+	showChangeMarkers,
 	width,
 	attachmentCount,
 	handlers,
@@ -145,6 +150,7 @@ function SplitCell({
 	side: DiffSide;
 	digits: number;
 	showLineNumbers: boolean;
+	showChangeMarkers: boolean;
 	width: number;
 	attachmentCount: number;
 	handlers?: GutterHandlers;
@@ -164,16 +170,23 @@ function SplitCell({
 			flexDirection="row"
 			onMouseDown={onContextMenu}
 		>
-			<Gutter
-				focused={gutter?.focused ?? false}
-				number={gutter?.lineNumber}
-				digits={digits}
-				showLineNumbers={showLineNumbers}
-				attachmentCount={gutter ? attachmentCount : 0}
-				handlers={gutter?.lineNumber === undefined ? undefined : handlers}
+			{showLineNumbers ? (
+				<Gutter
+					focused={gutter?.focused ?? false}
+					number={gutter?.lineNumber}
+					digits={digits}
+					showLineNumbers
+					attachmentCount={gutter ? attachmentCount : 0}
+					handlers={gutter?.lineNumber === undefined ? undefined : handlers}
+					theme={theme}
+				/>
+			) : null}
+			<LineContent
+				cell={cell}
+				lineId={lineId}
+				showChangeMarkers={showChangeMarkers}
 				theme={theme}
 			/>
-			<LineContent cell={cell} lineId={lineId} theme={theme} />
 		</box>
 	);
 }
@@ -182,6 +195,7 @@ function StackCell({
 	cell,
 	digits,
 	showLineNumbers,
+	showChangeMarkers,
 	sides,
 	attachmentCounts,
 	interactions,
@@ -192,6 +206,7 @@ function StackCell({
 	cell: PaintedVisualCell;
 	digits: number;
 	showLineNumbers: boolean;
+	showChangeMarkers: boolean;
 	sides: readonly DiffSide[];
 	attachmentCounts: AttachmentCounts;
 	interactions: CellInteractions;
@@ -224,7 +239,12 @@ function StackCell({
 					/>
 				);
 			})}
-			<LineContent cell={cell} lineId={lineId} theme={theme} />
+			<LineContent
+				cell={cell}
+				lineId={lineId}
+				showChangeMarkers={showChangeMarkers}
+				theme={theme}
+			/>
 		</box>
 	);
 }
@@ -238,6 +258,7 @@ type SideInteraction = {
 type LineRowProps = {
 	digits: number;
 	showLineNumbers: boolean;
+	showChangeMarkers: boolean;
 	attachmentCounts: AttachmentCounts;
 	anchorId?: string;
 	theme: Theme;
@@ -251,6 +272,7 @@ function SplitLine({
 	additions,
 	digits,
 	showLineNumbers,
+	showChangeMarkers,
 	attachmentCounts,
 	anchorId,
 	theme,
@@ -276,6 +298,7 @@ function SplitLine({
 						side="deletions"
 						digits={digits}
 						showLineNumbers={showLineNumbers}
+						showChangeMarkers={showChangeMarkers}
 						width={panes.old}
 						attachmentCount={attachmentCounts.deletions ?? 0}
 						handlers={deletions.handlers}
@@ -289,6 +312,7 @@ function SplitLine({
 						side="additions"
 						digits={digits}
 						showLineNumbers={showLineNumbers}
+						showChangeMarkers={showChangeMarkers}
 						width={panes.new}
 						attachmentCount={attachmentCounts.additions ?? 0}
 						handlers={additions.handlers}
@@ -311,6 +335,7 @@ function StackLine({
 	onContextMenu,
 	digits,
 	showLineNumbers,
+	showChangeMarkers,
 	attachmentCounts,
 	anchorId,
 	theme,
@@ -335,6 +360,7 @@ function StackLine({
 						cell={cell}
 						digits={digits}
 						showLineNumbers={showLineNumbers}
+						showChangeMarkers={showChangeMarkers}
 						sides={sides}
 						attachmentCounts={attachmentCounts}
 						interactions={interactions}
@@ -374,6 +400,7 @@ export type DiffBodySuppliedPlanProps = DiffBodyPaintProps & {
 	layout?: never;
 	width?: never;
 	showLineNumbers?: never;
+	showChangeMarkers?: never;
 	showHunkHeaders?: never;
 };
 
@@ -384,6 +411,7 @@ export type DiffBodyStandaloneProps = DiffBodyPaintProps & {
 	layout?: DiffLayout;
 	width: number;
 	showLineNumbers?: boolean;
+	showChangeMarkers?: boolean;
 	showHunkHeaders?: boolean;
 };
 
@@ -468,6 +496,7 @@ export function DiffBody(props: DiffBodyProps) {
 			width: props.width,
 			visibility: {
 				lineNumbers: props.showLineNumbers ?? true,
+				changeMarkers: props.showChangeMarkers ?? true,
 				hunkHeaders: props.showHunkHeaders ?? true,
 			},
 			chrome: OPENTUI_DIFF_CHROME,
@@ -479,6 +508,7 @@ export function DiffBody(props: DiffBodyProps) {
 		props.layout,
 		props.width,
 		props.showLineNumbers,
+		props.showChangeMarkers,
 		props.showHunkHeaders,
 		theme.syntaxTheme,
 	]);
@@ -707,6 +737,7 @@ export function DiffBody(props: DiffBodyProps) {
 							additions={interaction(secondCell, "additions")}
 							digits={geometry.digits}
 							showLineNumbers={geometry.visibility.lineNumbers}
+							showChangeMarkers={geometry.visibility.changeMarkers}
 							attachmentCounts={counts}
 							anchorId={id}
 							theme={theme}
@@ -714,7 +745,7 @@ export function DiffBody(props: DiffBodyProps) {
 					) : row.type === "stack-line" && firstCell ? (
 						<StackLine
 							row={row}
-							sides={geometry.stackGutterSides}
+							sides={geometry.visibility.lineNumbers ? geometry.stackGutterSides : []}
 							interactions={{
 								deletions: interaction(firstCell, "deletions").handlers,
 								additions: interaction(firstCell, "additions").handlers,
@@ -729,6 +760,7 @@ export function DiffBody(props: DiffBodyProps) {
 							}
 							digits={geometry.digits}
 							showLineNumbers={geometry.visibility.lineNumbers}
+							showChangeMarkers={geometry.visibility.changeMarkers}
 							attachmentCounts={counts}
 							anchorId={id}
 							theme={theme}

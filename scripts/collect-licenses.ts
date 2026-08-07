@@ -81,12 +81,40 @@ const installedPackages = (): Map<string, PackageRecord[]> => {
 	return byName;
 };
 
-const workspaceRootNames = (): string[] => {
+const workspaceRootNames = (rootManifestPath?: string): string[] => {
 	const glob = new Bun.Glob("packages/*/package.json");
-	return [...glob.scanSync({ cwd: repoRoot })].flatMap((path) => {
-		const manifest = readManifest(join(repoRoot, path));
-		return manifest ? externalDependencyNames(manifest) : [];
-	});
+	const manifests = [...glob.scanSync({ cwd: repoRoot })]
+		.map((path) => readManifest(join(repoRoot, path)))
+		.filter((manifest): manifest is Manifest => manifest !== null);
+	if (!rootManifestPath) return manifests.flatMap(externalDependencyNames);
+
+	const root = readManifest(resolve(repoRoot, rootManifestPath));
+	if (!root) throw new Error(`could not read workspace manifest ${rootManifestPath}`);
+	const byName = new Map(
+		manifests.flatMap((manifest) => (manifest.name ? [[manifest.name, manifest]] : [])),
+	);
+	const external = new Set<string>();
+	const visited = new Set<string>();
+	const queue = [root];
+	for (let index = 0; index < queue.length; index++) {
+		const manifest = queue[index];
+		if (!manifest) continue;
+		const key = manifest.name ?? rootManifestPath;
+		if (visited.has(key)) continue;
+		visited.add(key);
+		for (const [name, range] of Object.entries({
+			...manifest.dependencies,
+			...manifest.peerDependencies,
+			...manifest.optionalDependencies,
+		})) {
+			if (String(range).startsWith("workspace:")) {
+				const workspace = byName.get(name);
+				if (workspace) queue.push(workspace);
+				else throw new Error(`workspace dependency ${name} has no package manifest`);
+			} else external.add(name);
+		}
+	}
+	return [...external];
 };
 
 const productionClosure = (
@@ -112,7 +140,7 @@ const productionClosure = (
 	return { records, missing: [...missing].sort() };
 };
 
-const formatDocument = (records: PackageRecord[]): string => {
+const formatDocument = (records: PackageRecord[], productName: string): string => {
 	const sorted = [...records].sort((a, b) =>
 		`${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`),
 	);
@@ -126,7 +154,7 @@ const formatDocument = (records: PackageRecord[]): string => {
 	return [
 		"# Bundled third-party licences",
 		"",
-		"The revue executable bundles the packages below. Each section reproduces the licence",
+		`The ${productName} executable bundles the packages below. Each section reproduces the licence`,
 		"that package was distributed under.",
 		"",
 		sections.join("\n\n"),
@@ -135,12 +163,19 @@ const formatDocument = (records: PackageRecord[]): string => {
 };
 
 const outputPath = process.argv[2];
+const rootManifestPath = process.argv[3];
+const productName = process.argv[4] ?? "revue";
 if (!outputPath) {
-	process.stderr.write("usage: bun scripts/collect-licenses.ts <output-file>\n");
+	process.stderr.write(
+		"usage: bun scripts/collect-licenses.ts <output-file> [workspace-manifest] [product-name]\n",
+	);
 	process.exit(2);
 }
 
-const { records, missing } = productionClosure(installedPackages(), workspaceRootNames());
+const { records, missing } = productionClosure(
+	installedPackages(),
+	workspaceRootNames(rootManifestPath),
+);
 if (records.length === 0) {
 	process.stderr.write("No installed packages found — run `bun install` first.\n");
 	process.exit(1);
@@ -148,5 +183,5 @@ if (records.length === 0) {
 for (const name of missing) {
 	process.stderr.write(`warning: ${name} is depended on but not installed; skipped\n`);
 }
-await Bun.write(outputPath, formatDocument(records));
+await Bun.write(outputPath, formatDocument(records, productName));
 process.stderr.write(`Wrote ${records.length} package licences to ${outputPath}\n`);

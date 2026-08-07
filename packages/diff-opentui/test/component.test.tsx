@@ -215,7 +215,7 @@ test("host-supplied and standalone plans render equivalent component geometry", 
 		file,
 		layout: "split",
 		width,
-		visibility: { lineNumbers: false, hunkHeaders: false },
+		visibility: { lineNumbers: false, changeMarkers: true, hunkHeaders: false },
 		chrome: OPENTUI_DIFF_CHROME,
 		syntaxTheme: theme.syntaxTheme,
 	});
@@ -239,6 +239,32 @@ test("host-supplied and standalone plans render equivalent component geometry", 
 	await supplied.renderOnce();
 	expect(supplied.captureCharFrame()).toBe(standalone.captureCharFrame());
 	expect(supplied.captureSpans()).toEqual(standalone.captureSpans());
+});
+
+test("hidden line numbers remove the selectable gutter and return its columns to code", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const selections: unknown[] = [];
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={30}
+			showLineNumbers={false}
+			showChangeMarkers={false}
+			onRangeSelect={(range) => selections.push(range)}
+		/>,
+		{ width: 30, height: 10 },
+	);
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const y = rows.findIndex((row) => row.includes("old one"));
+	expect(y).toBeGreaterThan(-1);
+	expect(rows[y]?.startsWith("old one")).toBe(true);
+	await act(async () => t.mockMouse.click(0, y));
+	await t.renderOnce();
+	expect(selections).toEqual([]);
 });
 
 test("split rows keep one divider column at odd widths regardless of content length", async () => {

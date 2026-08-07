@@ -24,6 +24,8 @@ for Hunk provenance.
 packages/
   diff/            Headless Patch engine: parsing, analysis, rows, wrapping, and visual plans
   diff-opentui/    OpenTUI components, pointer handling, attachments, and measurement
+  diff-ansi/       Deterministic ANSI file envelopes shared with Revuediff
+  revuediff/       Standalone `revuediff` stdin formatter and downstream-pager CLI
   prep/            Git scope resolution, immutable snapshots, filtering, and hunk formatting
   markdown-export/ Pure deterministic Markdown formatting with no OpenTUI dependency
   theme/           Contrast-aware palettes derived from bundled editor themes
@@ -34,6 +36,14 @@ skills/
 examples/
   sample-run/      A complete prepared run that works without a Git repository
 ```
+
+## Revuediff ANSI diff pager
+
+[Revuediff](revuediff.md) is the independent buffered ANSI formatter for Git, Lazygit, and ordinary
+unified diffs. It shares Revue's Patch engine but never loads narrative state or OpenTUI. The
+narrative `revue` executable intentionally has no pager command. Its complete standalone reference
+covers installation, CLI and persistent configuration, paging, integrations, fail-open behaviour,
+and troubleshooting.
 
 ## Installing the agent skill
 
@@ -207,8 +217,15 @@ is taking columns from the thing under review — and a split body is used only 
 sides of the file have changed lines. That threshold is measured against the panel's default width,
 so dragging the divider never makes it disappear under the pointer. Asking for `split` outranks an
 `auto` sidebar, which matters once the divider has been dragged wide, but an explicit sidebar
-preference is never overridden. Both preferences, along with the panel width, chosen diff view, and file display, are remembered
-across repositories in `~/.revue/preferences.json`; they do not belong to one run's view state.
+preference is never overridden.
+
+Patch view shows line numbers and `+`/`-` change markers by default. **View → Line numbers** and
+**View → Change markers (+/-)** toggle them independently. Hidden line numbers remove the selectable
+gutter and return its columns to code; comments and selections already anchored to source lines
+remain valid. These toggles deliberately do not reinterpret Semantic view's Difftastic output.
+Both choices, along with the panel width, chosen diff view, layout, and file display, are remembered
+across repositories in `~/.revue/preferences.json`; existing preference files without the new keys
+retain the on/on defaults. They do not belong to one run's view state.
 
 Losing the sidebar never costs the chapter. The narrative it holds—title, summary, key changes and
 file list—stacks above the diff in a single column instead, the way the prologue already renders,
@@ -250,7 +267,11 @@ bun run revue show examples/sample-run --transparent-bg
 Without `--theme`, Revue uses the remembered theme and otherwise starts with `ayu-dark`. Pass
 `--theme auto` to ask the terminal for its background colour and choose `ayu-light` or `ayu-dark`.
 Derivation enforces WCAG contrast floors, so body
-text, status colours, and diff row tints stay readable on light and dark themes alike.
+text, status colours, and diff row tints stay readable on light and dark themes alike. Syntax
+highlighting normally uses Revue's adjacent native Syntect addon; a missing or corrupt addon warns
+once in the status bar and dynamically uses Shiki instead, preserving syntax highlighting. For
+temporary diagnostics only, `REVUE_SYNTAX_ENGINE=syntect|shiki` selects a backend; forced Syntect
+fails rather than silently falling back, and the setting is not persisted.
 
 ## Review ignore rules
 

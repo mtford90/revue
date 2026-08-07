@@ -1,5 +1,11 @@
 export { findFocusedDecorationAnchor, rangeToHunkIndex } from "./decorations.ts";
-export { type HighlightedLines, prepareSyntaxHighlighting } from "./highlight.ts";
+export {
+	type HighlightedLines,
+	prepareSyntaxHighlighting,
+	type SyntaxBackend,
+	type SyntaxHighlightingPreparation,
+	type SyntaxHighlightWarning,
+} from "./highlight.ts";
 export type { DiffChromeWidths } from "./layout.ts";
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export {
@@ -30,6 +36,7 @@ export {
 	structureRowIdentity,
 } from "./plan.ts";
 export { anchorRowIndex, plannedRowIdentity } from "./ranges.ts";
+export { compositeTerminalForeground } from "./syntectTheme.ts";
 export { sanitizeTerminalLine } from "./terminalText.ts";
 export type {
 	DecorationAnchor,

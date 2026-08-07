@@ -268,6 +268,50 @@ test("excerpt anchors resolve against the frozen context, and orphans neither th
 	}
 });
 
+/** Re-narrates the copied run at a partial depth that covers only the chapter named. */
+const narratedAtPartialDepth = async (directory: string, keptChapterId: string) => {
+	const chapters = (await Bun.file(join(sampleRun, "chapters.json")).json()) as RevueChaptersFile;
+	await writeFile(
+		join(directory, "chapters.json"),
+		`${JSON.stringify({
+			...chapters,
+			depth: { kind: "partial", label: "10,000ft" },
+			chapters: chapters.chapters.filter((chapter) => chapter.id === keptChapterId),
+		})}\n`,
+	);
+};
+
+test("a hunk thread on a unit a partial narrative left out still loads", async () => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-partial-hunk-"));
+	try {
+		const { directory, runId, threadsPath } = await narratedRun(root, []);
+		// A reviewer comments in Files on a hunk that the shallower narrative does not narrate.
+		const thread = openThreadStore(threadsPath, runId).create(
+			{
+				kind: THREAD_ANCHOR_KIND.HUNK,
+				filePath: "src/lib/backoff.ts",
+				oldStart: 0,
+				side: "additions",
+				startLine: 1,
+				endLine: 1,
+			},
+			agent,
+			"Does this ceiling hold?",
+		);
+		await narratedAtPartialDepth(directory, "chapter-2");
+
+		const run = await loadReviewRun(directory);
+		const loaded = loadValidatedThreads(threadsPath, run);
+
+		// No chapter owns the unit, but Files still does. Omitting it from the story is a
+		// narration choice, not corruption, so the feedback must survive and the run must open.
+		expect(loaded.threads.map((entry) => entry.id)).toEqual([thread.id]);
+		expect(loaded.orphaned).toEqual([]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("a corrupt hunk anchor still refuses to load", async () => {
 	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-hunk-anchor-"));
 	try {

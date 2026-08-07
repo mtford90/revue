@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 import {
 	type ExcerptRange,
 	excerptKey,
@@ -123,11 +123,23 @@ const freeze = (range: ExcerptRange, snapshot: Snapshot): Resolution => {
 	};
 };
 
+/**
+ * Citations come from an agent-written chapters file, and a worktree endpoint resolves them
+ * against the repository root, so a path that climbs out of the repository would let narration
+ * quote anything on the machine into a file the reviewer reads. Only repository-relative paths
+ * that stay inside it may be quoted.
+ */
+const escapesRepository = (filePath: string): boolean =>
+	isAbsolute(filePath) || normalize(filePath).split(/[\\/]/).includes("..");
+
 const resolveCitation = async (
 	context: GitContext,
 	source: SnapshotSource,
 	range: ExcerptRange,
 ): Promise<Resolution> => {
+	if (escapesRepository(range.filePath)) {
+		return unresolved(range, "the path is outside the repository");
+	}
 	let snapshot: Snapshot | null | "gitlink";
 	try {
 		snapshot = await readSnapshot(context, source, range.filePath);

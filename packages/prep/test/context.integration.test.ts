@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	type ContextExcerpt,
 	RevueChaptersFileSchema,
@@ -195,6 +195,30 @@ test("a citation nothing can be read for is recorded rather than pinned", async 
 		},
 		{ filePath: "src/value.ts", startLine: 5, endLine: 9, reason: "the file has 6 lines" },
 	]);
+});
+
+test("a citation that climbs out of the repository quotes nothing", async () => {
+	const root = await repository();
+	await write(root, "src/value.ts", numbered("working", 6));
+	// A secret the repository does not contain and narration must never be able to quote.
+	await writeFile(join(dirname(root), "outside.env"), "SECRET_TOKEN=hunter2\nAWS_KEY=abcd\n");
+	const run = await prepareRun(["--ref", "work", "--base", "main"], root);
+
+	const result = await freezeRunContext(
+		run,
+		narration([
+			{ filePath: "../outside.env", startLine: 1, endLine: 2 },
+			{ filePath: join(dirname(root), "outside.env"), startLine: 1, endLine: 2 },
+		]),
+	);
+
+	// The chapters file is agent-written, so a path is not a licence to read the machine.
+	expect(result.context.excerpts).toEqual([]);
+	expect(result.context.unresolved.map((entry) => entry.reason)).toEqual([
+		"the path is outside the repository",
+		"the path is outside the repository",
+	]);
+	expect(JSON.stringify(result.context)).not.toContain("hunter2");
 });
 
 test("frozen context belonging to another run is rejected", async () => {

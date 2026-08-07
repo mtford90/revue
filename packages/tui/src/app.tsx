@@ -2881,15 +2881,20 @@ export function App({
 	// was frozen for simply does not appear.
 	const chapterExcerpts = useMemo<ViewportExcerpt[]>(() => {
 		if (!chapter || !plannedBody) return [];
-		const paths = viewportFiles.map((entry) => entry.path);
+		// Anchored against the chapter's own file order, not the viewport's: Focused display shows
+		// one file, and placing every citation against that would move quotations between modes.
+		const paths = chapterFilePaths(chapter);
+		const onScreen = new Set(viewportFiles.map((entry) => entry.path));
 		return distinctExcerpts(chapter).flatMap(({ key, excerpt }, index) => {
+			const after = excerptAnchor(paths, index);
+			if (after !== null && !onScreen.has(after)) return [];
 			const frozen = frozenExcerptFor(context, excerpt);
 			if (!frozen) return [];
 			const quotation: ExcerptQuotation = { ...excerpt, lines: frozen.lines };
 			return [
 				{
 					key,
-					after: excerptAnchor(paths, index),
+					after,
 					plan: planExcerpt({
 						key,
 						quotation,

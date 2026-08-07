@@ -2328,6 +2328,50 @@ test("a cited excerpt is folded scenery that contributes nothing to review progr
 	expect(t.captureCharFrame()).toContain("1/3 files");
 });
 
+/** One chapter over two files, each with a citation, so placement has somewhere to go wrong. */
+const twoFileChapter: RevueChaptersFile = {
+	...file,
+	chapters: [
+		{
+			...(file.chapters[0] as (typeof file.chapters)[number]),
+			hunkRefs: [
+				{ filePath: "src/lib/backoff.ts", oldStart: 0 },
+				{ filePath: "src/lib/apiClient.ts", oldStart: 41 },
+			],
+			excerpts: [CITATION, { ...CITATION, startLine: 13, endLine: 14 }],
+		},
+		...file.chapters.slice(2),
+	],
+};
+
+test("focusing one file does not drag another file's quotation onto it", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App
+			file={twoFileChapter}
+			context={frozenContext}
+			diffFiles={diffFiles}
+			initialPreferences={{ fileDisplay: "focused" }}
+		/>,
+		{ width: 130, height: 44, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	// The first citation belongs after the first file, which is the one on screen.
+	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+
+	// Walk the file cursor to the second file; it steps through the quotation on the way.
+	for (let step = 0; step < 4 && !t.captureCharFrame().includes("return fetch"); step += 1) {
+		await press(t, "TAB");
+	}
+
+	// The second citation follows the second file; the first must not have travelled with it.
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("return fetch");
+	expect(frame).not.toContain(FOLDED_BAND);
+});
+
 test("clicking the band opens the excerpt in place, caption above its header", async () => {
 	const t = await renderExcerptChapter();
 

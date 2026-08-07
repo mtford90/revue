@@ -70,7 +70,14 @@ export type ContextExcerpt = z.infer<typeof contextExcerptSchema>;
  */
 export const narrativeDepthSchema = z.discriminatedUnion("kind", [
 	z.strictObject({ kind: z.literal("full") }),
-	z.strictObject({ kind: z.literal("partial"), label: z.string().min(1) }),
+	z.strictObject({
+		kind: z.literal("partial"),
+		// A blank label would relax coverage while telling the reviewer nothing about why.
+		label: z
+			.string()
+			.transform((value) => value.trim())
+			.refine((value) => value.length > 0, "A partial depth must say what it covers"),
+	}),
 ]);
 export type NarrativeDepth = z.infer<typeof narrativeDepthSchema>;
 

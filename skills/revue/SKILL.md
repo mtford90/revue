@@ -15,6 +15,17 @@ This skill is adapted from ReviewStage/stage-cli's `stage-chapters` skill (MIT).
 narration, and prologue rules remain the same. Revue differs by preserving one immutable patch and
 its old/new snapshots instead of recomputing Git state during display.
 
+## Invocation behaviour
+
+Invoking this skill is a request to generate a narrated review. Start the workflow immediately;
+do not stop after loading or summarising these instructions.
+
+- With no arguments, use bare `revue prep` and generate the narrative for its auto-selected scope.
+- With arguments, treat them as the requested review scope and pass the corresponding scope to
+  `revue prep`.
+- Use the chapterless `revue diff` path only when the user explicitly asks for a quick or
+  non-narrated review.
+
 ## Prerequisites
 
 1. **The current directory is a git repo.** Run `git rev-parse --is-inside-work-tree`. If it does

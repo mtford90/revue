@@ -43,7 +43,9 @@ import {
 import {
 	type Chapter,
 	emptyViewState,
+	narratedUnitCount,
 	type Prologue,
+	partialDepthLabel,
 	type ReviewThread,
 	type RevueChaptersFile,
 	THREAD_AUTHOR_KIND,
@@ -111,7 +113,7 @@ import {
 	permalinkFor,
 	sourceRangeFor,
 } from "./sourceLink.ts";
-import { StatusBar, type StatusNotice } from "./statusBar.tsx";
+import { type NarrativeCoverage, StatusBar, type StatusNotice } from "./statusBar.tsx";
 import {
 	complexityColor,
 	severityBackgroundColor,
@@ -534,6 +536,7 @@ function ChapterPanel({
 	pages,
 	current,
 	chapterCount,
+	coverage,
 	width,
 	vs,
 	indexExpanded,
@@ -556,6 +559,7 @@ function ChapterPanel({
 	pages: Page[];
 	current: number;
 	chapterCount: number;
+	coverage: NarrativeCoverage | null;
 	width: number;
 	vs: ViewState;
 	indexExpanded: boolean;
@@ -610,6 +614,14 @@ function ChapterPanel({
 				>
 					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.heading}>
 						{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
+						{coverage ? ` · ${coverage.label}` : ""}
+					</text>
+				</box>
+			) : null}
+			{chapterCount > 0 && !filesSurface && coverage ? (
+				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
+						{`${coverage.narrated} of ${coverage.total} hunks · rest in Files`}
 					</text>
 				</box>
 			) : null}
@@ -2405,6 +2417,17 @@ export function App({
 		(): Page => ({ kind: "files", label: ALL_FILES_LABEL, chapter: filesChapter }),
 		[filesChapter],
 	);
+	// Coverage is derived, never stored, and exists only for a narrative that declared itself
+	// partial — at full depth the reviewer is told nothing, because nothing was left out.
+	const coverage = useMemo((): NarrativeCoverage | null => {
+		const label = file ? partialDepthLabel(file) : null;
+		if (!file || !label) return null;
+		return {
+			label,
+			narrated: narratedUnitCount(file),
+			total: filesChapter.hunkRefs.length,
+		};
+	}, [file, filesChapter]);
 	const pages = useMemo(() => (file ? buildPages(file) : [filesPage]), [file, filesPage]);
 	const chapters = pages.flatMap((candidate) =>
 		candidate.kind === "chapter" ? [candidate.chapter] : [],
@@ -3972,6 +3995,7 @@ export function App({
 							pages={pages}
 							current={current}
 							chapterCount={chapters.length}
+							coverage={coverage}
 							width={panelWidth}
 							vs={vs}
 							indexExpanded={indexExpanded}
@@ -4194,6 +4218,7 @@ export function App({
 					context={statusContext}
 					reviewedFiles={filesSurface ? reviewedFiles : storyProgress.reviewed}
 					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
+					coverage={coverage}
 					openThreads={openThreadCount}
 					viewMode={viewMode}
 					notice={statusNotice}

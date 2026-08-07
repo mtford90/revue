@@ -624,7 +624,7 @@ async function showRun(
 
 	if (options.check || !process.stdout.isTTY) {
 		process.stdout.write(
-			`${run.chapters ? formatSummary(run.chapters) : formatChapterlessSummary(run.manifest)}\n`,
+			`${run.chapters ? formatSummary(run.chapters, run.manifest.totals.reviewUnits) : formatChapterlessSummary(run.manifest)}\n`,
 		);
 		return 0;
 	}

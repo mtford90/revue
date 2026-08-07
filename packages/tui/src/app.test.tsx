@@ -334,6 +334,38 @@ test("an interlude is an ordinary page that says plainly it has nothing to revie
 	expect(t.captureCharFrame()).toContain("[x] ¶ 4. Why the migration");
 });
 
+const zoomedOut: RevueChaptersFile = {
+	...file,
+	depth: { kind: "partial", label: "10,000ft" },
+	chapters: file.chapters.slice(0, 2), // the third unit stays reachable through Files
+};
+
+test("a zoomed-out narrative states its coverage in the index and the status bar", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={zoomedOut} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Chapters (2) · 10,000ft");
+	expect(frame).toContain("2 of 3 hunks · rest in Files");
+	expect(statusLine(t)).toContain("10,000ft · 2/3 hunks");
+});
+
+test("a full-depth narrative says nothing about coverage anywhere", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 130, height: 44 });
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Chapters (3)");
+	expect(frame).not.toContain("10,000ft");
+	expect(frame).not.toContain("rest in Files");
+	expect(frame).not.toContain("hunks");
+});
+
 test("reopening restores the page, collapsed files, scroll, and reviewer settings", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const sessions: ReviewSessionState[] = [];

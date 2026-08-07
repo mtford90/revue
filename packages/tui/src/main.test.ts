@@ -337,6 +337,7 @@ test("prep prints only the run path and show validates that same run", async () 
 
 		const checked = await run(root, ["show", runDirectory, "--check"]);
 		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(checked.stdout).toContain("1 of 1 review unit narrated");
 		expect(checked.stdout).toContain("1 chapter:");
 
 		const mismatchedChapters = {

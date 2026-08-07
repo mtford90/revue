@@ -1,7 +1,12 @@
-import type { RevueChaptersFile, RunManifest } from "@revue/types";
+import {
+	narratedUnitCount,
+	partialDepthLabel,
+	type RevueChaptersFile,
+	type RunManifest,
+} from "@revue/types";
 
-/** Plain-text summary after a complete run has passed validation. */
-export function formatSummary(file: RevueChaptersFile): string {
+/** Plain-text summary after a validated run, whatever depth it was narrated at. */
+export function formatSummary(file: RevueChaptersFile, preparedUnits: number): string {
 	const lines: string[] = [];
 	const { prologue, chapters } = file;
 
@@ -21,6 +26,10 @@ export function formatSummary(file: RevueChaptersFile): string {
 		lines.push("");
 	}
 
+	const depth = partialDepthLabel(file);
+	lines.push(
+		`  ${narratedUnitCount(file)} of ${preparedUnits} review unit${preparedUnits === 1 ? "" : "s"} narrated${depth ? ` (${depth})` : ""}`,
+	);
 	lines.push(`  ${chapters.length} chapter${chapters.length === 1 ? "" : "s"}:`);
 	for (const ch of [...chapters].sort((a, b) => a.order - b.order)) {
 		const hunks = ch.hunkRefs.length;

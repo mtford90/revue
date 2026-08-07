@@ -1,7 +1,9 @@
 import type { Chapter } from "@revue/types";
 import {
 	emptyViewState,
+	narratedUnitCount,
 	type Prologue,
+	partialDepthLabel,
 	type ReviewThread,
 	type RevueChaptersFile,
 	type RunFile,
@@ -185,6 +187,20 @@ const formatChapter = (
 	return lines;
 };
 
+/**
+ * A zoomed-out narrative says so in the document, so a reader outside Revue cannot mistake it
+ * for the whole change. A full-depth export says nothing and stays byte-identical.
+ */
+const formatCoverage = (review: MarkdownReview): string[] => {
+	const label = partialDepthLabel(review.chapters);
+	if (!label) return [];
+	const prepared = review.files.reduce((total, file) => total + file.referenceStarts.length, 0);
+	return [
+		"",
+		`Narrative depth: ${label} — ${narratedUnitCount(review.chapters)} of ${prepared} review units narrated; the rest are in the run but outside this narrative.`,
+	];
+};
+
 const selectChapter = (
 	chapters: Chapter[],
 	selection: Extract<MarkdownExportSelection, { kind: "chapter-id" | "chapter-order" }>,
@@ -217,6 +233,7 @@ export function formatMarkdownReview(
 	const threads = options.threads ?? [];
 	const files = new Map(review.files.map((file) => [file.path, file]));
 	const ordered = [...review.chapters.chapters].sort((left, right) => left.order - right.order);
+	const coverage = formatCoverage(review);
 	let lines: string[];
 
 	if (selection.kind === "prologue") {
@@ -225,6 +242,7 @@ export function formatMarkdownReview(
 			"# Prologue",
 			"",
 			`Pinned run: ${codeSpan(review.runId)}`,
+			...coverage,
 			"",
 			...formatPrologue(review.chapters.prologue, 1).slice(2),
 		];
@@ -234,11 +252,12 @@ export function formatMarkdownReview(
 			`# Chapter ${chapter.order}: ${inlineText(chapter.title)}`,
 			"",
 			`Pinned run: ${codeSpan(review.runId)}`,
+			...coverage,
 			"",
 			...formatChapter(chapter, files, state, threads, 1).slice(2),
 		];
 	} else {
-		lines = ["# Revue Review", "", `Pinned run: ${codeSpan(review.runId)}`];
+		lines = ["# Revue Review", "", `Pinned run: ${codeSpan(review.runId)}`, ...coverage];
 		if (review.chapters.prologue) lines.push("", ...formatPrologue(review.chapters.prologue, 2));
 		for (const chapter of ordered)
 			lines.push("", ...formatChapter(chapter, files, state, threads, 2));

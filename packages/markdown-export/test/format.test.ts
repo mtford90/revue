@@ -213,6 +213,28 @@ test("an interlude exports as prose with no file section", () => {
 	expect(markdown.slice(markdown.indexOf("## Chapter 3"))).not.toContain("### Files");
 });
 
+test("a zoomed-out review states its coverage; a full one reads exactly as before", () => {
+	const zoomedOut: MarkdownReview = {
+		...review,
+		chapters: {
+			...chapters,
+			depth: { kind: "partial", label: "10,000ft" },
+			chapters: chapters.chapters.filter((chapter) => chapter.id === "foundation"),
+		},
+	};
+	const coverage =
+		"Narrative depth: 10,000ft — 1 of 2 review units narrated; the rest are in the run but outside this narrative.";
+
+	expect(formatMarkdownReview(zoomedOut)).toContain(`\n\n${coverage}\n`);
+	expect(
+		formatMarkdownReview(zoomedOut, { selection: { kind: "chapter-id", id: "foundation" } }),
+	).toContain(coverage);
+	expect(formatMarkdownReview(review)).not.toContain("Narrative depth");
+	expect(
+		formatMarkdownReview({ ...review, chapters: { ...chapters, depth: { kind: "full" } } }),
+	).toBe(formatMarkdownReview(review));
+});
+
 test("prologue and chapter selections remain self-contained", () => {
 	const withPrologue: MarkdownReview = {
 		...review,

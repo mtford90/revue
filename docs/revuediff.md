@@ -204,6 +204,14 @@ or ambiguous streams are emitted in full as sanitised passthrough rather than pa
 Terminal-control input is removed while printable text is preserved. Syntax-highlighting or layout
 choices do not weaken this whole-stream fallback.
 
+## Development performance checks
+
+The repository includes a non-gating, deterministic compiled-executable benchmark under
+[`scripts/perf/`](../scripts/perf/README.md). Run `bun run perf:revuediff` for end-to-end figures,
+add `-- --stages` for diagnostic classification/highlighting/formatting timing, or `-- --compare`
+when Delta/Difftastic are installed. Its README explains buffering, comparator contract differences,
+and JSON artifact comparison; it does not change pager behaviour or impose timing budgets.
+
 ## Troubleshooting
 
 ### Colours look doubled or wrong

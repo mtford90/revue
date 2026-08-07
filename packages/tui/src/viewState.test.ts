@@ -99,6 +99,7 @@ test("file store round-trips review progress and session position per run key", 
 				selectedKeyChange: 3,
 				collapsedFiles: ["src/a.ts"],
 				openExcerpts: ['["src/api/client.ts",118,140]'],
+				foldedDiagrams: [],
 				scrollTop: 27,
 				panelScrollTop: 4,
 			},
@@ -121,6 +122,7 @@ test("file store round-trips review progress and session position per run key", 
 				selectedKeyChange: 3,
 				collapsedFiles: ["src/a.ts"],
 				openExcerpts: ['["src/api/client.ts",118,140]'],
+				foldedDiagrams: [],
 				scrollTop: 27,
 				panelScrollTop: 4,
 			},
@@ -185,4 +187,6 @@ test("a session saved before excerpts existed restores every excerpt folded", as
 	const store = await openFileStore(path, "runA");
 
 	expect(store.getSession().pages.c1?.openExcerpts).toEqual([]);
+	// Nothing was folded away either, so every figure draws.
+	expect(store.getSession().pages.c1?.foldedDiagrams).toEqual([]);
 });

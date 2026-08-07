@@ -267,7 +267,7 @@ const ALL_FILES_LABEL = "All files";
 const COMMENTS_PAGE_ID = "__comments__";
 const COMMENTS_PAGE: Page = { kind: "comments", label: "Comments" };
 const INTERLUDE_GLYPH = "¶";
-const INTERLUDE_NOTE = `${INTERLUDE_GLYPH} interlude · nothing to review here`;
+const INTERLUDE_NOTE = `${INTERLUDE_GLYPH} interlude`;
 const INTERLUDE_CLOSE = "── end of chapter ──";
 
 /**
@@ -315,6 +315,7 @@ const emptyReviewPageState = () => ({
 	selectedKeyChange: 0,
 	collapsedFiles: [] as string[],
 	openExcerpts: [] as string[],
+	foldedDiagrams: [] as string[],
 	scrollTop: 0,
 	panelScrollTop: 0,
 });
@@ -629,6 +630,7 @@ function ChapterPanel({
 	current,
 	chapterCount,
 	coverage,
+	omittedNotice,
 	width,
 	vs,
 	indexExpanded,
@@ -653,6 +655,7 @@ function ChapterPanel({
 	current: number;
 	chapterCount: number;
 	coverage: NarrativeCoverage | null;
+	omittedNotice: string | null;
 	width: number;
 	vs: ViewState;
 	indexExpanded: boolean;
@@ -716,6 +719,14 @@ function ChapterPanel({
 				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
 					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
 						{`${coverage.narrated} of ${coverage.total} hunks · rest in Files`}
+					</text>
+				</box>
+			) : null}
+			{/* Unlike coverage, an omission applies at every depth: the run itself is short. */}
+			{omittedNotice ? (
+				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
+						{omittedNotice}
 					</text>
 				</box>
 			) : null}
@@ -1761,7 +1772,7 @@ function InterludeClose({ keymap }: { keymap: readonly KeymapAction[] }) {
 	return (
 		<box flexDirection="column" width="100%">
 			<text fg={theme.muted}>{INTERLUDE_CLOSE}</text>
-			<text fg={theme.muted}>{`${markRead} mark this page read · ${nextPage} next page`}</text>
+			<text fg={theme.muted}>{`${markRead} mark this chapter read · ${nextPage} next page`}</text>
 		</box>
 	);
 }
@@ -2582,6 +2593,7 @@ const measuredAnchor = (thread: ReviewThread): DiffInlineAttachment => ({
 export function App({
 	file,
 	context = null,
+	omittedNotice = null,
 	diffFiles = null,
 	loadSemanticDiff,
 	loadFileLines,
@@ -2611,6 +2623,11 @@ export function App({
 	file: RevueChaptersFile | null;
 	/** Frozen quotations for the narration's excerpt citations; null until `context freeze` runs. */
 	context?: RunContextFile | null;
+	/**
+	 * What an ignore rule kept out of the prepared run. Coverage counts are measured against the
+	 * run, so without this a narrative can look complete while prep dropped half the change.
+	 */
+	omittedNotice?: string | null;
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 	/** The pinned new-side blob for a path, split into lines; null when unavailable. */
@@ -2704,6 +2721,9 @@ export function App({
 	);
 	const [openExcerpts, setOpenExcerpts] = useState<Set<string>>(
 		() => new Set(initialPageState.openExcerpts),
+	);
+	const [foldedDiagrams, setFoldedDiagrams] = useState<Set<string>>(
+		() => new Set(initialPageState.foldedDiagrams),
 	);
 	/** The excerpt the file cursor has stepped onto; excerpt rows carry no focus marker. */
 	const [focusedExcerpt, setFocusedExcerpt] = useState<string | null>(null);
@@ -2908,8 +2928,8 @@ export function App({
 	}, [chapter, context, plannedBody, viewportFiles, openExcerpts, contentWidth]);
 	/**
 	 * Figures the chapter draws, taken from fenced blocks in its own summary rather than a
-	 * schema field of their own. They share the excerpts' fold set; the keys cannot collide
-	 * because an excerpt keys on its cited range.
+	 * schema field of their own. Unlike an excerpt, a figure is usually the point of the prose
+	 * beside it — an interlude often has nothing else — so it draws open and folds on request.
 	 */
 	const chapterDiagrams = useMemo<ViewportDiagram[]>(() => {
 		if (!chapter || !plannedBody) return [];
@@ -2920,13 +2940,13 @@ export function App({
 				plan: planDiagram({
 					key,
 					diagram,
-					folded: !openExcerpts.has(key),
+					folded: foldedDiagrams.has(key),
 					width: contentWidth,
 					chrome: OPENTUI_DIFF_CHROME,
 				}),
 			};
 		});
-	}, [chapter, plannedBody, openExcerpts, contentWidth]);
+	}, [chapter, plannedBody, foldedDiagrams, contentWidth]);
 	/**
 	 * What the file cursor steps through, in narration order. An excerpt is a stop on that walk
 	 * so `toggle-file-diff` can open it, which is why folding needs no shortcut of its own.
@@ -3165,6 +3185,7 @@ export function App({
 					selectedKeyChange,
 					collapsedFiles: [...collapsedFiles],
 					openExcerpts: [...openExcerpts],
+					foldedDiagrams: [...foldedDiagrams],
 					scrollTop: pageScroll.current?.scrollTop ?? 0,
 					panelScrollTop: panelScroll.current?.scrollTop ?? 0,
 				},
@@ -3601,6 +3622,7 @@ export function App({
 		setSelectedKeyChange(restored.selectedKeyChange);
 		setCollapsedFiles(new Set(restored.collapsedFiles));
 		setOpenExcerpts(new Set(restored.openExcerpts));
+		setFoldedDiagrams(new Set(restored.foldedDiagrams));
 		setFocusedExcerpt(null);
 		setExpansions(new Map());
 		setExpandedVariants(new Map());
@@ -3769,17 +3791,18 @@ export function App({
 			requestFileFocus();
 		}
 	}
-	/** The fold shared by every quoted block: excerpts and the figures beside them. */
-	function toggleQuotedBlock(key: string) {
-		setOpenExcerpts((current) => {
-			const next = new Set(current);
-			if (next.has(key)) next.delete(key);
-			else next.add(key);
-			return next;
-		});
+	const toggleMembership = (key: string) => (current: Set<string>) => {
+		const next = new Set(current);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		return next;
+	};
+	/** Figures record the fold rather than the open, so the set stays empty in the common case. */
+	function toggleDiagram(key: string) {
+		setFoldedDiagrams(toggleMembership(key));
 	}
 	function toggleExcerpt(key: string) {
-		toggleQuotedBlock(key);
+		setOpenExcerpts(toggleMembership(key));
 		setFocusedExcerpt(key);
 	}
 	function toggleCollapsedFile(path: string) {
@@ -4493,6 +4516,7 @@ export function App({
 							current={current}
 							chapterCount={chapters.length}
 							coverage={coverage}
+							omittedNotice={omittedNotice}
 							width={panelWidth}
 							vs={vs}
 							indexExpanded={indexExpanded}
@@ -4591,7 +4615,7 @@ export function App({
 									width={contentWidth}
 									contextExpansion={contextExpansion}
 									onAttachmentNode={noteAttachmentNode}
-									onToggleDiagram={toggleQuotedBlock}
+									onToggleDiagram={toggleDiagram}
 									onToggleExcerpt={toggleExcerpt}
 									onSelectExcerptRange={selectExcerptRange}
 									onExcerptRangeContextMenu={openExcerptContextMenu}
@@ -4750,6 +4774,8 @@ export async function runApp(
 	options: {
 		/** Frozen quotations for the narration's excerpt citations. */
 		context?: RunContextFile | null;
+		/** What an ignore rule kept out of the prepared run, if anything. */
+		omittedNotice?: string | null;
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 		loadFileLines?: (path: string) => Promise<string[] | null>;

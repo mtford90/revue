@@ -6,11 +6,11 @@ import {
 	type LineRef,
 	partialDepthLabel,
 	type RevueChaptersFile,
-	RUN_EXCLUSION_REASON,
 	type RunContextFile,
 	type RunExclusion,
 } from "@revue/types";
 import type { PreparedRun } from "./artifact.ts";
+import { exclusionSource } from "./format.ts";
 
 export class ReviewCoverageError extends Error {}
 
@@ -76,12 +76,6 @@ const chapterIdentityIssues = (chapters: Chapter[]): string[] => {
 		orders.add(chapter.order);
 	}
 	return issues;
-};
-
-const exclusionSource = (exclusion: RunExclusion): string => {
-	if (exclusion.reason === RUN_EXCLUSION_REASON.REVUE_IGNORE) return ".revueignore";
-	if (exclusion.reason === RUN_EXCLUSION_REASON.SESSION_IGNORE) return "--ignore";
-	return "built-in filtering";
 };
 
 const exclusionForPath = (run: PreparedRun, path: string): RunExclusion | undefined =>

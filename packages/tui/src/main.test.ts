@@ -451,6 +451,8 @@ test("prep prints only the run path and show validates that same run", async () 
 		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
 		expect(checked.stdout).toContain("1 of 1 review unit narrated");
 		expect(checked.stdout).toContain("1 chapter:");
+		// Nothing was dropped, so nothing is claimed about omissions.
+		expect(checked.stdout).not.toContain("omitted");
 
 		const mismatchedChapters = {
 			chapters: chapters.chapters.map((chapter) => ({
@@ -552,6 +554,60 @@ test("context freeze pins cited code and --check refuses a narrative that skippe
 		const tooManyRuns = await run(root, ["context", "freeze", runDirectory, runDirectory]);
 		expect(tooManyRuns).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(tooManyRuns.stderr).toContain("context freeze requires one run directory");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("--check says how much of the change an ignore rule kept out of the run", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-omitted-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await writeFile(join(root, ".revueignore"), "*.test.ts\n");
+		await writeFile(join(root, "value.ts"), "export const value = 1;\n");
+		await writeFile(join(root, "value.test.ts"), "test one\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "value.ts"), "export const value = 2;\n");
+		await writeFile(join(root, "value.test.ts"), "test two\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Change value");
+
+		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+		const reference = manifest.files[0];
+		const oldStart = reference?.referenceStarts[0];
+		if (!reference || oldStart === undefined) throw new Error("Expected a prepared review unit");
+
+		// The agent is told what it cannot see, so it can narrate around the gap knowingly.
+		const hunks = await Bun.file(join(runDirectory, "hunks.txt")).text();
+		expect(hunks).toContain("=== OMITTED FROM THIS RUN ===");
+		expect(hunks).toContain('"value.test.ts": .revueignore pattern "*.test.ts"');
+
+		await writeFile(
+			join(runDirectory, "chapters.json"),
+			JSON.stringify({
+				chapters: [
+					{
+						id: "chapter-1",
+						order: 1,
+						title: "Change the value",
+						summary: "The value now reflects the new behaviour.",
+						hunkRefs: [{ filePath: reference.path, oldStart }],
+						keyChanges: [],
+					},
+				],
+			}),
+		);
+
+		const checked = await run(root, ["show", runDirectory, "--check"]);
+		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
+		// "1 of 1 narrated" is true of the run and misleading about the change, so the run says both.
+		expect(checked.stdout).toContain("1 of 1 review unit narrated");
+		expect(checked.stdout).toContain("1 file omitted · .revueignore");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

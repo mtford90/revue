@@ -108,6 +108,13 @@ test("committed prep pins blobs, modes, pseudo-references, and exclusions", asyn
 	expect(run.hunks).toContain('filePath: "new-name.txt", oldStart: 0');
 	expect(run.hunks).toContain("\\ No newline at end of file");
 	expect(run.patch).not.toContain("ignored.txt");
+
+	// The narrating agent reads only hunks.txt, so a file it cannot see has to be named there —
+	// otherwise an over-broad ignore silently narrows the review and the narrative reads complete.
+	expect(run.hunks).toContain("=== OMITTED FROM THIS RUN ===");
+	expect(run.hunks).toContain('"ignored.txt": .revueignore pattern "ignored.txt"');
+	expect(run.hunks).toContain('"visible.txt" (matched "secret.txt"): .revueignore pattern');
+	expect(run.hunks).toContain("4 changed files were omitted");
 });
 
 test("persistent and session ignores compose with rename path provenance", async () => {

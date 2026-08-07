@@ -1,3 +1,10 @@
-*.test.ts
-*.md
+# Paths kept out of every prepared run. Prep drops them before hunks.txt is written, so the
+# narrating agent cannot see them and no chapter can cite them — keep this list to material a
+# reviewer would genuinely skip, not merely material that is large.
+
+# Machine-readable dumps rather than authored code.
 *.jsonl
+
+# Vendored design-tool bundles: generated HTML and support scripts we do not write or review.
+# The authored brief beside them, docs/design-briefs/<date>-<slug>.md, stays in scope.
+docs/design-briefs/*/

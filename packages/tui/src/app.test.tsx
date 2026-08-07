@@ -307,7 +307,7 @@ const withInterlude: RevueChaptersFile = {
 	],
 };
 
-test("an interlude is an ordinary page that says plainly it has nothing to review", async () => {
+test("an interlude is an ordinary page marked as carrying no diff", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const seen: ViewState[] = [];
 	const t = await testRender(
@@ -325,17 +325,46 @@ test("an interlude is an ordinary page that says plainly it has nothing to revie
 	const frame = t.captureCharFrame();
 
 	expect(frame).toContain("Why the migration is staged");
-	expect(frame).toContain("¶ interlude · nothing to review here");
+	expect(frame).toContain("¶ interlude");
 	expect(frame).toContain("The retry work lands"); // the prose, which the sidebar wraps
 	expect(frame).not.toContain("Files ("); // no file list
 	expect(frame).not.toContain("What to review");
 	expect(frame).toContain("── end of chapter ──");
-	expect(frame).toContain("x mark this page read · ]c next page");
+	expect(frame).toContain("x mark this chapter read · ]c next page");
 	expect(statusLine(t)).toContain("Ch 4/4");
 
 	await press(t, "x");
 	expect(seen.at(-1)?.chapters).toContain("interlude");
 	expect(t.captureCharFrame()).toContain("[x] ¶ 4. Why the migration");
+});
+
+const withInterludeDiagram: RevueChaptersFile = {
+	...file,
+	chapters: [
+		...file.chapters,
+		{
+			id: "interlude",
+			order: file.chapters.length + 1,
+			title: "Why the migration is staged",
+			summary: "The order matters.\n\n```ascii\nretry -> callers\n```",
+			hunkRefs: [],
+			keyChanges: [],
+			excerpts: [],
+		},
+	],
+};
+
+test("an interlude draws the figure its prose is built around", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={withInterludeDiagram} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	for (let step = 0; step < 4; step += 1) await nextChapter(t);
+
+	// A figure is usually the whole reason an interlude exists, so it draws without being asked.
+	expect(t.captureCharFrame()).toContain("retry -> callers");
 });
 
 const zoomedOut: RevueChaptersFile = {
@@ -356,6 +385,18 @@ test("a zoomed-out narrative states its coverage in the index and the status bar
 	expect(frame).toContain("Chapters (2) · 10,000ft");
 	expect(frame).toContain("2 of 3 hunks · rest in Files");
 	expect(statusLine(t)).toContain("10,000ft · 2/3 hunks");
+});
+
+test("a run says when prep kept part of the change out of it, at any depth", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	// Full depth: "every unit narrated" is true of the run and says nothing about what prep dropped.
+	const t = await testRender(
+		<App file={file} diffFiles={diffFiles} omittedNotice="2 files omitted · .revueignore" />,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+
+	expect(t.captureCharFrame()).toContain("2 files omitted · .revueignore");
 });
 
 test("a full-depth narrative says nothing about coverage anywhere", async () => {
@@ -383,6 +424,7 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 				selectedKeyChange: 0,
 				collapsedFiles: ["src/lib/apiClient.ts"],
 				openExcerpts: [],
+				foldedDiagrams: [],
 				scrollTop: 0,
 				panelScrollTop: 0,
 			},
@@ -420,6 +462,7 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 			"chapter-2": {
 				collapsedFiles: ["src/lib/apiClient.ts"],
 				openExcerpts: [],
+				foldedDiagrams: [],
 				scrollTop: expect.any(Number),
 			},
 		},
@@ -818,6 +861,7 @@ ${additions}
 						selectedKeyChange: 0,
 						collapsedFiles: [],
 						openExcerpts: [],
+						foldedDiagrams: [],
 						scrollTop: 16,
 						panelScrollTop: 0,
 					},
@@ -2723,23 +2767,16 @@ test("an interlude's diagrams fold, open, and line up with quoted code", async (
 	);
 	await t.renderOnce();
 	await gotoChapter(t, 4);
-	const folded = t.captureCharFrame();
-
-	expect(folded).toContain("⋯  diagram · ascii  [▼ show 1 line]");
-	expect(folded).toContain("⋯  diagram · mermaid source  [▼ show 1 line]");
-	expect(folded).not.toContain(ASCII_FIGURE);
-	// The fences never reach the narration, which keeps its own prose.
-	expect(folded).toContain("Prep freezes the run");
-	expect(folded).not.toContain("```");
-
-	await clickBlockAction(t, "diagram · ascii");
-	await clickBlockAction(t, "diagram · mermaid source");
 	const opened = t.captureCharFrame();
 
+	// A figure draws without being asked; an interlude often has nothing else on the page.
 	expect(opened).toContain("diagram · ascii");
 	expect(opened).toContain("[▲ hide]");
 	expect(opened).toContain(ASCII_FIGURE);
 	expect(opened).toContain(MERMAID_SOURCE);
+	// The fences never reach the narration, which keeps its own prose.
+	expect(opened).toContain("Prep freezes the run");
+	expect(opened).not.toContain("```");
 	// A figure has no line numbers, yet reserves the quoted block's whole gutter before its text.
 	expect(textColumn(t, ASCII_FIGURE) - ruleColumn(t, ASCII_FIGURE)).toBe(EXCERPT_GUTTER_COLUMNS);
 	// ASCII is the drawing itself; Mermaid is source, so it reads as a label would.
@@ -2749,10 +2786,18 @@ test("an interlude's diagrams fold, open, and line up with quoted code", async (
 	);
 
 	await clickBlockAction(t, "diagram · ascii");
+	const folded = t.captureCharFrame();
 
-	expect(t.captureCharFrame()).not.toContain(ASCII_FIGURE);
+	expect(folded).toContain("⋯  diagram · ascii  [▼ show 1 line]");
+	expect(folded).not.toContain(ASCII_FIGURE);
+	// Folding one figure leaves its neighbour alone.
+	expect(folded).toContain(MERMAID_SOURCE);
 	// The close still ends the page, below the figures rather than above them.
-	expect(t.captureCharFrame()).toContain("── end of chapter ──");
+	expect(folded).toContain("── end of chapter ──");
+
+	await clickBlockAction(t, "diagram · ascii");
+
+	expect(t.captureCharFrame()).toContain(ASCII_FIGURE);
 });
 
 test("a fenced snippet in narration renders as code rather than raw backticks", async () => {

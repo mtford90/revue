@@ -108,6 +108,9 @@ const ReviewPageStateSchema = z.object({
 	// Excerpts are scenery, so their default is folded and the session records only the ones
 	// the reviewer opened. An older saved page simply restores every excerpt folded.
 	openExcerpts: z.array(z.string()).default([]),
+	// A figure is usually the point of the prose beside it, so diagrams default open and the
+	// session records only the ones the reviewer folded away.
+	foldedDiagrams: z.array(z.string()).default([]),
 	scrollTop: z.number().nonnegative(),
 	panelScrollTop: z.number().nonnegative(),
 });

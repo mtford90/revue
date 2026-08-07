@@ -37,7 +37,7 @@ import { ChaptersFileError, loadChaptersFile, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
-import { formatChapterlessSummary, formatSummary } from "./summary.ts";
+import { formatChapterlessSummary, formatSummary, omissionNotice } from "./summary.ts";
 import {
 	defaultThemesDir,
 	loadCustomThemes,
@@ -748,7 +748,7 @@ async function showRun(
 
 	if (options.check || !process.stdout.isTTY) {
 		process.stdout.write(
-			`${run.chapters ? formatSummary(run.chapters, run.manifest.totals.reviewUnits) : formatChapterlessSummary(run.manifest)}\n`,
+			`${run.chapters ? formatSummary(run.chapters, run.manifest) : formatChapterlessSummary(run.manifest)}\n`,
 		);
 		return 0;
 	}
@@ -793,6 +793,7 @@ async function showRun(
 	};
 	await runApp(run.chapters, {
 		context: run.context,
+		omittedNotice: omissionNotice(run.manifest),
 		diffFiles,
 		syntaxWarning,
 		loadSemanticDiff: () => generateSemanticDiff(run),

@@ -216,7 +216,7 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 	}
 	const commits = await commitMessages(plan);
 	const patch = files.map(({ diff }) => diff.patch ?? "").join("");
-	const hunks = formatAgentInput(commits, files);
+	const hunks = formatAgentInput(commits, files, exclusions);
 	await verifyRawCapture(plan, capture);
 	await verifyWorktreeSnapshots(plan, files);
 	return writePreparedRun({

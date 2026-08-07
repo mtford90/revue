@@ -12,7 +12,46 @@ const sample = {
 	exitCode: 0,
 	timedOut: false,
 };
-const benchmark = {
+type Validation = {
+	passed: boolean;
+	errors: string[];
+	exitCode: number;
+	timedOut: boolean;
+	outputBytes: number;
+	outputSha256: string;
+};
+
+type Report = {
+	status: string;
+	infrastructureFailures: string[];
+	revuediff: {
+		tiny: {
+			validation: Validation;
+			benchmark: Benchmark | null;
+			[key: string]: unknown;
+		};
+	};
+	environment: { tools: Record<string, unknown>; [key: string]: unknown };
+	[key: string]: unknown;
+};
+
+type Benchmark = {
+	runs: number;
+	failures: number;
+	warmupFailures: number;
+	failureDetails: string[];
+	ttfbP50Ms: number;
+	ttfbP95Ms: number;
+	totalP50Ms: number;
+	totalP95Ms: number;
+	outputBytesP50: number;
+	inputThroughputBytesPerSecondP50: number;
+	outputThroughputBytesPerSecondP50: number;
+	rawSamples: (typeof sample)[];
+	rawWarmupSamples: (typeof sample)[];
+};
+
+const benchmark: Benchmark = {
 	runs: 1,
 	failures: 0,
 	warmupFailures: 0,
@@ -44,7 +83,7 @@ const identity = {
 	repetitions: 1,
 	warmups: 1,
 };
-const successReport = () => ({
+const successReport = (): Report => ({
 	schemaVersion: 2,
 	status: "ok",
 	generatedAt: "2026-01-02T03:04:05.000Z",
@@ -72,7 +111,7 @@ const successReport = () => ({
 			largeRegression: "no >20% regression once a baseline is recorded",
 		},
 	},
-	infrastructureFailures: [],
+	infrastructureFailures: [] as string[],
 	revuediff: {
 		tiny: {
 			...identity,
@@ -104,8 +143,8 @@ const successReport = () => ({
 	],
 });
 
-const forcedFailureReport = (): Record<string, any> => {
-	const report: Record<string, any> = successReport();
+const forcedFailureReport = () => {
+	const report = successReport();
 	report.status = "failed";
 	report.infrastructureFailures = ["tiny executable validation failed"];
 	report.revuediff.tiny.validation = {

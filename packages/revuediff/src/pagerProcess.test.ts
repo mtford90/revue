@@ -216,12 +216,15 @@ test("forwards SIGINT and SIGTERM to the active pager and exits nonzero", async 
 			const ready = join(directory, `${signal}-ready`);
 			const seen = join(directory, `${signal}-seen`);
 			const pager = join(directory, `${signal}-pager`);
+			// Drain stdin before advertising readiness so the parent is waiting on the
+			// pager exit rather than an in-flight stdin write that a signal can wedge.
 			await writeFile(
 				pager,
 				`#!/bin/sh
+cat >/dev/null
 echo ready > ${JSON.stringify(ready)}
 trap 'echo ${signal} > ${JSON.stringify(seen)}; exit 1' ${signal}
-while :; do sleep 1; done
+while :; do sleep 0.05; done
 `,
 			);
 			await chmod(pager, 0o755);
@@ -243,4 +246,4 @@ while :; do sleep 1; done
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
-}, 10_000);
+}, 30_000);

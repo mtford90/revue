@@ -20,8 +20,10 @@ if [ -n "$EXPECTED_VERSION" ] && [ "$reported" != "revue $EXPECTED_VERSION" ]; t
 fi
 
 "$BIN" skill print | head -1 | grep -q -- '---'
-"$BIN" show examples/sample-run --check | grep -q "run is valid"
-transcript="$(mktemp -d)/typescript"
+SAMPLE_RUN="$(cd "$(dirname "$0")/.." && pwd)/examples/sample-run"
+"$BIN" show "$SAMPLE_RUN" --check | grep -q "run is valid"
+workdir="$(mktemp -d)"
+transcript="$workdir/typescript"
 export TERM=xterm-256color
 # q is re-sent every second: a keypress that lands before the TUI enables raw mode is
 # flushed with the cooked-mode buffer, so a single early q would hang the session on
@@ -29,9 +31,9 @@ export TERM=xterm-256color
 send_quit() { for _ in $(seq 1 25); do sleep 1; printf q; done; }
 set +o pipefail
 if [ "$(uname)" = "Linux" ]; then
-	send_quit | script -q -e -c "$BIN show examples/sample-run" "$transcript" >/dev/null
+	send_quit | (cd "$workdir" && REVUE_SYNTAX_ENGINE=syntect script -q -e -c "$BIN show '$SAMPLE_RUN'" "$transcript") >/dev/null
 else
-	send_quit | script -q "$transcript" "$BIN" show examples/sample-run >/dev/null
+	send_quit | (cd "$workdir" && REVUE_SYNTAX_ENGINE=syntect script -q "$transcript" "$BIN" show "$SAMPLE_RUN") >/dev/null
 fi
 set -o pipefail
 

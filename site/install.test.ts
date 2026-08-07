@@ -16,6 +16,7 @@ interface InstallerCase {
 	version: string;
 	archive: (tag: string, target: string) => string;
 	installEnvironment: string;
+	addon: string;
 }
 
 const cases: InstallerCase[] = [
@@ -26,6 +27,7 @@ const cases: InstallerCase[] = [
 		version: "1.2.3",
 		archive: (tag, target) => `revue-${tag}-${target}.tar.gz`,
 		installEnvironment: "REVUE_INSTALL",
+		addon: "revue-highlighter.node",
 	},
 	{
 		name: "Revuediff",
@@ -34,6 +36,7 @@ const cases: InstallerCase[] = [
 		version: "2.3.4",
 		archive: (tag, target) => `${tag}-${target}.tar.gz`,
 		installEnvironment: "REVUEDIFF_INSTALL",
+		addon: "revuediff-highlighter.node",
 	},
 ];
 
@@ -66,6 +69,7 @@ describe.each(cases)("$name installer release resolution", (installer) => {
 			`#!/bin/sh\necho '${executableName} ${installer.version}'\n`,
 		);
 		await chmod(`${payload}/${executableName}`, 0o755);
+		await writeFile(`${payload}/${installer.addon}`, "native addon fixture");
 		const archiveName = installer.archive(tag, target);
 		const archivePath = `${root}/${archiveName}`;
 		const tar = Bun.spawnSync(["tar", "-czf", archivePath, "-C", payload, "."]);
@@ -133,6 +137,7 @@ esac
 		expect(stderr).toBe("");
 		expect(exitCode).toBe(0);
 		expect(stdout).toContain(`installed ${executableName} ${installer.version}`);
+		expect(await Bun.file(`${install}/${installer.addon}`).text()).toBe("native addon fixture");
 		expect(await Bun.file(`${root}/curl.log`).text()).toContain("per_page=100&page=2");
 	});
 });

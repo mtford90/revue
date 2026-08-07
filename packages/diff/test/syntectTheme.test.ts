@@ -10,8 +10,12 @@ test("converts opaque and alpha Shiki foregrounds to deterministic terminal RGB"
 	expect(compositeTerminalForeground("#bfbdb6b3", "#10141c")).toBe("#8b8b88");
 });
 
+test("expands shorthand opaque and alpha Shiki foregrounds before terminal composition", () => {
+	expect(compositeTerminalForeground("#abc", "#000000")).toBe("#aabbcc");
+	expect(compositeTerminalForeground("#abcd", "#000000")).toBe("#93a2b1");
+});
+
 test("rejects non-terminal Shiki colour values rather than silently changing them", () => {
-	expect(compositeTerminalForeground("#abc", "#000000")).toBeUndefined();
 	expect(compositeTerminalForeground("inherit", "#000000")).toBeUndefined();
 });
 

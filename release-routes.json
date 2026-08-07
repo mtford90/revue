@@ -48,6 +48,7 @@
 		"packages/tui/",
 		"packages/types/",
 		"scripts/generate-tap-formula.sh",
+		"scripts/generate-tap-formula.test.ts",
 		"scripts/release-smoke.sh",
 		"scripts/screenshots/",
 		"site/assets/",

@@ -7,15 +7,17 @@ export function compositeTerminalForeground(
 	background: string,
 ): string | undefined {
 	const parse = (value: string): [number, number, number, number] | undefined => {
-		const match = /^#([\da-f]{6})([\da-f]{2})?$/i.exec(value);
+		const match = /^#([\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.exec(value);
 		if (!match) return undefined;
-		const rgb = match[1];
-		if (!rgb) return undefined;
+		const hex = match[1];
+		if (!hex) return undefined;
+		const expanded = hex.length <= 4 ? [...hex].map((channel) => channel.repeat(2)).join("") : hex;
+		const rgb = expanded.slice(0, 6);
 		return [
 			Number.parseInt(rgb.slice(0, 2), 16),
 			Number.parseInt(rgb.slice(2, 4), 16),
 			Number.parseInt(rgb.slice(4, 6), 16),
-			match[2] ? Number.parseInt(match[2], 16) : 255,
+			expanded.length === 8 ? Number.parseInt(expanded.slice(6, 8), 16) : 255,
 		];
 	};
 	const source = parse(foreground);

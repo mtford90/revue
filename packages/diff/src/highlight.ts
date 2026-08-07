@@ -35,9 +35,22 @@ export type SyntaxHighlightingPreparation = {
 // arrays rather than metadata object identity. One file is highlighted once per
 // syntax theme and selected backend, because both changes recolour every span.
 const highlightByAdditionLines = new WeakMap<string[], Map<string, HighlightedLines>>();
+// Automatic mode can fall back after an addon has loaded but fails while highlighting.
+// Keep the successful backend with each file/theme rather than treating addon presence as
+// proof that its cached spans are usable.
+const preparedBackendByAdditionLines = new WeakMap<string[], Map<string, SyntaxBackend>>();
 let nativeHighlighter: NativeHighlighter | null | undefined;
 let nativeFailure: string | undefined;
 let warnedNativeFailure = false;
+
+/** @internal Test seam for reproducing loaded-addon runtime failures. */
+export function setNativeHighlighterForTesting(
+	highlighter: NativeHighlighter | null | undefined,
+): void {
+	nativeHighlighter = highlighter;
+	nativeFailure = undefined;
+	warnedNativeFailure = false;
+}
 
 const highlightsFor = (file: DiffFile) => {
 	const existing = highlightByAdditionLines.get(file.metadata.additionLines);
@@ -45,6 +58,22 @@ const highlightsFor = (file: DiffFile) => {
 	const created = new Map<string, HighlightedLines>();
 	highlightByAdditionLines.set(file.metadata.additionLines, created);
 	return created;
+};
+
+const preparedBackendsFor = (file: DiffFile) => {
+	const existing = preparedBackendByAdditionLines.get(file.metadata.additionLines);
+	if (existing) return existing;
+	const created = new Map<string, SyntaxBackend>();
+	preparedBackendByAdditionLines.set(file.metadata.additionLines, created);
+	return created;
+};
+
+const rememberPreparedBackend = (
+	files: readonly DiffFile[],
+	syntaxTheme: string,
+	backend: SyntaxBackend,
+) => {
+	for (const file of files) preparedBackendsFor(file).set(syntaxTheme, backend);
 };
 
 const engine = (): SyntaxBackend | "auto" => {
@@ -162,7 +191,10 @@ export async function prepareSyntaxHighlighting(
 	const selected = engine();
 	if (selected !== "shiki") {
 		try {
-			if (prepareSyntect(files, syntaxTheme)) return { backend: "syntect" };
+			if (prepareSyntect(files, syntaxTheme)) {
+				rememberPreparedBackend(files, syntaxTheme, "syntect");
+				return { backend: "syntect" };
+			}
 		} catch (error) {
 			nativeFailure = error instanceof Error ? error.message : String(error);
 		}
@@ -172,6 +204,7 @@ export async function prepareSyntaxHighlighting(
 			);
 	}
 	await prepareShiki(files, syntaxTheme);
+	rememberPreparedBackend(files, syntaxTheme, "shiki");
 	const warning =
 		selected === "auto" && !warnedNativeFailure
 			? {
@@ -189,8 +222,11 @@ export function highlightedLines(
 ): HighlightedLines | undefined {
 	if (!syntaxTheme) return undefined;
 	const selected = engine();
-	const backend = selected === "auto" ? (nativeHighlighter ? "syntect" : "shiki") : selected;
-	return highlightByAdditionLines
-		.get(file.metadata.additionLines)
-		?.get(cacheKey(syntaxTheme, backend));
+	const backend =
+		selected === "auto"
+			? preparedBackendByAdditionLines.get(file.metadata.additionLines)?.get(syntaxTheme)
+			: selected;
+	return backend
+		? highlightByAdditionLines.get(file.metadata.additionLines)?.get(cacheKey(syntaxTheme, backend))
+		: undefined;
 }

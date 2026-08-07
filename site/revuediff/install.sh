@@ -81,6 +81,7 @@ fi
 mkdir -p "$tmp/extract" "$install_dir"
 tar -xzf "$tmp/$archive" -C "$tmp/extract"
 install -m 755 "$tmp/extract/revuediff" "$install_dir/revuediff"
+install -m 755 "$tmp/extract/revuediff-highlighter.node" "$install_dir/revuediff-highlighter.node"
 
 echo "installed $("$install_dir/revuediff" --version) to $install_dir/revuediff"
 case ":$PATH:" in

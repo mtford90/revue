@@ -46,7 +46,7 @@ class Revuediff < Formula
   end
 
   def install
-    bin.install "revuediff"
+    bin.install "revuediff", "revuediff-highlighter.node"
     doc.install Dir["*.md"]
   end
 

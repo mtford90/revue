@@ -48,7 +48,7 @@ class Revue < Formula
   depends_on "git"
 
   def install
-    bin.install "revue"
+    bin.install "revue", "revue-highlighter.node"
     doc.install Dir["*.md"]
   end
 

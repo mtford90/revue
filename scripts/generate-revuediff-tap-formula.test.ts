@@ -30,7 +30,7 @@ test("Revuediff formula uses its independent tag, assets, binary, and class", as
 		expect(formula).toContain("releases/download/revuediff-v0.1.0");
 		for (const target of ["darwin-arm64", "darwin-x64", "linux-x64"])
 			expect(formula).toContain(`revuediff-v0.1.0-${target}.tar.gz`);
-		expect(formula).toContain('bin.install "revuediff"');
+		expect(formula).toContain('bin.install "revuediff", "revuediff-highlighter.node"');
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}

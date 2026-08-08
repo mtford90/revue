@@ -151,8 +151,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Run key** — `sha256(runId + chapters)`, truncated for local persistence; a chapterless run
   hashes `runId` plus a chapterless sentinel so its progress keys on the snapshot alone. Review
   progress belongs to one pinned code snapshot narrated one specific way; changing either starts
-  fresh, except that a newly narrated run seeds its view state from any chapterless progress for
-  the same snapshot (a one-way migration). Threads use the full immutable **run ID** instead, so
+  fresh, except for two seeds into an as-yet unreviewed run: a newly narrated run inherits any
+  chapterless progress for the same snapshot (a one-way migration), and a run opened by reload
+  inherits the progress of the run it replaced, keeping a file's mark only where that file's frozen
+  snapshots are identical in both runs. Threads use the full immutable **run ID** instead, so
   feedback survives chapter regeneration for unchanged frozen code.
 - **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
   revue's, persisted to `.revue/state.json` (a `{ [runKey]: ViewState }` map).

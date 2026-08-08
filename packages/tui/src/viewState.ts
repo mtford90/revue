@@ -6,12 +6,16 @@ import {
 	type Chapter,
 	emptyViewState,
 	type RevueChaptersFile,
+	type RunFile,
 	type ViewState,
 	ViewStateSchema,
 	viewStateFileId,
 	viewStateKeyChangeId,
 } from "@revue/types";
 import { z } from "zod";
+
+/** The synthetic chapter the flat "All files" page reviews under, narrated run or not. */
+export const ALL_FILES_CHAPTER_ID = "__files__";
 
 /** Distinct file paths a chapter touches, in first-seen order. */
 export function chapterFilePaths(chapter: Chapter): string[] {
@@ -82,6 +86,83 @@ export function toggleKeyChange(vs: ViewState, chapter: Chapter, index: number):
 	};
 }
 
+// ── Reload carry-over ────────────────────────────────────────────────────────
+type ReviewedRun = { files: RunFile[]; chapters: RevueChaptersFile | null };
+
+/** A file's diff identity: both frozen snapshots and how they relate. */
+const fileSnapshot = (file: RunFile): string =>
+	[file.status, file.previousPath, file.oldBlob, file.newBlob, file.oldMode, file.newMode].join(
+		"\0",
+	);
+
+const flatChapter = (files: RunFile[]): Chapter => ({
+	id: ALL_FILES_CHAPTER_ID,
+	order: 0,
+	title: "All files",
+	summary: "",
+	hunkRefs: files.map((file) => ({ filePath: file.path, oldStart: 0 })),
+	keyChanges: [],
+	excerpts: [],
+});
+
+/** Every surface a file can be marked reviewed on: each narrated chapter, plus the flat page. */
+const reviewSurfaces = (run: ReviewedRun): Chapter[] => [
+	...(run.chapters?.chapters ?? []),
+	flatChapter(run.files),
+];
+
+/** Paths the reviewer marked reviewed, whichever surface they marked them on. */
+const reviewedPaths = (run: ReviewedRun, state: ViewState): Set<string> =>
+	new Set(
+		reviewSurfaces(run).flatMap((chapter) =>
+			chapterFilePaths(chapter).filter(
+				(path) => isChapterReviewed(state, chapter.id) || isFileReviewed(state, chapter.id, path),
+			),
+		),
+	);
+
+/** Paths whose diff is identical in both runs; anything added, removed, or edited is absent. */
+const unchangedPaths = (previous: RunFile[], next: RunFile[]): Set<string> => {
+	const before = new Map(previous.map((file) => [file.path, fileSnapshot(file)]));
+	const survived = next.filter((file) => before.get(file.path) === fileSnapshot(file));
+	return new Set(survived.map((file) => file.path));
+};
+
+const markChapter = (
+	state: ViewState,
+	chapter: Chapter,
+	isCarried: (path: string) => boolean,
+): ViewState => {
+	const paths = chapterFilePaths(chapter);
+	const reviewed = paths.filter(isCarried);
+	const done = paths.length > 0 && reviewed.length === paths.length;
+	return {
+		...state,
+		chapters: done ? [...state.chapters, chapter.id] : state.chapters,
+		files: [...state.files, ...reviewed.map((path) => viewStateFileId(chapter.id, path))],
+	};
+};
+
+/**
+ * Review progress for the run a reload just opened, carried over from the run it replaced.
+ * A file keeps its mark only where its diff is unchanged, so an edited file comes back
+ * unreviewed and takes its chapter with it. Key-change ticks are dropped: they answer
+ * questions about a snapshot the reviewer has moved past.
+ */
+export function carryReviewProgress(args: {
+	previous: ReviewedRun & { state: ViewState };
+	next: ReviewedRun;
+}): ViewState {
+	const { previous, next } = args;
+	const reviewed = reviewedPaths(previous, previous.state);
+	const unchanged = unchangedPaths(previous.files, next.files);
+	const isCarried = (path: string) => reviewed.has(path) && unchanged.has(path);
+	return reviewSurfaces(next).reduce(
+		(state, chapter) => markChapter(state, chapter, isCarried),
+		emptyViewState(),
+	);
+}
+
 // ── Persistence ──────────────────────────────────────────────────────────────
 /**
  * Review progress belongs to one pinned code snapshot narrated one specific way;
@@ -141,18 +222,25 @@ export async function loadViewState(path: string, key: string): Promise<ViewStat
 	return all[key] ? ViewStateSchema.parse(all[key]) : emptyViewState();
 }
 
-/** A newly narrated run starts from any progress made reviewing it chapterless. */
+const hasProgress = (state: ViewState): boolean =>
+	state.chapters.length > 0 || state.files.length > 0 || state.keyChanges.length > 0;
+
+/**
+ * A newly narrated run starts from any progress made reviewing it chapterless; a run a reload
+ * opened starts from the `carried` progress of the run it replaced. Either seed applies only to
+ * a run nobody has reviewed yet, so returning to a started review never loses it.
+ */
 export async function openRunStateStore(
 	path: string,
 	runId: string,
 	file: RevueChaptersFile | null,
+	carried?: ViewState,
 ): Promise<ViewStateStore> {
 	const store = await openFileStore(path, runKey(runId, file));
-	if (!file) return store;
-	const state = store.get();
-	if (state.chapters.length || state.files.length || state.keyChanges.length) return store;
-	const flat = await loadViewState(path, runKey(runId, null));
-	if (flat.chapters.length || flat.files.length) store.set(flat);
+	if (hasProgress(store.get())) return store;
+	const seed =
+		carried ?? (file ? await loadViewState(path, runKey(runId, null)) : emptyViewState());
+	if (hasProgress(seed)) store.set(seed);
 	return store;
 }
 

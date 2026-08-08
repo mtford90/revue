@@ -28,6 +28,7 @@ import {
 	THREAD_AUTHOR_KIND,
 	type ThreadAnchor,
 	type ThreadAuthor,
+	type ViewState,
 } from "@revue/types";
 import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
@@ -59,7 +60,13 @@ import {
 	validateThreadsForRun,
 } from "./threads.ts";
 import { REVUE_VERSION } from "./version.ts";
-import { defaultStatePath, loadViewState, type ReviewSessionState, runKey } from "./viewState.ts";
+import {
+	carryReviewProgress,
+	defaultStatePath,
+	loadViewState,
+	type ReviewSessionState,
+	runKey,
+} from "./viewState.ts";
 
 const HELP = `revue — narrative code review in your terminal
 
@@ -805,6 +812,7 @@ async function showRun(
 
 	let currentDirectory = directory;
 	let carriedSessionState: ReviewSessionState | undefined;
+	let carriedProgress: ViewState | undefined;
 	let notice: StatusNotice | undefined;
 
 	for (;;) {
@@ -824,7 +832,13 @@ async function showRun(
 			syntaxWarning = warning;
 		});
 		await prepareContextQuotations(run.context, startupTheme.syntaxTheme);
-		const store = await openRunStateStore(defaultStatePath(), run.manifest.runId, run.chapters);
+		const store = await openRunStateStore(
+			defaultStatePath(),
+			run.manifest.runId,
+			run.chapters,
+			carriedProgress,
+		);
+		carriedProgress = undefined;
 		const threadStore = openThreadStore(defaultThreadsPath(currentDirectory), run.manifest.runId);
 		const repositoryRoot = repositoryRootForRun(currentDirectory);
 		const humanAuthor = resolveHumanAuthor(repositoryRoot);
@@ -880,6 +894,7 @@ async function showRun(
 
 		if (outcome === "quit") return 0;
 
+		const previous = { files: run.manifest.files, chapters: run.chapters, state: store.get() };
 		const repreped = await reprepForReload(run, currentDirectory, options.prepArgs);
 		if ("notice" in repreped) {
 			notice = repreped.notice;
@@ -900,6 +915,12 @@ async function showRun(
 				continue;
 			}
 			throw error;
+		}
+		if (run.manifest.runId !== previousRun.manifest.runId) {
+			carriedProgress = carryReviewProgress({
+				previous,
+				next: { files: run.manifest.files, chapters: run.chapters },
+			});
 		}
 		notice = reloadNotice(previousRun, run);
 	}

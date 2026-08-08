@@ -2,9 +2,11 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Chapter } from "@revue/types";
-import { emptyViewState } from "@revue/types";
+import type { Chapter, RunFile } from "@revue/types";
+import { emptyViewState, viewStateFileId } from "@revue/types";
 import {
+	ALL_FILES_CHAPTER_ID,
+	carryReviewProgress,
 	emptyReviewSessionState,
 	isChapterReviewed,
 	isFileReviewed,
@@ -24,6 +26,25 @@ const chapter = (id: string, order: number, paths: string[]): Chapter => ({
 	hunkRefs: paths.map((filePath) => ({ filePath, oldStart: 0 })),
 	keyChanges: [],
 	excerpts: [],
+});
+
+const blob = (seed: string) => seed.repeat(64).slice(0, 64);
+
+const runFile = (path: string, newBlobSeed: string): RunFile => ({
+	path,
+	previousPath: null,
+	status: "modified",
+	oldBlob: blob("0"),
+	newBlob: blob(newBlobSeed),
+	oldMode: "100644",
+	newMode: "100644",
+	oldKind: "file",
+	newKind: "file",
+	isBinary: false,
+	hunks: 1,
+	referenceStarts: [1],
+	additions: 1,
+	deletions: 0,
 });
 
 const tmpDirs: string[] = [];
@@ -189,4 +210,67 @@ test("a session saved before excerpts existed restores every excerpt folded", as
 	expect(store.getSession().pages.c1?.openExcerpts).toEqual([]);
 	// Nothing was folded away either, so every figure draws.
 	expect(store.getSession().pages.c1?.foldedDiagrams).toEqual([]);
+});
+
+test("a reload keeps marks on files whose diff is unchanged and drops the edited ones", () => {
+	const previousFiles = [runFile("a.ts", "a"), runFile("b.ts", "b")];
+	const state = {
+		chapters: [ALL_FILES_CHAPTER_ID],
+		files: [
+			viewStateFileId(ALL_FILES_CHAPTER_ID, "a.ts"),
+			viewStateFileId(ALL_FILES_CHAPTER_ID, "b.ts"),
+		],
+		keyChanges: [],
+	};
+
+	const carried = carryReviewProgress({
+		previous: { files: previousFiles, chapters: null, state },
+		next: { files: [runFile("a.ts", "a"), runFile("b.ts", "edited")], chapters: null },
+	});
+
+	expect(carried.files).toEqual([viewStateFileId(ALL_FILES_CHAPTER_ID, "a.ts")]);
+	expect(carried.chapters).toEqual([]); // b.ts is unreviewed again, so the page isn't done
+});
+
+test("a reload carries narrated marks onto the flat page and drops stale key changes", () => {
+	const c1 = chapter("c1", 1, ["a.ts", "b.ts"]);
+	const state = { ...toggleChapter(emptyViewState(), c1), keyChanges: ["c1#0"] };
+
+	const carried = carryReviewProgress({
+		previous: {
+			files: [runFile("a.ts", "a"), runFile("b.ts", "b")],
+			chapters: { chapters: [c1] },
+			state,
+		},
+		next: { files: [runFile("a.ts", "a"), runFile("b.ts", "edited")], chapters: null },
+	});
+
+	expect(carried).toEqual({
+		chapters: [],
+		files: [viewStateFileId(ALL_FILES_CHAPTER_ID, "a.ts")],
+		keyChanges: [],
+	});
+});
+
+test("a reload leaves a run the reviewer has already made progress on alone", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "revue-vs-carry-"));
+	tmpDirs.push(dir);
+	const path = join(dir, "state.json");
+	const carried = {
+		chapters: [],
+		files: [viewStateFileId(ALL_FILES_CHAPTER_ID, "a.ts")],
+		keyChanges: [],
+	};
+
+	const seeded = await openRunStateStore(path, "run-b", null, carried);
+	expect(seeded.get()).toEqual(carried);
+
+	// Reloading back onto a run reviewed earlier keeps that run's own progress.
+	seeded.set({
+		chapters: [],
+		files: [viewStateFileId(ALL_FILES_CHAPTER_ID, "z.ts")],
+		keyChanges: [],
+	});
+	const reopened = await openRunStateStore(path, "run-b", null, carried);
+	expect(reopened.get().files).toEqual([viewStateFileId(ALL_FILES_CHAPTER_ID, "z.ts")]);
 });

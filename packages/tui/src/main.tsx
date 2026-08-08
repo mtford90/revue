@@ -762,17 +762,22 @@ async function showRun(
 	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
 	const startupTheme = resolveTheme(themeId, null, customThemes);
 
-	const [{ runApp }, { preparePatch }, { generateSemanticDiff }, { openRunStateStore }] =
-		await Promise.all([
-			import("./app.tsx"),
-			import("./diff.ts"),
-			import("./semantic.ts"),
-			import("./viewState.ts"),
-		]);
+	const [
+		{ runApp },
+		{ preparePatch, prepareContextQuotations },
+		{ generateSemanticDiff },
+		{ openRunStateStore },
+	] = await Promise.all([
+		import("./app.tsx"),
+		import("./diff.ts"),
+		import("./semantic.ts"),
+		import("./viewState.ts"),
+	]);
 	let syntaxWarning: string | undefined;
 	const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme, (warning) => {
 		syntaxWarning = warning;
 	});
+	await prepareContextQuotations(run.context, startupTheme.syntaxTheme);
 	const store = await openRunStateStore(defaultStatePath(), run.manifest.runId, run.chapters);
 	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
 	const repositoryRoot = repositoryRootForRun(directory);

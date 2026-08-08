@@ -310,6 +310,41 @@ test("an open excerpt sheds its state word rather than truncating the range it n
 	expect(header(narrow)).toBe("context · src/api/client.ts 118–120");
 });
 
+test("quoted lines wear the colours they are handed, and read as plain text without them", () => {
+	const shared = { key: "e", quotation, folded: false, width: 110, chrome: openTuiChrome };
+	const coloured = planExcerpt({
+		...shared,
+		spans: [
+			[
+				{ text: "export", fg: "#ff0000" },
+				{ text: " class ApiClient {", fg: "#00ff00" },
+			],
+		],
+	});
+	const plain = planExcerpt(shared);
+	const lineSpans = (plan: typeof plain, index: number) =>
+		plan.rows.filter((row) => row.type === "excerpt-line")[index]?.visualRows[0]?.spans ?? [];
+
+	expect(lineSpans(coloured, 0).map((span) => span.fg)).toEqual(["#ff0000", "#00ff00"]);
+	expect(lineSpans(plain, 0)).toEqual([{ text: "export class ApiClient {" }]);
+	// Only the first line was prepared; the rest fall back rather than rendering empty.
+	expect(lineSpans(coloured, 1)).toEqual([{ text: "  send(request) {}" }]);
+});
+
+test("coloured quoted lines are sanitised like any other untrusted terminal text", () => {
+	const plan = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+		spans: [[{ text: "\x1b[31mexport\tclass", fg: "#ff0000" }]],
+	});
+	const spans = plan.rows.find((row) => row.type === "excerpt-line")?.visualRows[0]?.spans ?? [];
+
+	expect(spans.map((span) => span.text).join("")).toBe("export  class");
+});
+
 const figure = {
 	kind: "ascii",
 	lines: ["prep ──▶ chapters.json ──▶ show", "        └─ blobs"],

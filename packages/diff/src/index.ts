@@ -1,7 +1,10 @@
 export { findFocusedDecorationAnchor, rangeToHunkIndex } from "./decorations.ts";
 export {
 	type HighlightedLines,
+	prepareQuotedSyntaxHighlighting,
 	prepareSyntaxHighlighting,
+	type QuotedCode,
+	quotedLineSpans,
 	type SyntaxBackend,
 	type SyntaxHighlightingPreparation,
 	type SyntaxHighlightWarning,
@@ -20,6 +23,7 @@ export {
 	diffStructure,
 	EXCERPT_HUNK_OLD_START,
 	type ExcerptQuotation,
+	type ExcerptSpans,
 	type ExcerptVisualPlan,
 	excerptLineRange,
 	measureDiff,

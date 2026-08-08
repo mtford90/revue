@@ -2,7 +2,7 @@ import { applicableDecorations, decorationsAtLine } from "./decorations.ts";
 import type { CodeWidths, DiffChromeWidths } from "./layout.ts";
 import { diffCodeWidths, lineNumberDigits, splitPaneWidths, stackGutterSides } from "./layout.ts";
 import { buildDiffRows, tabAdjustedRanges } from "./rows.ts";
-import { sanitizeTerminalLine } from "./terminalText.ts";
+import { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
 import type {
 	DiffCell,
 	DiffFile,
@@ -480,6 +480,13 @@ export function planDiff(input: PlanDiffInput): DiffVisualPlan {
 // same file, the sign slot stays empty because nothing changed, and the block never divides
 // into two panes — an unchanged quotation has no old side to compare against.
 
+/**
+ * Syntax spans for the quoted lines, one entry per line. Unlike a diff body, which reads the
+ * shared highlight cache as it builds rows, a quotation is handed its colours: the plan stays
+ * pure, and a caller that prepared nothing simply gets plain text.
+ */
+export type ExcerptSpans = readonly (readonly RenderSpan[])[];
+
 /** One cited range together with the bytes frozen for it. */
 export type ExcerptQuotation = {
 	filePath: string;
@@ -509,6 +516,7 @@ export type PlanExcerptInput = {
 	folded: boolean;
 	width: number;
 	chrome: DiffChromeWidths;
+	spans?: ExcerptSpans;
 };
 
 /**
@@ -560,13 +568,22 @@ const excerptLineRow = ({
 	quotation,
 	index,
 	codeWidth,
+	spans,
 }: {
 	key: string;
 	quotation: ExcerptQuotation;
 	index: number;
 	codeWidth: number;
+	spans: ExcerptSpans | undefined;
 }): PlannedExcerptRow => {
-	const wrapped = wrapSpans([{ text: plainLine(quotation.lines[index] ?? "") }], codeWidth);
+	// As a diff cell does: coloured spans when the quotation was prepared, plain text otherwise.
+	const highlighted = spans?.[index];
+	const wrapped = wrapSpans(
+		highlighted?.length
+			? sanitizeTerminalSpans(highlighted)
+			: [{ text: plainLine(quotation.lines[index] ?? "") }],
+		codeWidth,
+	);
 	const lineNumber = quotation.startLine + index;
 	return {
 		type: "excerpt-line",
@@ -583,11 +600,13 @@ const openExcerptRows = ({
 	quotation,
 	width,
 	codeWidth,
+	spans,
 }: {
 	key: string;
 	quotation: ExcerptQuotation;
 	width: number;
 	codeWidth: number;
+	spans: ExcerptSpans | undefined;
 }): PlannedExcerptRow[] => {
 	const label = excerptLabel(quotation);
 	return [
@@ -599,7 +618,9 @@ const openExcerptRows = ({
 			label: width < EXCERPT_STATE_WIDTH ? label : `${label} · unchanged`,
 			action: "▲ hide",
 		},
-		...quotation.lines.map((_, index) => excerptLineRow({ key, quotation, index, codeWidth })),
+		...quotation.lines.map((_, index) =>
+			excerptLineRow({ key, quotation, index, codeWidth, spans }),
+		),
 	];
 };
 
@@ -625,6 +646,7 @@ export function planExcerpt({
 	folded,
 	width,
 	chrome,
+	spans,
 }: PlanExcerptInput): ExcerptVisualPlan {
 	const digits = excerptDigits(quotation);
 	const gutterColumns = 2 * (chrome.focusMarker + digits + chrome.attachmentMarker) + chrome.sign;
@@ -641,7 +663,7 @@ export function planExcerpt({
 	}).additions;
 	const rows = folded
 		? [foldedExcerptRow(key, quotation)]
-		: openExcerptRows({ key, quotation, width, codeWidth });
+		: openExcerptRows({ key, quotation, width, codeWidth, spans });
 	return {
 		key,
 		quotation,

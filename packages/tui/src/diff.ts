@@ -2,10 +2,12 @@ import {
 	type DiffFile,
 	type DiffFileInput,
 	parsePatch,
+	prepareQuotedSyntaxHighlighting,
 	prepareSyntaxHighlighting,
+	type QuotedCode,
 	rangeToHunkIndex,
 } from "@revue/diff";
-import type { Chapter, LineRef } from "@revue/types";
+import type { Chapter, LineRef, RunContextFile } from "@revue/types";
 
 // Bridges a chapters file to Revue's renderer: a chapter cites hunks by
 // `(filePath, oldStart)`; Pierre parses a unified diff into files whose
@@ -21,6 +23,26 @@ export async function preparePatch(
 	const highlighting = await prepareSyntaxHighlighting(files, syntaxTheme);
 	if (highlighting.warning) onSyntaxWarning?.(highlighting.warning.message);
 	return files;
+}
+
+/**
+ * Every quotation the frozen context holds. Citations are few and short, so they are coloured
+ * as one batch rather than per chapter: any chapter may reach any of them.
+ */
+export const contextQuotations = (context: RunContextFile | null): QuotedCode[] =>
+	(context?.excerpts ?? []).map((excerpt) => ({
+		path: excerpt.filePath,
+		lines: excerpt.lines,
+	}));
+
+/** Colour the quoted code a narration cites, which no parsed patch accounts for. */
+export async function prepareContextQuotations(
+	context: RunContextFile | null,
+	syntaxTheme: string,
+): Promise<void> {
+	const quotations = contextQuotations(context);
+	if (!quotations.length) return;
+	await prepareQuotedSyntaxHighlighting(quotations, syntaxTheme);
 }
 
 /** A selected diff plus the exact chapter path that selected it. */

@@ -1,7 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import {
 	highlightedLines,
+	prepareQuotedSyntaxHighlighting,
 	prepareSyntaxHighlighting,
+	quotedLineSpans,
 	setNativeHighlighterForTesting,
 } from "../src/highlight.ts";
 import { parsePatch } from "../src/model.ts";
@@ -58,4 +60,36 @@ test("uses Shiki spans after an already-loaded native highlighter throws", async
 
 	expect(preparation).toMatchObject({ backend: "shiki", warning: { code: "native-unavailable" } });
 	expect(new Set(spans.map((span) => span.fg).filter(Boolean)).size).toBeGreaterThan(1);
+});
+
+test("colours quoted code from its path alone, one entry per cited line", async () => {
+	process.env.REVUE_SYNTAX_ENGINE = "shiki";
+	// Frozen citations carry no line endings, so tokenising must not run the range together.
+	const quotation = {
+		path: "src/api/client.ts",
+		lines: ["export class ApiClient {", "  send(request: Request) {}", "}"],
+	};
+
+	const preparation = await prepareQuotedSyntaxHighlighting([quotation], "catppuccin-mocha");
+	const spans = quotedLineSpans(quotation, "catppuccin-mocha") ?? [];
+
+	expect(preparation).toEqual({ backend: "shiki" });
+	expect(spans).toHaveLength(quotation.lines.length);
+	expect(
+		spans.map((line) =>
+			line
+				.map((span) => span.text)
+				.join("")
+				.trimEnd(),
+		),
+	).toEqual(quotation.lines);
+	expect(new Set(spans[0]?.map((span) => span.fg).filter(Boolean)).size).toBeGreaterThan(1);
+});
+
+test("quoted code has no colours until something has been prepared for it", () => {
+	process.env.REVUE_SYNTAX_ENGINE = "shiki";
+	const quotation = { path: "src/api/other.ts", lines: ["const answer = 42;"] };
+
+	expect(quotedLineSpans(quotation, "catppuccin-mocha")).toBeUndefined();
+	expect(quotedLineSpans(quotation, undefined)).toBeUndefined();
 });

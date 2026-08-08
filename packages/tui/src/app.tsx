@@ -23,7 +23,9 @@ import {
 	parsePatch,
 	planDiagram,
 	planExcerpt,
+	prepareQuotedSyntaxHighlighting,
 	prepareSyntaxHighlighting,
+	quotedLineSpans,
 	type RangeDecoration,
 	type SpanEmphasis,
 } from "@revue/diff";
@@ -78,7 +80,13 @@ import {
 	useState,
 } from "react";
 import { copyToClipboard } from "./clipboard.ts";
-import { type ChapterDiffFile, type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import {
+	type ChapterDiffFile,
+	contextQuotations,
+	type FileStat,
+	selectChapterFiles,
+	statsByPath,
+} from "./diff.ts";
 import {
 	boundaryActions,
 	expandBoundary,
@@ -2921,11 +2929,23 @@ export function App({
 						folded: !openExcerpts.has(key),
 						width: contentWidth,
 						chrome: OPENTUI_DIFF_CHROME,
+						spans: quotedLineSpans(
+							{ path: excerpt.filePath, lines: frozen.lines },
+							diffTheme.syntaxTheme,
+						),
 					}),
 				},
 			];
 		});
-	}, [chapter, context, plannedBody, viewportFiles, openExcerpts, contentWidth]);
+	}, [
+		chapter,
+		context,
+		plannedBody,
+		viewportFiles,
+		openExcerpts,
+		contentWidth,
+		diffTheme.syntaxTheme,
+	]);
 	/**
 	 * Figures the chapter draws, taken from fenced blocks in its own summary rather than a
 	 * schema field of their own. Unlike an excerpt, a figure is usually the point of the prose
@@ -3222,16 +3242,22 @@ export function App({
 			...semanticDiffFiles(semantic),
 			...expandedVariants.values(),
 		];
-		if (!highlightable.length || preparedSyntaxTheme === theme.syntaxTheme) return;
+		// Quotations were coloured at startup, so this is the theme-change path for them too.
+		const quotations = contextQuotations(context);
+		if ((!highlightable.length && !quotations.length) || preparedSyntaxTheme === theme.syntaxTheme)
+			return;
 		let current = true;
 		const syntaxTheme = theme.syntaxTheme;
-		prepareSyntaxHighlighting(highlightable, syntaxTheme).then(() => {
+		Promise.all([
+			prepareSyntaxHighlighting(highlightable, syntaxTheme),
+			prepareQuotedSyntaxHighlighting(quotations, syntaxTheme),
+		]).then(() => {
 			if (current) setPreparedSyntaxTheme(syntaxTheme);
 		});
 		return () => {
 			current = false;
 		};
-	}, [diffFiles, semantic, expandedVariants, preparedSyntaxTheme, theme.syntaxTheme]);
+	}, [diffFiles, semantic, expandedVariants, context, preparedSyntaxTheme, theme.syntaxTheme]);
 
 	useEffect(() => {
 		const scroll = pageScroll.current;

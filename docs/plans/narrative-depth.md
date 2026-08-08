@@ -169,9 +169,11 @@ orphan path.
 - **Excerpt placement within a chapter is inferred, not declared.** The schema carries no anchor, so
   the nth citation follows the nth file section, a citation past the last file closes the chapter,
   and a chapter with no files leads with its excerpts. A repeated range renders as one block.
-- **Quoted excerpt lines render unhighlighted.** The row plan emits plain sanitised text rather than
-  syntax spans, so the PRD's "syntax-highlighted" is not yet true of quoted code. Everything else
-  about the block — gutter column, fold behaviour, selection, comments, links — is as designed.
+- **Quoted excerpt lines are coloured from their path, not from a patch.** The highlight cache keys
+  on a line array rather than a parsed file, so a citation is prepared alongside the diff and
+  planned with the spans handed to it. Unlike a diff body, which reads the cache as it builds rows,
+  the excerpt plan stays pure and falls back to plain text when nothing was prepared. Quoted lines
+  are re-ended before tokenising because a frozen citation carries no line endings.
 - **Diagrams come from fenced blocks in the chapter summary**, not a schema field: an `ascii` or
   `mermaid` info string moves the block out of the prose and into the content column wearing the
   excerpt's chrome. Every other fence stays inline as a snippet.

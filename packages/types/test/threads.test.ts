@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { reviewThreadSchema, THREAD_AUTHOR_KIND, THREAD_STATUS } from "@revue/types/threads";
+import {
+	reviewThreadSchema,
+	THREAD_ANCHOR_KIND,
+	THREAD_AUTHOR_KIND,
+	THREAD_STATUS,
+	threadAnchorSchema,
+} from "@revue/types/threads";
 
 const thread = {
 	id: "00000000-0000-4000-8000-000000000001",
@@ -52,4 +58,27 @@ test("thread bodies allow prose while author names remain terminal-safe single l
 	expect(() =>
 		reviewThreadSchema.parse({ ...thread, createdAt: "2026-08-02T10:00:01.000Z" }),
 	).toThrow("root message");
+});
+
+test("an anchor states its kind, and a stored hunk anchor keeps parsing without one", () => {
+	// The migration: anchors written before excerpt threads existed carry no discriminator.
+	expect(threadAnchorSchema.parse(thread.anchor)).toEqual({
+		kind: THREAD_ANCHOR_KIND.HUNK,
+		...thread.anchor,
+	});
+	expect(reviewThreadSchema.parse(thread).anchor.kind).toBe(THREAD_ANCHOR_KIND.HUNK);
+
+	const excerpt = {
+		kind: THREAD_ANCHOR_KIND.EXCERPT,
+		filePath: "src/api/client.ts",
+		startLine: 118,
+		endLine: 140,
+	};
+	expect(threadAnchorSchema.parse(excerpt)).toEqual(excerpt);
+	// The hazard this discriminator exists for: an excerpt anchor must never be expressible as a
+	// metadata review unit, whose sentinel is oldStart 0 on the very same path.
+	expect(() => threadAnchorSchema.parse({ ...excerpt, oldStart: 0, side: "additions" })).toThrow();
+	expect(() => threadAnchorSchema.parse({ ...excerpt, endLine: 117 })).toThrow();
+	expect(() => threadAnchorSchema.parse({ ...excerpt, startLine: 0, endLine: 0 })).toThrow();
+	expect(() => threadAnchorSchema.parse({ ...thread.anchor, kind: "narration" })).toThrow();
 });

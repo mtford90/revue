@@ -1,11 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
+import { RGBA } from "@opentui/core";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff";
 import { resolveTheme, THEME_IDS, THEMES } from "@revue/theme";
 import {
 	type ReviewThread,
+	type RevueChaptersFile,
 	RevueChaptersFileSchema,
+	type RunContextFile,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	type ThreadAnchor,
@@ -287,6 +291,126 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("0/3 files"); // none reviewed yet
 });
 
+const withInterlude: RevueChaptersFile = {
+	...file,
+	chapters: [
+		...file.chapters,
+		{
+			id: "interlude",
+			order: file.chapters.length + 1,
+			title: "Why the migration is staged",
+			summary: "The retry work lands before the callers so nothing regresses mid-deploy.",
+			hunkRefs: [],
+			keyChanges: [],
+			excerpts: [],
+		},
+	],
+};
+
+test("an interlude is an ordinary page marked as carrying no diff", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const seen: ViewState[] = [];
+	const t = await testRender(
+		<App
+			file={withInterlude}
+			diffFiles={diffFiles}
+			onViewStateChange={(next) => seen.push(next)}
+		/>,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("¶ 4. Why the migration"); // the index marks it
+
+	for (let step = 0; step < 4; step += 1) await nextChapter(t);
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Why the migration is staged");
+	expect(frame).toContain("¶ interlude");
+	expect(frame).toContain("The retry work lands"); // the prose, which the sidebar wraps
+	expect(frame).not.toContain("Files ("); // no file list
+	expect(frame).not.toContain("What to review");
+	expect(frame).toContain("── end of chapter ──");
+	expect(frame).toContain("x mark this chapter read · ]c next page");
+	expect(statusLine(t)).toContain("Ch 4/4");
+
+	await press(t, "x");
+	expect(seen.at(-1)?.chapters).toContain("interlude");
+	expect(t.captureCharFrame()).toContain("[x] ¶ 4. Why the migration");
+});
+
+const withInterludeDiagram: RevueChaptersFile = {
+	...file,
+	chapters: [
+		...file.chapters,
+		{
+			id: "interlude",
+			order: file.chapters.length + 1,
+			title: "Why the migration is staged",
+			summary: "The order matters.\n\n```ascii\nretry -> callers\n```",
+			hunkRefs: [],
+			keyChanges: [],
+			excerpts: [],
+		},
+	],
+};
+
+test("an interlude draws the figure its prose is built around", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={withInterludeDiagram} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	for (let step = 0; step < 4; step += 1) await nextChapter(t);
+
+	// A figure is usually the whole reason an interlude exists, so it draws without being asked.
+	expect(t.captureCharFrame()).toContain("retry -> callers");
+});
+
+const zoomedOut: RevueChaptersFile = {
+	...file,
+	depth: { kind: "partial", label: "10,000ft" },
+	chapters: file.chapters.slice(0, 2), // the third unit stays reachable through Files
+};
+
+test("a zoomed-out narrative states its coverage in the index and the status bar", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={zoomedOut} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Chapters (2) · 10,000ft");
+	expect(frame).toContain("2 of 3 hunks · rest in Files");
+	expect(statusLine(t)).toContain("10,000ft · 2/3 hunks");
+});
+
+test("a run says when prep kept part of the change out of it, at any depth", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	// Full depth: "every unit narrated" is true of the run and says nothing about what prep dropped.
+	const t = await testRender(
+		<App file={file} diffFiles={diffFiles} omittedNotice="2 files omitted · .revueignore" />,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+
+	expect(t.captureCharFrame()).toContain("2 files omitted · .revueignore");
+});
+
+test("a full-depth narrative says nothing about coverage anywhere", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 130, height: 44 });
+	await t.renderOnce();
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Chapters (3)");
+	expect(frame).not.toContain("10,000ft");
+	expect(frame).not.toContain("rest in Files");
+	expect(frame).not.toContain("hunks");
+});
+
 test("reopening restores the page, collapsed files, scroll, and reviewer settings", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const sessions: ReviewSessionState[] = [];
@@ -299,6 +423,8 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 				selectedHunk: 0,
 				selectedKeyChange: 0,
 				collapsedFiles: ["src/lib/apiClient.ts"],
+				openExcerpts: [],
+				foldedDiagrams: [],
 				scrollTop: 0,
 				panelScrollTop: 0,
 			},
@@ -335,6 +461,8 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 		pages: {
 			"chapter-2": {
 				collapsedFiles: ["src/lib/apiClient.ts"],
+				openExcerpts: [],
+				foldedDiagrams: [],
 				scrollTop: expect.any(Number),
 			},
 		},
@@ -759,6 +887,8 @@ ${additions}
 						selectedHunk: 0,
 						selectedKeyChange: 0,
 						collapsedFiles: [],
+						openExcerpts: [],
+						foldedDiagrams: [],
 						scrollTop: 16,
 						panelScrollTop: 0,
 					},
@@ -1273,6 +1403,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 		id: "00000000-0000-4000-8000-000000000001",
 		runId,
 		anchor: {
+			kind: THREAD_ANCHOR_KIND.HUNK,
 			filePath: "thread.ts",
 			oldStart: 1,
 			side: "additions",
@@ -1447,6 +1578,7 @@ test("o opens the Comments surface and Enter jumps back into the owning chapter"
 	if (!diffFile) throw new Error("missing diff fixture");
 	const runId = "a".repeat(64);
 	const anchor: ThreadAnchor = {
+		kind: THREAD_ANCHOR_KIND.HUNK,
 		filePath: "thread.ts",
 		oldStart: 1,
 		side: "additions",
@@ -2022,4 +2154,702 @@ test("commenting on a highlight anchors the thread to every line it covers", asy
 		startLine: 1,
 		endLine: 3,
 	});
+});
+
+/** A distinctive word of the current chapter's narration, in the sidebar. */
+const proseWord = (t: Awaited<ReturnType<typeof testRender>>, word: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes(word));
+	return { x: (lines[y] ?? "").indexOf(word), y, width: word.length };
+};
+
+async function dragOverProse(t: Awaited<ReturnType<typeof testRender>>, word: string) {
+	const prose = proseWord(t, word);
+	await act(async () => {
+		await t.mockMouse.drag(prose.x, prose.y, prose.x + prose.width, prose.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	return prose;
+}
+
+test("narration yanks with the selection key, like any other selected text", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	await dragOverProse(t, "Introduces");
+	await press(t, "y");
+
+	expect(copied).toEqual(["Introduces"]);
+	expect(t.captureCharFrame()).toContain("Copied 1 selected line");
+});
+
+test("right-clicking narration offers only the verbs prose can answer", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			permalinks={permalinks(NEW_SHA)}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const prose = await dragOverProse(t, "Introduces");
+	await rightClick(t, prose.x, prose.y);
+	const menu = t.captureCharFrame();
+
+	expect(menu).toContain("Copy selected text");
+	expect(menu).toContain("Copy with chapter reference");
+	expect(menu).toContain("Copy path:line");
+	expect(menu).not.toContain("Copy GitHub link"); // prose has no line to point at
+	expect(menu).not.toContain("Comment on selection"); // narration takes no threads
+
+	// Copy path:line is offered but dead, so the keyboard cannot land on it.
+	const menuLines = menu.split("\n");
+	const pathY = menuLines.findIndex((line) => line.includes("Copy path:line"));
+	await click(t, (menuLines[pathY]?.indexOf("Copy path:line") ?? -1) + 1, pathY);
+	expect(copied).toEqual([]);
+	expect(t.captureCharFrame()).toContain("Copy path:line"); // a dead entry does not close the menu
+});
+
+test("copying narration with its reference quotes the prose under the chapter heading", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const prose = await dragOverProse(t, "Introduces");
+	await rightClick(t, prose.x, prose.y);
+	const menu = t.captureCharFrame().split("\n");
+	const referenceY = menu.findIndex((line) => line.includes("Copy with chapter reference"));
+	await click(t, (menu[referenceY]?.indexOf("Copy with chapter reference") ?? -1) + 1, referenceY);
+
+	expect(copied).toEqual(["Ch 1 · Add a reusable backoff helper\n> Introduces"]);
+	expect(t.captureCharFrame()).toContain("Copied narration · Ch 1");
+});
+
+test("an interlude's prose yanks and references like any other chapter summary", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={withInterlude}
+			diffFiles={diffFiles}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 160, height: 40 },
+	);
+	await t.renderOnce();
+	for (let step = 0; step < 4; step += 1) await nextChapter(t);
+
+	const prose = await dragOverProse(t, "regresses");
+	await rightClick(t, prose.x, prose.y);
+	const menu = t.captureCharFrame().split("\n");
+	const referenceY = menu.findIndex((line) => line.includes("Copy with chapter reference"));
+	await click(t, (menu[referenceY]?.indexOf("Copy with chapter reference") ?? -1) + 1, referenceY);
+
+	expect(copied).toEqual(["Ch 4 · Why the migration is staged\n> regresses"]);
+	expect(t.captureCharFrame()).toContain("Copied narration · Ch 4");
+});
+
+const CITATION = {
+	filePath: "src/lib/transport.ts",
+	startLine: 12,
+	endLine: 14,
+	caption: "the caller this change has to satisfy",
+};
+
+const withExcerpt: RevueChaptersFile = {
+	...file,
+	chapters: file.chapters.map((chapter) =>
+		chapter.id === "chapter-1" ? { ...chapter, excerpts: [CITATION] } : chapter,
+	),
+};
+
+/** What `revue context freeze` pinned for that citation; the TUI never re-reads the file. */
+const frozenContext: RunContextFile = {
+	runId: "a".repeat(64),
+	source: { kind: "commit", revision: "0123456789abcdef0123456789abcdef01234567" },
+	excerpts: [
+		{
+			filePath: CITATION.filePath,
+			startLine: CITATION.startLine,
+			endLine: CITATION.endLine,
+			lines: ["export class Transport {", "  dispatch(request) {}", "}"],
+			fileSha256: "b".repeat(64),
+		},
+	],
+	unresolved: [],
+};
+
+const FOLDED_BAND = "⋯  context · src/lib/transport.ts 12–14  [▼ show 3 lines]";
+
+/** Click a bracketed excerpt action wherever the current frame happens to place it. */
+const clickAction = async (t: Awaited<ReturnType<typeof testRender>>, marker: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const row = lines.findIndex((line) => line.includes(marker));
+	if (row < 0) throw new Error(`no row shows ${marker}`);
+	await click(t, (lines[row] ?? "").indexOf(marker) + 2, row);
+};
+
+const renderExcerptChapter = async ({
+	onViewStateChange,
+	onCopy,
+	permalinkContext,
+	initialThreads,
+	threadActions,
+	openChapter = true,
+}: {
+	onViewStateChange?: (next: ViewState) => void;
+	onCopy?: (text: string) => boolean;
+	permalinkContext?: PermalinkContext;
+	initialThreads?: ReviewThread[];
+	threadActions?: Parameters<typeof App>[0]["threadActions"];
+	openChapter?: boolean;
+} = {}) => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App
+			file={withExcerpt}
+			context={frozenContext}
+			diffFiles={diffFiles}
+			permalinks={permalinkContext}
+			onCopy={onCopy}
+			onViewStateChange={onViewStateChange}
+			initialThreads={initialThreads}
+			threadActions={threadActions}
+		/>,
+		{ width: 130, height: 44, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	if (openChapter) await nextChapter(t);
+	return t;
+};
+
+/** The line-number cell beside a quoted line, found by walking back from its code. */
+const excerptGutter = (t: Awaited<ReturnType<typeof testRender>>, code: string, number: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const y = lines.findIndex((line) => line.includes(code));
+	const line = lines[y] ?? "";
+	return { x: line.lastIndexOf(number, line.indexOf(code)), y };
+};
+
+const rowBackground = (t: Awaited<ReturnType<typeof testRender>>, code: string) => {
+	const y = t
+		.captureCharFrame()
+		.split("\n")
+		.findIndex((line) => line.includes(code));
+	return t
+		.captureSpans()
+		.lines[y]?.spans.find((span) => span.text.includes(code))
+		?.bg?.toString();
+};
+
+test("a cited excerpt is folded scenery that contributes nothing to review progress", async () => {
+	const seen: ViewState[] = [];
+	const t = await renderExcerptChapter({ onViewStateChange: (next) => seen.push(next) });
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain(FOLDED_BAND);
+	expect(frame).not.toContain("[▲ hide]");
+	expect(frame).not.toContain("export class Transport");
+	// The quoted file is neither a reviewable file nor a checkbox anywhere.
+	expect(frame).toContain("0/3 files");
+	expect(frame).not.toContain("[ ] src/lib/transport.ts");
+
+	await press(t, "x");
+
+	expect(seen.at(-1)?.files).toEqual(["chapter-1::src/lib/backoff.ts"]);
+	expect(t.captureCharFrame()).toContain("1/3 files");
+});
+
+/** One chapter over two files, each with a citation, so placement has somewhere to go wrong. */
+const twoFileChapter: RevueChaptersFile = {
+	...file,
+	chapters: [
+		{
+			...(file.chapters[0] as (typeof file.chapters)[number]),
+			hunkRefs: [
+				{ filePath: "src/lib/backoff.ts", oldStart: 0 },
+				{ filePath: "src/lib/apiClient.ts", oldStart: 41 },
+			],
+			excerpts: [CITATION, { ...CITATION, startLine: 13, endLine: 14 }],
+		},
+		...file.chapters.slice(2),
+	],
+};
+
+test("focusing one file does not drag another file's quotation onto it", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App
+			file={twoFileChapter}
+			context={frozenContext}
+			diffFiles={diffFiles}
+			initialPreferences={{ fileDisplay: "focused" }}
+		/>,
+		{ width: 130, height: 44, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	// The first citation belongs after the first file, which is the one on screen.
+	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+
+	// Walk the file cursor to the second file; it steps through the quotation on the way.
+	for (let step = 0; step < 4 && !t.captureCharFrame().includes("return fetch"); step += 1) {
+		await press(t, "TAB");
+	}
+
+	// The second citation follows the second file; the first must not have travelled with it.
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("return fetch");
+	expect(frame).not.toContain(FOLDED_BAND);
+});
+
+test("clicking the band opens the excerpt in place, caption above its header", async () => {
+	const t = await renderExcerptChapter();
+
+	await clickAction(t, "[▼ show");
+	const opened = t.captureCharFrame().split("\n");
+	const captionRow = opened.findIndex((line) => line.includes("the caller this change"));
+	const headerRow = opened.findIndex((line) => line.includes("context · src/lib/transport.ts"));
+
+	expect(opened.join("\n")).toContain("[▲ hide]");
+	expect(opened.join("\n")).toContain("export class Transport {");
+	expect(opened.join("\n")).toContain("  dispatch(request) {}");
+	expect(captionRow).toBeGreaterThanOrEqual(0);
+	expect(captionRow).toBe(headerRow - 1);
+
+	await clickAction(t, "[▲ hide]");
+
+	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+});
+
+test("dragging a quoted line's gutter tints the range and y yanks the quotation", async () => {
+	const copied: string[] = [];
+	const t = await renderExcerptChapter({
+		onCopy: (text) => {
+			copied.push(text);
+			return true;
+		},
+	});
+	await clickAction(t, "[▼ show");
+	const untinted = rowBackground(t, "export class Transport {");
+
+	const first = excerptGutter(t, "export class Transport {", "12");
+	const second = excerptGutter(t, "dispatch(request)", "13");
+	await act(async () => {
+		await t.mockMouse.drag(first.x, first.y, second.x, second.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	const tint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
+	expect(rowBackground(t, "export class Transport {")).toBe(tint);
+	expect(rowBackground(t, "dispatch(request)")).toBe(tint);
+	expect(untinted).not.toBe(tint);
+	// No composer: an excerpt line takes no comment, so the selection simply stands.
+	expect(t.captureCharFrame()).not.toContain("New review thread");
+
+	await press(t, "y");
+	expect(copied).toEqual(["export class Transport {\n  dispatch(request) {}"]);
+	expect(t.captureCharFrame()).toContain("Copied 2 selected lines");
+});
+
+test("an excerpt line answers the full range menu against its own file and lines", async () => {
+	const copied: string[] = [];
+	const t = await renderExcerptChapter({
+		permalinkContext: permalinks(NEW_SHA),
+		onCopy: (text) => {
+			copied.push(text);
+			return true;
+		},
+	});
+	await clickAction(t, "[▼ show");
+
+	const first = excerptGutter(t, "export class Transport {", "12");
+	const second = excerptGutter(t, "dispatch(request)", "13");
+	await act(async () => {
+		await t.mockMouse.drag(first.x, first.y, second.x, second.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	await rightClick(t, first.x, first.y);
+
+	const menu = t.captureCharFrame();
+	expect(menu).toContain("Copy selected text");
+	expect(menu).toContain("Copy path:line");
+	expect(menu).toContain("Copy GitHub link");
+	expect(menu).toContain("Comment on selection");
+
+	const menuLines = menu.split("\n");
+	const pathY = menuLines.findIndex((line) => line.includes("Copy path:line"));
+	await click(t, (menuLines[pathY]?.indexOf("Copy path:line") ?? -1) + 1, pathY);
+	// The quoted file, not the chapter's diffed file, and the citation's own line numbers.
+	expect(copied).toEqual(["src/lib/transport.ts:12-13"]);
+
+	await rightClick(t, first.x, first.y);
+	const reopened = t.captureCharFrame().split("\n");
+	const linkY = reopened.findIndex((line) => line.includes("Copy GitHub link"));
+	await click(t, (reopened[linkY]?.indexOf("Copy GitHub link") ?? -1) + 1, linkY);
+
+	expect(copied.at(-1)).toBe(
+		`https://github.com/mtford/revue/blob/${NEW_SHA}/src/lib/transport.ts#L12-L13`,
+	);
+});
+
+test("an uncommitted new side blocks a quoted line's link for the same stated reason", async () => {
+	const t = await renderExcerptChapter({ permalinkContext: permalinks(null) });
+	await clickAction(t, "[▼ show");
+
+	const gutter = excerptGutter(t, "export class Transport {", "12");
+	await rightClick(t, gutter.x, gutter.y);
+
+	expect(t.captureCharFrame()).toContain("Copy GitHub link (side is not committed)");
+});
+
+test("the file cursor steps onto an excerpt so the existing toggle key opens it", async () => {
+	const t = await renderExcerptChapter();
+
+	await press(t, "TAB"); // off the chapter's only file, onto the excerpt that follows it
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain("export class Transport {");
+
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+});
+
+const excerptThread = ({
+	id,
+	startLine,
+	endLine,
+	body,
+}: {
+	id: string;
+	startLine: number;
+	endLine: number;
+	body: string;
+}): ReviewThread => ({
+	id,
+	runId: frozenContext.runId,
+	anchor: {
+		kind: THREAD_ANCHOR_KIND.EXCERPT,
+		filePath: CITATION.filePath,
+		startLine,
+		endLine,
+	},
+	status: THREAD_STATUS.OPEN,
+	createdAt: "2026-08-02T10:00:00.000Z",
+	messages: [
+		{
+			id: `${id.slice(0, -1)}9`,
+			author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Matt Reviewer" },
+			body,
+			createdAt: "2026-08-02T10:00:00.000Z",
+		},
+	],
+});
+
+test("Enter on a quoted selection starts a thread anchored to the excerpt, not to a hunk", async () => {
+	const created: ThreadAnchor[] = [];
+	const t = await renderExcerptChapter({
+		threadActions: {
+			create: (anchor, author, body) => {
+				created.push(anchor);
+				return {
+					...excerptThread({
+						id: "00000000-0000-4000-8000-000000000021",
+						startLine: 12,
+						endLine: 13,
+						body,
+					}),
+					anchor,
+					messages: [
+						{
+							id: "00000000-0000-4000-8000-000000000022",
+							author,
+							body,
+							createdAt: "2026-08-02T10:00:01.000Z",
+						},
+					],
+				};
+			},
+			reply: () => {
+				throw new Error("unused");
+			},
+			delete: () => {
+				throw new Error("unused");
+			},
+			deleteMessage: () => {
+				throw new Error("unused");
+			},
+			markDealt: () => {
+				throw new Error("unused");
+			},
+			reopen: () => {
+				throw new Error("unused");
+			},
+		},
+	});
+	await clickAction(t, "[▼ show");
+
+	const first = excerptGutter(t, "export class Transport {", "12");
+	const second = excerptGutter(t, "dispatch(request)", "13");
+	await act(async () => {
+		await t.mockMouse.drag(first.x, first.y, second.x, second.y);
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain("New review thread");
+
+	await act(async () => t.mockInput.typeText("Does this caller still hold?"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+
+	// The load-bearing assertion: quoted code takes its own anchor kind. Borrowing oldStart 0
+	// would make it indistinguishable from a thread on a metadata review unit.
+	expect(created).toEqual([
+		{
+			kind: THREAD_ANCHOR_KIND.EXCERPT,
+			filePath: "src/lib/transport.ts",
+			startLine: 12,
+			endLine: 13,
+		},
+	]);
+	const settled = t.captureCharFrame();
+	expect(settled).not.toContain("New review thread");
+	expect(settled).toContain("Does this caller still hold?");
+	// The attachment marker slot in the excerpt gutter now carries the count.
+	const quotedRow = settled.split("\n")[excerptGutter(t, "dispatch(request)", "13").y] ?? "";
+	expect(quotedRow).toContain("13 1●");
+});
+
+test("excerpt threads list in the Comments surface, marked when the narrative stopped quoting them", async () => {
+	const t = await renderExcerptChapter({
+		openChapter: false,
+		initialThreads: [
+			excerptThread({
+				id: "00000000-0000-4000-8000-000000000031",
+				startLine: 12,
+				endLine: 12,
+				body: "Why does this stay synchronous?",
+			}),
+			excerptThread({
+				id: "00000000-0000-4000-8000-000000000032",
+				startLine: 90,
+				endLine: 90,
+				body: "Raised against a range the narrative dropped",
+			}),
+		],
+	});
+
+	await press(t, "o");
+	const list = t.captureCharFrame();
+
+	expect(list).toContain("src/lib/transport.ts:12");
+	expect(list).toContain("Why does this stay synchronous?");
+	// Kept and shown rather than pruned, and visibly distinguished from a live anchor.
+	expect(list).toContain("src/lib/transport.ts:90 · no longer quoted");
+	expect(list).toContain("Raised against a range the narrative dropped");
+
+	await press(t, "RETURN");
+	const chapterFrame = t.captureCharFrame();
+
+	expect(statusLine(t)).toContain("Ch 1/");
+	// Jumping opens the folded excerpt the thread hangs off, so the feedback is actually visible.
+	expect(chapterFrame).toContain("export class Transport {");
+	expect(chapterFrame).toContain("Why does this stay synchronous?");
+});
+
+/** The chrome an excerpt reserves before its code at the excerpt's default numbering width. */
+const EXCERPT_GUTTER_COLUMNS = 17;
+
+const ASCII_FIGURE = "prep ──▶ chapters.json ──▶ show";
+const MERMAID_SOURCE = "graph LR; prep --> show";
+
+/** An interlude whose narration carries both figures as fenced blocks, and no diff at all. */
+const withDiagrams: RevueChaptersFile = {
+	...withExcerpt,
+	chapters: [
+		...withExcerpt.chapters,
+		{
+			id: "interlude",
+			order: withExcerpt.chapters.length + 1,
+			title: "How prep and show fit together",
+			summary: [
+				"Prep freezes the run; show only ever reads it.",
+				"",
+				"```ascii",
+				ASCII_FIGURE,
+				"```",
+				"",
+				"```mermaid",
+				MERMAID_SOURCE,
+				"```",
+			].join("\n"),
+			hunkRefs: [],
+			keyChanges: [],
+			excerpts: [],
+		},
+	],
+};
+
+/** The column a rendered line's own text starts on, ignoring the chrome before it. */
+const textColumn = (t: Awaited<ReturnType<typeof testRender>>, needle: string) => {
+	const line = t
+		.captureCharFrame()
+		.split("\n")
+		.find((row) => row.includes(needle));
+	if (line === undefined) throw new Error(`no row shows ${needle}`);
+	return line.indexOf(needle);
+};
+
+/** The block rule immediately left of a rendered line, past the sidebar's own divider. */
+const ruleColumn = (t: Awaited<ReturnType<typeof testRender>>, needle: string) => {
+	const line =
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((row) => row.includes(needle)) ?? "";
+	return line.lastIndexOf("│", line.indexOf(needle));
+};
+
+const textColour = (t: Awaited<ReturnType<typeof testRender>>, needle: string) => {
+	const y = t
+		.captureCharFrame()
+		.split("\n")
+		.findIndex((line) => line.includes(needle));
+	return t
+		.captureSpans()
+		.lines[y]?.spans.find((span) => span.text.includes(needle))
+		?.fg?.toString();
+};
+
+const gotoChapter = async (t: Awaited<ReturnType<typeof testRender>>, order: number) => {
+	for (let step = 0; step < 8 && !statusLine(t).includes(`Ch ${order}/`); step += 1) {
+		await nextChapter(t);
+	}
+	if (!statusLine(t).includes(`Ch ${order}/`)) throw new Error(`never reached chapter ${order}`);
+};
+
+/** Click the fold action on the band or header that carries a given label. */
+const clickBlockAction = async (t: Awaited<ReturnType<typeof testRender>>, label: string) => {
+	const lines = t.captureCharFrame().split("\n");
+	const row = lines.findIndex((line) => line.includes(label));
+	if (row < 0) throw new Error(`no foldable row shows ${label}`);
+	const line = lines[row] ?? "";
+	// The sidebar shares the terminal row, so the action is the bracket after the label itself.
+	await click(t, line.indexOf("[", line.indexOf(label)) + 2, row);
+};
+
+test("an interlude's diagrams fold, open, and line up with quoted code", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(
+		<App file={withDiagrams} context={frozenContext} diffFiles={diffFiles} />,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+	await gotoChapter(t, 4);
+	const opened = t.captureCharFrame();
+
+	// A figure draws without being asked; an interlude often has nothing else on the page.
+	expect(opened).toContain("diagram · ascii");
+	expect(opened).toContain("[▲ hide]");
+	expect(opened).toContain(ASCII_FIGURE);
+	expect(opened).toContain(MERMAID_SOURCE);
+	// The fences never reach the narration, which keeps its own prose.
+	expect(opened).toContain("Prep freezes the run");
+	expect(opened).not.toContain("```");
+	// A figure has no line numbers, yet reserves the quoted block's whole gutter before its text.
+	expect(textColumn(t, ASCII_FIGURE) - ruleColumn(t, ASCII_FIGURE)).toBe(EXCERPT_GUTTER_COLUMNS);
+	// ASCII is the drawing itself; Mermaid is source, so it reads as a label would.
+	expect(textColour(t, ASCII_FIGURE)).toBe(RGBA.fromHex(resolveTheme(undefined).text).toString());
+	expect(textColour(t, MERMAID_SOURCE)).toBe(
+		RGBA.fromHex(resolveTheme(undefined).muted).toString(),
+	);
+
+	await clickBlockAction(t, "diagram · ascii");
+	const folded = t.captureCharFrame();
+
+	expect(folded).toContain("⋯  diagram · ascii  [▼ show 1 line]");
+	expect(folded).not.toContain(ASCII_FIGURE);
+	// Folding one figure leaves its neighbour alone.
+	expect(folded).toContain(MERMAID_SOURCE);
+	// The close still ends the page, below the figures rather than above them.
+	expect(folded).toContain("── end of chapter ──");
+
+	await clickBlockAction(t, "diagram · ascii");
+
+	expect(t.captureCharFrame()).toContain(ASCII_FIGURE);
+});
+
+test("a fenced snippet in narration renders as code rather than raw backticks", async () => {
+	const snippet = "revue show .revue/runs/latest";
+	const withSnippet: RevueChaptersFile = {
+		...file,
+		chapters: file.chapters.map((chapter, index) =>
+			index === 0
+				? { ...chapter, summary: ["Run it yourself:", "```sh", snippet, "```"].join("\n") }
+				: chapter,
+		),
+	};
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={withSnippet} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 44,
+	});
+	await t.renderOnce();
+	await nextChapter(t);
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Run it yourself:");
+	expect(frame).toContain(snippet);
+	expect(frame).not.toContain("```");
+	// A snippet is code, not a diagram: it stays in the narration and gets no fold.
+	expect(frame).not.toContain("diagram · ");
+	expect(frame).not.toContain("[▼ show");
 });

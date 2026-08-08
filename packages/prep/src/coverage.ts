@@ -1,12 +1,16 @@
 import { type DiffFile, parsePatch } from "@revue/diff";
 import {
 	type Chapter,
+	excerptKey,
+	excerptRangeLabel,
 	type LineRef,
+	partialDepthLabel,
 	type RevueChaptersFile,
-	RUN_EXCLUSION_REASON,
+	type RunContextFile,
 	type RunExclusion,
 } from "@revue/types";
 import type { PreparedRun } from "./artifact.ts";
+import { exclusionSource } from "./format.ts";
 
 export class ReviewCoverageError extends Error {}
 
@@ -74,12 +78,6 @@ const chapterIdentityIssues = (chapters: Chapter[]): string[] => {
 	return issues;
 };
 
-const exclusionSource = (exclusion: RunExclusion): string => {
-	if (exclusion.reason === RUN_EXCLUSION_REASON.REVUE_IGNORE) return ".revueignore";
-	if (exclusion.reason === RUN_EXCLUSION_REASON.SESSION_IGNORE) return "--ignore";
-	return "built-in filtering";
-};
-
 const exclusionForPath = (run: PreparedRun, path: string): RunExclusion | undefined =>
 	run.manifest.exclusions.find(
 		(exclusion) => exclusion.path === path || exclusion.matchedPath === path,
@@ -99,10 +97,13 @@ const omittedPathExplanation = (
 	return `${label} references ${JSON.stringify(path)}, which prep omitted via ${exclusionSource(exclusion)} pattern ${JSON.stringify(exclusion.pattern)}${matched}; regenerate chapters.json from this run's hunks.txt, or adjust the ignore rule and prep a new run`;
 };
 
-const reviewUnitIssues = (run: PreparedRun, chapters: Chapter[]): string[] => {
+const reviewUnitIssues = (run: PreparedRun, file: RevueChaptersFile): string[] => {
+	// Only a narrative that says out loud it is partial may leave units out; everything else,
+	// including a chapters file written before depth existed, still owes every one of them.
+	const everyUnitRequired = partialDepthLabel(file) === null;
 	const expected = new Map(manifestUnitEntries(run));
 	const occurrences = new Map<string, string[]>();
-	for (const chapter of chapters) {
+	for (const chapter of file.chapters) {
 		for (const reference of chapter.hunkRefs) {
 			const key = unitKey(reference.filePath, reference.oldStart);
 			occurrences.set(key, [...(occurrences.get(key) ?? []), chapter.id]);
@@ -111,7 +112,7 @@ const reviewUnitIssues = (run: PreparedRun, chapters: Chapter[]): string[] => {
 	const issues: string[] = [];
 	for (const [key, label] of expected) {
 		const owners = occurrences.get(key) ?? [];
-		if (!owners.length) issues.push(`missing review unit ${label}`);
+		if (!owners.length && everyUnitRequired) issues.push(`missing review unit ${label}`);
 		if (owners.length > 1) issues.push(`review unit ${label} appears ${owners.length} times`);
 	}
 	for (const [key, owners] of occurrences) {
@@ -178,13 +179,46 @@ const lineReferenceIssues = (
 	);
 };
 
-export function validateReviewCoverage(run: PreparedRun, file: RevueChaptersFile): void {
+/**
+ * An excerpt cites code the agent never transcribed, so the citation is only worth anything once
+ * `revue context freeze` has pinned its bytes. A citation may legitimately name a file outside the
+ * diff — quoting the untouched caller a change has to satisfy is the point — so the frozen context,
+ * not the manifest, is what a citation is checked against.
+ */
+const excerptIssues = (
+	run: PreparedRun,
+	file: RevueChaptersFile,
+	context: RunContextFile | null,
+): string[] => {
+	const frozen = new Set((context?.excerpts ?? []).map(excerptKey));
+	const unresolved = new Map(
+		(context?.unresolved ?? []).map((entry) => [excerptKey(entry), entry]),
+	);
+	return file.chapters.flatMap((chapter) =>
+		chapter.excerpts.flatMap((excerpt) => {
+			const label = `chapter ${JSON.stringify(chapter.id)} excerpt ${excerptRangeLabel(excerpt)}`;
+			const failure = unresolved.get(excerptKey(excerpt));
+			if (failure) return [`${label} could not be frozen: ${failure.reason}`];
+			if (frozen.has(excerptKey(excerpt))) return [];
+			return [
+				`${label} has no frozen content; run \`revue context freeze ${run.directory}\` after writing chapters.json`,
+			];
+		}),
+	);
+};
+
+export function validateReviewCoverage(
+	run: PreparedRun,
+	file: RevueChaptersFile,
+	context: RunContextFile | null = null,
+): void {
 	const files = parsePatch(run.patch);
 	const issues = [
 		...preparedUnitIssues(run, files),
 		...chapterIdentityIssues(file.chapters),
-		...reviewUnitIssues(run, file.chapters),
+		...reviewUnitIssues(run, file),
 		...lineReferenceIssues(run, new Map(files.map((entry) => [entry.path, entry])), file.chapters),
+		...excerptIssues(run, file, context),
 	];
 	if (issues.length) {
 		throw new ReviewCoverageError(

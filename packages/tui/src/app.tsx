@@ -17,19 +17,27 @@ import {
 	type DiffLineRange,
 	type DiffSide,
 	type DiffVisualPlan,
+	EXCERPT_HUNK_OLD_START,
+	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	parsePatch,
+	planDiagram,
+	planExcerpt,
+	prepareQuotedSyntaxHighlighting,
 	prepareSyntaxHighlighting,
+	quotedLineSpans,
 	type RangeDecoration,
 	type SpanEmphasis,
 } from "@revue/diff";
 import {
+	DiagramBlock,
 	DiffBody,
 	type DiffBodyProps,
 	DiffFileHeader,
 	type DiffInlineAttachment,
 	decorationAnchorId,
 	diffRangeWithin,
+	ExcerptBlock,
 	type ExpandDirection,
 	OPENTUI_DIFF_CHROME,
 } from "@revue/diff-opentui";
@@ -42,10 +50,19 @@ import {
 } from "@revue/theme";
 import {
 	type Chapter,
+	type ContextExcerpt,
 	emptyViewState,
+	excerptKey,
+	frozenExcerptContaining,
+	frozenExcerptFor,
+	isExcerptAnchor,
+	narratedUnitCount,
 	type Prologue,
+	partialDepthLabel,
 	type ReviewThread,
 	type RevueChaptersFile,
+	type RunContextFile,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 	type ThreadAnchor,
@@ -53,9 +70,23 @@ import {
 	type ThreadMessage,
 	type ViewState,
 } from "@revue/types";
-import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type ReactNode,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { copyToClipboard } from "./clipboard.ts";
-import { type ChapterDiffFile, type FileStat, selectChapterFiles, statsByPath } from "./diff.ts";
+import {
+	type ChapterDiffFile,
+	contextQuotations,
+	type FileStat,
+	selectChapterFiles,
+	statsByPath,
+} from "./diff.ts";
 import {
 	boundaryActions,
 	expandBoundary,
@@ -79,7 +110,7 @@ import {
 	resolvePanelWidth,
 	type SidebarPreference,
 } from "./layout.ts";
-import { Narration } from "./markdown.tsx";
+import { Narration, splitNarration } from "./markdown.tsx";
 import {
 	buildAppMenus,
 	ContextMenu,
@@ -92,6 +123,7 @@ import {
 	selectable,
 	useMenuController,
 } from "./menu.tsx";
+import { type ChapterReference, chapterReferenceCopy } from "./narrationCopy.ts";
 import {
 	abbreviatePath,
 	buildPathTree,
@@ -111,7 +143,7 @@ import {
 	permalinkFor,
 	sourceRangeFor,
 } from "./sourceLink.ts";
-import { StatusBar, type StatusNotice } from "./statusBar.tsx";
+import { type NarrativeCoverage, StatusBar, type StatusNotice } from "./statusBar.tsx";
 import {
 	complexityColor,
 	severityBackgroundColor,
@@ -137,6 +169,7 @@ import {
 	attachmentRowIndex,
 	bodySegmentId,
 	ESTIMATED_ATTACHMENT_HEIGHT,
+	excerptSegmentId,
 	headerSegmentId,
 	OVERSCAN_ROWS,
 	type PlannedViewportFile,
@@ -147,6 +180,8 @@ import {
 	segmentKind,
 	segmentOffset,
 	segmentPath,
+	type ViewportDiagram,
+	type ViewportExcerpt,
 	type ViewportFile,
 	viewportSegments,
 	type WindowPlanItem,
@@ -221,6 +256,7 @@ const centreContentOffset = ({
 	const centred = top - Math.floor((scroll.viewport.height - span) / 2);
 	scroll.scrollTo(Math.max(0, Math.min(centred, maximum)));
 };
+const RIGHT_MOUSE_BUTTON = 2;
 const COMPACT_NAV_WIDTH = 34;
 const COMPACT_STRIP_WIDTH = 60;
 // ── Page model ──────────────────────────────────────────────────────────────
@@ -238,6 +274,16 @@ export const ALL_FILES_CHAPTER_ID = "__files__";
 const ALL_FILES_LABEL = "All files";
 const COMMENTS_PAGE_ID = "__comments__";
 const COMMENTS_PAGE: Page = { kind: "comments", label: "Comments" };
+const INTERLUDE_GLYPH = "¶";
+const INTERLUDE_NOTE = `${INTERLUDE_GLYPH} interlude`;
+const INTERLUDE_CLOSE = "── end of chapter ──";
+
+/**
+ * A prose-only page: a chapter that cites no review units. The synthetic Files
+ * chapter never counts, since an empty diff is not a narrative choice.
+ */
+const isInterlude = (chapter: Chapter) =>
+	chapter.id !== ALL_FILES_CHAPTER_ID && chapter.hunkRefs.length === 0;
 
 /** The whole diff as one synthetic chapter, so the flat page reuses the chapter pipeline. */
 const allFilesChapter = (diffFiles: DiffFile[] | null, order: number): Chapter => ({
@@ -252,6 +298,7 @@ const allFilesChapter = (diffFiles: DiffFile[] | null, order: number): Chapter =
 			: [{ filePath: path, oldStart: 0 }];
 	}),
 	keyChanges: [],
+	excerpts: [],
 });
 
 function buildPages(file: RevueChaptersFile): Page[] {
@@ -275,9 +322,58 @@ const emptyReviewPageState = () => ({
 	selectedHunk: 0,
 	selectedKeyChange: 0,
 	collapsedFiles: [] as string[],
+	openExcerpts: [] as string[],
+	foldedDiagrams: [] as string[],
 	scrollTop: 0,
 	panelScrollTop: 0,
 });
+
+/**
+ * Excerpts sit in narration order rather than being pinned to the end of a chapter: the nth
+ * citation follows the nth file section, and any citation past the last file closes the chapter.
+ * A chapter with no files — an interlude — leads with them.
+ */
+const excerptAnchor = (paths: readonly string[], index: number): string | null =>
+	paths.length ? (paths[Math.min(index, paths.length - 1)] ?? null) : null;
+
+/** Fold keys for figures, namespaced away from excerpt keys, which are cited ranges. */
+const diagramFoldKey = (chapterId: string, index: number) => `diagram:${chapterId}:${index}`;
+
+type ChapterFocusTarget = { kind: "file"; index: number } | { kind: "excerpt"; key: string };
+
+/** Distinct citations in declared order; a repeated range is one block, opened once. */
+const distinctExcerpts = (chapter: Chapter): { key: string; excerpt: ContextExcerpt }[] => {
+	const seen = new Set<string>();
+	return chapter.excerpts.flatMap((excerpt) => {
+		const key = excerptKey(excerpt);
+		if (seen.has(key)) return [];
+		seen.add(key);
+		return [{ key, excerpt }];
+	});
+};
+
+/** Whether a quotation is the one a range was dragged over, so tint and yank agree. */
+const excerptCovers = (quotation: ExcerptQuotation, range: DiffLineRange): boolean =>
+	quotation.filePath === range.filePath &&
+	quotation.startLine <= range.startLine &&
+	range.endLine <= quotation.endLine;
+
+/**
+ * The frozen lines a selected range covers. The quotation is the only source: an excerpt may
+ * cite a file the diff never touched, so neither the manifest nor the parsed patch can answer.
+ */
+const excerptRangeText = (
+	excerpts: readonly ViewportExcerpt[],
+	range: DiffLineRange,
+): string | null => {
+	const quotation = excerpts
+		.map((excerpt) => excerpt.plan.quotation)
+		.find((candidate) => excerptCovers(candidate, range));
+	if (!quotation) return null;
+	const from = range.startLine - quotation.startLine;
+	const lines = quotation.lines.slice(from, from + (range.endLine - range.startLine) + 1);
+	return lines.length ? lines.join("\n") : null;
+};
 
 const pageRowId = (index: number) => `page-index-row:${index}`;
 
@@ -296,7 +392,9 @@ function PageIndexRows({
 	return pages.map((page, index) => {
 		const active = index === current;
 		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
-		const label = page.kind === "chapter" ? `${page.chapter.order}. ${page.label}` : page.label;
+		const glyph = page.kind === "chapter" && isInterlude(page.chapter) ? `${INTERLUDE_GLYPH} ` : "";
+		const label =
+			page.kind === "chapter" ? `${glyph}${page.chapter.order}. ${page.label}` : page.label;
 		return (
 			<box
 				key={page.label}
@@ -467,6 +565,7 @@ function ChapterBrief({
 	onFocusKeyChange,
 	onToggleFileReview,
 	onToggleKeyChange,
+	onProseContextMenu,
 }: {
 	chapter: Chapter;
 	vs: ViewState;
@@ -479,12 +578,39 @@ function ChapterBrief({
 	onFocusKeyChange: (index: number) => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
+	/** Absent where the narration belongs to no real chapter, such as the Files surface. */
+	onProseContextMenu?: (reference: ChapterReference, position: { x: number; y: number }) => void;
 }) {
 	const theme = useTheme();
+	const proseMenu = onProseContextMenu
+		? (event: OpenTUIMouseEvent) => {
+				if (event.button !== RIGHT_MOUSE_BUTTON) return;
+				event.preventDefault();
+				event.stopPropagation();
+				onProseContextMenu(
+					{ order: chapter.order, title: chapter.title },
+					{ x: event.x, y: event.y },
+				);
+			}
+		: undefined;
+	// Diagrams are hoisted out of the summary: they render in the content column, where the
+	// window plan can give them a height, rather than inside the brief.
+	const prose = splitNarration(chapter.summary).prose;
+	if (isInterlude(chapter)) {
+		return (
+			<box flexDirection="column" width="100%" gap={1}>
+				<box flexDirection="column" width="100%">
+					<text fg={theme.accent}>{chapter.title}</text>
+					<text fg={theme.muted}>{INTERLUDE_NOTE}</text>
+				</box>
+				{prose ? <Narration text={prose} fg={theme.muted} onMouseDown={proseMenu} /> : null}
+			</box>
+		);
+	}
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
 			<text fg={theme.accent}>{chapter.title}</text>
-			{chapter.summary ? <Narration text={chapter.summary} fg={theme.muted} /> : null}
+			{prose ? <Narration text={prose} fg={theme.muted} onMouseDown={proseMenu} /> : null}
 			<KeyChanges
 				chapter={chapter}
 				vs={vs}
@@ -511,6 +637,8 @@ function ChapterPanel({
 	pages,
 	current,
 	chapterCount,
+	coverage,
+	omittedNotice,
 	width,
 	vs,
 	indexExpanded,
@@ -528,11 +656,14 @@ function ChapterPanel({
 	onToggleChapterReview,
 	onToggleFileReview,
 	onToggleKeyChange,
+	onProseContextMenu,
 }: {
 	page: Page | undefined;
 	pages: Page[];
 	current: number;
 	chapterCount: number;
+	coverage: NarrativeCoverage | null;
+	omittedNotice: string | null;
 	width: number;
 	vs: ViewState;
 	indexExpanded: boolean;
@@ -550,6 +681,7 @@ function ChapterPanel({
 	onToggleChapterReview: () => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
+	onProseContextMenu: (reference: ChapterReference, position: { x: number; y: number }) => void;
 }) {
 	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
@@ -587,6 +719,22 @@ function ChapterPanel({
 				>
 					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.heading}>
 						{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
+						{coverage ? ` · ${coverage.label}` : ""}
+					</text>
+				</box>
+			) : null}
+			{chapterCount > 0 && !filesSurface && coverage ? (
+				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
+						{`${coverage.narrated} of ${coverage.total} hunks · rest in Files`}
+					</text>
+				</box>
+			) : null}
+			{/* Unlike coverage, an omission applies at every depth: the run itself is short. */}
+			{omittedNotice ? (
+				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
+						{omittedNotice}
 					</text>
 				</box>
 			) : null}
@@ -654,6 +802,7 @@ function ChapterPanel({
 						onFocusKeyChange={onFocusKeyChange}
 						onToggleFileReview={onToggleFileReview}
 						onToggleKeyChange={onToggleKeyChange}
+						onProseContextMenu={filesSurface ? undefined : onProseContextMenu}
 					/>
 				</scrollbox>
 			) : (
@@ -1089,16 +1238,60 @@ const semanticViewportFiles = ({
 	});
 };
 
-const threadAnchorRange = (thread: ReviewThread | undefined): DiffLineRange | undefined =>
-	thread
+/**
+ * The display range an anchor acts on. Quoted code has no old side and belongs to no git hunk,
+ * so it borrows the excerpt sentinel the renderer already uses for a quoted line's own range.
+ */
+const diffRangeForAnchor = (anchor: ThreadAnchor): DiffLineRange =>
+	isExcerptAnchor(anchor)
 		? {
-				filePath: thread.anchor.filePath,
-				hunkOldStart: thread.anchor.oldStart,
-				side: thread.anchor.side,
-				startLine: thread.anchor.startLine,
-				endLine: thread.anchor.endLine,
+				filePath: anchor.filePath,
+				hunkOldStart: EXCERPT_HUNK_OLD_START,
+				side: "additions",
+				startLine: anchor.startLine,
+				endLine: anchor.endLine,
 			}
+		: {
+				filePath: anchor.filePath,
+				hunkOldStart: anchor.oldStart,
+				side: anchor.side,
+				startLine: anchor.startLine,
+				endLine: anchor.endLine,
+			};
+
+const threadAnchorRange = (thread: ReviewThread | undefined): DiffLineRange | undefined =>
+	thread ? diffRangeForAnchor(thread.anchor) : undefined;
+
+/** The chapter citation whose quoted range contains this thread's anchor, if it has one. */
+const citationFor = (chapter: Chapter, { anchor }: ReviewThread): ContextExcerpt | undefined =>
+	isExcerptAnchor(anchor)
+		? chapter.excerpts.find(
+				(excerpt) =>
+					excerpt.filePath === anchor.filePath &&
+					excerpt.startLine <= anchor.startLine &&
+					anchor.endLine <= excerpt.endLine,
+			)
 		: undefined;
+
+/** A chapter owns a thread through the review unit it narrates or the range it quotes. */
+const chapterOwnsThread = (chapter: Chapter, thread: ReviewThread): boolean => {
+	const { anchor } = thread;
+	if (isExcerptAnchor(anchor)) return citationFor(chapter, thread) !== undefined;
+	return chapter.hunkRefs.some(
+		(reference) => reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
+	);
+};
+
+/** Threads on quoted code this chapter cites; they render inside its excerpt block, not a diff. */
+const chapterExcerptThreads = (
+	chapter: Chapter,
+	threads: readonly ReviewThread[],
+): ReviewThread[] =>
+	threads.filter((thread) => isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread));
+
+/** Threads on this chapter's own review units. */
+const chapterHunkThreads = (chapter: Chapter, threads: readonly ReviewThread[]): ReviewThread[] =>
+	threads.filter((thread) => !isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread));
 
 function KeyChanges({
 	chapter,
@@ -1299,15 +1492,20 @@ const threadLocation = (thread: ReviewThread) =>
 		thread.anchor.endLine === thread.anchor.startLine ? "" : `-${thread.anchor.endLine}`
 	}`;
 
+/** The narration stopped quoting this thread's code; it is kept and shown, never pruned. */
+const ORPHANED_THREAD_NOTE = " · no longer quoted";
+
 function CommentRow({
 	thread,
 	index,
 	active,
+	orphaned,
 	onJump,
 }: {
 	thread: ReviewThread;
 	index: number;
 	active: boolean;
+	orphaned: boolean;
 	onJump: (thread: ReviewThread) => void;
 }) {
 	const theme = useTheme();
@@ -1330,9 +1528,18 @@ function CommentRow({
 			<text flexShrink={0} fg={dealtWith ? theme.badgeAdded : theme.badgeModified}>
 				{dealtWith ? "✓ " : "! "}
 			</text>
-			<text flexShrink={0} wrapMode="none" fg={active ? theme.accent : theme.text}>
+			<text
+				flexShrink={0}
+				wrapMode="none"
+				fg={orphaned ? theme.muted : active ? theme.accent : theme.text}
+			>
 				{threadLocation(thread)}
 			</text>
+			{orphaned ? (
+				<text flexShrink={0} wrapMode="none" fg={theme.badgeModified}>
+					{ORPHANED_THREAD_NOTE}
+				</text>
+			) : null}
 			<text flexShrink={0} fg={theme.muted}>{` ${root?.author.name ?? ""} `}</text>
 			<text
 				flexGrow={1}
@@ -1356,10 +1563,12 @@ function CommentRow({
 function CommentsView({
 	threads,
 	selected,
+	orphaned,
 	onJump,
 }: {
 	threads: ReviewThread[];
 	selected: number;
+	orphaned: ReadonlySet<string>;
 	onJump: (thread: ReviewThread) => void;
 }) {
 	const theme = useTheme();
@@ -1386,6 +1595,7 @@ function CommentsView({
 					thread={thread}
 					index={index}
 					active={index === selected}
+					orphaned={orphaned.has(thread.id)}
 					onJump={onJump}
 				/>
 			))}
@@ -1562,12 +1772,29 @@ type ContextExpansionUi = {
 	expandersFor: (path: string, base: DiffFileInput) => DiffBodyProps["expanders"];
 };
 
+/** An interlude has no diff, so its content column is just the close and the keys that follow it. */
+function InterludeClose({ keymap }: { keymap: readonly KeymapAction[] }) {
+	const theme = useTheme();
+	const markRead = keymapHint("toggle-chapter-review", keymap) ?? "";
+	const nextPage = keymapHint("next-page", keymap) ?? "";
+	return (
+		<box flexDirection="column" width="100%">
+			<text fg={theme.muted}>{INTERLUDE_CLOSE}</text>
+			<text fg={theme.muted}>{`${markRead} mark this chapter read · ${nextPage} next page`}</text>
+		</box>
+	);
+}
+
 function ChapterView({
 	chapter,
 	diffTheme,
 	diffFiles,
 	visibleDiffFiles,
 	bodyPlans,
+	diagrams,
+	excerpts,
+	focusedExcerpt,
+	excerptSelection,
 	windowPlan,
 	width,
 	vs,
@@ -1579,10 +1806,15 @@ function ChapterView({
 	threads,
 	selectedThreadRange,
 	threadDraft,
+	excerptDraft,
 	replyDraft,
 	contextExpansion,
 	onAttachmentNode,
 	onSelectFile,
+	onToggleDiagram,
+	onToggleExcerpt,
+	onSelectExcerptRange,
+	onExcerptRangeContextMenu,
 	onToggleCollapse,
 	onToggleFileReview,
 	onSelectThreadRange,
@@ -1597,6 +1829,10 @@ function ChapterView({
 	diffFiles: DiffFile[] | null;
 	visibleDiffFiles: ChapterDiffFile[];
 	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
+	diagrams: readonly ViewportDiagram[];
+	excerpts: readonly ViewportExcerpt[];
+	focusedExcerpt: string | null;
+	excerptSelection: DiffLineRange | null;
 	windowPlan: WindowPlanItem[];
 	width: number;
 	vs: ViewState;
@@ -1608,10 +1844,16 @@ function ChapterView({
 	threads: ReviewThread[];
 	selectedThreadRange: DiffLineRange | undefined;
 	threadDraft: DiffInlineAttachment | undefined;
+	/** The composer for a new thread on quoted code, which mounts inside its excerpt block. */
+	excerptDraft: DiffInlineAttachment | undefined;
 	replyDraft: { threadId: string; content: ReactNode } | undefined;
 	contextExpansion?: ContextExpansionUi;
 	onAttachmentNode: (id: string, node: { height: number } | null) => void;
 	onSelectFile: (index: number) => void;
+	onToggleDiagram: (key: string) => void;
+	onToggleExcerpt: (key: string) => void;
+	onSelectExcerptRange: (range: DiffLineRange) => void;
+	onExcerptRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
 	onSelectThreadRange: (range: DiffLineRange) => void;
@@ -1638,35 +1880,27 @@ function ChapterView({
 			showGutterMarker: false,
 		}));
 	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
-	const chapterThreads = threads.filter((thread) =>
-		chapter.hunkRefs.some(
-			(reference) =>
-				reference.filePath === thread.anchor.filePath &&
-				reference.oldStart === thread.anchor.oldStart,
+	const mountThread = (thread: ReviewThread): DiffInlineAttachment => ({
+		id: thread.id,
+		anchor: diffRangeForAnchor(thread.anchor),
+		content: (
+			<InlineThread
+				thread={thread}
+				replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
+				onReply={onReplyThread}
+				onDeleteThread={onDeleteThread}
+				onDeleteMessage={onDeleteThreadMessage}
+				onToggleStatus={onToggleThreadStatus}
+			/>
 		),
-	);
+	});
 	const inlineAttachments: DiffInlineAttachment[] = [
-		...chapterThreads.map((thread) => ({
-			id: thread.id,
-			anchor: {
-				filePath: thread.anchor.filePath,
-				hunkOldStart: thread.anchor.oldStart,
-				side: thread.anchor.side,
-				startLine: thread.anchor.startLine,
-				endLine: thread.anchor.endLine,
-			},
-			content: (
-				<InlineThread
-					thread={thread}
-					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
-					onReply={onReplyThread}
-					onDeleteThread={onDeleteThread}
-					onDeleteMessage={onDeleteThreadMessage}
-					onToggleStatus={onToggleThreadStatus}
-				/>
-			),
-		})),
+		...chapterHunkThreads(chapter, threads).map(mountThread),
 		...(threadDraft ? [threadDraft] : []),
+	];
+	const excerptAttachments: DiffInlineAttachment[] = [
+		...chapterExcerptThreads(chapter, threads).map(mountThread),
+		...(excerptDraft ? [excerptDraft] : []),
 	];
 
 	return (
@@ -1677,9 +1911,48 @@ function ChapterView({
 					return <box key={`gap:${planIndex}`} height={item.height} flexShrink={0} width="100%" />;
 				}
 				const path = segmentPath(item.id);
+				const kind = segmentKind(item.id);
+				if (kind === "excpad" || kind === "diapad") {
+					return <box key={item.id} height={1} flexShrink={0} width="100%" />;
+				}
+				if (kind === "dia") {
+					const diagram = diagrams.find((candidate) => candidate.key === path);
+					if (!diagram) return null;
+					return (
+						<DiagramBlock
+							key={item.id}
+							plan={diagram.plan}
+							theme={diffTheme}
+							window={item.window}
+							onToggle={onToggleDiagram}
+						/>
+					);
+				}
+				if (kind === "exc") {
+					const excerpt = excerpts.find((candidate) => candidate.key === path);
+					if (!excerpt) return null;
+					return (
+						<ExcerptBlock
+							key={item.id}
+							plan={excerpt.plan}
+							theme={diffTheme}
+							focused={focusedExcerpt === excerpt.key}
+							window={item.window}
+							onToggle={onToggleExcerpt}
+							selectedRange={
+								excerptSelection && excerptCovers(excerpt.plan.quotation, excerptSelection)
+									? excerptSelection
+									: undefined
+							}
+							inlineAttachments={excerptAttachments}
+							onAttachmentNode={onAttachmentNode}
+							onRangeSelect={onSelectExcerptRange}
+							onRangeContextMenu={onExcerptRangeContextMenu}
+						/>
+					);
+				}
 				const diffFile = filesByPath.get(path);
 				if (!diffFile) return null;
-				const kind = segmentKind(item.id);
 				const fileIndex = paths.indexOf(path);
 				const focused = fileIndex === selectedFile;
 				if (kind === "sep") {
@@ -1880,17 +2153,14 @@ function SemanticChapterView({
 		}
 		return emphasis;
 	}, [semantic, theme.badgeRemoved, theme.badgeAdded]);
-	const chapterThreads = threads.filter((thread) => paths.includes(thread.anchor.filePath));
+	// Semantic view renders no excerpts, so threads on quoted code have nowhere to sit here.
+	const chapterThreads = threads.filter(
+		(thread) => !isExcerptAnchor(thread.anchor) && paths.includes(thread.anchor.filePath),
+	);
 	const inlineAttachments: DiffInlineAttachment[] = [
 		...chapterThreads.map((thread) => ({
 			id: thread.id,
-			anchor: {
-				filePath: thread.anchor.filePath,
-				hunkOldStart: thread.anchor.oldStart,
-				side: thread.anchor.side,
-				startLine: thread.anchor.startLine,
-				endLine: thread.anchor.endLine,
-			},
+			anchor: diffRangeForAnchor(thread.anchor),
 			content: (
 				<InlineThread
 					thread={thread}
@@ -2223,16 +2493,23 @@ function ConfirmDialog({
 
 // ── App shell ───────────────────────────────────────────────────────────────
 type ThreadDraft =
-	| { kind: "thread"; range: DiffLineRange }
+	| { kind: "thread"; anchor: ThreadAnchor; range: DiffLineRange }
 	| { kind: "reply"; threadId: string; range: DiffLineRange };
 
 type ContextMenuState = {
-	range: DiffLineRange;
 	position: { x: number; y: number };
 	selected: number;
 	/** Whatever was dragged over when the menu opened, so the entry survives the menu taking focus. */
 	selectedText: string | null;
-};
+} & (
+	| {
+			kind: "range";
+			range: DiffLineRange;
+			/** Which anchor a comment on this range would take; quoted code takes an excerpt one. */
+			anchorKind: (typeof THREAD_ANCHOR_KIND)[keyof typeof THREAD_ANCHOR_KIND];
+	  }
+	| { kind: "prose"; reference: ChapterReference }
+);
 
 /** The verbs a selected range answers to, shared by the pointer menu and the composer footer. */
 const buildRangeMenu = ({
@@ -2275,21 +2552,56 @@ const buildRangeMenu = ({
 	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
 ];
 
+const noVerb = () => undefined;
+
+/** Narration answers to copying alone: it has no line to point at and takes no comments. */
+const buildProseMenu = ({
+	selectedText,
+	copyText,
+	copyWithReference,
+	keymap = KEYMAP,
+}: {
+	selectedText: string | null;
+	copyText: () => void;
+	copyWithReference: () => void;
+	keymap?: readonly KeymapAction[];
+}): MenuEntry[] => [
+	{
+		kind: "item",
+		label: "Copy selected text",
+		hint: keymapHint("copy-selection", keymap),
+		disabled: !selectedText,
+		action: copyText,
+	},
+	{
+		kind: "item",
+		label: "Copy with chapter reference",
+		disabled: !selectedText,
+		action: copyWithReference,
+	},
+	{ kind: "separator", id: "copy" },
+	{ kind: "item", label: "Copy path:line", hint: "Ctrl+Y", disabled: true, action: noVerb },
+];
+
 const defaultHumanAuthor: ThreadAuthor = {
 	kind: THREAD_AUTHOR_KIND.HUMAN,
 	name: "Reviewer",
 };
 
-const diffRangeForThread = (thread: ReviewThread): DiffLineRange => ({
-	filePath: thread.anchor.filePath,
-	hunkOldStart: thread.anchor.oldStart,
-	side: thread.anchor.side,
-	startLine: thread.anchor.startLine,
-	endLine: thread.anchor.endLine,
+const diffRangeForThread = (thread: ReviewThread): DiffLineRange =>
+	diffRangeForAnchor(thread.anchor);
+
+/** A thread reduced to what the viewport needs to reserve room for it. */
+const measuredAnchor = (thread: ReviewThread): DiffInlineAttachment => ({
+	id: thread.id,
+	anchor: diffRangeForAnchor(thread.anchor),
+	content: null,
 });
 
 export function App({
 	file,
+	context = null,
+	omittedNotice = null,
 	diffFiles = null,
 	loadSemanticDiff,
 	loadFileLines,
@@ -2319,6 +2631,13 @@ export function App({
 }: {
 	/** Null for a chapterless run: the review opens straight onto the All files page. */
 	file: RevueChaptersFile | null;
+	/** Frozen quotations for the narration's excerpt citations; null until `context freeze` runs. */
+	context?: RunContextFile | null;
+	/**
+	 * What an ignore rule kept out of the prepared run. Coverage counts are measured against the
+	 * run, so without this a narrative can look complete while prep dropped half the change.
+	 */
+	omittedNotice?: string | null;
 	diffFiles?: DiffFile[] | null;
 	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 	/** The pinned new-side blob for a path, split into lines; null when unavailable. */
@@ -2374,6 +2693,17 @@ export function App({
 		(): Page => ({ kind: "files", label: ALL_FILES_LABEL, chapter: filesChapter }),
 		[filesChapter],
 	);
+	// Coverage is derived, never stored, and exists only for a narrative that declared itself
+	// partial — at full depth the reviewer is told nothing, because nothing was left out.
+	const coverage = useMemo((): NarrativeCoverage | null => {
+		const label = file ? partialDepthLabel(file) : null;
+		if (!file || !label) return null;
+		return {
+			label,
+			narrated: narratedUnitCount(file),
+			total: filesChapter.hunkRefs.length,
+		};
+	}, [file, filesChapter]);
 	const pages = useMemo(() => (file ? buildPages(file) : [filesPage]), [file, filesPage]);
 	const chapters = pages.flatMap((candidate) =>
 		candidate.kind === "chapter" ? [candidate.chapter] : [],
@@ -2402,6 +2732,16 @@ export function App({
 	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
 		() => new Set(initialPageState.collapsedFiles),
 	);
+	const [openExcerpts, setOpenExcerpts] = useState<Set<string>>(
+		() => new Set(initialPageState.openExcerpts),
+	);
+	const [foldedDiagrams, setFoldedDiagrams] = useState<Set<string>>(
+		() => new Set(initialPageState.foldedDiagrams),
+	);
+	/** The excerpt the file cursor has stepped onto; excerpt rows carry no focus marker. */
+	const [focusedExcerpt, setFocusedExcerpt] = useState<string | null>(null);
+	/** A quoted range the gutter drag left behind. It has no composer to hold it, so it lives here. */
+	const [excerptSelection, setExcerptSelection] = useState<DiffLineRange | null>(null);
 	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
 	const [expansions, setExpansions] = useState<Map<string, FileExpansion>>(() => new Map());
 	const [expandedVariants, setExpandedVariants] = useState<Map<string, DiffFile>>(() => new Map());
@@ -2476,6 +2816,12 @@ export function App({
 	const surface: ReviewSurface =
 		page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story";
 	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
+	const interlude = chapter ? isInterlude(chapter) : false;
+	/**
+	 * Whether the page's body is the planned content column. An interlude has no diff to swap,
+	 * so its figures and quotations are planned in either view rather than only in Patch.
+	 */
+	const plannedBody = Boolean(chapter) && (viewMode === "patch" || interlude);
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
@@ -2565,20 +2911,121 @@ export function App({
 			diffFiles,
 		],
 	);
+	// Quoted code comes from the frozen context, never re-resolved from Git; a citation nothing
+	// was frozen for simply does not appear.
+	const chapterExcerpts = useMemo<ViewportExcerpt[]>(() => {
+		if (!chapter || !plannedBody) return [];
+		// Anchored against the chapter's own file order, not the viewport's: Focused display shows
+		// one file, and placing every citation against that would move quotations between modes.
+		const paths = chapterFilePaths(chapter);
+		const onScreen = new Set(viewportFiles.map((entry) => entry.path));
+		return distinctExcerpts(chapter).flatMap(({ key, excerpt }, index) => {
+			const after = excerptAnchor(paths, index);
+			if (after !== null && !onScreen.has(after)) return [];
+			const frozen = frozenExcerptFor(context, excerpt);
+			if (!frozen) return [];
+			const quotation: ExcerptQuotation = { ...excerpt, lines: frozen.lines };
+			return [
+				{
+					key,
+					after,
+					plan: planExcerpt({
+						key,
+						quotation,
+						folded: !openExcerpts.has(key),
+						width: contentWidth,
+						chrome: OPENTUI_DIFF_CHROME,
+						spans: quotedLineSpans(
+							{ path: excerpt.filePath, lines: frozen.lines },
+							diffTheme.syntaxTheme,
+						),
+					}),
+				},
+			];
+		});
+	}, [
+		chapter,
+		context,
+		plannedBody,
+		viewportFiles,
+		openExcerpts,
+		contentWidth,
+		diffTheme.syntaxTheme,
+	]);
+	/**
+	 * Figures the chapter draws, taken from fenced blocks in its own summary rather than a
+	 * schema field of their own. Unlike an excerpt, a figure is usually the point of the prose
+	 * beside it — an interlude often has nothing else — so it draws open and folds on request.
+	 */
+	const chapterDiagrams = useMemo<ViewportDiagram[]>(() => {
+		if (!chapter || !plannedBody) return [];
+		return splitNarration(chapter.summary).diagrams.map((diagram, index) => {
+			const key = diagramFoldKey(chapter.id, index);
+			return {
+				key,
+				plan: planDiagram({
+					key,
+					diagram,
+					folded: foldedDiagrams.has(key),
+					width: contentWidth,
+					chrome: OPENTUI_DIFF_CHROME,
+				}),
+			};
+		});
+	}, [chapter, plannedBody, foldedDiagrams, contentWidth]);
+	/**
+	 * What the file cursor steps through, in narration order. An excerpt is a stop on that walk
+	 * so `toggle-file-diff` can open it, which is why folding needs no shortcut of its own.
+	 */
+	const focusTargets = useMemo<ChapterFocusTarget[]>(() => {
+		const paths = chapter ? chapterFilePaths(chapter) : [];
+		const anchored = new Set(paths);
+		const excerptsAfter = (path: string | null): ChapterFocusTarget[] =>
+			chapterExcerpts
+				.filter((entry) => entry.after === path)
+				.map((entry) => ({ kind: "excerpt", key: entry.key }));
+		return [
+			...excerptsAfter(null),
+			...paths.flatMap((path, index): ChapterFocusTarget[] => [
+				{ kind: "file", index },
+				...excerptsAfter(path),
+			]),
+			...chapterExcerpts
+				.filter((entry) => entry.after !== null && !anchored.has(entry.after))
+				.map((entry): ChapterFocusTarget => ({ kind: "excerpt", key: entry.key })),
+		];
+	}, [chapter, chapterExcerpts]);
 	const chapterThreadList = useMemo(() => {
 		if (!chapter) return [];
 		if (viewMode === "semantic") {
 			const paths = chapterFilePaths(chapter);
-			return threads.filter((thread) => paths.includes(thread.anchor.filePath));
+			return threads.filter(
+				(thread) => !isExcerptAnchor(thread.anchor) && paths.includes(thread.anchor.filePath),
+			);
 		}
-		return threads.filter((thread) =>
-			chapter.hunkRefs.some(
-				(reference) =>
-					reference.filePath === thread.anchor.filePath &&
-					reference.oldStart === thread.anchor.oldStart,
-			),
-		);
+		return chapterHunkThreads(chapter, threads);
 	}, [chapter, threads, viewMode]);
+	const chapterQuotedThreads = useMemo(
+		() => (chapter && viewMode === "patch" ? chapterExcerptThreads(chapter, threads) : []),
+		[chapter, threads, viewMode],
+	);
+	/**
+	 * Threads on code the frozen context no longer quotes. Re-narrating at another depth can
+	 * legitimately drop an excerpt, so these stay in the store and stay listed rather than being
+	 * pruned; they simply have no quoted line to render against.
+	 */
+	const orphanedThreads = useMemo(
+		() =>
+			new Set(
+				threads
+					.filter(
+						(thread) =>
+							isExcerptAnchor(thread.anchor) && !frozenExcerptContaining(context, thread.anchor),
+					)
+					.map((thread) => thread.id),
+			),
+		[threads, context],
+	);
 	const orderedThreads = useMemo(
 		() =>
 			[...threads].sort(
@@ -2590,24 +3037,24 @@ export function App({
 			),
 		[threads],
 	);
+	const quotedDraft = threadDraft?.kind === "thread" && isExcerptAnchor(threadDraft.anchor);
 	const attachmentAnchors = useMemo<DiffInlineAttachment[]>(
 		() => [
-			...chapterThreadList.map((thread) => ({
-				id: thread.id,
-				anchor: {
-					filePath: thread.anchor.filePath,
-					hunkOldStart: thread.anchor.oldStart,
-					side: thread.anchor.side,
-					startLine: thread.anchor.startLine,
-					endLine: thread.anchor.endLine,
-				},
-				content: null,
-			})),
-			...(threadDraft?.kind === "thread"
+			...chapterThreadList.map(measuredAnchor),
+			...(threadDraft?.kind === "thread" && !quotedDraft
 				? [{ id: THREAD_COMPOSER_ID, anchor: threadDraft.range, content: null }]
 				: []),
 		],
-		[chapterThreadList, threadDraft],
+		[chapterThreadList, threadDraft, quotedDraft],
+	);
+	const excerptAttachmentAnchors = useMemo<DiffInlineAttachment[]>(
+		() => [
+			...chapterQuotedThreads.map(measuredAnchor),
+			...(threadDraft?.kind === "thread" && quotedDraft
+				? [{ id: THREAD_COMPOSER_ID, anchor: threadDraft.range, content: null }]
+				: []),
+		],
+		[chapterQuotedThreads, threadDraft, quotedDraft],
 	);
 	const plannedViewportFiles = useMemo<PlannedViewportFile[]>(
 		() =>
@@ -2623,10 +3070,20 @@ export function App({
 		() =>
 			viewportSegments({
 				files: plannedViewportFiles,
+				diagrams: chapterDiagrams,
+				excerpts: chapterExcerpts,
 				attachments: attachmentAnchors,
+				excerptAttachments: excerptAttachmentAnchors,
 				attachmentHeight: (id) => attachmentHeights.get(id) ?? ESTIMATED_ATTACHMENT_HEIGHT,
 			}),
-		[plannedViewportFiles, attachmentAnchors, attachmentHeights],
+		[
+			plannedViewportFiles,
+			chapterDiagrams,
+			chapterExcerpts,
+			attachmentAnchors,
+			excerptAttachmentAnchors,
+			attachmentHeights,
+		],
 	);
 	const windowPlan = useMemo(
 		() =>
@@ -2655,10 +3112,36 @@ export function App({
 	// or replan never re-triggers a scroll on its own.
 	const chapterSegmentsRef = useRef(chapterSegments);
 	chapterSegmentsRef.current = chapterSegments;
+	const chapterExcerptsRef = useRef(chapterExcerpts);
+	chapterExcerptsRef.current = chapterExcerpts;
 	const viewportFilesRef = useRef(plannedViewportFiles);
 	viewportFilesRef.current = plannedViewportFiles;
 	const threadsRef = useRef(threads);
 	threadsRef.current = threads;
+	/**
+	 * Where an inline attachment sits in the planned content. Quoted code is measured against its
+	 * own excerpt segment: a chapter can both diff and quote one file, and matching an excerpt
+	 * anchor against diff rows would scroll to the wrong place.
+	 */
+	const attachmentOffset = useCallback((anchor: ThreadAnchor, range: DiffLineRange) => {
+		if (isExcerptAnchor(anchor)) {
+			const excerpt = chapterExcerptsRef.current.find((candidate) =>
+				excerptCovers(candidate.plan.quotation, range),
+			);
+			const row =
+				excerpt?.plan.rows.findIndex(
+					(entry) => entry.type === "excerpt-line" && entry.lineNumber === range.endLine,
+				) ?? -1;
+			if (!excerpt || row < 0) return null;
+			return segmentOffset(chapterSegmentsRef.current, excerptSegmentId(excerpt.key), row);
+		}
+		const file = viewportFilesRef.current.find((candidate) => candidate.path === range.filePath);
+		if (!file) return null;
+		const row = attachmentRowIndex(file, range);
+		return row >= 0
+			? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row)
+			: null;
+	}, []);
 	function noteAttachmentNode(id: string, node: { height: number } | null) {
 		if (node) attachmentNodes.current.set(id, node);
 		else attachmentNodes.current.delete(id);
@@ -2727,6 +3210,8 @@ export function App({
 					selectedHunk: selectedHunkIndex,
 					selectedKeyChange,
 					collapsedFiles: [...collapsedFiles],
+					openExcerpts: [...openExcerpts],
+					foldedDiagrams: [...foldedDiagrams],
 					scrollTop: pageScroll.current?.scrollTop ?? 0,
 					panelScrollTop: panelScroll.current?.scrollTop ?? 0,
 				},
@@ -2767,16 +3252,22 @@ export function App({
 			...semanticDiffFiles(semantic),
 			...expandedVariants.values(),
 		];
-		if (!highlightable.length || preparedSyntaxTheme === theme.syntaxTheme) return;
+		// Quotations were coloured at startup, so this is the theme-change path for them too.
+		const quotations = contextQuotations(context);
+		if ((!highlightable.length && !quotations.length) || preparedSyntaxTheme === theme.syntaxTheme)
+			return;
 		let current = true;
 		const syntaxTheme = theme.syntaxTheme;
-		prepareSyntaxHighlighting(highlightable, syntaxTheme).then(() => {
+		Promise.all([
+			prepareSyntaxHighlighting(highlightable, syntaxTheme),
+			prepareQuotedSyntaxHighlighting(quotations, syntaxTheme),
+		]).then(() => {
 			if (current) setPreparedSyntaxTheme(syntaxTheme);
 		});
 		return () => {
 			current = false;
 		};
-	}, [diffFiles, semantic, expandedVariants, preparedSyntaxTheme, theme.syntaxTheme]);
+	}, [diffFiles, semantic, expandedVariants, context, preparedSyntaxTheme, theme.syntaxTheme]);
 
 	useEffect(() => {
 		const scroll = pageScroll.current;
@@ -2810,8 +3301,13 @@ export function App({
 	useEffect(() => {
 		if (!chapter || fileFocusRequest === 0) return;
 		const path = chapterFilePaths(chapter)[selectedFile];
-		if (path !== undefined) {
-			const offset = segmentOffset(chapterSegmentsRef.current, headerSegmentId(path));
+		const segment = focusedExcerpt
+			? excerptSegmentId(focusedExcerpt)
+			: path !== undefined
+				? headerSegmentId(path)
+				: null;
+		if (segment !== null) {
+			const offset = segmentOffset(chapterSegmentsRef.current, segment);
 			if (offset !== null) {
 				revealContentOffset({
 					scroll: pageScroll.current,
@@ -2820,6 +3316,7 @@ export function App({
 				});
 			}
 		}
+		if (focusedExcerpt) return;
 		const anchorFocusedFile = () =>
 			pageScroll.current?.scrollChildIntoView(fileHeaderId(chapter.id, selectedFile));
 		const retry = setTimeout(anchorFocusedFile, 50);
@@ -2828,7 +3325,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [chapter, selectedFile, fileFocusRequest]);
+	}, [chapter, selectedFile, focusedExcerpt, fileFocusRequest]);
 
 	useEffect(() => {
 		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
@@ -2869,24 +3366,18 @@ export function App({
 
 	useEffect(() => {
 		if (!threadFocusTarget) return;
-		const anchor = threadAnchorRange(
-			threadsRef.current.find((thread) => thread.id === threadFocusTarget.threadId),
+		const thread = threadsRef.current.find(
+			(candidate) => candidate.id === threadFocusTarget.threadId,
 		);
-		const file = anchor
-			? viewportFilesRef.current.find((candidate) => candidate.path === anchor.filePath)
-			: undefined;
-		if (file && anchor) {
-			const row = attachmentRowIndex(file, anchor);
-			const offset =
-				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
-			if (offset !== null) {
-				centreContentOffset({
-					scroll: pageScroll.current,
-					leadingHeight: leadingContent.current?.height ?? 0,
-					offset,
-					span: ESTIMATED_ATTACHMENT_HEIGHT,
-				});
-			}
+		const anchor = threadAnchorRange(thread);
+		const offset = thread && anchor ? attachmentOffset(thread.anchor, anchor) : null;
+		if (offset !== null) {
+			centreContentOffset({
+				scroll: pageScroll.current,
+				leadingHeight: leadingContent.current?.height ?? 0,
+				offset,
+				span: ESTIMATED_ATTACHMENT_HEIGHT,
+			});
 		}
 		const revealThread = () => pageScroll.current?.scrollChildIntoView(threadFocusTarget.threadId);
 		const retry = setTimeout(revealThread, 50);
@@ -2895,7 +3386,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [threadFocusTarget]);
+	}, [threadFocusTarget, attachmentOffset]);
 
 	useEffect(() => {
 		if (!copyNotice) return;
@@ -2913,25 +3404,20 @@ export function App({
 
 	useEffect(() => {
 		if (!threadDraft) return;
-		const anchor =
-			threadDraft.kind === "thread"
-				? threadDraft.range
-				: threadAnchorRange(threads.find((thread) => thread.id === threadDraft.threadId));
-		const file = anchor
-			? viewportFilesRef.current.find((candidate) => candidate.path === anchor.filePath)
-			: undefined;
-		if (file && anchor) {
-			const row = attachmentRowIndex(file, anchor);
-			const offset =
-				row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
-			if (offset !== null) {
-				revealContentOffset({
-					scroll: pageScroll.current,
-					leadingHeight: leadingContent.current?.height ?? 0,
-					offset,
-					span: ESTIMATED_ATTACHMENT_HEIGHT + 1,
-				});
-			}
+		const replied =
+			threadDraft.kind === "reply"
+				? threads.find((thread) => thread.id === threadDraft.threadId)
+				: undefined;
+		const threadAnchor = threadDraft.kind === "thread" ? threadDraft.anchor : replied?.anchor;
+		const anchor = threadDraft.kind === "thread" ? threadDraft.range : threadAnchorRange(replied);
+		const offset = threadAnchor && anchor ? attachmentOffset(threadAnchor, anchor) : null;
+		if (offset !== null) {
+			revealContentOffset({
+				scroll: pageScroll.current,
+				leadingHeight: leadingContent.current?.height ?? 0,
+				offset,
+				span: ESTIMATED_ATTACHMENT_HEIGHT + 1,
+			});
 		}
 		const revealThreadComposer = () => pageScroll.current?.scrollChildIntoView(THREAD_COMPOSER_ID);
 		const retry = setTimeout(revealThreadComposer, 50);
@@ -2940,7 +3426,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [threadDraft, threads]);
+	}, [threadDraft, threads, attachmentOffset]);
 
 	function previousPathFor(filePath: string) {
 		return diffFiles?.find((candidate) => candidate.path === filePath)?.previousPath;
@@ -2995,16 +3481,79 @@ export function App({
 	function openRangeContextMenu(range: DiffLineRange, position: { x: number; y: number }) {
 		setCopyNotice(null);
 		setContextMenu({
+			kind: "range",
 			range: highlightedRange(range) ?? range,
+			anchorKind: THREAD_ANCHOR_KIND.HUNK,
 			position,
 			selected: 0,
 			selectedText: highlightedText(),
 		});
 	}
-	function selectThreadRange(range: DiffLineRange) {
-		setThreadDraft({ kind: "thread", range });
+	/** The quoted lines the yank verbs act on when nothing was dragged over the code itself. */
+	function excerptSelectionText(range = excerptSelection) {
+		return range ? excerptRangeText(chapterExcerpts, range) : null;
+	}
+	function selectExcerptRange(range: DiffLineRange) {
+		setCopyNotice(null);
+		setExcerptSelection(range);
+	}
+	function openExcerptContextMenu(range: DiffLineRange, position: { x: number; y: number }) {
+		setCopyNotice(null);
+		const resolved = highlightedRange(range) ?? range;
+		setExcerptSelection(resolved);
+		setContextMenu({
+			kind: "range",
+			range: resolved,
+			anchorKind: THREAD_ANCHOR_KIND.EXCERPT,
+			position,
+			selected: 0,
+			selectedText: highlightedText() ?? excerptSelectionText(resolved),
+		});
+	}
+	function openProseContextMenu(reference: ChapterReference, position: { x: number; y: number }) {
+		setCopyNotice(null);
+		setContextMenu({
+			kind: "prose",
+			reference,
+			position,
+			selected: 0,
+			selectedText: highlightedText(),
+		});
+	}
+	function startThread(anchor: ThreadAnchor, range: DiffLineRange) {
+		setThreadDraft({ kind: "thread", anchor, range });
 		setThreadBody("");
 		setThreadNotice(null);
+	}
+	function selectThreadRange(range: DiffLineRange) {
+		setExcerptSelection(null);
+		startThread(
+			{
+				kind: THREAD_ANCHOR_KIND.HUNK,
+				filePath: range.filePath,
+				oldStart: range.hunkOldStart,
+				side: range.side,
+				startLine: range.startLine,
+				endLine: range.endLine,
+			},
+			range,
+		);
+	}
+	/**
+	 * Quoted code takes its own anchor kind: it belongs to no review unit, so it is keyed to the
+	 * run and answers to the frozen context instead. The selection stays tinted under the composer.
+	 */
+	function commentOnExcerptRange(range: DiffLineRange) {
+		setExcerptSelection(range);
+		startThread(
+			{
+				kind: THREAD_ANCHOR_KIND.EXCERPT,
+				filePath: range.filePath,
+				startLine: range.startLine,
+				endLine: range.endLine,
+			},
+			range,
+		);
 	}
 	function startThreadReply(thread: ReviewThread) {
 		setThreadDraft({ kind: "reply", threadId: thread.id, range: diffRangeForThread(thread) });
@@ -3015,6 +3564,7 @@ export function App({
 		setThreadDraft(null);
 		setThreadBody("");
 		setThreadNotice(null);
+		setExcerptSelection(null);
 	}
 	function saveThreadDraft() {
 		if (!threadDraft) return;
@@ -3025,14 +3575,7 @@ export function App({
 		}
 		try {
 			if (threadDraft.kind === "thread") {
-				const range = threadDraft.range;
-				const anchor: ThreadAnchor = {
-					filePath: range.filePath,
-					oldStart: range.hunkOldStart,
-					side: range.side,
-					startLine: range.startLine,
-					endLine: range.endLine,
-				};
+				const anchor = threadDraft.anchor;
 				const thread =
 					threadActions?.create(anchor, humanAuthor, body) ??
 					createThread("0".repeat(64), anchor, humanAuthor, body);
@@ -3120,6 +3663,9 @@ export function App({
 		setSelectedHunkIndex(restored.selectedHunk);
 		setSelectedKeyChange(restored.selectedKeyChange);
 		setCollapsedFiles(new Set(restored.collapsedFiles));
+		setOpenExcerpts(new Set(restored.openExcerpts));
+		setFoldedDiagrams(new Set(restored.foldedDiagrams));
+		setFocusedExcerpt(null);
 		setExpansions(new Map());
 		setExpandedVariants(new Map());
 		setFileFocusRequest(0);
@@ -3177,13 +3723,7 @@ export function App({
 	}
 	function jumpToThread(thread: ReviewThread) {
 		const chapterIndex = pages.findIndex(
-			(candidate) =>
-				candidate.kind === "chapter" &&
-				candidate.chapter.hunkRefs.some(
-					(reference) =>
-						reference.filePath === thread.anchor.filePath &&
-						reference.oldStart === thread.anchor.oldStart,
-				),
+			(candidate) => candidate.kind === "chapter" && chapterOwnsThread(candidate.chapter, thread),
 		);
 		const nextPage = chapterIndex >= 0 ? pages[chapterIndex] : filesPage;
 		const nextPageId = pageId(nextPage);
@@ -3205,6 +3745,12 @@ export function App({
 			(currentCollapsed) =>
 				new Set([...currentCollapsed].filter((entry) => entry !== thread.anchor.filePath)),
 		);
+		// A folded excerpt renders none of its threads, so landing on one has to open it.
+		const citation = targetChapter ? citationFor(targetChapter, thread) : undefined;
+		if (citation) {
+			const key = excerptKey(citation);
+			setOpenExcerpts((currentOpen) => new Set([...currentOpen, key]));
+		}
 		setThreadFocusTarget((currentTarget) => ({
 			threadId: thread.id,
 			request: (currentTarget?.request ?? 0) + 1,
@@ -3281,10 +3827,25 @@ export function App({
 		if (!chapter) return;
 		const paths = chapterFilePaths(chapter);
 		if (index >= 0 && index < paths.length) {
+			setFocusedExcerpt(null);
 			setSelectedFile(index);
 			setSelectedHunkIndex(0);
 			requestFileFocus();
 		}
+	}
+	const toggleMembership = (key: string) => (current: Set<string>) => {
+		const next = new Set(current);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		return next;
+	};
+	/** Figures record the fold rather than the open, so the set stays empty in the common case. */
+	function toggleDiagram(key: string) {
+		setFoldedDiagrams(toggleMembership(key));
+	}
+	function toggleExcerpt(key: string) {
+		setOpenExcerpts(toggleMembership(key));
+		setFocusedExcerpt(key);
 	}
 	function toggleCollapsedFile(path: string) {
 		setCollapsedFiles((currentCollapsed) => {
@@ -3577,19 +4138,39 @@ export function App({
 		keymap,
 	});
 	const menu = useMenuController(menus);
-	const contextMenuEntries = contextMenu
-		? buildRangeMenu({
-				selectedText: contextMenu.selectedText,
-				linkBlocker: permalinkBlocker({ context: permalinks, side: contextMenu.range.side }),
-				copyText: () => {
-					if (contextMenu.selectedText) copyText(contextMenu.selectedText);
-				},
-				copyLocation: () => copyLocation(contextMenu.range),
-				copyLink: () => copyLink(contextMenu.range),
-				comment: () => selectThreadRange(contextMenu.range),
-				keymap,
-			})
-		: [];
+	const contextMenuEntries = !contextMenu
+		? []
+		: contextMenu.kind === "prose"
+			? buildProseMenu({
+					selectedText: contextMenu.selectedText,
+					copyText: () => {
+						if (contextMenu.selectedText) copyText(contextMenu.selectedText);
+					},
+					copyWithReference: () => {
+						if (contextMenu.selectedText)
+							copy(
+								chapterReferenceCopy({
+									reference: contextMenu.reference,
+									text: contextMenu.selectedText,
+								}),
+							);
+					},
+					keymap,
+				})
+			: buildRangeMenu({
+					selectedText: contextMenu.selectedText,
+					linkBlocker: permalinkBlocker({ context: permalinks, side: contextMenu.range.side }),
+					copyText: () => {
+						if (contextMenu.selectedText) copyText(contextMenu.selectedText);
+					},
+					copyLocation: () => copyLocation(contextMenu.range),
+					copyLink: () => copyLink(contextMenu.range),
+					comment: () =>
+						contextMenu.anchorKind === THREAD_ANCHOR_KIND.EXCERPT
+							? commentOnExcerptRange(contextMenu.range)
+							: selectThreadRange(contextMenu.range),
+					keymap,
+				});
 	const threadComposer = threadDraft ? (
 		<ThreadComposer
 			key={threadDraft.kind === "thread" ? "new-thread" : threadDraft.threadId}
@@ -3606,7 +4187,7 @@ export function App({
 			onCopyLink={() => copyLink(threadDraft.range)}
 		/>
 	) : undefined;
-	const newThreadDraft: DiffInlineAttachment | undefined =
+	const mountedDraft: DiffInlineAttachment | undefined =
 		threadDraft?.kind === "thread" && threadComposer
 			? {
 					id: THREAD_COMPOSER_ID,
@@ -3614,6 +4195,8 @@ export function App({
 					content: threadComposer,
 				}
 			: undefined;
+	const newThreadDraft = quotedDraft ? undefined : mountedDraft;
+	const newExcerptDraft = quotedDraft ? mountedDraft : undefined;
 	const replyDraft =
 		threadDraft?.kind === "reply" && threadComposer
 			? { threadId: threadDraft.threadId, content: threadComposer }
@@ -3789,7 +4372,7 @@ export function App({
 				openThemePicker();
 				break;
 			case "copy-selection": {
-				const text = highlightedText();
+				const text = highlightedText() ?? excerptSelectionText();
 				if (text) copyText(text);
 				break;
 			}
@@ -3823,15 +4406,38 @@ export function App({
 			case "scroll-top":
 				pageScroll.current?.scrollTo(0);
 				break;
-			case "focus-file":
-				if (paths.length) {
-					const delta = key.shift ? -1 : 1;
-					setSelectedFile((selected) => (selected + delta + paths.length) % paths.length);
-					requestFileFocus();
-				}
+			case "focus-file": {
+				if (!focusTargets.length) break;
+				const delta = key.shift ? -1 : 1;
+				const at = focusedExcerpt
+					? focusTargets.findIndex(
+							(target) => target.kind === "excerpt" && target.key === focusedExcerpt,
+						)
+					: focusTargets.findIndex(
+							(target) => target.kind === "file" && target.index === selectedFile,
+						);
+				const next =
+					focusTargets[(Math.max(0, at) + delta + focusTargets.length) % focusTargets.length];
+				if (!next) break;
+				if (next.kind === "file") {
+					setFocusedExcerpt(null);
+					setSelectedFile(next.index);
+				} else setFocusedExcerpt(next.key);
+				requestFileFocus();
 				break;
+			}
 			case "toggle-file-diff": {
 				if (!chapter) break;
+				// A standing quoted selection is what the reviewer is acting on, so Enter comments on
+				// it rather than folding the block it sits in.
+				if (excerptSelection) {
+					commentOnExcerptRange(excerptSelection);
+					break;
+				}
+				if (focusedExcerpt) {
+					toggleExcerpt(focusedExcerpt);
+					break;
+				}
 				const path = paths[selectedFile];
 				if (path) toggleCollapsedFile(path);
 				break;
@@ -3960,6 +4566,8 @@ export function App({
 							pages={pages}
 							current={current}
 							chapterCount={chapters.length}
+							coverage={coverage}
+							omittedNotice={omittedNotice}
 							width={panelWidth}
 							vs={vs}
 							indexExpanded={indexExpanded}
@@ -3977,6 +4585,7 @@ export function App({
 							onToggleChapterReview={toggleChapterReview}
 							onToggleFileReview={toggleFileReview}
 							onToggleKeyChange={toggleSelectedKeyChange}
+							onProseContextMenu={openProseContextMenu}
 						/>
 					) : null}
 					<scrollbox
@@ -4002,7 +4611,7 @@ export function App({
 								}}
 							>
 								{semanticNotice ? <text fg={theme.badgeModified}>{semanticNotice}</text> : null}
-								{chapter && viewMode === "semantic" && semantic ? (
+								{chapter && !interlude && viewMode === "semantic" && semantic ? (
 									<text fg={theme.muted}>{semantic.version} · semantic view</text>
 								) : null}
 								{chapter && !showChapterPanel ? (
@@ -4019,6 +4628,7 @@ export function App({
 											onFocusKeyChange={focusKeyChange}
 											onToggleFileReview={toggleFileReview}
 											onToggleKeyChange={toggleSelectedKeyChange}
+											onProseContextMenu={openProseContextMenu}
 										/>
 										<text fg={theme.border}>{"─".repeat(Math.max(1, contentWidth))}</text>
 									</box>
@@ -4037,20 +4647,29 @@ export function App({
 								<CommentsView
 									threads={orderedThreads}
 									selected={selectedThread}
+									orphaned={orphanedThreads}
 									onJump={jumpToThread}
 								/>
 							) : null}
-							{chapter && viewMode === "patch" ? (
+							{chapter && plannedBody ? (
 								<ChapterView
 									chapter={chapter}
 									diffTheme={diffTheme}
 									diffFiles={diffFiles}
 									visibleDiffFiles={visibleChapterFiles}
 									bodyPlans={bodyPlans}
+									diagrams={chapterDiagrams}
+									excerpts={chapterExcerpts}
+									focusedExcerpt={focusedExcerpt}
+									excerptSelection={excerptSelection}
 									windowPlan={windowPlan}
 									width={contentWidth}
 									contextExpansion={contextExpansion}
 									onAttachmentNode={noteAttachmentNode}
+									onToggleDiagram={toggleDiagram}
+									onToggleExcerpt={toggleExcerpt}
+									onSelectExcerptRange={selectExcerptRange}
+									onExcerptRangeContextMenu={openExcerptContextMenu}
 									vs={vs}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
@@ -4059,10 +4678,13 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										contextMenu?.range ??
-										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
+										(contextMenu?.kind === "range" &&
+										contextMenu.anchorKind === THREAD_ANCHOR_KIND.HUNK
+											? contextMenu.range
+											: undefined) ?? newThreadDraft?.anchor
 									}
 									threadDraft={newThreadDraft}
+									excerptDraft={newExcerptDraft}
 									replyDraft={replyDraft}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
@@ -4075,7 +4697,7 @@ export function App({
 									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
-							{chapter && viewMode === "semantic" && semantic ? (
+							{chapter && !interlude && viewMode === "semantic" && semantic ? (
 								<SemanticChapterView
 									chapter={chapter}
 									semantic={semantic}
@@ -4092,8 +4714,10 @@ export function App({
 									collapsedFiles={collapsedFiles}
 									threads={threads}
 									selectedThreadRange={
-										contextMenu?.range ??
-										(threadDraft?.kind === "thread" ? threadDraft.range : undefined)
+										(contextMenu?.kind === "range" &&
+										contextMenu.anchorKind === THREAD_ANCHOR_KIND.HUNK
+											? contextMenu.range
+											: undefined) ?? newThreadDraft?.anchor
 									}
 									threadDraft={newThreadDraft}
 									replyDraft={replyDraft}
@@ -4108,6 +4732,7 @@ export function App({
 									onToggleThreadStatus={toggleInlineThreadStatus}
 								/>
 							) : null}
+							{interlude ? <InterludeClose keymap={keymap} /> : null}
 						</box>
 					</scrollbox>
 				</box>
@@ -4181,6 +4806,7 @@ export function App({
 					context={statusContext}
 					reviewedFiles={filesSurface ? reviewedFiles : storyProgress.reviewed}
 					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
+					coverage={coverage}
 					openThreads={openThreadCount}
 					viewMode={viewMode}
 					notice={statusNotice}
@@ -4197,6 +4823,10 @@ const THEME_MODE_TIMEOUT_MS = 100;
 export async function runApp(
 	file: RevueChaptersFile | null,
 	options: {
+		/** Frozen quotations for the narration's excerpt citations. */
+		context?: RunContextFile | null;
+		/** What an ignore rule kept out of the prepared run, if anything. */
+		omittedNotice?: string | null;
 		diffFiles?: DiffFile[] | null;
 		loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 		loadFileLines?: (path: string) => Promise<string[] | null>;
@@ -4243,6 +4873,7 @@ export async function runApp(
 		root.render(
 			<App
 				file={file}
+				context={options.context ?? null}
 				diffFiles={options.diffFiles ?? null}
 				loadSemanticDiff={options.loadSemanticDiff}
 				loadFileLines={options.loadFileLines}

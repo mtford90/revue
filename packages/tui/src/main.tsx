@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -7,7 +8,9 @@ import {
 	type MarkdownExportSelection,
 } from "@revue/markdown-export";
 import {
+	freezeRunContext,
 	GitError,
+	loadPreparedRun,
 	PrepArgumentError,
 	type PreparedRun,
 	PrepError,
@@ -18,8 +21,10 @@ import {
 } from "@revue/prep";
 import { isBundledShikiThemeId, resolveTheme, type Theme } from "@revue/theme";
 import {
+	excerptRangeLabel,
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	type ThreadAnchor,
 	type ThreadAuthor,
@@ -29,12 +34,12 @@ import { splitFileLines } from "./expand.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
 import { KEYMAP } from "./keymap.ts";
-import { ChaptersFileError, loadReviewRun } from "./load.ts";
+import { ChaptersFileError, loadChaptersFile, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
 import type { StatusNotice } from "./statusBar.tsx";
-import { formatChapterlessSummary, formatSummary } from "./summary.ts";
+import { formatChapterlessSummary, formatSummary, omissionNotice } from "./summary.ts";
 import {
 	defaultThemesDir,
 	loadCustomThemes,
@@ -65,6 +70,7 @@ Usage:
              [--ignore <pattern>]... [--show-ignored]
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
+  revue context freeze <run-directory> pin the code the narration quotes into context.json
   revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
   revue comments <operation>           compatibility alias for revue threads
@@ -99,8 +105,11 @@ const EXPORT_HELP = `usage: revue export <run-directory>
                      [--prologue | --chapter-id <id> | --chapter-order <number>]
                      [--output <path>]`;
 const THREADS_HELP = `usage: revue threads list <run-directory> --json [--all]
-       revue threads create <run-directory> --file <path> --old-start <number>
+       revue threads create <run-directory> [--kind hunk] --file <path> --old-start <number>
                             --side additions|deletions --start-line <number> --end-line <number>
+                            --author <agent-name> (--body <text> | --body-file <path|->)
+       revue threads create <run-directory> --kind excerpt --file <path>
+                            --start-line <number> --end-line <number>
                             --author <agent-name> (--body <text> | --body-file <path|->)
        revue threads reply <run-directory> <thread-id> --author <agent-name>
                            (--body <text> | --body-file <path|->)
@@ -274,7 +283,7 @@ async function cmdExport(args: string[]): Promise<number> {
 
 	let threads: ReviewThread[];
 	try {
-		threads = loadValidatedThreads(defaultThreadsPath(parsed.directory), run);
+		threads = loadValidatedThreads(defaultThreadsPath(parsed.directory), run).threads;
 	} catch (error) {
 		if (error instanceof ThreadStoreError) {
 			process.stderr.write(`${error.message}\n`);
@@ -313,6 +322,83 @@ async function cmdExport(args: string[]): Promise<number> {
 		return 1;
 	}
 	process.stderr.write(`Wrote Markdown export to ${parsed.output}\n`);
+	return 0;
+}
+
+const CONTEXT_HELP = `usage: revue context freeze <run-directory>
+
+freeze  resolve every excerpt citation in the run's chapters.json against the run's own
+        recorded endpoint and pin the quoted lines into context.json beside it, so the
+        reviewer reads code that came off disk rather than a transcription`;
+
+async function cmdContext(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${CONTEXT_HELP}\n`);
+		return 0;
+	}
+	const [operation, ...rest] = args;
+	let directory: string | undefined;
+	try {
+		if (operation !== "freeze") {
+			throw new Error(operation ? `unknown context operation: ${operation}` : "missing operation");
+		}
+		const options = parseCommandOptions(rest, []);
+		directory = options.positionals[0];
+		if (!directory || options.positionals.length !== 1) {
+			throw new Error("context freeze requires one run directory");
+		}
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${CONTEXT_HELP}\n`,
+		);
+		return 1;
+	}
+	try {
+		return await freezeContext(directory);
+	} catch (error) {
+		if (
+			error instanceof ChaptersFileError ||
+			error instanceof RunArtifactError ||
+			error instanceof GitError
+		) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
+}
+
+async function freezeContext(directory: string): Promise<number> {
+	const run = await loadPreparedRun(directory);
+	const chaptersPath = join(directory, "chapters.json");
+	if (!existsSync(chaptersPath)) {
+		throw new ChaptersFileError(
+			`${chaptersPath} does not exist; narrate the run before freezing its context`,
+		);
+	}
+	const { path, context, unverifiable } = await freezeRunContext(
+		run,
+		await loadChaptersFile(chaptersPath),
+	);
+	for (const cited of unverifiable) {
+		process.stderr.write(
+			`warning: ${JSON.stringify(cited)} is not part of this run, so its worktree content could not be checked against what prep captured\n`,
+		);
+	}
+	if (context.unresolved.length) {
+		for (const entry of context.unresolved) {
+			process.stderr.write(
+				`Could not freeze excerpt ${excerptRangeLabel(entry)}: ${entry.reason}\n`,
+			);
+		}
+		return 1;
+	}
+	const { kind, revision } = context.source;
+	const count = context.excerpts.length;
+	process.stderr.write(
+		`Froze ${count} excerpt${count === 1 ? "" : "s"} from ${kind}:${revision.slice(0, 12)}\n`,
+	);
+	process.stdout.write(`${path}\n`);
 	return 0;
 }
 
@@ -395,8 +481,44 @@ const threadBody = async (options: CommandOptions): Promise<string> => {
 const loadThreadCommand = async (directory: string) => {
 	const run = await loadReviewRun(directory);
 	const path = defaultThreadsPath(directory);
-	const threads = loadValidatedThreads(path, run);
-	return { run, store: openThreadStore(path, run.manifest.runId), threads };
+	const { threads, orphaned } = loadValidatedThreads(path, run);
+	return { run, store: openThreadStore(path, run.manifest.runId), threads, orphaned };
+};
+
+/**
+ * The anchor a `threads create` invocation names. A hunk anchor pins a review unit and a side; an
+ * excerpt anchor names quoted code, which has neither, so the two option sets are disjoint.
+ */
+const threadAnchorFrom = (options: CommandOptions): ThreadAnchor => {
+	const kind = options.values.get("--kind") ?? THREAD_ANCHOR_KIND.HUNK;
+	if (kind !== THREAD_ANCHOR_KIND.HUNK && kind !== THREAD_ANCHOR_KIND.EXCERPT) {
+		throw new Error("--kind must be hunk or excerpt");
+	}
+	if (kind === THREAD_ANCHOR_KIND.EXCERPT) {
+		for (const rejected of ["--old-start", "--side"]) {
+			if (options.values.has(rejected)) {
+				throw new Error(`${rejected} does not apply to an excerpt anchor`);
+			}
+		}
+		return {
+			kind,
+			filePath: requiredOption(options, "--file"),
+			startLine: integerOption(options, "--start-line"),
+			endLine: integerOption(options, "--end-line"),
+		};
+	}
+	const side = requiredOption(options, "--side");
+	if (side !== "additions" && side !== "deletions") {
+		throw new Error("--side must be additions or deletions");
+	}
+	return {
+		kind,
+		filePath: requiredOption(options, "--file"),
+		oldStart: integerOption(options, "--old-start", true),
+		side,
+		startLine: integerOption(options, "--start-line"),
+		endLine: integerOption(options, "--end-line"),
+	};
 };
 
 async function cmdThreads(args: string[], commandName = "threads"): Promise<number> {
@@ -413,17 +535,26 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 				throw new Error(`${commandName} list requires one run directory`);
 			}
 			if (!options.booleans.has("--json")) throw new Error(`${commandName} list requires --json`);
-			const { run, threads } = await loadThreadCommand(directory);
+			const { run, threads, orphaned } = await loadThreadCommand(directory);
 			const selected = threads.filter(
 				(thread) => options.booleans.has("--all") || thread.status === "open",
 			);
 			process.stdout.write(
-				`${JSON.stringify({ runId: run.manifest.runId, threads: selected }, null, 2)}\n`,
+				`${JSON.stringify(
+					{
+						runId: run.manifest.runId,
+						threads: selected,
+						orphaned: orphaned.map((entry) => ({ id: entry.thread.id, reason: entry.reason })),
+					},
+					null,
+					2,
+				)}\n`,
 			);
 			return 0;
 		}
 		if (operation === "create") {
 			const options = parseCommandOptions(rest, [
+				"--kind",
 				"--file",
 				"--old-start",
 				"--side",
@@ -437,22 +568,15 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 			if (!directory || options.positionals.length !== 1) {
 				throw new Error(`${commandName} create requires one run directory`);
 			}
-			const side = requiredOption(options, "--side");
-			if (side !== "additions" && side !== "deletions") {
-				throw new Error("--side must be additions or deletions");
-			}
-			const anchor: ThreadAnchor = {
-				filePath: requiredOption(options, "--file"),
-				oldStart: integerOption(options, "--old-start", true),
-				side,
-				startLine: integerOption(options, "--start-line"),
-				endLine: integerOption(options, "--end-line"),
-			};
+			const anchor = threadAnchorFrom(options);
 			const author = agentAuthor(options);
 			const body = await threadBody(options);
 			const { run, store } = await loadThreadCommand(directory);
 			const candidate = createThread(run.manifest.runId, anchor, author, body);
-			validateThreadsForRun(run, [candidate]);
+			const unanchored = validateThreadsForRun(run, [candidate])[0];
+			if (unanchored) {
+				throw new ThreadStoreError(`Cannot anchor a thread there: ${unanchored.reason}`);
+			}
 			const root = candidate.messages[0];
 			if (!root) throw new ThreadStoreError("A new thread requires a root message");
 			const thread = store.create(anchor, author, body, {
@@ -653,7 +777,7 @@ async function showRun(
 
 	if (options.check || !process.stdout.isTTY) {
 		process.stdout.write(
-			`${run.chapters ? formatSummary(run.chapters) : formatChapterlessSummary(run.manifest)}\n`,
+			`${run.chapters ? formatSummary(run.chapters, run.manifest) : formatChapterlessSummary(run.manifest)}\n`,
 		);
 		return 0;
 	}
@@ -667,13 +791,17 @@ async function showRun(
 	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
 	const startupTheme = resolveTheme(themeId, null, customThemes);
 
-	const [{ runApp }, { preparePatch }, { generateSemanticDiff }, { openRunStateStore }] =
-		await Promise.all([
-			import("./app.tsx"),
-			import("./diff.ts"),
-			import("./semantic.ts"),
-			import("./viewState.ts"),
-		]);
+	const [
+		{ runApp },
+		{ preparePatch, prepareContextQuotations },
+		{ generateSemanticDiff },
+		{ openRunStateStore },
+	] = await Promise.all([
+		import("./app.tsx"),
+		import("./diff.ts"),
+		import("./semantic.ts"),
+		import("./viewState.ts"),
+	]);
 
 	let currentDirectory = directory;
 	let carriedSessionState: ReviewSessionState | undefined;
@@ -682,7 +810,7 @@ async function showRun(
 	for (;;) {
 		let threads: ReviewThread[];
 		try {
-			threads = loadValidatedThreads(defaultThreadsPath(currentDirectory), run);
+			threads = loadValidatedThreads(defaultThreadsPath(currentDirectory), run).threads;
 		} catch (error) {
 			if (error instanceof ThreadStoreError) {
 				process.stderr.write(`${error.message}\n`);
@@ -695,6 +823,7 @@ async function showRun(
 		const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme, (warning) => {
 			syntaxWarning = warning;
 		});
+		await prepareContextQuotations(run.context, startupTheme.syntaxTheme);
 		const store = await openRunStateStore(defaultStatePath(), run.manifest.runId, run.chapters);
 		const threadStore = openThreadStore(defaultThreadsPath(currentDirectory), run.manifest.runId);
 		const repositoryRoot = repositoryRootForRun(currentDirectory);
@@ -717,6 +846,8 @@ async function showRun(
 		const hasSavedPosition = Object.keys(storedSession.pages).length > 0;
 
 		const outcome = await runApp(run.chapters, {
+			context: run.context,
+			omittedNotice: omissionNotice(run.manifest),
 			diffFiles,
 			syntaxWarning,
 			initialNotice: notice,
@@ -1005,6 +1136,7 @@ async function main(): Promise<number> {
 	if (command === "diff") return cmdDiff(args);
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
+	if (command === "context") return cmdContext(args);
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);

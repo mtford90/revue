@@ -44,6 +44,7 @@ const chapter = (hunkRefs: Chapter["hunkRefs"]): Chapter => ({
 	summary: "Summary",
 	hunkRefs,
 	keyChanges: [],
+	excerpts: [],
 });
 
 const lineRef = (ref: Partial<LineRef>): LineRef => ({

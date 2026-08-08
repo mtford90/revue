@@ -1,7 +1,27 @@
-import type { RevueChaptersFile, RunManifest } from "@revue/types";
+import { exclusionSource } from "@revue/prep";
+import {
+	narratedUnitCount,
+	partialDepthLabel,
+	type RevueChaptersFile,
+	type RunManifest,
+} from "@revue/types";
 
-/** Plain-text summary after a complete run has passed validation. */
-export function formatSummary(file: RevueChaptersFile): string {
+/**
+ * What an ignore rule kept out of the run. The narrated count is measured against the run, so a
+ * fully narrated run whose prep dropped half the change still reads as complete without this.
+ */
+export const omissionNotice = (manifest: RunManifest): string | null => {
+	const { exclusions } = manifest;
+	if (!exclusions.length) return null;
+	const sources = [...new Set(exclusions.map(exclusionSource))].sort();
+	// Short enough to survive the sidebar, which truncates mid-string rather than wrapping.
+	const files = `${exclusions.length} file${exclusions.length === 1 ? "" : "s"}`;
+	return `${files} omitted · ${sources.join(" and ")}`;
+};
+
+/** Plain-text summary after a validated run, whatever depth it was narrated at. */
+export function formatSummary(file: RevueChaptersFile, manifest: RunManifest): string {
+	const preparedUnits = manifest.totals.reviewUnits;
 	const lines: string[] = [];
 	const { prologue, chapters } = file;
 
@@ -21,6 +41,12 @@ export function formatSummary(file: RevueChaptersFile): string {
 		lines.push("");
 	}
 
+	const depth = partialDepthLabel(file);
+	lines.push(
+		`  ${narratedUnitCount(file)} of ${preparedUnits} review unit${preparedUnits === 1 ? "" : "s"} narrated${depth ? ` (${depth})` : ""}`,
+	);
+	const omitted = omissionNotice(manifest);
+	if (omitted) lines.push(`  ${omitted}`);
 	lines.push(`  ${chapters.length} chapter${chapters.length === 1 ? "" : "s"}:`);
 	for (const ch of [...chapters].sort((a, b) => a.order - b.order)) {
 		const hunks = ch.hunkRefs.length;

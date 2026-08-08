@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { anchorRowIndex, parsePatch } from "@revue/diff";
+import { anchorRowIndex, type DiffFileInput, parsePatch, planExcerpt } from "@revue/diff";
 import { OPENTUI_DIFF_CHROME } from "@revue/diff-opentui";
 import {
 	attachmentRowIndex,
@@ -391,5 +391,85 @@ diff --git a/second.ts b/second.ts
 		expect(body?.heights[0]).toBe(1); // hidden header plus its expander band
 		expect(body?.heights[plannedIndex]).toBe((planned.plan.rows[plannedIndex]?.height ?? 0) + 5);
 		expect(body?.heights).toHaveLength(planned.plan.rows.length + 1);
+	});
+});
+
+describe("excerpt segments", () => {
+	const quotation = {
+		filePath: "src/api/client.ts",
+		startLine: 118,
+		endLine: 120,
+		caption: "the caller this change has to satisfy",
+		lines: ["export class ApiClient {", "  send(request) {}", "}"],
+	};
+	const excerpt = (folded: boolean) => ({
+		key: "cited",
+		after: "first.ts",
+		plan: planExcerpt({
+			key: "cited",
+			quotation,
+			folded,
+			width: 60,
+			chrome: OPENTUI_DIFF_CHROME,
+		}),
+	});
+	const files = () =>
+		planViewportFiles({
+			files: ["first.ts", "second.ts"].map((path, index) => ({
+				path,
+				displayed: parsePatch(`diff --git a/${path} b/${path}
+--- a/${path}
++++ b/${path}
+@@ -1 +1 @@
+-old
++new
+`)[0] as DiffFileInput,
+				collapsed: false,
+				separator: index > 0,
+				layout: "stack" as const,
+			})),
+			width: 60,
+			chrome: OPENTUI_DIFF_CHROME,
+		});
+
+	test("an excerpt sits between the file it follows and the next, not at the chapter's end", () => {
+		expect(
+			viewportSegments({
+				files: files(),
+				excerpts: [excerpt(true)],
+				attachments: [],
+				attachmentHeight: () => 0,
+			}).map((segment) => segment.id),
+		).toEqual([
+			"head:first.ts",
+			"body:first.ts",
+			"excpad:cited",
+			"exc:cited",
+			"sep:second.ts",
+			"head:second.ts",
+			"body:second.ts",
+		]);
+	});
+
+	test("folding is planned rather than measured, so the window plan sees the change at once", () => {
+		const segmentsFor = (folded: boolean) =>
+			viewportSegments({
+				files: files(),
+				excerpts: [excerpt(folded)],
+				attachments: [],
+				attachmentHeight: () => 0,
+			});
+		const excerptHeights = (segments: SegmentRows[]) =>
+			segments.find((segment) => segment.id === "exc:cited")?.heights;
+		const folded = segmentsFor(true);
+		const open = segmentsFor(false);
+
+		expect(excerptHeights(folded)).toEqual([1]);
+		// caption, header, then one row per quoted line.
+		expect(excerptHeights(open)).toEqual([1, 1, 1, 1, 1]);
+		expect(segmentsHeight(open) - segmentsHeight(folded)).toBe(4);
+		expect(segmentOffset(open, "head:second.ts")).toBe(
+			(segmentOffset(folded, "head:second.ts") ?? 0) + 4,
+		);
 	});
 });

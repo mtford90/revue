@@ -3,10 +3,13 @@ import {
 	anchorRowIndex,
 	type DiffChromeWidths,
 	type DiffPlanStyles,
+	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	paintDiff,
 	parsePatch,
+	planDiagram,
 	planDiff,
+	planExcerpt,
 } from "../src/index.ts";
 
 const styles: DiffPlanStyles = {
@@ -222,4 +225,170 @@ test("split paint keeps multi-line decoration focus isolated to its requested si
 			newMarker: false,
 		},
 	]);
+});
+
+const quotation: ExcerptQuotation = {
+	filePath: "src/api/client.ts",
+	startLine: 118,
+	endLine: 120,
+	caption: "the caller this change has to satisfy",
+	lines: ["export class ApiClient {", "  send(request) {}", "}"],
+};
+
+const openTuiChrome: DiffChromeWidths = {
+	focusMarker: 1,
+	attachmentMarker: 3,
+	sign: 3,
+	edge: 1,
+	divider: 1,
+	minimumCode: 8,
+};
+
+test("an excerpt's fold state is an input to planning, not something measured after mount", () => {
+	const shared = { key: "e", quotation, width: 110, chrome: openTuiChrome };
+	const folded = planExcerpt({ ...shared, folded: true });
+	const open = planExcerpt({ ...shared, folded: false });
+
+	expect(folded.rows.map((row) => row.type)).toEqual(["excerpt-band"]);
+	expect(folded.totalHeight).toBe(1);
+	expect(open.rows.map((row) => row.type)).toEqual([
+		"excerpt-caption",
+		"excerpt-header",
+		"excerpt-line",
+		"excerpt-line",
+		"excerpt-line",
+	]);
+	expect(open.totalHeight).toBe(2 + quotation.lines.length);
+	expect(open.rows.flatMap((row) => (row.type === "excerpt-line" ? [row.lineNumber] : []))).toEqual(
+		[118, 119, 120],
+	);
+});
+
+test("quoted lines land on the same column as reviewable code, with one gutter at any width", () => {
+	const plan = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+	});
+	const split = planDiff({
+		file,
+		layout: "split",
+		width: 110,
+		visibility: { lineNumbers: true, changeMarkers: true, hunkHeaders: true },
+		chrome: openTuiChrome,
+	});
+
+	// Deletions gutter (rule plus blanks), additions gutter, then the always-empty sign slot.
+	expect(plan.gutterColumns).toBe(17);
+	expect(plan.digits).toBe(3);
+	// A split diff halves its code budget between two panes; an excerpt never divides.
+	expect(plan.codeWidth).toBe(110 - plan.gutterColumns - openTuiChrome.edge);
+	expect(plan.codeWidth).toBeGreaterThan(split.paneWidths.new);
+});
+
+test("an open excerpt sheds its state word rather than truncating the range it names", () => {
+	const wide = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+	});
+	const narrow = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 80,
+		chrome: openTuiChrome,
+	});
+	const header = (plan: typeof wide) =>
+		plan.rows.find((row) => row.type === "excerpt-header")?.label;
+
+	expect(header(wide)).toBe("context · src/api/client.ts 118–120 · unchanged");
+	expect(header(narrow)).toBe("context · src/api/client.ts 118–120");
+});
+
+test("quoted lines wear the colours they are handed, and read as plain text without them", () => {
+	const shared = { key: "e", quotation, folded: false, width: 110, chrome: openTuiChrome };
+	const coloured = planExcerpt({
+		...shared,
+		spans: [
+			[
+				{ text: "export", fg: "#ff0000" },
+				{ text: " class ApiClient {", fg: "#00ff00" },
+			],
+		],
+	});
+	const plain = planExcerpt(shared);
+	const lineSpans = (plan: typeof plain, index: number) =>
+		plan.rows.filter((row) => row.type === "excerpt-line")[index]?.visualRows[0]?.spans ?? [];
+
+	expect(lineSpans(coloured, 0).map((span) => span.fg)).toEqual(["#ff0000", "#00ff00"]);
+	expect(lineSpans(plain, 0)).toEqual([{ text: "export class ApiClient {" }]);
+	// Only the first line was prepared; the rest fall back rather than rendering empty.
+	expect(lineSpans(coloured, 1)).toEqual([{ text: "  send(request) {}" }]);
+});
+
+test("coloured quoted lines are sanitised like any other untrusted terminal text", () => {
+	const plan = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+		spans: [[{ text: "\x1b[31mexport\tclass", fg: "#ff0000" }]],
+	});
+	const spans = plan.rows.find((row) => row.type === "excerpt-line")?.visualRows[0]?.spans ?? [];
+
+	expect(spans.map((span) => span.text).join("")).toBe("export  class");
+});
+
+const figure = {
+	kind: "ascii",
+	lines: ["prep ──▶ chapters.json ──▶ show", "        └─ blobs"],
+} as const;
+
+test("a diagram plans to a known height folded and open, on the excerpt's own column", () => {
+	const shared = { key: "d", diagram: figure, width: 110, chrome: openTuiChrome };
+	const folded = planDiagram({ ...shared, folded: true });
+	const open = planDiagram({ ...shared, folded: false });
+	const quoted = planExcerpt({
+		key: "e",
+		quotation,
+		folded: false,
+		width: 110,
+		chrome: openTuiChrome,
+	});
+
+	expect(folded.rows.map((row) => row.type)).toEqual(["diagram-band"]);
+	expect(folded.totalHeight).toBe(1);
+	expect(open.rows.map((row) => row.type)).toEqual([
+		"diagram-header",
+		"diagram-line",
+		"diagram-line",
+	]);
+	expect(open.totalHeight).toBe(1 + figure.lines.length);
+	// A figure numbers nothing, yet lands where a quotation's code does.
+	expect(open.gutterColumns).toBe(quoted.gutterColumns);
+	expect(open.codeWidth).toBe(quoted.codeWidth);
+});
+
+test("a diagram's header names its kind, and mermaid is labelled as the source it is", () => {
+	const label = (kind: "ascii" | "mermaid", folded: boolean) =>
+		planDiagram({
+			key: "d",
+			diagram: { kind, lines: ["a --> b"] },
+			folded,
+			width: 110,
+			chrome: openTuiChrome,
+		}).rows[0];
+
+	expect(label("ascii", false)).toMatchObject({ label: "diagram · ascii", action: "▲ hide" });
+	expect(label("mermaid", false)).toMatchObject({ label: "diagram · mermaid source" });
+	expect(label("mermaid", true)).toMatchObject({
+		label: "diagram · mermaid source",
+		action: "▼ show 1 line",
+	});
 });

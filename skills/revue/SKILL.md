@@ -34,10 +34,14 @@ do not stop after loading or summarising these instructions.
    install the revue CLI (see the revue README for installation options) and stop — never download
    or install the binary yourself. From a checkout of the Revue repo, `bun run revue` works
    instead of an installed binary.
-3. **This skill matches the CLI.** The installed copy of this skill is written by
-   `revue skill install` and stamped with the CLI version that produced it. If `revue show`
-   rejects a chapters file this skill wrote, suggest re-running `revue skill install` (or
-   `revue doctor` to diagnose) before retrying.
+3. **This skill matches the CLI.** Check this before writing anything, not after validation
+   fails. `revue skill install` stamps the copy it writes with the CLI version that produced it,
+   as a `revue-version:` line in this file's frontmatter. Compare that version with the one
+   `revue --version` prints. If they differ, stop and tell the user to re-run
+   `revue skill install` (`revue doctor` reports the same drift) — a skill and a CLI from
+   different versions disagree about the chapters schema, and pushing on wastes a whole
+   narration before `revue show` rejects it. A copy with no `revue-version:` line was placed by
+   hand rather than installed; treat the CLI as authoritative and continue.
 
 ## Step 1 — Prepare the run
 
@@ -80,7 +84,7 @@ When the user wants a quick look without narration, skip this skill's chapter st
 `revue diff [scope…]` accepts the same scope forms as prep and opens the result immediately as a
 flat file-by-file diff — no chapters. It launches the full-screen TUI, so like `revue show` it is
 a command to hand to the user, never one to run yourself. It prints the run directory to stderr,
-so review threads (Step 7) can still be targeted against it.
+so review threads (Step 8) can still be targeted against it.
 
 If prep exits non-zero, relay its error and stop. Do not edit `run.json`, `diff.patch`, `hunks.txt`,
 or `blobs/`; they are one immutable input.
@@ -117,9 +121,35 @@ then integration (wiring, config, tests). A chapter introducing a symbol another
 **Hunk ordering within a chapter:** group all hunks from the same file together; within a file, list
 them in ascending `oldStart` order.
 
+### Narrative depth
+
+A chapters file may declare the `depth` it was written at. **Full depth is the default and is
+almost always right** — omit `depth` entirely, or write `{ "kind": "full" }`, and narrate the whole
+diff. A large diff is not a reason to go partial; it is a reason to write more chapters.
+
+Declare a partial depth only when the user asked for less than the whole change:
+
+```json
+"depth": { "kind": "partial", "label": "10,000ft" }
+```
+
+- `10,000ft` is the preset label for "just give me the overview" — a handful of chapters covering
+  the shape of the change, leaving routine units out.
+- Any other request gets a freeform label in the user's own words: `"just the API changes"`,
+  `"migrations only"`.
+
+The label is shown to the reviewer verbatim, next to how many of the prepared review units the
+narration actually cites, so it has to describe honestly what was left out. Never declare a partial
+depth the user did not ask for.
+
 ### Coverage rule
 
-Every review unit in `hunks.txt` must appear in **exactly one** chapter — no omissions, no duplicates.
+At **full depth** — the default — every review unit in `hunks.txt` must appear in **exactly one**
+chapter: no omissions, no duplicates.
+
+A narrative that declares a **partial** depth may leave review units out. Nothing else relaxes: it
+still may not cite a unit twice, and still may not cite a reference `hunks.txt` does not print.
+Omitting units without declaring a partial depth is a validation failure, not a shortcut.
 
 ### Narration rules
 
@@ -128,7 +158,10 @@ Every review unit in `hunks.txt` must appear in **exactly one** chapter — no o
 - **Summary:** 2–3 sentences — what this chapter enables and why. Lead with impact. When a chapter
   builds on a previous one, open with the causal link ("Now that X is in place…"). Short paragraphs,
   one idea each, separated by blank lines. Markdown allowed: `**bold**`, `*italics*`, `` `code` ``,
-  and short fenced snippets (≤ 6 lines).
+  and short fenced snippets (≤ 6 lines). No lists, tables or block quotes — they render as raw text.
+- **Diagrams:** a fence tagged `ascii` or `mermaid` is a figure rather than a snippet. It leaves the
+  prose and renders beside the diff as a folded block the reviewer opens. Mermaid is shown as source,
+  never drawn. Use them sparingly, and mostly on a chapter with no hunks.
 
 ### Key change rules
 
@@ -142,6 +175,54 @@ old-side).
 
 Good: "Should `retryCount` reset when the user switches orgs?"
 Bad: "Check that the auth logic is correct." (verifiable by reading the code)
+
+### Context excerpts
+
+A chapter may cite **unchanged** code the diff does not contain but the reviewer needs in front of
+them — the caller a changed signature still has to satisfy, the invariant the change relies on.
+Cite it in the chapter's `excerpts` with new-side line numbers at the run's new endpoint:
+
+```json
+"excerpts": [
+  { "filePath": "src/orders.ts", "startLine": 88, "endLine": 96,
+    "caption": "The caller this signature still has to satisfy." }
+]
+```
+
+**Never transcribe code yourself.** An excerpt carries no text: you cite the range, and
+`revue context freeze` (Step 6) reads those exact bytes off disk and pins them. Code typed into a
+`summary` by hand is a transcription — it can be subtly wrong, it silently rots, and it throws away
+the whole point of the mechanism. If you find yourself pasting source lines into `chapters.json`,
+cite them instead.
+
+Cited files need not be part of the diff. Keep each range tight — a signature, a guard clause, a
+type — rather than a whole file, and give the `caption` one short line saying why the reviewer is
+looking at it. **Most chapters need no excerpt.** Cite one when a reviewer would otherwise have to
+leave the review to open a file, never to decorate a chapter.
+
+### Interludes
+
+A chapter with `hunkRefs: []` is an **interlude**: a prose-only page between chapters, shown to the
+reviewer marked as having nothing to review. It still needs an `id`, `order`, `title` and `summary`,
+and its `keyChanges` must be empty — a key change anchors into its own chapter's hunks, and an
+interlude has none.
+
+```json
+{
+  "id": "interlude-migration-order",
+  "order": 4,
+  "title": "Why the backfill runs before the cutover",
+  "summary": "The next three chapters only make sense in order…",
+  "hunkRefs": [],
+  "keyChanges": []
+}
+```
+
+An interlude earns its place when the reviewer needs something no single chapter owns: the reason a
+run of chapters has to be read in order, or a `mermaid`/`ascii` figure explaining a structure that
+spans them. **Most reviews have none.** Never open a review with one — the prologue already does
+that job — and never use one to restate what a chapter's `summary` should say. An interlude in
+every review makes the product worse, not richer.
 
 ## Step 4 — Generate the prologue
 
@@ -169,6 +250,7 @@ Write the JSON to `$RUN/chapters.json` via a heredoc:
 ```bash
 cat > "$RUN/chapters.json" << 'EOF'
 {
+  "depth": { "kind": "full" },
   "chapters": [
     {
       "id": "chapter-1",
@@ -184,6 +266,14 @@ cat > "$RUN/chapters.json" << 'EOF'
             { "filePath": "path/to/file.ts", "side": "additions", "startLine": 50, "endLine": 55 }
           ]
         }
+      ],
+      "excerpts": [
+        {
+          "filePath": "path/to/caller.ts",
+          "startLine": 88,
+          "endLine": 96,
+          "caption": "Why the reviewer is being shown this."
+        }
       ]
     }
   ]
@@ -192,21 +282,44 @@ EOF
 ```
 
 Field constraints: `order` is a positive 1-indexed integer; `hunkRefs[].oldStart` is a non-negative
-integer copied from `hunks.txt`; every `keyChanges[].severity` is `critical`, `high`, `medium`, or
-`info`; every `keyChanges[].lineRefs` has ≥ 1 entry with positive `startLine ≤ endLine`; `prologue`
+integer copied from `hunks.txt`, and the array is empty only for an interlude; every
+`keyChanges[].severity` is `critical`, `high`, `medium`, or `info`; every `keyChanges[].lineRefs`
+has ≥ 1 entry with positive `startLine ≤ endLine`. `excerpts` is optional and defaults to empty —
+each entry needs a `filePath` and positive new-side `startLine ≤ endLine`, with an optional
+non-empty `caption` and no code of its own. `depth` is optional and means `{ "kind": "full" }` when
+absent; a partial depth is `{ "kind": "partial", "label": "…" }` with a non-empty label. `prologue`
 is optional, so the minimal skeleton omits it. When included, obey
 Step 4’s key-change and focus-area cardinalities. See `examples/sample-run/chapters.json` for a full
 valid example and `packages/types/src/` for the authoritative zod schema.
 
-## Step 6 — Validate, then hand over
+## Step 6 — Freeze the code the narration quotes
+
+Skip this step only when no chapter has an `excerpts` entry. Otherwise run it after writing
+`chapters.json` and before validating, and re-run it after any edit to a chapter's `excerpts`:
+
+```bash
+revue context freeze "$RUN"
+```
+
+Freeze resolves every citation against the run's own recorded endpoint and pins the quoted lines
+into `context.json` beside `chapters.json`. This is what turns a citation into text the reviewer
+can read — validation in Step 7 rejects any citation that has no frozen content, so skipping this
+step fails the review, and hand-writing `context.json` is never the answer.
+
+If a citation cannot be resolved — the line range runs past the end of the file, the endpoint has
+no file at that path, the file is binary — freeze names the range and exits non-zero. Fix the
+citation in `chapters.json` and freeze again.
+
+## Step 7 — Validate, then hand over
 
 ```bash
 revue show "$RUN" --check
 ```
 
 `--check` verifies the run hashes, validates `chapters.json`, requires every prepared review unit
-exactly once, checks key-change ranges against their chapter hunks, and prints a plain-text
-summary without launching the UI. A run with no `chapters.json` opens as a flat file-by-file diff
+exactly once at full depth (once or not at all when a partial depth is declared), checks key-change
+ranges against their chapter hunks, confirms every excerpt was frozen in Step 6, and prints a
+plain-text summary without launching the UI. A run with no `chapters.json` opens as a flat file-by-file diff
 rather than erroring — so a missing chapters file is not caught here; confirm Step 5 wrote it
 before treating a flat display as intentional.
 
@@ -222,7 +335,7 @@ revue show <run-directory>
 Show accepts `--theme <name>`, `--theme auto`, `--theme list`, and `--transparent-bg`; without a
 flag it uses the reviewer's remembered theme.
 
-## Step 7 — Act on review threads
+## Step 8 — Act on review threads
 
 Once the user has finished reviewing, retrieve open threads through Revue's public JSON interface. Do not
 scrape terminal output and do not read or edit `.revue/threads.json` directly.
@@ -264,6 +377,16 @@ review-unit identity and line range from the prepared run rather than inventing 
 ```bash
 revue threads create "$RUN" \
   --file src/value.ts --old-start 4 --side additions --start-line 8 --end-line 10 \
+  --author "review agent" --body-file -
+```
+
+That is the default `--kind hunk` anchor, on a pinned review unit. Feedback on code a chapter
+quoted rather than changed uses an excerpt anchor instead, which names no review unit and no side —
+just the file and the line range, matching a range some frozen excerpt covers:
+
+```bash
+revue threads create "$RUN" --kind excerpt \
+  --file src/orders.ts --start-line 88 --end-line 96 \
   --author "review agent" --body-file -
 ```
 

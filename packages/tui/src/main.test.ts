@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import {
 	RevueChaptersFileSchema,
 	runManifestSchema,
+	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	viewStateFileId,
 	viewStateKeyChangeId,
@@ -153,6 +154,7 @@ test("thread operations reject stale anchors against the verified pinned patch",
 		const manifest = runManifestSchema.parse(await Bun.file(join(reviewRun, "run.json")).json());
 		openThreadStore(join(root, ".revue", "threads.json"), manifest.runId).create(
 			{
+				kind: THREAD_ANCHOR_KIND.HUNK,
 				filePath: "src/lib/backoff.ts",
 				oldStart: 0,
 				side: "additions",
@@ -166,6 +168,116 @@ test("thread operations reject stale anchors against the verified pinned patch",
 		expect(result).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(result.stderr).toContain("corrupt or stale anchor");
 		expect(result.stderr).toContain("outside that review unit");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("the thread CLI round-trips an excerpt anchor and keeps it when the narrative moves on", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-excerpt-threads-cli-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "value.ts"), "export const value = 1;\n");
+		await writeFile(
+			join(root, "src", "caller.ts"),
+			"import { value } from './value';\nuse(value);\n",
+		);
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "value.ts"), "export const value = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Change value");
+
+		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+		const reference = manifest.files[0];
+		const oldStart = reference?.referenceStarts[0];
+		if (!reference || oldStart === undefined) throw new Error("Expected a prepared review unit");
+		const chapter = {
+			id: "chapter-1",
+			order: 1,
+			title: "Change the value",
+			summary: "The value now reflects the new behaviour.",
+			hunkRefs: [{ filePath: reference.path, oldStart }],
+			keyChanges: [],
+			excerpts: [{ filePath: "src/caller.ts", startLine: 1, endLine: 2 }],
+		};
+		const chaptersPath = join(runDirectory, "chapters.json");
+		await writeFile(chaptersPath, `${JSON.stringify({ chapters: [chapter] })}\n`);
+		expect((await run(root, ["context", "freeze", runDirectory])).exitCode).toBe(0);
+
+		const created = await run(root, [
+			"threads",
+			"create",
+			runDirectory,
+			"--kind",
+			"excerpt",
+			"--file",
+			"src/caller.ts",
+			"--start-line",
+			"1",
+			"--end-line",
+			"2",
+			"--author",
+			"Review agent",
+			"--body",
+			"Does this caller still hold?",
+		]);
+		expect(created).toMatchObject({ exitCode: 0, stderr: "" });
+		const thread = JSON.parse(created.stdout).thread;
+		expect(thread.anchor).toEqual({
+			kind: "excerpt",
+			filePath: "src/caller.ts",
+			startLine: 1,
+			endLine: 2,
+		});
+
+		const outside = await run(root, [
+			...["threads", "create", runDirectory, "--kind", "excerpt", "--file", "src/caller.ts"],
+			...["--start-line", "40", "--end-line", "41", "--author", "Review agent", "--body", "No"],
+		]);
+		expect(outside).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(outside.stderr).toContain("Cannot anchor a thread there");
+		const mixedOptions = await run(root, [
+			...["threads", "create", runDirectory, "--kind", "excerpt", "--file", "src/caller.ts"],
+			...["--old-start", "0", "--start-line", "1", "--end-line", "2"],
+			...["--author", "Review agent", "--body", "No"],
+		]);
+		expect(mixedOptions.stderr).toContain("--old-start does not apply to an excerpt anchor");
+
+		const replied = await run(root, [
+			...["threads", "reply", runDirectory, thread.id, "--author", "Fix agent"],
+			...["--body", "It does; nothing to change."],
+		]);
+		expect(replied).toMatchObject({ exitCode: 0, stderr: "" });
+		const listed = JSON.parse(
+			(await run(root, ["threads", "list", runDirectory, "--json"])).stdout,
+		);
+		expect(listed).toMatchObject({
+			runId: manifest.runId,
+			threads: [{ id: thread.id, messages: [{}, {}] }],
+			orphaned: [],
+		});
+		expect(
+			JSON.parse((await run(root, ["threads", "mark-dealt", runDirectory, thread.id])).stdout),
+		).toMatchObject({ thread: { status: "dealt-with" } });
+
+		// Re-narrate at a depth that stops quoting the caller, then re-freeze. The run must still
+		// load and the feedback must still be listed rather than being pruned or failing the load.
+		await writeFile(
+			chaptersPath,
+			`${JSON.stringify({ chapters: [{ ...chapter, excerpts: [] }] })}\n`,
+		);
+		expect((await run(root, ["context", "freeze", runDirectory])).exitCode).toBe(0);
+		const rezoomed = await run(root, ["threads", "list", runDirectory, "--json", "--all"]);
+		expect(rezoomed).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(rezoomed.stdout).threads).toHaveLength(1);
+		expect(JSON.parse(rezoomed.stdout).orphaned).toMatchObject([{ id: thread.id }]);
+		expect((await run(root, ["show", runDirectory, "--check"])).exitCode).toBe(0);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -337,7 +449,10 @@ test("prep prints only the run path and show validates that same run", async () 
 
 		const checked = await run(root, ["show", runDirectory, "--check"]);
 		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(checked.stdout).toContain("1 of 1 review unit narrated");
 		expect(checked.stdout).toContain("1 chapter:");
+		// Nothing was dropped, so nothing is claimed about omissions.
+		expect(checked.stdout).not.toContain("omitted");
 
 		const mismatchedChapters = {
 			chapters: chapters.chapters.map((chapter) => ({
@@ -356,6 +471,143 @@ test("prep prints only the run path and show validates that same run", async () 
 		const mismatchedExport = await run(root, ["export", runDirectory]);
 		expect(mismatchedExport).toMatchObject({ exitCode: 1, stdout: "" });
 		expect(mismatchedExport.stderr).toContain("does not cover the prepared run");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("context freeze pins cited code and --check refuses a narrative that skipped it", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-context-cli-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "value.ts"), "export const value = 1;\n");
+		await writeFile(
+			join(root, "src", "caller.ts"),
+			"import { value } from './value';\nuse(value);\n",
+		);
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "value.ts"), "export const value = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Change value");
+
+		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+		const reference = manifest.files[0];
+		const oldStart = reference?.referenceStarts[0];
+		if (!reference || oldStart === undefined) throw new Error("Expected a prepared review unit");
+		const chapter = {
+			id: "chapter-1",
+			order: 1,
+			title: "Change the value",
+			summary: "The value now reflects the new behaviour.",
+			hunkRefs: [{ filePath: reference.path, oldStart }],
+			keyChanges: [],
+			// A file no change touched: the caller the change has to satisfy.
+			excerpts: [{ filePath: "src/caller.ts", startLine: 1, endLine: 2 }],
+		};
+		const chaptersPath = join(runDirectory, "chapters.json");
+		await writeFile(chaptersPath, `${JSON.stringify({ chapters: [chapter] })}\n`);
+
+		const unfrozen = await run(root, ["show", runDirectory, "--check"]);
+		expect(unfrozen).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(unfrozen.stderr).toContain(
+			`has no frozen content; run \`revue context freeze ${runDirectory}\``,
+		);
+
+		const frozen = await run(root, ["context", "freeze", runDirectory]);
+		expect(frozen.exitCode).toBe(0);
+		expect(frozen.stdout).toBe(`${join(runDirectory, "context.json")}\n`);
+		expect(frozen.stderr).toContain("Froze 1 excerpt from commit:");
+		expect(await Bun.file(join(runDirectory, "context.json")).json()).toMatchObject({
+			runId: manifest.runId,
+			excerpts: [{ lines: ["import { value } from './value';", "use(value);"] }],
+		});
+
+		const checked = await run(root, ["show", runDirectory, "--check"]);
+		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
+
+		await writeFile(
+			chaptersPath,
+			`${JSON.stringify({
+				chapters: [
+					{ ...chapter, excerpts: [{ filePath: "src/caller.ts", startLine: 40, endLine: 41 }] },
+				],
+			})}\n`,
+		);
+		const unresolvable = await run(root, ["context", "freeze", runDirectory]);
+		expect(unresolvable).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(unresolvable.stderr).toContain(
+			'Could not freeze excerpt "src/caller.ts" 40-41: the file has 2 lines',
+		);
+		const rechecked = await run(root, ["show", runDirectory, "--check"]);
+		expect(rechecked).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(rechecked.stderr).toContain("could not be frozen: the file has 2 lines");
+
+		const missingOperation = await run(root, ["context"]);
+		expect(missingOperation).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(missingOperation.stderr).toContain("missing operation");
+		const tooManyRuns = await run(root, ["context", "freeze", runDirectory, runDirectory]);
+		expect(tooManyRuns).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(tooManyRuns.stderr).toContain("context freeze requires one run directory");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("--check says how much of the change an ignore rule kept out of the run", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-omitted-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await writeFile(join(root, ".revueignore"), "*.test.ts\n");
+		await writeFile(join(root, "value.ts"), "export const value = 1;\n");
+		await writeFile(join(root, "value.test.ts"), "test one\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "value.ts"), "export const value = 2;\n");
+		await writeFile(join(root, "value.test.ts"), "test two\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Change value");
+
+		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+		const reference = manifest.files[0];
+		const oldStart = reference?.referenceStarts[0];
+		if (!reference || oldStart === undefined) throw new Error("Expected a prepared review unit");
+
+		// The agent is told what it cannot see, so it can narrate around the gap knowingly.
+		const hunks = await Bun.file(join(runDirectory, "hunks.txt")).text();
+		expect(hunks).toContain("=== OMITTED FROM THIS RUN ===");
+		expect(hunks).toContain('"value.test.ts": .revueignore pattern "*.test.ts"');
+
+		await writeFile(
+			join(runDirectory, "chapters.json"),
+			JSON.stringify({
+				chapters: [
+					{
+						id: "chapter-1",
+						order: 1,
+						title: "Change the value",
+						summary: "The value now reflects the new behaviour.",
+						hunkRefs: [{ filePath: reference.path, oldStart }],
+						keyChanges: [],
+					},
+				],
+			}),
+		);
+
+		const checked = await run(root, ["show", runDirectory, "--check"]);
+		expect(checked).toMatchObject({ exitCode: 0, stderr: "" });
+		// "1 of 1 narrated" is true of the run and misleading about the change, so the run says both.
+		expect(checked.stdout).toContain("1 of 1 review unit narrated");
+		expect(checked.stdout).toContain("1 file omitted · .revueignore");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

@@ -34,8 +34,16 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   sanitises the full stream, renders only complete supported ordinary unified-diff envelopes through
   `@revue/diff-ansi`, and otherwise fails open to full sanitised passthrough. It owns downstream
   pagination and never starts OpenTUI or reads prepared-run, narrative Revue, or `~/.revue` state.
-- **Chapter** — one narrative beat: a coherent group of diff hunks the reviewer absorbs as a unit,
-  with a `title`, a narrated `summary`, the `hunkRefs` it covers, and any `keyChanges`. Ordered.
+- **Chapter** — one narrative beat, with a `title`, a narrated `summary`, the `hunkRefs` it covers,
+  any `keyChanges`, and any context `excerpts` it quotes. Usually a coherent group of diff hunks the
+  reviewer absorbs as a unit; a chapter with no hunks at all is an **interlude**. Fenced `ascii` and
+  `mermaid` blocks in the summary leave the prose and draw as diagrams beside the excerpts; every
+  other fence stays inline as a snippet. Ordered.
+- **Interlude** — a chapter with no hunks: a title, prose that may run longer than a normal summary,
+  and optionally excerpts and diagrams. It is *inferred* from an empty `hunkRefs`, never flagged, so
+  no field can contradict the hunk list. An ordinary page otherwise — it navigates, marks read, and
+  counts toward chapter progress — but it shows no file list and completes on the mark-read key
+  alone, since it has no files to complete it vacuously.
 - **Hunk reference (`hunkRef`)** — `(filePath, oldStart)`. The stable identity of a review unit; the
   agent copies these from `hunks.txt` rather than inventing them. Textual hunks use their pre-image
   start. A file with no textual hunk (pure rename, mode-only change, or empty file) receives one
@@ -46,10 +54,18 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   broad prologue guidance.
 - **Line ref** — `(filePath, side, startLine, endLine)`. `side` is `additions` (new-side line
   numbers) or `deletions` (old-side).
-- **Thread** — the official mutable feedback aggregate, independently identified and anchored by
-  `(filePath, oldStart, side, startLine, endLine)`. The review-unit `oldStart` keeps it tied to exactly
-  one pinned hunk even when a path appears in multiple chapters. A thread has ordered messages and a
-  thread-level `open` or reversible `dealt-with` status; multiple threads may share an anchor.
+- **Thread** — the official mutable feedback aggregate, independently identified and anchored by one
+  of two anchor kinds. A `hunk` anchor is `(filePath, oldStart, side, startLine, endLine)`; the
+  review-unit `oldStart` keeps it tied to exactly one pinned hunk even when a path appears in
+  multiple chapters. An `excerpt` anchor is `(filePath, startLine, endLine)` over quoted code and
+  resolves against the frozen context rather than the patch; it deliberately carries no `oldStart`
+  and no `side`, because `oldStart: 0` is already the metadata review unit's sentinel and an excerpt
+  borrowing it would be indistinguishable from a thread on a file with no textual hunk. The two
+  kinds fail differently: a hunk anchor that no longer resolves is corruption and blocks the load,
+  while an excerpt anchor the frozen context no longer covers is surfaced as **orphaned** and never
+  pruned, because re-narrating at another depth legitimately drops a citation. A thread has ordered
+  messages and a thread-level `open` or reversible `dealt-with` status; multiple threads may share
+  an anchor.
 - **Thread message** — one independently identified root message or reply containing a terminal-safe
   body, creation time, and `{ kind: "human" | "agent", name }` author. Human TUI names resolve from
   repository-aware `git config user.name`, then the system login. Agent CLI messages require an
@@ -68,6 +84,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   uses coloured side-by-side output when wide and coloured inline output when narrow; styling is
   translated into safe OpenTUI spans. Key-change anchors navigate and carry severity-tinted exact
   ranges in both views by source line number; Difftastic output is never parsed into durable anchors.
+  Cited context excerpts render in Patch only.
 - **File display** — All (the default chapter stream) or Focused (only the selected file). The
   reviewer moves the focused surface through the chapter with file navigation. It applies to both
   diff views and persists machine-wide as a reviewer preference rather than per-run state.
@@ -77,7 +94,27 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Context expansion** — GitHub-style revealing of unchanged lines around hunks. Each inter-hunk
   gap is a numbered boundary; revealing rewrites the patch from the run's pinned blobs and
   re-parses it. Blobs are the sole source of extra file content — `show` never touches Git — and
-  revealed lines never accept comment anchors.
+  revealed lines never accept comment anchors. Distinct from a **context excerpt**, which is
+  narration and does accept them.
+- **Context excerpt** — a range of *unchanged* code a chapter cites so the reviewer can see what the
+  change has to satisfy: a file path, an inclusive new-side line range, and an optional caption.
+  The agent cites; it never transcribes. `revue context freeze` resolves each citation against the
+  run's own recorded new endpoint and pins the bytes into `context.json`, so quoted code came off
+  disk. A cited file need not appear in the diff — quoting the untouched caller is the point. Folded
+  to a single band by default, opens in place, reads as scenery rather than work, contributes
+  nothing to review progress, and accepts comments on its lines, because a citation is pinned
+  narration rather than an ad-hoc reveal. Patch view only; the semantic view quotes nothing.
+  Quoted lines are currently rendered unhighlighted.
+- **Narrative depth** — the chapters file's own declaration of how much of the prepared diff it sets
+  out to cover: `full`, or `partial` carrying the label the reviewer sees (the `10,000ft` preset, or
+  freeform words for a bespoke request). An absent declaration means full, so every chapters file
+  written before depth existed keeps its meaning. It is the only thing that permits a narrative to
+  leave review units out.
+- **Coverage** — how many prepared review units the narration actually cites, against how many exist.
+  `revue show --check` reports it for every run; the TUI states it in exactly two places — a
+  status-bar segment after the file count, and the chapter-index header plus one line beneath it —
+  and in neither at full depth, because full is the baseline rather than a mode. Whatever the
+  narrative omits stays reachable through the Files surface.
 - **Selection** — the gutter-drag line range that says what the reviewer is acting on. Comment,
   copy-text, copy-location, and copy-GitHub-link are verbs hung off the one selection, reachable
   from the composer footer keys and the right-click menu alike. A GitHub permalink is offered per
@@ -91,14 +128,19 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes
-  the chapter, and vice-versa. Persisted locally, keyed by **run key**.
+  the chapter, and vice-versa. Excerpts appear in it nowhere: quoted code is scenery, not work.
+  Persisted locally, keyed by **run key**.
 - **Review session state** — narration-sensitive location within one run: current page, focused
-  file/hunk/question, collapsed files, and scroll offsets. It is stored beside review progress under
+  file/hunk/question, collapsed files, which excerpts and diagrams have been opened (both fold shut
+  by default, so only the openings are recorded), and scroll offsets. It is stored beside review progress under
   the same run key in `.revue/state.json`. It restores a saved review rather than becoming part of
   the immutable run. Unfinished thread drafts are deliberately excluded.
 - **Run** — an immutable directory under `.revue/runs/<runId>/` containing `run.json`, the pinned
   `diff.patch`, agent-facing `hunks.txt`, content-addressed old/new blobs, and — optionally — the
-  agent-written `chapters.json`. `show` consumes this directory and never recomputes Git state. A
+  agent-written `chapters.json` plus the `context.json` that `revue context freeze` pins the code
+  the narration quotes into. Both of those are narration-side and excluded from the run ID, so
+  narrating or freezing a run can never invalidate the code it describes. `show` consumes this
+  directory and never recomputes Git state. A
   run without chapters is fully reviewable as a flat diff; narration is an overlay, not
   scaffolding.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
@@ -179,8 +221,11 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   agent adds narration before `show`; whether Revue later drives the agent live remains open.
 - **Prep owns scope; show never touches Git.** See `docs/adr/0003`. Old/new blobs and Git modes are
   stored with the patch so semantic diff and full-file context can consume the same frozen input.
-  Show rejects missing, extra, or duplicate review units and line ranges outside their chapter’s
-  pinned hunks before claiming the run is valid.
+  How strictly show checks coverage keys on the narrative's declared depth (see `docs/adr/0014`):
+  at full depth — which is also what an absent declaration means — it still requires every prepared
+  review unit exactly once, so the default case is unchanged. Only an explicitly partial depth may
+  omit units. Duplicate units, unknown units, and key-change line ranges outside their chapter’s
+  pinned hunks are rejected at every depth.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
@@ -191,8 +236,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   reviewed repository from the supplied run, validates and atomically replaces its
   `.revue/threads.json`, keyed by full `runId`; prepared run directories remain immutable. Mutations
   take a cross-process lock and transform the latest same-run state, preventing TUI/agent writers
-  from replacing one another's feedback. Durable anchors include review-unit `oldStart`, while the
-  renderer exposes only feedback-neutral gutter
+  from replacing one another's feedback. Durable hunk anchors include review-unit `oldStart`;
+  excerpt anchors carry none and resolve against the run's frozen context instead
+  (see `docs/adr/0014`). The renderer exposes only feedback-neutral gutter
   selection and inline attachment placement. Revue owns thread/message UUIDs, authors, lifecycle,
   presentation, CLI operations, and chapter association. The disposable pre-thread comment store
   was reset rather than introducing a legacy migration.
@@ -205,9 +251,11 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   Chapterless progress seeds narrated progress one way; markdown export refuses a chapterless run.
 - **Alternate views synthesise patches; anchors stay on the git hunks.** See `docs/adr/0007`.
   Semantic view and context expansion synthesise unified patches replayed through the one
-  canonical pipeline rather than owning renderers. Displayed geometry varies per view; comment
-  anchors always resolve against the original git hunks, so every thread renders in every view and
-  synthesised-only lines refuse comments.
+  canonical pipeline rather than owning renderers. Displayed geometry varies per view; hunk anchors
+  always resolve against the original git hunks, so every such thread renders in every view and
+  synthesised-only lines refuse comments. Narration-cited excerpts are a second anchor authority
+  resolving against the frozen context (see `docs/adr/0014`); *ad hoc* context expansion still
+  refuses comments, because revealed lines are not pinned narration.
 - **One keymap registry; user-owned overrides.** See `docs/adr/0009`. Shortcuts exist once, in the
   typed registry; `~/.revue/keybindings.json` overrides action-to-keys with reserved keys,
   fixed-point merging, and per-entry lenient validation.
@@ -226,6 +274,12 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **The TUI owns viewport windowing.** See `docs/adr/0012`. OpenTUI culling still pays full layout
   cost, so Revue mounts only near-window row segments and preserves scroll geometry with
   fixed-height gaps; reveals are offset-based, and diff-body components need measurable heights.
+- **A narrative declares its depth; Revue freezes the code it quotes.** See `docs/adr/0014`, which
+  extends ADRs 0003, 0004 and 0007 rather than superseding them. Coverage strictness keys on the
+  declared depth so nothing loosens by default; excerpt citations are frozen off disk by
+  `revue context freeze` rather than transcribed by the agent, and may name files outside the diff;
+  and quoted code carries its own anchor kind, whose failure to resolve is orphaning rather than
+  corruption.
 - **Agents never launch the TUI.** An agent validates with `revue show "$RUN" --check` and hands
   the human the exact `revue show` command for their own terminal; the TUI cannot run inside an
   agent harness, and the skill forbids suggesting otherwise.

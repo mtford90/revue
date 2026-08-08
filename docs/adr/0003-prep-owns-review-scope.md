@@ -86,6 +86,13 @@ content.
   patch — context expansion synthesises from them and `show` still never touches Git
   ([ADR 0007](0007-synthesised-patches-and-anchor-authority.md)). Reviewing a bare patch with no
   backing blobs remains explicitly out of scope pending its own design.
+- 2026-08-07 — Extended, not superseded, by
+  [ADR 0014](0014-narrative-depth-and-frozen-context.md). The requirement above that `show` accept
+  every prepared review unit exactly once now applies at the narrative's declared full depth, which
+  is also what an absent declaration means; only an explicitly partial depth may omit units, and
+  duplicate units, unknown units, and out-of-chapter key-change ranges remain errors at every depth.
+  The run directory also gains `context.json`, a narration-side artifact excluded from the run ID
+  exactly as `chapters.json` is.
 
 ## Amendment
 

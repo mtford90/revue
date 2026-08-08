@@ -53,3 +53,13 @@ and on revealed unchanged context. Displayed geometry may vary per view; anchor 
 - Expansion works offline against any old run because blobs are pinned (ADR 0003).
 - The renderer's extension surface (`resolveRange`, emphasis spans, expansion controls) is the
   contract alternate views program against, extending the ADR 0002 boundary.
+
+## Amendments
+
+- 2026-08-07 — Extended, not superseded, by
+  [ADR 0014](0014-narrative-depth-and-frozen-context.md). Anchor authority now has two kinds. Hunk
+  anchors still resolve against the original git hunks in every view, exactly as decided above.
+  Narration-cited context excerpts are a second authority, resolving against the run's frozen
+  context and keyed to the run ID; they accept comments because they are pinned narration. *Ad hoc*
+  context expansion still refuses comments, because revealed lines are not. An excerpt anchor that
+  no longer resolves is surfaced as orphaned; a hunk anchor that does not resolve remains fatal.

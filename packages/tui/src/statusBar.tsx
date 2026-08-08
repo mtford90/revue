@@ -32,10 +32,29 @@ const TINY_BAR_WIDTH = 40;
 
 export type StatusNotice = { text: string; tone: "success" | "error" };
 
+/** How much of the diff a partial narrative covers. Null at full depth: full is the baseline. */
+export type NarrativeCoverage = { label: string; narrated: number; total: number };
+
+/**
+ * A zoomed-out run says so permanently, so the segment only sheds under real pressure: the
+ * word `hunks` once the thread count has already gone, then the segment once the files count
+ * and the context have gone too.
+ */
+export function coverageSegment(
+	coverage: NarrativeCoverage | null,
+	terminalWidth: number,
+): string | null {
+	if (!coverage || terminalWidth < TINY_BAR_WIDTH) return null;
+	const counts = `${coverage.narrated}/${coverage.total}`;
+	const hunks = terminalWidth < NARROW_BAR_WIDTH ? "" : " hunks";
+	return ` ${coverage.label} · ${counts}${hunks} `;
+}
+
 export function StatusBar({
 	context,
 	reviewedFiles,
 	totalFiles,
+	coverage,
 	openThreads,
 	viewMode,
 	notice,
@@ -44,6 +63,7 @@ export function StatusBar({
 	context: string;
 	reviewedFiles: number;
 	totalFiles: number;
+	coverage: NarrativeCoverage | null;
 	openThreads: number;
 	viewMode: "patch" | "semantic";
 	notice: StatusNotice | null;
@@ -55,6 +75,7 @@ export function StatusBar({
 	const narrow = terminalWidth < NARROW_BAR_WIDTH;
 	const tiny = terminalWidth < TINY_BAR_WIDTH;
 	const bar = gauge(reviewedFiles, totalFiles, GAUGE_WIDTH);
+	const coverageText = coverageSegment(coverage, terminalWidth);
 	const boundary = bar.indexOf("▱");
 	const filled = boundary === -1 ? bar : bar.slice(0, boundary);
 	const empty = boundary === -1 ? "" : bar.slice(boundary);
@@ -100,6 +121,11 @@ export function StatusBar({
 					{` ${reviewedFiles}/${totalFiles} files `}
 				</text>
 			)}
+			{coverageText ? (
+				<text flexShrink={0} fg={theme.muted} bg={theme.panel}>
+					{coverageText}
+				</text>
+			) : null}
 			{arrows && !tiny ? (
 				<text flexShrink={0} fg={theme.panel}>
 					{RIGHT_ARROW}

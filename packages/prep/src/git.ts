@@ -372,13 +372,13 @@ const worktreeSnapshot = async (context: GitContext, path: string): Promise<Snap
 };
 
 export const readSnapshot = async (
-	plan: ScopePlan,
+	context: GitContext,
 	source: SnapshotSource,
 	path: string,
 ): Promise<Snapshot | null | "gitlink"> =>
 	source.kind === RUN_ENDPOINT_KIND.WORKTREE
-		? worktreeSnapshot(plan.context, path)
-		: treeSnapshot(plan.context, source.revision, path);
+		? worktreeSnapshot(context, path)
+		: treeSnapshot(context, source.revision, path);
 
 export async function commitMessages(plan: ScopePlan): Promise<RunCommit[]> {
 	const start = plan.comparison === RUN_COMPARISON.DIRECT ? plan.base.sha : plan.mergeBaseSha;

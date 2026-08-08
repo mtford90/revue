@@ -7,6 +7,7 @@
 
 import {
 	createDiffFile,
+	type DiagramVisualPlan,
 	type DiffChromeWidths,
 	type DiffFile,
 	type DiffFileInput,
@@ -16,10 +17,12 @@ import {
 	type DiffSide,
 	type DiffVisualPlan,
 	diffStructure,
+	type ExcerptVisualPlan,
 	measureDiff,
 	planDiff,
 } from "@revue/diff";
 import {
+	attachmentsForExcerptLine,
 	attachmentsForRow,
 	type DiffInlineAttachment,
 	type ExpandDirection,
@@ -130,6 +133,10 @@ export const separatorSegmentId = (path: string) => `sep:${path}`;
 export const headerSegmentId = (path: string) => `head:${path}`;
 export const notesSegmentId = (path: string) => `notes:${path}`;
 export const bodySegmentId = (path: string) => `body:${path}`;
+export const excerptPadSegmentId = (key: string) => `excpad:${key}`;
+export const excerptSegmentId = (key: string) => `exc:${key}`;
+export const diagramPadSegmentId = (key: string) => `diapad:${key}`;
+export const diagramSegmentId = (key: string) => `dia:${key}`;
 export const segmentKind = (id: string) => id.slice(0, id.indexOf(":"));
 export const segmentPath = (id: string) => id.slice(id.indexOf(":") + 1);
 
@@ -316,16 +323,84 @@ export const attachmentRowIndex = (file: PlannedViewportFile, anchor: DiffLineRa
 	);
 };
 
-export const viewportSegments = ({
-	files,
+/**
+ * A quoted excerpt placed in narration order: it follows one file's section rather than being
+ * pinned to the end of the chapter. Its plan already carries the fold, so a folded excerpt
+ * occupies exactly one planned row here.
+ */
+export type ViewportExcerpt = {
+	key: string;
+	/** The file section this excerpt follows, or null to sit above the first one. */
+	after: string | null;
+	plan: ExcerptVisualPlan;
+};
+
+const excerptSegments = ({
+	excerpt,
 	attachments,
 	attachmentHeight,
 }: {
-	files: readonly PlannedViewportFile[];
+	excerpt: ViewportExcerpt;
 	attachments: readonly DiffInlineAttachment[];
 	attachmentHeight: (id: string) => number;
+}): SegmentRows[] => [
+	{ id: excerptPadSegmentId(excerpt.key), heights: [1] },
+	{
+		id: excerptSegmentId(excerpt.key),
+		heights: excerpt.plan.rows.map((row) => {
+			if (row.type !== "excerpt-line") return row.height;
+			const attached = attachmentsForExcerptLine({
+				filePath: row.filePath,
+				lineNumber: row.lineNumber,
+				attachments,
+			});
+			return row.height + attached.reduce((sum, entry) => sum + attachmentHeight(entry.id), 0);
+		}),
+	},
+];
+
+/**
+ * A figure the chapter draws. It leads the content column rather than sitting in narration
+ * order, because it illustrates the chapter rather than one file within it.
+ */
+export type ViewportDiagram = {
+	key: string;
+	plan: DiagramVisualPlan;
+};
+
+const diagramSegments = (diagram: ViewportDiagram): SegmentRows[] => [
+	{ id: diagramPadSegmentId(diagram.key), heights: [1] },
+	{ id: diagramSegmentId(diagram.key), heights: diagram.plan.rows.map((row) => row.height) },
+];
+
+export const viewportSegments = ({
+	files,
+	diagrams = [],
+	excerpts = [],
+	attachments,
+	excerptAttachments = [],
+	attachmentHeight,
+}: {
+	files: readonly PlannedViewportFile[];
+	diagrams?: readonly ViewportDiagram[];
+	excerpts?: readonly ViewportExcerpt[];
+	attachments: readonly DiffInlineAttachment[];
+	/** Threads on quoted code, matched against excerpt rows rather than diff rows. */
+	excerptAttachments?: readonly DiffInlineAttachment[];
+	attachmentHeight: (id: string) => number;
 }): SegmentRows[] => {
-	const segments: SegmentRows[] = [];
+	const segments: SegmentRows[] = diagrams.flatMap(diagramSegments);
+	const placed = new Set<string>();
+	const placeAfter = (path: string | null) => {
+		for (const excerpt of excerpts) {
+			if (excerpt.after !== path || placed.has(excerpt.key)) continue;
+			placed.add(excerpt.key);
+			segments.push(
+				...excerptSegments({ excerpt, attachments: excerptAttachments, attachmentHeight }),
+			);
+		}
+	};
+	placeAfter(null);
 	for (const file of files) {
 		if (file.leadingBlank) segments.push({ id: padSegmentId(file.path), heights: [1] });
 		if (file.separator) segments.push({ id: separatorSegmentId(file.path), heights: [1] });
@@ -343,6 +418,15 @@ export const viewportSegments = ({
 					heights: bodyHeights({ file, attachments, attachmentHeight }),
 				});
 			}
+		}
+		placeAfter(file.path);
+	}
+	// An excerpt whose anchor is not on screen still belongs to the chapter, so it closes it.
+	for (const excerpt of excerpts) {
+		if (!placed.has(excerpt.key)) {
+			segments.push(
+				...excerptSegments({ excerpt, attachments: excerptAttachments, attachmentHeight }),
+			);
 		}
 	}
 	return segments;

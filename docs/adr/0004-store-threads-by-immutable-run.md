@@ -80,6 +80,14 @@ Thread is the model and `revue threads` is the official API.
   action is disabled with a stated reason rather than emitting a link that could resolve to
   different content. Known gap: the threads CLI authors messages only as `agent`; human authorship
   exists solely through the TUI.
+- 2026-08-07 — Extended, not superseded, by
+  [ADR 0014](0014-narrative-depth-and-frozen-context.md). The anchor tuple above is now one of two
+  kinds: it describes the `hunk` anchor, while a thread on narration-cited quoted code takes an
+  `excerpt` anchor of `(filePath, startLine, endLine)`, resolved against the run's frozen context.
+  An excerpt anchor deliberately carries no `oldStart` and no `side`, since `oldStart: 0` is already
+  the metadata review unit's sentinel. An excerpt anchor the frozen context no longer covers is
+  surfaced as orphaned rather than failing the load; a hunk anchor that does not resolve remains
+  fatal.
 
 ## Amendment
 

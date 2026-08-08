@@ -37,7 +37,7 @@ export const RUN_EXCLUSION_REASON = {
 	SESSION_IGNORE: "session-ignore",
 } as const;
 
-const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "Expected a SHA-256 digest");
+export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "Expected a SHA-256 digest");
 const commitShaSchema = z.string().regex(/^[0-9a-f]{40}$/, "Expected a full commit SHA");
 const resolvedRefSchema = z.strictObject({
 	ref: z.string().min(1),

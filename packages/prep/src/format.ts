@@ -1,9 +1,21 @@
 import type { DiffFile } from "@revue/diff";
-import type { RunCommit, RunFile } from "@revue/types";
+import {
+	RUN_EXCLUSION_REASON,
+	type RunCommit,
+	type RunExclusion,
+	type RunFile,
+} from "@revue/types";
 
 export type AgentInputFile = {
 	diff: DiffFile;
 	runFile: RunFile;
+};
+
+/** Which rule dropped a path, in the words the reviewer would use to change it. */
+export const exclusionSource = (exclusion: RunExclusion): string => {
+	if (exclusion.reason === RUN_EXCLUSION_REASON.REVUE_IGNORE) return ".revueignore";
+	if (exclusion.reason === RUN_EXCLUSION_REASON.SESSION_IGNORE) return "--ignore";
+	return "built-in filtering";
 };
 
 const lineNumber = (value: number | undefined, width: number): string =>
@@ -136,13 +148,42 @@ const formatFile = (file: AgentInputFile): string[] => {
 	]);
 };
 
-export function formatAgentInput(commits: RunCommit[], files: AgentInputFile[]): string {
+const excludedLine = (exclusion: RunExclusion): string => {
+	const matched =
+		exclusion.matchedPath && exclusion.matchedPath !== exclusion.path
+			? ` (matched ${JSON.stringify(exclusion.matchedPath)})`
+			: "";
+	return `  ${JSON.stringify(exclusion.path)}${matched}: ${exclusionSource(exclusion)} pattern ${JSON.stringify(exclusion.pattern)}`;
+};
+
+/**
+ * The narrating agent sees only this file, so a path prep dropped would otherwise be invisible to
+ * it — and an over-broad ignore rule would quietly narrow the review while the narrative still
+ * reads as complete. Naming the omissions lets narration say what it could not see.
+ */
+const omittedSection = (exclusions: readonly RunExclusion[]): string[] =>
+	exclusions.length
+		? [
+				"=== OMITTED FROM THIS RUN ===",
+				`${exclusions.length} changed files were omitted and cannot be reviewed here. No chapter may cite them.`,
+				"If any of these look load-bearing for the change, say so in the narration rather than narrating around them.",
+				...exclusions.map(excludedLine),
+				"",
+			]
+		: [];
+
+export function formatAgentInput(
+	commits: RunCommit[],
+	files: AgentInputFile[],
+	exclusions: readonly RunExclusion[] = [],
+): string {
 	const commitLines = commits.map((commit) => `${commit.sha.slice(0, 12)} ${commit.subject}`);
 	const hunkLines = files.flatMap(formatFile);
 	return [
 		"=== COMMIT MESSAGES ===",
 		...(commitLines.length ? commitLines : ["(none)"]),
 		"",
+		...omittedSection(exclusions),
 		"=== HUNKS ===",
 		...hunkLines,
 		"",

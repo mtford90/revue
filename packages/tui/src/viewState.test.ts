@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Chapter } from "@revue/types";
@@ -23,6 +23,7 @@ const chapter = (id: string, order: number, paths: string[]): Chapter => ({
 	summary: "s",
 	hunkRefs: paths.map((filePath) => ({ filePath, oldStart: 0 })),
 	keyChanges: [],
+	excerpts: [],
 });
 
 const tmpDirs: string[] = [];
@@ -42,6 +43,17 @@ test("marking all files in a chapter auto-completes the chapter; unmarking one r
 
 	vs = toggleFile(vs, c, "a.ts"); // un-review a file
 	expect(isChapterReviewed(vs, "c1")).toBe(false); // chapter reverts
+});
+
+test("an interlude completes only on the explicit mark, never vacuously", () => {
+	const c = chapter("interlude", 1, []);
+
+	// No file of its own can complete it, and a stray file id must not either.
+	expect(isChapterReviewed(toggleFile(emptyViewState(), c, "a.ts"), "interlude")).toBe(false);
+
+	const marked = toggleChapter(emptyViewState(), c);
+	expect(isChapterReviewed(marked, "interlude")).toBe(true);
+	expect(isChapterReviewed(toggleChapter(marked, c), "interlude")).toBe(false);
 });
 
 test("toggling a chapter cascades to its files", () => {
@@ -86,6 +98,8 @@ test("file store round-trips review progress and session position per run key", 
 				selectedHunk: 1,
 				selectedKeyChange: 3,
 				collapsedFiles: ["src/a.ts"],
+				openExcerpts: ['["src/api/client.ts",118,140]'],
+				foldedDiagrams: [],
 				scrollTop: 27,
 				panelScrollTop: 4,
 			},
@@ -107,6 +121,8 @@ test("file store round-trips review progress and session position per run key", 
 				selectedHunk: 1,
 				selectedKeyChange: 3,
 				collapsedFiles: ["src/a.ts"],
+				openExcerpts: ['["src/api/client.ts",118,140]'],
+				foldedDiagrams: [],
 				scrollTop: 27,
 				panelScrollTop: 4,
 			},
@@ -138,4 +154,39 @@ test("a chapterless run keys on the snapshot alone and seeds its later narration
 	upgraded.set({ chapters: ["c1"], files: [], keyChanges: [] });
 	const reopened = await openRunStateStore(path, "run-a", narrated);
 	expect(reopened.get()).toEqual({ chapters: ["c1"], files: [], keyChanges: [] });
+});
+
+test("a session saved before excerpts existed restores every excerpt folded", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "revue-vs-"));
+	tmpDirs.push(dir);
+	const path = join(dir, "state.json");
+	await writeFile(
+		path,
+		JSON.stringify({
+			runA: {
+				chapters: [],
+				files: [],
+				keyChanges: [],
+				session: {
+					pageId: "c1",
+					pages: {
+						c1: {
+							selectedFile: 0,
+							selectedHunk: 0,
+							selectedKeyChange: 0,
+							collapsedFiles: [],
+							scrollTop: 0,
+							panelScrollTop: 0,
+						},
+					},
+				},
+			},
+		}),
+	);
+
+	const store = await openFileStore(path, "runA");
+
+	expect(store.getSession().pages.c1?.openExcerpts).toEqual([]);
+	// Nothing was folded away either, so every figure draws.
+	expect(store.getSession().pages.c1?.foldedDiagrams).toEqual([]);
 });

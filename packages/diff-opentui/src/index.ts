@@ -1,11 +1,17 @@
-export { attachmentsForRow, type DiffInlineAttachment } from "./attachments.ts";
 export {
+	attachmentsForExcerptLine,
+	attachmentsForRow,
+	type DiffInlineAttachment,
+} from "./attachments.ts";
+export {
+	DiagramBlock,
 	DiffBody,
 	type DiffBodyProps,
 	type DiffBodyStandaloneProps,
 	type DiffBodySuppliedPlanProps,
 	DiffFileHeader,
 	type DiffFileHeaderProps,
+	ExcerptBlock,
 	type ExpandDirection,
 } from "./components.tsx";
 export { decorationAnchorId } from "./ids.ts";

@@ -56,9 +56,11 @@ const expectedSnapshots = async (
 ): Promise<[Snapshot | null | "gitlink", Snapshot | null | "gitlink"]> => {
 	const oldPath = file.previousPath ?? file.path;
 	const old =
-		file.metadata.type === "new" ? null : await readSnapshot(plan, plan.oldSource, oldPath);
+		file.metadata.type === "new" ? null : await readSnapshot(plan.context, plan.oldSource, oldPath);
 	const current =
-		file.metadata.type === "deleted" ? null : await readSnapshot(plan, plan.newSource, file.path);
+		file.metadata.type === "deleted"
+			? null
+			: await readSnapshot(plan.context, plan.newSource, file.path);
 	return [old, current];
 };
 
@@ -164,7 +166,7 @@ const verifyWorktreeSnapshots = async (plan: ScopePlan, files: PreparedFile[]): 
 	if (plan.newSource.kind !== RUN_ENDPOINT_KIND.WORKTREE) return;
 	for (const file of files) {
 		if (file.newSnapshot) {
-			const current = await readSnapshot(plan, plan.newSource, file.diff.path);
+			const current = await readSnapshot(plan.context, plan.newSource, file.diff.path);
 			if (
 				current === null ||
 				current === "gitlink" ||
@@ -214,7 +216,7 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 	}
 	const commits = await commitMessages(plan);
 	const patch = files.map(({ diff }) => diff.patch ?? "").join("");
-	const hunks = formatAgentInput(commits, files);
+	const hunks = formatAgentInput(commits, files, exclusions);
 	await verifyRawCapture(plan, capture);
 	await verifyWorktreeSnapshots(plan, files);
 	return writePreparedRun({

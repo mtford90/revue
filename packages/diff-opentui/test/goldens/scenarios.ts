@@ -1,4 +1,4 @@
-import type { DiffLayout } from "@revue/diff";
+import type { Diagram, DiffLayout, ExcerptQuotation } from "@revue/diff";
 
 export type GoldenScenario = {
 	/** File-name stem for this scenario's goldens. */
@@ -186,5 +186,111 @@ export const GOLDEN_SCENARIOS: readonly GoldenScenario[] = [
 +
  const last = 3;
 `,
+	},
+];
+
+/**
+ * A quoted excerpt has no old side and never splits into panes, so its goldens vary by fold
+ * state and width alone. The wide case keeps the header's state word; the narrow one sheds it
+ * and forces the quoted code to wrap.
+ */
+export type GoldenExcerptScenario = {
+	name: string;
+	covers: string;
+	folded: boolean;
+	quotation: ExcerptQuotation;
+	widths: readonly number[];
+	height: number;
+};
+
+const QUOTATION: ExcerptQuotation = {
+	filePath: "src/api/client.ts",
+	startLine: 118,
+	endLine: 124,
+	caption: "the caller this change has to satisfy",
+	lines: [
+		"export class ApiClient {",
+		"  constructor(private readonly transport: Transport) {}",
+		"",
+		"  async send(request: Request): Promise<Response> {",
+		"    return this.transport.dispatch(request, { retries: 2, timeoutMs: 30_000 });",
+		"  }",
+		"}",
+	],
+};
+
+/** Wide enough to keep the header's state word, narrow enough to shed it and wrap code. */
+const EXCERPT_WIDTHS = [80, 110] as const;
+
+export const GOLDEN_EXCERPT_SCENARIOS: readonly GoldenExcerptScenario[] = [
+	{
+		name: "excerpt-folded",
+		covers: "the default state: one expander band naming the quoted range",
+		folded: true,
+		quotation: QUOTATION,
+		widths: EXCERPT_WIDTHS,
+		height: 4,
+	},
+	{
+		name: "excerpt-open",
+		covers: "caption, header and quoted lines against the additions gutter's columns",
+		folded: false,
+		quotation: QUOTATION,
+		widths: EXCERPT_WIDTHS,
+		height: 14,
+	},
+];
+
+/**
+ * A diagram wears the excerpt's chrome with a blank gutter, so its goldens hold the two things
+ * characters alone cannot show: where the figure starts, and that Mermaid reads as source.
+ */
+export type GoldenDiagramScenario = {
+	name: string;
+	covers: string;
+	folded: boolean;
+	diagram: Diagram;
+	widths: readonly number[];
+	height: number;
+};
+
+const ASCII: Diagram = {
+	kind: "ascii",
+	lines: [
+		"prep ──▶ chapters.json ──▶ show",
+		"  │                        │",
+		"  └── blobs ───────────────┘",
+	],
+};
+
+const MERMAID: Diagram = {
+	kind: "mermaid",
+	lines: ["graph LR", "  prep --> chapters", "  chapters --> show"],
+};
+
+export const GOLDEN_DIAGRAM_SCENARIOS: readonly GoldenDiagramScenario[] = [
+	{
+		name: "diagram-ascii-folded",
+		covers: "the default state: one band naming the figure's kind",
+		folded: true,
+		diagram: ASCII,
+		widths: [110],
+		height: 3,
+	},
+	{
+		name: "diagram-ascii-open",
+		covers: "the figure on the column quoted code starts on, over a blank gutter",
+		folded: false,
+		diagram: ASCII,
+		widths: [110],
+		height: 6,
+	},
+	{
+		name: "diagram-mermaid-open",
+		covers: "mermaid labelled and coloured as the source it is, not a picture",
+		folded: false,
+		diagram: MERMAID,
+		widths: [110],
+		height: 6,
 	},
 ];

@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
+import { inferLanguage } from "./model.ts";
 import type { DiffFile, RenderSpan } from "./types.ts";
 
 type NativeSpan = { text: string; fg?: string };
@@ -7,9 +8,49 @@ type NativeResponse = { files: { deletions: NativeSpan[][]; additions: NativeSpa
 type NativeHighlighter = {
 	highlight(request: {
 		theme: string;
-		files: { path: string; language?: string; deletions: string[]; additions: string[] }[];
+		files: {
+			path: string;
+			language?: string;
+			deletions: readonly string[];
+			additions: readonly string[];
+		}[];
 	}): NativeResponse;
 };
+
+/**
+ * What the backends actually colour. A parsed file contributes both its sides; quoted code
+ * contributes one. `id` is the array whose identity keys the cache, held apart from `additions`
+ * because quoted lines are re-ended before tokenising and must still be found by the caller's
+ * own array.
+ */
+type HighlightSubject = {
+	id: readonly string[];
+	path: string;
+	language: string;
+	deletions: readonly string[];
+	additions: readonly string[];
+};
+
+const fileSubject = (file: DiffFile): HighlightSubject => ({
+	id: file.metadata.additionLines,
+	path: file.path ?? file.metadata.name,
+	language: file.language,
+	deletions: file.metadata.deletionLines,
+	additions: file.metadata.additionLines,
+});
+
+/** A range of unchanged code a narration quotes. It belongs to no patch, so its path names its grammar. */
+export type QuotedCode = { path: string; lines: readonly string[] };
+
+// Each side is tokenised as one document split on its own line endings, and frozen quoted lines
+// carry none, so re-end them here rather than pinning endings a citation never had.
+const quotationSubject = ({ path, lines }: QuotedCode): HighlightSubject => ({
+	id: lines,
+	path,
+	language: inferLanguage(path),
+	deletions: [],
+	additions: lines.map((line) => `${line}\n`),
+});
 
 export interface HighlightedLines {
 	deletions: RenderSpan[][];
@@ -27,13 +68,13 @@ export type SyntaxHighlightingPreparation = {
 };
 
 // A selected-hunk metadata copy retains Pierre's line arrays, so key by those
-// arrays rather than metadata object identity. One file is highlighted once per
+// arrays rather than metadata object identity. One subject is highlighted once per
 // syntax theme and selected backend, because both changes recolour every span.
-const highlightByAdditionLines = new WeakMap<string[], Map<string, HighlightedLines>>();
+const highlightById = new WeakMap<readonly string[], Map<string, HighlightedLines>>();
 // Automatic mode can fall back after an addon has loaded but fails while highlighting.
-// Keep the successful backend with each file/theme rather than treating addon presence as
+// Keep the successful backend with each subject/theme rather than treating addon presence as
 // proof that its cached spans are usable.
-const preparedBackendByAdditionLines = new WeakMap<string[], Map<string, SyntaxBackend>>();
+const preparedBackendById = new WeakMap<readonly string[], Map<string, SyntaxBackend>>();
 let nativeHighlighter: NativeHighlighter | null | undefined;
 let nativeFailure: string | undefined;
 let warnedNativeFailure = false;
@@ -47,28 +88,28 @@ export function setNativeHighlighterForTesting(
 	warnedNativeFailure = false;
 }
 
-const highlightsFor = (file: DiffFile) => {
-	const existing = highlightByAdditionLines.get(file.metadata.additionLines);
+const highlightsFor = (id: readonly string[]) => {
+	const existing = highlightById.get(id);
 	if (existing) return existing;
 	const created = new Map<string, HighlightedLines>();
-	highlightByAdditionLines.set(file.metadata.additionLines, created);
+	highlightById.set(id, created);
 	return created;
 };
 
-const preparedBackendsFor = (file: DiffFile) => {
-	const existing = preparedBackendByAdditionLines.get(file.metadata.additionLines);
+const preparedBackendsFor = (id: readonly string[]) => {
+	const existing = preparedBackendById.get(id);
 	if (existing) return existing;
 	const created = new Map<string, SyntaxBackend>();
-	preparedBackendByAdditionLines.set(file.metadata.additionLines, created);
+	preparedBackendById.set(id, created);
 	return created;
 };
 
 const rememberPreparedBackend = (
-	files: readonly DiffFile[],
+	subjects: readonly HighlightSubject[],
 	syntaxTheme: string,
 	backend: SyntaxBackend,
 ) => {
-	for (const file of files) preparedBackendsFor(file).set(syntaxTheme, backend);
+	for (const subject of subjects) preparedBackendsFor(subject.id).set(syntaxTheme, backend);
 };
 
 const engine = (): SyntaxBackend | "auto" => {
@@ -114,25 +155,20 @@ const loadNative = (): NativeHighlighter | null => {
 
 const cacheKey = (syntaxTheme: string, selected: SyntaxBackend) => `${selected}:${syntaxTheme}`;
 
-async function prepareShiki(files: readonly DiffFile[], syntaxTheme: string): Promise<void> {
+async function prepareShiki(
+	subjects: readonly HighlightSubject[],
+	syntaxTheme: string,
+): Promise<void> {
 	const { highlightWithShiki } = await import("./shikiFallback.ts");
-	for (const file of files) {
-		const cached = highlightsFor(file);
+	for (const subject of subjects) {
+		const cached = highlightsFor(subject.id);
 		const key = cacheKey(syntaxTheme, "shiki");
 		if (cached.has(key)) continue;
 		try {
 			cached.set(key, {
 				// Each side is tokenised as one document so multiline grammars retain state.
-				deletions: await highlightWithShiki(
-					file.metadata.deletionLines,
-					file.language,
-					syntaxTheme,
-				),
-				additions: await highlightWithShiki(
-					file.metadata.additionLines,
-					file.language,
-					syntaxTheme,
-				),
+				deletions: await highlightWithShiki(subject.deletions, subject.language, syntaxTheme),
+				additions: await highlightWithShiki(subject.additions, subject.language, syntaxTheme),
 			});
 		} catch {
 			cached.set(key, { deletions: [], additions: [] });
@@ -140,41 +176,37 @@ async function prepareShiki(files: readonly DiffFile[], syntaxTheme: string): Pr
 	}
 }
 
-function prepareSyntect(files: readonly DiffFile[], syntaxTheme: string): boolean {
+function prepareSyntect(subjects: readonly HighlightSubject[], syntaxTheme: string): boolean {
 	const native = loadNative();
 	if (!native) return false;
 	const response = native.highlight({
 		theme: syntaxTheme,
-		files: files.map((file) => ({
-			path: file.path ?? file.metadata.name,
-			language: file.language,
-			deletions: file.metadata.deletionLines,
-			additions: file.metadata.additionLines,
+		files: subjects.map(({ path, language, deletions, additions }) => ({
+			path,
+			language,
+			deletions,
+			additions,
 		})),
 	});
-	if (response.files.length !== files.length)
+	if (response.files.length !== subjects.length)
 		throw new Error("native highlighter returned an incomplete result");
-	for (const [index, file] of files.entries()) {
+	for (const [index, subject] of subjects.entries()) {
 		const highlighted = response.files[index];
 		if (!highlighted) throw new Error("native highlighter returned a missing file");
-		highlightsFor(file).set(cacheKey(syntaxTheme, "syntect"), highlighted);
+		highlightsFor(subject.id).set(cacheKey(syntaxTheme, "syntect"), highlighted);
 	}
 	return true;
 }
 
-/**
- * Precompute syntax spans while retaining the shared cache used by ANSI and OpenTUI.
- * Native Syntect is the normal path; Shiki remains the explicit and fail-open fallback.
- */
-export async function prepareSyntaxHighlighting(
-	files: readonly DiffFile[],
+async function prepare(
+	subjects: readonly HighlightSubject[],
 	syntaxTheme: string,
 ): Promise<SyntaxHighlightingPreparation> {
 	const selected = engine();
 	if (selected !== "shiki") {
 		try {
-			if (prepareSyntect(files, syntaxTheme)) {
-				rememberPreparedBackend(files, syntaxTheme, "syntect");
+			if (prepareSyntect(subjects, syntaxTheme)) {
+				rememberPreparedBackend(subjects, syntaxTheme, "syntect");
 				return { backend: "syntect" };
 			}
 		} catch (error) {
@@ -185,8 +217,8 @@ export async function prepareSyntaxHighlighting(
 				`Syntect syntax engine was requested but could not load: ${nativeFailure ?? "unknown error"}`,
 			);
 	}
-	await prepareShiki(files, syntaxTheme);
-	rememberPreparedBackend(files, syntaxTheme, "shiki");
+	await prepareShiki(subjects, syntaxTheme);
+	rememberPreparedBackend(subjects, syntaxTheme, "shiki");
 	const warning =
 		selected === "auto" && !warnedNativeFailure
 			? {
@@ -198,17 +230,46 @@ export async function prepareSyntaxHighlighting(
 	return { backend: "shiki", warning };
 }
 
+/**
+ * Precompute syntax spans while retaining the shared cache used by ANSI and OpenTUI.
+ * Native Syntect is the normal path; Shiki remains the explicit and fail-open fallback.
+ */
+export async function prepareSyntaxHighlighting(
+	files: readonly DiffFile[],
+	syntaxTheme: string,
+): Promise<SyntaxHighlightingPreparation> {
+	return prepare(files.map(fileSubject), syntaxTheme);
+}
+
+/** The same precomputation for quoted code, which no parsed patch accounts for. */
+export async function prepareQuotedSyntaxHighlighting(
+	quotations: readonly QuotedCode[],
+	syntaxTheme: string,
+): Promise<SyntaxHighlightingPreparation> {
+	return prepare(quotations.map(quotationSubject), syntaxTheme);
+}
+
+const lookup = (
+	id: readonly string[],
+	syntaxTheme: string | undefined,
+): HighlightedLines | undefined => {
+	if (!syntaxTheme) return undefined;
+	const selected = engine();
+	const backend = selected === "auto" ? preparedBackendById.get(id)?.get(syntaxTheme) : selected;
+	return backend ? highlightById.get(id)?.get(cacheKey(syntaxTheme, backend)) : undefined;
+};
+
 export function highlightedLines(
 	file: DiffFile,
 	syntaxTheme: string | undefined,
 ): HighlightedLines | undefined {
-	if (!syntaxTheme) return undefined;
-	const selected = engine();
-	const backend =
-		selected === "auto"
-			? preparedBackendByAdditionLines.get(file.metadata.additionLines)?.get(syntaxTheme)
-			: selected;
-	return backend
-		? highlightByAdditionLines.get(file.metadata.additionLines)?.get(cacheKey(syntaxTheme, backend))
-		: undefined;
+	return lookup(file.metadata.additionLines, syntaxTheme);
+}
+
+/** Spans for each quoted line, or undefined until something has been prepared for that quotation. */
+export function quotedLineSpans(
+	quotation: QuotedCode,
+	syntaxTheme: string | undefined,
+): RenderSpan[][] | undefined {
+	return lookup(quotation.lines, syntaxTheme)?.additions;
 }

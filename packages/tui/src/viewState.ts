@@ -64,9 +64,10 @@ export function toggleChapter(vs: ViewState, chapter: Chapter): ViewState {
 /** Toggle one file within a chapter; a chapter auto-(un)marks when all/not-all its files are reviewed. */
 export function toggleFile(vs: ViewState, chapter: Chapter, filePath: string): ViewState {
 	const files = toggleMember(vs.files, viewStateFileId(chapter.id, filePath));
-	const allReviewed = chapterFilePaths(chapter).every((p) =>
-		files.includes(viewStateFileId(chapter.id, p)),
-	);
+	const paths = chapterFilePaths(chapter);
+	// An interlude has no files to complete vacuously; only the mark-read key finishes it.
+	if (!paths.length) return { ...vs, files };
+	const allReviewed = paths.every((p) => files.includes(viewStateFileId(chapter.id, p)));
 	let chapters = vs.chapters;
 	if (allReviewed && !chapters.includes(chapter.id)) chapters = [...chapters, chapter.id];
 	if (!allReviewed && chapters.includes(chapter.id))
@@ -104,6 +105,12 @@ const ReviewPageStateSchema = z.object({
 	selectedHunk: z.number().int().nonnegative(),
 	selectedKeyChange: z.number().int().nonnegative(),
 	collapsedFiles: z.array(z.string()),
+	// Excerpts are scenery, so their default is folded and the session records only the ones
+	// the reviewer opened. An older saved page simply restores every excerpt folded.
+	openExcerpts: z.array(z.string()).default([]),
+	// A figure is usually the point of the prose beside it, so diagrams default open and the
+	// session records only the ones the reviewer folded away.
+	foldedDiagrams: z.array(z.string()).default([]),
 	scrollTop: z.number().nonnegative(),
 	panelScrollTop: z.number().nonnegative(),
 });

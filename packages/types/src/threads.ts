@@ -9,6 +9,10 @@ export const THREAD_AUTHOR_KIND = {
 	HUMAN: "human",
 	AGENT: "agent",
 } as const;
+export const THREAD_ANCHOR_KIND = {
+	HUNK: "hunk",
+	EXCERPT: "excerpt",
+} as const;
 
 const runIdSchema = z.string().regex(/^[0-9a-f]{64}$/, "Expected a run ID");
 
@@ -38,18 +42,45 @@ const terminalSafeName = terminalSafeText("Author name").refine(
 	"Author name must be a single line without terminal control characters",
 );
 
-export const threadAnchorSchema = z
+const orderedRange = { message: "Thread anchor startLine must not exceed endLine" };
+
+/**
+ * A thread anchored to one pinned git hunk. `kind` carries a default so anchors written before
+ * excerpt threads existed keep parsing unchanged; everything written from now on states it.
+ */
+export const hunkThreadAnchorSchema = z
 	.strictObject({
+		kind: z.literal(THREAD_ANCHOR_KIND.HUNK).default(THREAD_ANCHOR_KIND.HUNK),
 		filePath: z.string().min(1),
 		oldStart: z.number().int().nonnegative(),
 		side: z.enum(["additions", "deletions"]),
 		startLine: z.number().int().positive(),
 		endLine: z.number().int().positive(),
 	})
-	.refine((anchor) => anchor.startLine <= anchor.endLine, {
-		message: "Thread anchor startLine must not exceed endLine",
-	});
+	.refine((anchor) => anchor.startLine <= anchor.endLine, orderedRange);
+export type HunkThreadAnchor = z.infer<typeof hunkThreadAnchorSchema>;
+
+/**
+ * A thread anchored to quoted unchanged code, keyed to the run and validated against the frozen
+ * context rather than the patch. It deliberately carries no `oldStart`: zero is already the
+ * metadata review unit's sentinel, so an excerpt anchor borrowing it would be indistinguishable
+ * from a thread on a file with no textual hunk.
+ */
+export const excerptThreadAnchorSchema = z
+	.strictObject({
+		kind: z.literal(THREAD_ANCHOR_KIND.EXCERPT),
+		filePath: z.string().min(1),
+		startLine: z.number().int().positive(),
+		endLine: z.number().int().positive(),
+	})
+	.refine((anchor) => anchor.startLine <= anchor.endLine, orderedRange);
+export type ExcerptThreadAnchor = z.infer<typeof excerptThreadAnchorSchema>;
+
+export const threadAnchorSchema = z.union([hunkThreadAnchorSchema, excerptThreadAnchorSchema]);
 export type ThreadAnchor = z.infer<typeof threadAnchorSchema>;
+
+export const isExcerptAnchor = (anchor: ThreadAnchor): anchor is ExcerptThreadAnchor =>
+	anchor.kind === THREAD_ANCHOR_KIND.EXCERPT;
 
 export const threadAuthorSchema = z.strictObject({
 	kind: z.enum(THREAD_AUTHOR_KIND),

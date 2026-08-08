@@ -2,12 +2,15 @@ import { type MouseEvent as OpenTUIMouseEvent, TextAttributes } from "@opentui/c
 import {
 	anchorRowIndex,
 	createDiffFile,
+	type DiagramVisualPlan,
 	type DiffFile,
 	type DiffFileInput,
 	type DiffLayout,
 	type DiffLineRange,
 	type DiffSide,
 	type DiffVisualPlan,
+	type ExcerptVisualPlan,
+	excerptLineRange,
 	findFocusedDecorationAnchor,
 	type PaintedDiffRow,
 	type PaintedSplitLineRow,
@@ -22,7 +25,11 @@ import {
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
-import { attachmentsForRow, type DiffInlineAttachment } from "./attachments.ts";
+import {
+	attachmentsForExcerptLine,
+	attachmentsForRow,
+	type DiffInlineAttachment,
+} from "./attachments.ts";
 import { decorationAnchorId } from "./ids.ts";
 import { diffLineId } from "./selectionIds.ts";
 import { diffPlanStyles, OPENTUI_DIFF_CHROME } from "./styles.ts";
@@ -97,6 +104,115 @@ type GutterHandlers = {
 
 type CellInteractions = Partial<Record<DiffSide, GutterHandlers>>;
 type AttachmentCounts = Partial<Record<DiffSide, number>>;
+
+type RangeSelectionInput = {
+	selectedRange?: DiffLineRange;
+	onRangeSelect?: (range: DiffLineRange) => void;
+	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
+};
+
+/**
+ * Gutter-drag range selection, shared by diff bodies and excerpt blocks so a quoted line
+ * answers the pointer exactly as a reviewable one does.
+ */
+const useRangeSelection = ({
+	selectedRange,
+	onRangeSelect,
+	onRangeContextMenu,
+}: RangeSelectionInput) => {
+	const activeStart = useRef<DiffLineRange | null>(null);
+	const activeRange = useRef<DiffLineRange | null>(null);
+	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
+	const displayedRange = dragRange ?? selectedRange;
+	const updateRange = (target: DiffLineRange) => {
+		const start = activeStart.current;
+		if (
+			!start ||
+			start.filePath !== target.filePath ||
+			start.hunkOldStart !== target.hunkOldStart ||
+			start.side !== target.side
+		)
+			return;
+		const next = {
+			...start,
+			startLine: Math.min(start.startLine, target.startLine),
+			endLine: Math.max(start.endLine, target.endLine),
+		};
+		activeRange.current = next;
+		setDragRange(next);
+	};
+	const finishRange = () => {
+		if (!activeStart.current) return;
+		const completed = activeRange.current;
+		activeStart.current = null;
+		activeRange.current = null;
+		setDragRange(null);
+		if (completed) onRangeSelect?.(completed);
+	};
+	const cancelActiveRange = () => {
+		activeStart.current = null;
+		activeRange.current = null;
+		setDragRange(null);
+	};
+	/** A right click inside the live selection acts on all of it, not just the row beneath. */
+	const contextRange = (target: DiffLineRange): DiffLineRange =>
+		displayedRange &&
+		displayedRange.filePath === target.filePath &&
+		displayedRange.side === target.side &&
+		displayedRange.startLine <= target.startLine &&
+		target.endLine <= displayedRange.endLine
+			? displayedRange
+			: target;
+	const openContextMenu = (target: DiffLineRange, event: OpenTUIMouseEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		onRangeContextMenu?.(contextRange(target), { x: event.x, y: event.y });
+	};
+	const contextHandler = (target: DiffLineRange | null) =>
+		target && onRangeContextMenu
+			? (event: OpenTUIMouseEvent) => {
+					if (event.button === RIGHT_MOUSE_BUTTON) openContextMenu(target, event);
+				}
+			: undefined;
+	const gutterHandlers = (target: DiffLineRange | null): GutterHandlers | undefined =>
+		target && (onRangeSelect || onRangeContextMenu)
+			? {
+					onMouseDown: (event) => {
+						if (event.button === RIGHT_MOUSE_BUTTON) {
+							openContextMenu(target, event);
+							return;
+						}
+						if (event.button !== 0) return;
+						event.preventDefault();
+						event.stopPropagation();
+						activeStart.current = target;
+						activeRange.current = target;
+						setDragRange(target);
+					},
+					onMouseDrag: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+					},
+					onMouseOver: (event) => {
+						if (!activeStart.current) return;
+						event.preventDefault();
+						event.stopPropagation();
+						updateRange(target);
+					},
+					onMouseDragEnd: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						finishRange();
+					},
+					onMouseUp: (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						finishRange();
+					},
+				}
+			: undefined;
+	return { displayedRange, gutterHandlers, contextHandler, cancelActiveRange };
+};
 
 const attachmentMarker = (count: number): string =>
 	count > 0 ? `${String(count).padStart(2)}●` : "   ";
@@ -513,10 +629,11 @@ export function DiffBody(props: DiffBodyProps) {
 		theme.syntaxTheme,
 	]);
 	const normalized = geometry.file;
-	const activeStart = useRef<DiffLineRange | null>(null);
-	const activeRange = useRef<DiffLineRange | null>(null);
-	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
-	const displayedRange = dragRange ?? selectedRange;
+	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
+		selectedRange,
+		onRangeSelect,
+		onRangeContextMenu,
+	});
 	const selectionDecoration = useMemo<RangeDecoration | null>(
 		() =>
 			displayedRange
@@ -579,88 +696,6 @@ export function DiffBody(props: DiffBodyProps) {
 			endLine: identity.lineNumber,
 		};
 	};
-	const updateRange = (target: DiffLineRange): DiffLineRange | null => {
-		const start = activeStart.current;
-		if (
-			!start ||
-			start.filePath !== target.filePath ||
-			start.hunkOldStart !== target.hunkOldStart ||
-			start.side !== target.side
-		)
-			return activeRange.current;
-		const next = {
-			...start,
-			startLine: Math.min(start.startLine, target.startLine),
-			endLine: Math.max(start.endLine, target.endLine),
-		};
-		activeRange.current = next;
-		setDragRange(next);
-		return next;
-	};
-	const finishRange = () => {
-		if (!activeStart.current) return;
-		const completed = activeRange.current;
-		activeStart.current = null;
-		activeRange.current = null;
-		setDragRange(null);
-		if (completed) onRangeSelect?.(completed);
-	};
-	const contextRange = (target: DiffLineRange): DiffLineRange =>
-		displayedRange &&
-		displayedRange.filePath === target.filePath &&
-		displayedRange.side === target.side &&
-		displayedRange.startLine <= target.startLine &&
-		target.endLine <= displayedRange.endLine
-			? displayedRange
-			: target;
-	const openContextMenu = (target: DiffLineRange, event: OpenTUIMouseEvent) => {
-		event.preventDefault();
-		event.stopPropagation();
-		onRangeContextMenu?.(contextRange(target), { x: event.x, y: event.y });
-	};
-	const contextHandler = (target: DiffLineRange | null) =>
-		target && onRangeContextMenu
-			? (event: OpenTUIMouseEvent) => {
-					if (event.button === RIGHT_MOUSE_BUTTON) openContextMenu(target, event);
-				}
-			: undefined;
-	const gutterHandlers = (target: DiffLineRange | null): GutterHandlers | undefined =>
-		target && (onRangeSelect || onRangeContextMenu)
-			? {
-					onMouseDown: (event) => {
-						if (event.button === RIGHT_MOUSE_BUTTON) {
-							openContextMenu(target, event);
-							return;
-						}
-						if (event.button !== 0) return;
-						event.preventDefault();
-						event.stopPropagation();
-						activeStart.current = target;
-						activeRange.current = target;
-						setDragRange(target);
-					},
-					onMouseDrag: (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-					},
-					onMouseOver: (event) => {
-						if (!activeStart.current) return;
-						event.preventDefault();
-						event.stopPropagation();
-						updateRange(target);
-					},
-					onMouseDragEnd: (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						finishRange();
-					},
-					onMouseUp: (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						finishRange();
-					},
-				}
-			: undefined;
 	const interaction = (cell: PaintedVisualCell, side: DiffSide): SideInteraction => {
 		const range = rangeForIdentity(cell.identities[side]);
 		return {
@@ -671,11 +706,6 @@ export function DiffBody(props: DiffBodyProps) {
 	};
 	const rowAttachments = (row: Exclude<PaintedDiffRow, { type: "hunk-header" }>) =>
 		attachmentsForRow({ row, attachments: inlineAttachments, resolveRange });
-	const cancelActiveRange = () => {
-		activeStart.current = null;
-		activeRange.current = null;
-		setDragRange(null);
-	};
 
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length)
 		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
@@ -791,6 +821,293 @@ export function DiffBody(props: DiffBodyProps) {
 					onExpand={expanders.onExpand}
 				/>
 			) : null}
+		</box>
+	);
+}
+
+/**
+ * The one row a folded block collapses to, and the header an open one leads with. Excerpts and
+ * diagrams share it so the two blocks cannot drift apart visually.
+ */
+function BlockBand({
+	band,
+	label,
+	action,
+	labelFg,
+	theme,
+	onToggle,
+}: {
+	band: boolean;
+	label: string;
+	action: string;
+	labelFg: string;
+	theme: Theme;
+	onToggle?: (event: OpenTUIMouseEvent) => void;
+}) {
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI pointer affordances live on text renderables.
+		<box
+			width="100%"
+			height={1}
+			backgroundColor={theme.panel}
+			flexDirection="row"
+			onMouseDown={onToggle}
+		>
+			<text flexShrink={0} fg={band ? theme.muted : theme.lineNumberFg} selectable={false}>
+				{band ? "  ⋯" : "│"}
+			</text>
+			<text
+				flexGrow={band ? 0 : 1}
+				flexShrink={1}
+				minWidth={0}
+				fg={labelFg}
+				wrapMode="none"
+				truncate
+				selectable={false}
+			>
+				{band ? `  ${label}` : ` ${label}`}
+			</text>
+			<text flexShrink={0} fg={theme.accent} selectable={false}>
+				{band ? `  [${action}]` : `[${action}] `}
+			</text>
+		</box>
+	);
+}
+
+/**
+ * A figure a chapter draws. It borrows the excerpt's chrome and fold, but cites no file: the
+ * gutter is blank rather than numbered, and Mermaid renders in `muted` because it is source
+ * text rather than a picture.
+ */
+export function DiagramBlock({
+	plan,
+	theme,
+	window: rowWindow,
+	onToggle,
+}: {
+	plan: DiagramVisualPlan;
+	theme: Theme;
+	window?: { start: number; end: number };
+	onToggle?: (key: string) => void;
+}) {
+	const start = Math.max(0, Math.min(plan.rows.length, rowWindow?.start ?? 0));
+	const end = Math.max(start, Math.min(plan.rows.length, rowWindow?.end ?? plan.rows.length));
+	const toggle = onToggle
+		? (event: OpenTUIMouseEvent) => {
+				event.preventDefault();
+				event.stopPropagation();
+				onToggle(plan.key);
+			}
+		: undefined;
+	const bodyFg = plan.diagram.kind === "mermaid" ? theme.muted : theme.text;
+	const blankGutter = " ".repeat(Math.max(0, plan.gutterColumns - 1));
+	return (
+		<box width="100%" flexDirection="column">
+			{plan.rows.slice(start, end).map((row) => {
+				if (row.type === "diagram-band" || row.type === "diagram-header") {
+					return (
+						<BlockBand
+							key={row.key}
+							band={row.type === "diagram-band"}
+							label={row.label}
+							action={row.action}
+							labelFg={theme.muted}
+							theme={theme}
+							onToggle={toggle}
+						/>
+					);
+				}
+				return (
+					<box key={row.key} width="100%" flexDirection="column">
+						{row.visualRows.map(({ continuationIndex, spans }) => (
+							<box
+								key={continuationIndex}
+								width="100%"
+								height={1}
+								overflow="hidden"
+								backgroundColor={theme.contextBg}
+								flexDirection="row"
+							>
+								<text flexShrink={0} fg={theme.lineNumberFg} wrapMode="none" selectable={false}>
+									{`│${blankGutter}`}
+								</text>
+								{/* A figure carries no syntax, so its spans are plain text under one colour. */}
+								<text
+									fg={bodyFg}
+									selectionBg={theme.badgeModified}
+									selectionFg={theme.panelAlt}
+									wrapMode="none"
+									flexShrink={0}
+									selectable
+								>
+									{spans.map((span) => span.text).join("")}
+								</text>
+							</box>
+						))}
+					</box>
+				);
+			})}
+		</box>
+	);
+}
+
+/**
+ * Quoted unchanged code a chapter cites. It reads as scenery: the rule replaces the focus
+ * marker because an excerpt row never focuses, the deletions gutter stays blank because there
+ * is no old side, the sign slot stays empty because nothing changed, and the body sits on the
+ * unstyled page. Folded — the default — the whole block collapses to one expander band.
+ */
+export function ExcerptBlock({
+	plan,
+	theme,
+	focused = false,
+	window: rowWindow,
+	inlineAttachments = EMPTY_ATTACHMENTS,
+	onToggle,
+	onAttachmentNode,
+	selectedRange,
+	onRangeSelect,
+	onRangeContextMenu,
+}: RangeSelectionInput & {
+	plan: ExcerptVisualPlan;
+	theme: Theme;
+	/** The block, not a row: excerpt rows have no focus marker to carry it. */
+	focused?: boolean;
+	window?: { start: number; end: number };
+	/** Threads anchored to quoted lines, kept apart from the diff's own attachment list. */
+	inlineAttachments?: readonly DiffInlineAttachment[];
+	onToggle?: (key: string) => void;
+	onAttachmentNode?: (id: string, node: { height: number } | null) => void;
+}) {
+	const { chrome, digits } = plan;
+	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
+		selectedRange,
+		onRangeSelect,
+		onRangeContextMenu,
+	});
+	const start = Math.max(0, Math.min(plan.rows.length, rowWindow?.start ?? 0));
+	const end = Math.max(start, Math.min(plan.rows.length, rowWindow?.end ?? plan.rows.length));
+	const toggle = onToggle
+		? (event: OpenTUIMouseEvent) => {
+				event.preventDefault();
+				event.stopPropagation();
+				onToggle(plan.key);
+			}
+		: undefined;
+	const labelFg = focused ? theme.accent : theme.muted;
+	const emptyGutter = " ".repeat(chrome.focusMarker - 1 + digits + chrome.attachmentMarker);
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: the block clears gutter drags that end off a quoted line.
+		<box
+			width="100%"
+			flexDirection="column"
+			onMouseUp={cancelActiveRange}
+			onMouseDragEnd={cancelActiveRange}
+		>
+			{plan.rows.slice(start, end).map((row) => {
+				if (row.type === "excerpt-caption") {
+					return (
+						<box key={row.key} width="100%" flexDirection="column">
+							{row.lines.map((line, index) => (
+								<text
+									// biome-ignore lint/suspicious/noArrayIndexKey: wrapped caption rows have no identity beyond position.
+									key={`${index}:${line}`}
+									fg={theme.muted}
+									wrapMode="none"
+									truncate
+									selectable={false}
+								>
+									{line}
+								</text>
+							))}
+						</box>
+					);
+				}
+				if (row.type === "excerpt-band" || row.type === "excerpt-header") {
+					return (
+						<BlockBand
+							key={row.key}
+							band={row.type === "excerpt-band"}
+							label={row.label}
+							action={row.action}
+							labelFg={labelFg}
+							theme={theme}
+							onToggle={toggle}
+						/>
+					);
+				}
+				const range = excerptLineRange(row);
+				const selected = Boolean(
+					displayedRange &&
+						displayedRange.filePath === range.filePath &&
+						displayedRange.side === range.side &&
+						displayedRange.startLine <= range.startLine &&
+						range.endLine <= displayedRange.endLine,
+				);
+				const attachments = attachmentsForExcerptLine({
+					filePath: row.filePath,
+					lineNumber: row.lineNumber,
+					attachments: inlineAttachments,
+				});
+				return (
+					<box key={row.key} width="100%" flexDirection="column">
+						{row.visualRows.map(({ continuationIndex, spans }) => (
+							// biome-ignore lint/a11y/noStaticElementInteractions: a right click anywhere on the line acts on that line.
+							<box
+								key={continuationIndex}
+								width="100%"
+								height={1}
+								overflow="hidden"
+								backgroundColor={selected ? theme.selectedHunk : theme.contextBg}
+								flexDirection="row"
+								onMouseDown={contextHandler(range)}
+							>
+								<text flexShrink={0} fg={theme.lineNumberFg} wrapMode="none" selectable={false}>
+									{`│${emptyGutter}`}
+								</text>
+								<text
+									flexShrink={0}
+									fg={theme.lineNumberFg}
+									wrapMode="none"
+									selectable={false}
+									{...gutterHandlers(range)}
+								>
+									{" ".repeat(chrome.focusMarker)}
+									{continuationIndex === 0
+										? lineNumber(row.lineNumber, digits)
+										: lineNumber(undefined, digits)}
+									{attachmentMarker(continuationIndex === 0 ? attachments.length : 0)}
+								</text>
+								<text flexShrink={0} fg={theme.text} wrapMode="none" selectable={false}>
+									{" ".repeat(chrome.sign)}
+								</text>
+								<text
+									id={diffLineId(range)}
+									fg={theme.text}
+									selectionBg={theme.badgeModified}
+									selectionFg={theme.panelAlt}
+									wrapMode="none"
+									flexShrink={0}
+									selectable
+								>
+									<CellContent spans={spans} theme={theme} />
+								</text>
+							</box>
+						))}
+						{attachments.map((attachment) => (
+							<box
+								key={attachment.id}
+								id={attachment.id}
+								width="100%"
+								flexDirection="column"
+								ref={(node) => onAttachmentNode?.(attachment.id, node)}
+							>
+								{attachment.content}
+							</box>
+						))}
+					</box>
+				);
+			})}
 		</box>
 	);
 }

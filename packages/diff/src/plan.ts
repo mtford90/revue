@@ -1,8 +1,9 @@
 import { applicableDecorations, decorationsAtLine } from "./decorations.ts";
 import type { CodeWidths, DiffChromeWidths } from "./layout.ts";
 import { diffCodeWidths, lineNumberDigits, splitPaneWidths, stackGutterSides } from "./layout.ts";
+import { drawMermaid } from "./mermaidAscii.ts";
 import { buildDiffRows, tabAdjustedRanges } from "./rows.ts";
-import { sanitizeTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
+import { plainTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
 import type {
 	DiffCell,
 	DiffFile,
@@ -399,7 +400,7 @@ export function planDiff(input: PlanDiffInput): DiffVisualPlan {
 				key: row.key,
 				hunkIndex: row.hunkIndex,
 				height: visibility.hunkHeaders ? 1 : 0,
-				text: sanitizeTerminalLine(row.text).replaceAll("\t", "  "),
+				text: plainTerminalLine(row.text),
 				source: {
 					fileId: file.id,
 					filePath: file.path,
@@ -546,10 +547,8 @@ const EXCERPT_STATE_WIDTH = 100;
 /** The caption is a figure label, indented under the block rather than heading it. */
 const EXCERPT_CAPTION_INDENT = 3;
 
-const plainLine = (text: string): string => sanitizeTerminalLine(text).replaceAll("\t", "  ");
-
 const excerptLabel = ({ filePath, startLine, endLine }: ExcerptQuotation): string =>
-	`context · ${plainLine(filePath)} ${startLine}–${endLine}`;
+	`context · ${plainTerminalLine(filePath)} ${startLine}–${endLine}`;
 
 const excerptDigits = ({ startLine, endLine }: ExcerptQuotation): number =>
 	String(Math.max(startLine, endLine)).length;
@@ -557,7 +556,7 @@ const excerptDigits = ({ startLine, endLine }: ExcerptQuotation): number =>
 const captionRow = (key: string, caption: string, width: number): PlannedExcerptRow => {
 	const indent = " ".repeat(EXCERPT_CAPTION_INDENT);
 	const lines = wrapSpans(
-		[{ text: plainLine(caption) }],
+		[{ text: plainTerminalLine(caption) }],
 		Math.max(1, width - EXCERPT_CAPTION_INDENT),
 	).map((row) => indent + row.map((span) => span.text).join(""));
 	return { type: "excerpt-caption", key: `${key}:caption`, height: lines.length, lines };
@@ -581,7 +580,7 @@ const excerptLineRow = ({
 	const wrapped = wrapSpans(
 		highlighted?.length
 			? sanitizeTerminalSpans(highlighted)
-			: [{ text: plainLine(quotation.lines[index] ?? "") }],
+			: [{ text: plainTerminalLine(quotation.lines[index] ?? "") }],
 		codeWidth,
 	);
 	const lineNumber = quotation.startLine + index;
@@ -691,6 +690,8 @@ export type Diagram = { kind: DiagramKind; lines: readonly string[] };
 export type DiagramVisualPlan = {
 	key: string;
 	diagram: Diagram;
+	/** False only for Mermaid this subset cannot lay out, whose own source is shown instead. */
+	drawn: boolean;
 	folded: boolean;
 	width: number;
 	chrome: DiffChromeWidths;
@@ -717,7 +718,19 @@ const DIAGRAM_GUTTER_DIGITS = 3;
 
 const DIAGRAM_LABELS: Record<DiagramKind, string> = {
 	ascii: "diagram · ascii",
-	mermaid: "diagram · mermaid source",
+	mermaid: "diagram · mermaid",
+};
+
+/** What the block actually holds: the figure itself, or the source it could not be drawn from. */
+type DiagramFigure = { drawn: boolean; label: string; lines: readonly string[] };
+
+const diagramFigure = (diagram: Diagram, codeWidth: number): DiagramFigure => {
+	const label = DIAGRAM_LABELS[diagram.kind];
+	if (diagram.kind !== "mermaid") return { drawn: true, label, lines: diagram.lines };
+	const drawing = drawMermaid({ source: diagram.lines, maxWidth: codeWidth });
+	return drawing
+		? { drawn: true, label, lines: drawing }
+		: { drawn: false, label: `${label} source`, lines: diagram.lines };
 };
 
 const diagramLineRow = ({
@@ -731,7 +744,7 @@ const diagramLineRow = ({
 	index: number;
 	codeWidth: number;
 }): PlannedDiagramRow => {
-	const wrapped = wrapSpans([{ text: plainLine(line) }], codeWidth);
+	const wrapped = wrapSpans([{ text: plainTerminalLine(line) }], codeWidth);
 	return {
 		type: "diagram-line",
 		key: `${key}:line:${index}`,
@@ -742,30 +755,30 @@ const diagramLineRow = ({
 
 const openDiagramRows = ({
 	key,
-	diagram,
+	figure,
 	codeWidth,
 }: {
 	key: string;
-	diagram: Diagram;
+	figure: DiagramFigure;
 	codeWidth: number;
 }): PlannedDiagramRow[] => [
 	{
 		type: "diagram-header",
 		key: `${key}:header`,
 		height: 1,
-		label: DIAGRAM_LABELS[diagram.kind],
+		label: figure.label,
 		action: "▲ hide",
 	},
-	...diagram.lines.map((line, index) => diagramLineRow({ key, line, index, codeWidth })),
+	...figure.lines.map((line, index) => diagramLineRow({ key, line, index, codeWidth })),
 ];
 
-const foldedDiagramRow = (key: string, diagram: Diagram): PlannedDiagramRow => {
-	const count = diagram.lines.length;
+const foldedDiagramRow = (key: string, figure: DiagramFigure): PlannedDiagramRow => {
+	const count = figure.lines.length;
 	return {
 		type: "diagram-band",
 		key: `${key}:band`,
 		height: 1,
-		label: DIAGRAM_LABELS[diagram.kind],
+		label: figure.label,
 		action: `▼ show ${count} line${count === 1 ? "" : "s"}`,
 	};
 };
@@ -789,12 +802,14 @@ export function planDiagram({
 		stackGutters: 2,
 		chrome,
 	}).additions;
+	const figure = diagramFigure(diagram, codeWidth);
 	const rows = folded
-		? [foldedDiagramRow(key, diagram)]
-		: openDiagramRows({ key, diagram, codeWidth });
+		? [foldedDiagramRow(key, figure)]
+		: openDiagramRows({ key, figure, codeWidth });
 	return {
 		key,
 		diagram,
+		drawn: figure.drawn,
 		folded,
 		width,
 		chrome,

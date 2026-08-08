@@ -876,8 +876,8 @@ function BlockBand({
 
 /**
  * A figure a chapter draws. It borrows the excerpt's chrome and fold, but cites no file: the
- * gutter is blank rather than numbered, and Mermaid renders in `muted` because it is source
- * text rather than a picture.
+ * gutter is blank rather than numbered. Mermaid the engine could not draw renders in `muted`,
+ * because what is on the page is then source text rather than a picture.
  */
 export function DiagramBlock({
 	plan,
@@ -899,7 +899,7 @@ export function DiagramBlock({
 				onToggle(plan.key);
 			}
 		: undefined;
-	const bodyFg = plan.diagram.kind === "mermaid" ? theme.muted : theme.text;
+	const bodyFg = plan.drawn ? theme.text : theme.muted;
 	const blankGutter = " ".repeat(Math.max(0, plan.gutterColumns - 1));
 	return (
 		<box width="100%" flexDirection="column">

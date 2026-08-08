@@ -243,7 +243,7 @@ export const GOLDEN_EXCERPT_SCENARIOS: readonly GoldenExcerptScenario[] = [
 
 /**
  * A diagram wears the excerpt's chrome with a blank gutter, so its goldens hold the two things
- * characters alone cannot show: where the figure starts, and that Mermaid reads as source.
+ * characters alone cannot show: where the figure starts, and that undrawn Mermaid reads as source.
  */
 export type GoldenDiagramScenario = {
 	name: string;
@@ -265,7 +265,13 @@ const ASCII: Diagram = {
 
 const MERMAID: Diagram = {
 	kind: "mermaid",
-	lines: ["graph LR", "  prep --> chapters", "  chapters --> show"],
+	lines: ["graph LR", "  prep[revue prep] --> chapters[chapters.json]", "  chapters --> show"],
+};
+
+/** A sequence diagram is outside the drawn subset, so the block holds the author's own source. */
+const MERMAID_UNDRAWN: Diagram = {
+	kind: "mermaid",
+	lines: ["sequenceDiagram", "  reviewer ->> agent: comment", "  agent ->> reviewer: reply"],
 };
 
 export const GOLDEN_DIAGRAM_SCENARIOS: readonly GoldenDiagramScenario[] = [
@@ -287,9 +293,17 @@ export const GOLDEN_DIAGRAM_SCENARIOS: readonly GoldenDiagramScenario[] = [
 	},
 	{
 		name: "diagram-mermaid-open",
-		covers: "mermaid labelled and coloured as the source it is, not a picture",
+		covers: "a flowchart drawn as boxes and arrows, coloured as the picture it is",
 		folded: false,
 		diagram: MERMAID,
+		widths: [110],
+		height: 12,
+	},
+	{
+		name: "diagram-mermaid-source",
+		covers: "mermaid outside the drawn subset, labelled and coloured as the source it is",
+		folded: false,
+		diagram: MERMAID_UNDRAWN,
 		widths: [110],
 		height: 6,
 	},

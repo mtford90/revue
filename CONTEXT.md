@@ -37,8 +37,15 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Chapter** — one narrative beat, with a `title`, a narrated `summary`, the `hunkRefs` it covers,
   any `keyChanges`, and any context `excerpts` it quotes. Usually a coherent group of diff hunks the
   reviewer absorbs as a unit; a chapter with no hunks at all is an **interlude**. Fenced `ascii` and
-  `mermaid` blocks in the summary leave the prose and draw as diagrams beside the excerpts; every
+  `mermaid` blocks in the summary leave the prose and draw as **diagrams** beside the excerpts; every
   other fence stays inline as a snippet. Ordered.
+- **Diagram** — a figure a chapter draws rather than a range it quotes, wearing the excerpt's chrome
+  over a blank gutter because it cites no file. An `ascii` figure is the drawing itself. A `mermaid`
+  figure is source Revue draws: a `flowchart`/`graph` is parsed and laid out as ASCII boxes and
+  arrows, always top to bottom whatever direction it declares, because columns are the scarce axis in
+  a terminal. Everything outside that subset — another diagram type, unmodelled flowchart syntax, a
+  cycle, malformed source, or a figure too wide for the content column — falls back to showing the
+  author's source, labelled and coloured as source. Never half-drawn.
 - **Interlude** — a chapter with no hunks: a title, prose that may run longer than a normal summary,
   and optionally excerpts and diagrams. It is *inferred* from an empty `hunkRefs`, never flagged, so
   no field can contradict the hunk list. An ordinary page otherwise — it navigates, marks read, and
@@ -71,7 +78,8 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   repository-aware `git config user.name`, then the system login. Agent CLI messages require an
   explicit author name. Root messages are removed with their thread; replies may be deleted alone.
 - **Prologue** — a high-level overview of the whole change: motivation, outcome, optional Mermaid
-  diagram, 2–5 key changes, 1–5 focus areas, and a complexity rating. Shown before chapter one.
+  diagram (drawn as a **diagram**, in a bordered box of its own), 2–5 key changes, 1–5 focus areas,
+  and a complexity rating. Shown before chapter one.
 - **Focus area** — a typed/severity-tagged spot in the prologue worth a reviewer's attention.
 - **Page** — a TUI navigation unit: the prologue (if present) followed by each chapter in order.
 - **Surface** — a top-level tab above pages: **Story** (the narrated page sequence), **Files** (the
@@ -283,6 +291,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   `revue context freeze` rather than transcribed by the agent, and may name files outside the diff;
   and quoted code carries its own anchor kind, whose failure to resolve is orphaning rather than
   corruption.
+- **Mermaid flowcharts are drawn; everything else stays source.** See `docs/adr/0016`. The parser
+  and the ASCII layout live in `@revue/diff` beside the rest of the visual plan, so a diagram block
+  says whether it holds a drawing or source and every adapter renders that decision identically.
+  The subset is deliberately narrow and the fallback is a designed path: nothing is half-drawn.
 - **Agents never launch the TUI.** An agent validates with `revue show "$RUN" --check` and hands
   the human the exact `revue show` command for their own terminal; the TUI cannot run inside an
   agent harness, and the skill forbids suggesting otherwise.

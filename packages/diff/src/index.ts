@@ -10,6 +10,14 @@ export {
 	type SyntaxHighlightWarning,
 } from "./highlight.ts";
 export type { DiffChromeWidths } from "./layout.ts";
+export {
+	type MermaidDirection,
+	type MermaidEdge,
+	type MermaidFlowchart,
+	type MermaidNode,
+	parseMermaidFlowchart,
+} from "./mermaid.ts";
+export { drawMermaid } from "./mermaidAscii.ts";
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export {
 	type Diagram,
@@ -55,7 +63,7 @@ export {
 } from "./plan.ts";
 export { anchorRowIndex, plannedRowIdentity } from "./ranges.ts";
 export { compositeTerminalForeground } from "./syntectTheme.ts";
-export { sanitizeTerminalLine } from "./terminalText.ts";
+export { plainTerminalLine, sanitizeTerminalLine } from "./terminalText.ts";
 export type {
 	DecorationAnchor,
 	DiffChangeContent,

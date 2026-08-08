@@ -290,6 +290,27 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("0/3 files"); // none reviewed yet
 });
 
+test("the prologue's mermaid diagram is drawn, and says so when it cannot be", async () => {
+	const t = await testRender(<App file={file} />, { width: 130, height: 44 });
+	await t.renderOnce();
+	const drawn = t.captureCharFrame();
+
+	expect(drawn).toContain("diagram (mermaid)");
+	expect(drawn).toContain("│ Dashboard │");
+	expect(drawn).toContain("retry on 503"); // the edge label survives the drawing
+	expect(drawn).not.toContain("A[Dashboard]"); // and the source it was drawn from does not
+
+	const undrawn: RevueChaptersFile = file.prologue
+		? { ...file, prologue: { ...file.prologue, diagram: "stateDiagram-v2\n  [*] --> open" } }
+		: file;
+	const other = await testRender(<App file={undrawn} />, { width: 130, height: 44 });
+	await other.renderOnce();
+	const frame = other.captureCharFrame();
+
+	expect(frame).toContain("diagram (mermaid source)");
+	expect(frame).toContain("[*] --> open");
+});
+
 const withInterlude: RevueChaptersFile = {
 	...file,
 	chapters: [
@@ -2898,9 +2919,14 @@ test("excerpt threads list in the Comments surface, marked when the narrative st
 const EXCERPT_GUTTER_COLUMNS = 17;
 
 const ASCII_FIGURE = "prep ──▶ chapters.json ──▶ show";
-const MERMAID_SOURCE = "graph LR; prep --> show";
+const MERMAID_FLOWCHART = "graph LR; prep[revue prep] --> show[revue show]";
+/** A box the flowchart above is drawn as, which its own source never contains. */
+const MERMAID_DRAWN_BOX = "│ revue prep │";
+/** Outside the drawn subset, so this block holds the author's source exactly as written. */
+const MERMAID_UNDRAWN = "sequenceDiagram";
+const MERMAID_UNDRAWN_LINE = "reviewer ->> agent: comment";
 
-/** An interlude whose narration carries both figures as fenced blocks, and no diff at all. */
+/** An interlude whose narration carries the figures as fenced blocks, and no diff at all. */
 const withDiagrams: RevueChaptersFile = {
 	...withExcerpt,
 	chapters: [
@@ -2917,7 +2943,12 @@ const withDiagrams: RevueChaptersFile = {
 				"```",
 				"",
 				"```mermaid",
-				MERMAID_SOURCE,
+				MERMAID_FLOWCHART,
+				"```",
+				"",
+				"```mermaid",
+				MERMAID_UNDRAWN,
+				`  ${MERMAID_UNDRAWN_LINE}`,
 				"```",
 			].join("\n"),
 			hunkRefs: [],
@@ -2989,15 +3020,24 @@ test("an interlude's diagrams fold, open, and line up with quoted code", async (
 	expect(opened).toContain("diagram · ascii");
 	expect(opened).toContain("[▲ hide]");
 	expect(opened).toContain(ASCII_FIGURE);
-	expect(opened).toContain(MERMAID_SOURCE);
+	// A supported flowchart is drawn rather than transcribed, so its own source never appears.
+	expect(opened).toContain("diagram · mermaid ");
+	expect(opened).toContain(MERMAID_DRAWN_BOX);
+	expect(opened).not.toContain(MERMAID_FLOWCHART);
+	// Mermaid outside the drawn subset keeps its source, and the label says so.
+	expect(opened).toContain("diagram · mermaid source");
+	expect(opened).toContain(MERMAID_UNDRAWN_LINE);
 	// The fences never reach the narration, which keeps its own prose.
 	expect(opened).toContain("Prep freezes the run");
 	expect(opened).not.toContain("```");
 	// A figure has no line numbers, yet reserves the quoted block's whole gutter before its text.
 	expect(textColumn(t, ASCII_FIGURE) - ruleColumn(t, ASCII_FIGURE)).toBe(EXCERPT_GUTTER_COLUMNS);
-	// ASCII is the drawing itself; Mermaid is source, so it reads as a label would.
+	// A drawing is the figure itself; undrawn Mermaid is source, so it reads as a label would.
 	expect(textColour(t, ASCII_FIGURE)).toBe(RGBA.fromHex(resolveTheme(undefined).text).toString());
-	expect(textColour(t, MERMAID_SOURCE)).toBe(
+	expect(textColour(t, MERMAID_DRAWN_BOX)).toBe(
+		RGBA.fromHex(resolveTheme(undefined).text).toString(),
+	);
+	expect(textColour(t, MERMAID_UNDRAWN_LINE)).toBe(
 		RGBA.fromHex(resolveTheme(undefined).muted).toString(),
 	);
 
@@ -3006,8 +3046,8 @@ test("an interlude's diagrams fold, open, and line up with quoted code", async (
 
 	expect(folded).toContain("⋯  diagram · ascii  [▼ show 1 line]");
 	expect(folded).not.toContain(ASCII_FIGURE);
-	// Folding one figure leaves its neighbour alone.
-	expect(folded).toContain(MERMAID_SOURCE);
+	// Folding one figure leaves its neighbours alone.
+	expect(folded).toContain(MERMAID_DRAWN_BOX);
 	// The close still ends the page, below the figures rather than above them.
 	expect(folded).toContain("── end of chapter ──");
 

@@ -78,8 +78,7 @@ async function press(t: Awaited<ReturnType<typeof testRender>>, key: string) {
 }
 
 async function nextChapter(t: Awaited<ReturnType<typeof testRender>>) {
-	await press(t, "]");
-	await press(t, "c");
+	await press(t, ".");
 }
 
 async function arrow(
@@ -330,7 +329,7 @@ test("an interlude is an ordinary page marked as carrying no diff", async () => 
 	expect(frame).not.toContain("Files ("); // no file list
 	expect(frame).not.toContain("What to review");
 	expect(frame).toContain("── end of chapter ──");
-	expect(frame).toContain("x mark this chapter read · ]c next page");
+	expect(frame).toContain("x mark this chapter read · . next page");
 	expect(statusLine(t)).toContain("Ch 4/4");
 
 	await press(t, "x");
@@ -573,14 +572,13 @@ test("a new file is rendered unified so no pane sits empty", async () => {
 	expect(codeLine.slice(codeLine.indexOf("│") + 1)).not.toContain("│");
 });
 
-test("[c walks back into the prologue instead of stopping at chapter one", async () => {
+test(", walks back into the prologue instead of stopping at chapter one", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
 	await t.renderOnce();
 	await nextChapter(t);
 	expect(statusLine(t)).toContain("Ch 1/3");
 
-	await press(t, "[");
-	await press(t, "c");
+	await press(t, ",");
 	expect(statusLine(t)).toContain("Prologue");
 	expect(t.captureCharFrame()).toContain("Dashboards stay up during deploys now");
 });
@@ -937,17 +935,15 @@ test("an unavailable semantic diff stays in Patch with a safe explanation", asyn
 	expect(frame).not.toContain("[31m");
 });
 
-test("opening a menu cancels an incomplete chapter chord", async () => {
+test("the bracket keys stay unbound now the chapter chord is retired", async () => {
 	const t = await testRender(<App file={file} />, {
 		width: 110,
 		height: 32,
 		kittyKeyboard: true,
 	});
 	await t.renderOnce();
+	await press(t, "[");
 	await press(t, "]");
-	await press(t, "F10");
-	await press(t, "ESCAPE");
-	await press(t, "c");
 
 	expect(statusLine(t)).toContain("Prologue");
 });
@@ -1000,7 +996,8 @@ test("the mouse menu acts once and blocks the chapter beneath it", async () => {
 	await click(t, bar.indexOf("Navigate") + 1, 0);
 	const menuLines = t.captureCharFrame().split("\n");
 	const nextLine = menuLines.find((line) => line.includes("Next page")) ?? "";
-	expect(nextLine).not.toContain("]c");
+	// Under 60 columns the dropdown drops its key hints, so the page-navigation key stays out.
+	expect(nextLine).not.toContain(".");
 
 	// The backdrop swallows the click aimed at the chapter's review checkbox.
 	await click(t, checkboxX + 1, chapterY);
@@ -1038,7 +1035,48 @@ test("s hides and restores the sidebar, giving its columns to the diff", async (
 	expect(t.captureCharFrame()).toContain("Chapters (3)");
 });
 
-test("the keymap floats over the review instead of replacing it", async () => {
+test("the keys surface covers the review, keeps the bars, and gives the page back on Esc", async () => {
+	let quits = 0;
+	const t = await testRender(<App file={file} onQuit={() => (quits += 1)} />, {
+		width: 110,
+		height: 61,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await nextChapter(t);
+	await press(t, "?");
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Here — Files & diff");
+	expect(frame).toContain("Scrolling");
+	// The surface substitutes for the review, not for the chrome: the bar underneath still names
+	// the chapter you were on, which is how you get it back unchanged.
+	expect(frame).toContain("File  Navigate  View  Help");
+	expect(statusLine(t)).toContain("Ch 1/");
+
+	await press(t, "ESCAPE");
+	const closed = t.captureCharFrame();
+	expect(closed).not.toContain("Here — Files & diff");
+	expect(closed).toContain("Add a reusable backoff helper");
+	expect(quits).toBe(0);
+});
+
+test("the keys surface documents the keys that fire here, and marks the ones that do not", async () => {
+	const t = await testRender(<App file={file} />, { width: 110, height: 61, kittyKeyboard: true });
+	await t.renderOnce();
+	await press(t, "o"); // onto the Comments surface
+	await press(t, "?");
+	const frame = t.captureCharFrame();
+
+	expect(frame).toContain("Here — Comments");
+	expect(frame).toContain("Select the next thread");
+	expect(frame).toContain("Jump to the selected thread");
+	// Page scrolling does not fire in Comments, so it is dimmed under Elsewhere rather than
+	// dropped: you would never learn it existed if it were hidden.
+	expect(frame).toContain("Elsewhere — Files & diff · press w to get there");
+	expect(frame).toContain("Scroll down half a page");
+});
+
+test("typing into the filter narrows the list without firing the actions it spells", async () => {
 	let quits = 0;
 	const t = await testRender(<App file={file} onQuit={() => (quits += 1)} />, {
 		width: 110,
@@ -1047,13 +1085,48 @@ test("the keymap floats over the review instead of replacing it", async () => {
 	});
 	await t.renderOnce();
 	await press(t, "?");
-	const frame = t.captureCharFrame();
-	expect(frame).toContain("Scrolling");
-	expect(frame).toContain("Dashboards stay up during deploys now"); // the prologue is still behind it
+	for (const letter of ["q", "u", "i", "t"]) await press(t, letter);
 
-	await press(t, "ESCAPE");
-	expect(t.captureCharFrame()).not.toContain("Scrolling");
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("filter: quit");
+	expect(frame).toContain("Quit (Esc also works)");
+	expect(frame).not.toContain("Scroll down one line");
+	// `q` quits, `u` and `i` scroll and `t` opens the theme picker — none of them may act while
+	// the filter has the keyboard.
 	expect(quits).toBe(0);
+	expect(frame).not.toContain("Choose a theme");
+
+	// Esc empties the filter first; only a second Esc closes.
+	await press(t, "ESCAPE");
+	expect(t.captureCharFrame()).toContain("Scroll down one line");
+	await press(t, "ESCAPE");
+	expect(t.captureCharFrame()).not.toContain("Here — Files & diff");
+	expect(quits).toBe(0);
+});
+
+test("the status bar hints follow the surface and name the keys that are actually bound", async () => {
+	const t = await testRender(<App file={file} />, { width: 130, height: 44 });
+	await t.renderOnce();
+	expect(statusLine(t)).toContain("j/k move");
+	expect(statusLine(t)).toContain("o comments");
+
+	// A long chapter title eats the width the hints were using, so they shed whole from the right
+	// rather than truncating into half a hint.
+	await nextChapter(t);
+	expect(statusLine(t)).toContain("j/k move");
+	expect(statusLine(t)).not.toContain("o comments");
+
+	await press(t, "o");
+	expect(statusLine(t)).toContain("Enter jump");
+	expect(statusLine(t)).toContain("w files");
+	expect(statusLine(t)).not.toContain("o comments");
+});
+
+test("a rebound help key changes the hint the status bar ends with", async () => {
+	const { keymap } = mergeKeymap(KEYMAP, { "toggle-shortcut-help": "z" });
+	const t = await testRender(<App file={file} keymap={keymap} />, { width: 130, height: 44 });
+	await t.renderOnce();
+	expect(statusLine(t)).toContain("z help · q quit");
 });
 
 test("a rebound action fires on its new key, its default key falls silent, and the menu hint updates", async () => {

@@ -65,7 +65,7 @@ ${OVERRIDABLE_THEME_SLOTS.map((slot) => `//   ${slot}`).join("\n")}
 //
 // Colours are #rgb or #rrggbb. Validation is lenient: a malformed file drops the whole theme, an
 // unknown extends drops the whole theme, but a bad colour, syntax theme, or override slot just
-// drops that one key and falls back to its default — see \`revue themes\` and the TUI help overlay
+// drops that one key and falls back to its default — see \`revue themes\` and the TUI keys surface
 // for details on any dropped entries. Themes are read once at startup.
 `;
 

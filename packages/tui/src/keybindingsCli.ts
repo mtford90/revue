@@ -1,11 +1,22 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { expandShiftAliases, isValidUserKey, type KeymapIssue } from "./keybindings.ts";
-import { formatKeymapKeys, KEYMAP_SECTION_ORDER, type KeymapAction } from "./keymap.ts";
+import { isValidUserKey, type KeymapIssue } from "./keybindings.ts";
+import {
+	expandShiftAliases,
+	formatKeymapKeys,
+	KEYMAP_SECTION_ORDER,
+	type KeymapAction,
+} from "./keymap.ts";
 
 const COMMENTS_SECTION_TITLE = "Comments";
 
-const sectionTitleFor = (action: KeymapAction): string => action.section ?? COMMENTS_SECTION_TITLE;
+/**
+ * The listing groups the Comments surface apart rather than by section, because a flat list would
+ * put `w` under Navigation twice with nothing saying which surface each one belongs to. The keys
+ * surface carries that distinction visually; here it has to be a heading.
+ */
+const sectionTitleFor = (action: KeymapAction): string =>
+	action.context === "comments" ? COMMENTS_SECTION_TITLE : (action.section ?? "");
 
 const groupBySection = (
 	keymap: readonly KeymapAction[],
@@ -37,8 +48,7 @@ const formatActionLine = (
 		effectiveAction && !sameKeySet(effectiveAction.keys, defaultAction.keys),
 	);
 	const overrideNote = overridden ? ` (overridden, default: ${defaultDisplay})` : "";
-	const chordNote = defaultAction.context === "chord" ? " (fixed, not rebindable)" : "";
-	return `  ${defaultAction.id.padEnd(24)} ${formatKeymapKeys(effectiveKeys).padEnd(16)} ${defaultAction.description}${overrideNote}${chordNote}`;
+	return `  ${defaultAction.id.padEnd(24)} ${formatKeymapKeys(effectiveKeys).padEnd(16)} ${defaultAction.description}${overrideNote}`;
 };
 
 /** Lists every registry action grouped by section, marking overridden bindings and reporting validation issues. */
@@ -74,9 +84,7 @@ const TEMPLATE_HEADER = `// revue keybindings
 //   shifted letters        G (not shift+g)
 //   shift+ prefix          only for named/special keys, e.g. shift+tab
 //
-// Reserved, cannot be bound: escape, [ and ] (chord prefixes), digits 1-9 (direct
-// key-change shortcuts). Chord actions (page navigation) cannot be rebound and are
-// omitted below.
+// Reserved, cannot be bound: escape, digits 1-9 (direct key-change shortcuts).
 //
 // Invalid or conflicting entries are dropped with a warning; the rest of the file
 // still applies. If uncommenting more than one entry, add a comma between them.
@@ -85,8 +93,7 @@ const TEMPLATE_HEADER = `// revue keybindings
 
 /** Generates a fully-commented JSONC starter file from the live registry, so it can never drift. */
 export const generateKeybindingsTemplate = (keymap: readonly KeymapAction[]): string => {
-	const rebindable = keymap.filter((action) => action.context !== "chord");
-	const body = groupBySection(rebindable)
+	const body = groupBySection(keymap)
 		.map(({ title, actions }) =>
 			[
 				`  // ${title}`,

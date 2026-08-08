@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { KEYMAP, type KeymapAction } from "./keymap.ts";
+import { expandShiftAliases, KEYMAP, type KeymapAction } from "./keymap.ts";
 
 export const defaultKeybindingsPath = (): string => join(homedir(), ".revue", "keybindings.json");
 
@@ -86,13 +86,10 @@ const NAMED_KEYS = new Set([
 	"f12",
 ]);
 
-/** The `[c`/`]c` chord lives outside the registry and dispatches on the raw `[`/`]` keys before anything else runs. */
-const RESERVED_CHORD_PREFIXES = new Set(["[", "]"]);
-
 const isReservedDigit = (base: string): boolean => /^[1-9]$/.test(base);
 
 const isBareKey = (base: string): boolean => {
-	if (base === "escape" || isReservedDigit(base) || RESERVED_CHORD_PREFIXES.has(base)) return false;
+	if (base === "escape" || isReservedDigit(base)) return false;
 	if (NAMED_KEYS.has(base)) return true;
 	return base.length === 1 && !/\s/.test(base);
 };
@@ -112,36 +109,11 @@ export const isValidUserKey = (key: string): boolean => {
 	return isBareKey(key);
 };
 
-/**
- * Some terminals report a shifted keystroke as the literal shifted character (`"G"`, `"{"`); others
- * report the base key with a shift flag (`{name: "g", shift: true}`, which `matchKeymapAction`
- * turns into the `"shift+g"` candidate). The default registry lists both forms for its own shifted
- * bindings (`scroll-bottom: ["G", "shift+g"]`); user overrides get the same alias expansion here so
- * a rebind is equally reliable on either terminal style.
- */
-const SHIFT_PUNCTUATION_BASE: Record<string, string> = { "{": "[", "}": "]" };
-
-const shiftAliasFor = (key: string): string | undefined => {
-	if (/^[A-Z]$/.test(key)) return `shift+${key.toLowerCase()}`;
-	const base = SHIFT_PUNCTUATION_BASE[key];
-	return base ? `shift+${base}` : undefined;
-};
-
-export const expandShiftAliases = (keys: readonly string[]): string[] => {
-	const expanded = new Set<string>();
-	for (const key of keys) {
-		expanded.add(key);
-		const alias = shiftAliasFor(key);
-		if (alias) expanded.add(alias);
-	}
-	return [...expanded];
-};
-
 export type KeymapIssue = { entry: string; reason: string };
 
 type Candidate = { id: string; rawKeys: string[]; keys: string[] };
 
-/** The two non-chord contexts a key can be claimed in; `global` actions participate in both. */
+/** The two surface contexts a key can be claimed in; `global` actions participate in both. */
 const CONTEXTS = ["page", "comments"] as const;
 
 /** Validates one override entry against the grammar, independent of any other entry. */
@@ -152,9 +124,6 @@ const readCandidate = (
 ): { candidate: Candidate } | { issue: KeymapIssue } => {
 	const action = keymap.find((candidate) => candidate.id === id);
 	if (!action) return { issue: { entry: id, reason: `unknown action "${id}"` } };
-	if (action.context === "chord") {
-		return { issue: { entry: id, reason: `"${id}" cannot be rebound` } };
-	}
 	if (typeof value !== "string" && !Array.isArray(value)) {
 		return {
 			issue: { entry: id, reason: `"${id}" must be a key string or an array of key strings` },

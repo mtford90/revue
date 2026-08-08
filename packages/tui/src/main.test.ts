@@ -887,7 +887,9 @@ test("keybindings lists every action and flags overrides and issues", async () =
 		const listing = await run(root, ["keybindings"], { HOME: root });
 		expect(listing.exitCode).toBe(0);
 		expect(listing.stdout).toContain("line-up");
-		expect(listing.stdout).toMatch(/quit\s+z\s+Quit \(Esc also works\) \(overridden, default: q\)/);
+		expect(listing.stdout).toMatch(
+			/quit\s+z\s+Quit \(Esc also works\) \(overridden, default: q\/Q\)/,
+		);
 		expect(listing.stdout).toContain("Issues:");
 		expect(listing.stdout).toContain('not-a-real-action: unknown action "not-a-real-action"');
 	} finally {
@@ -902,7 +904,7 @@ test("keybindings init writes a starter template and refuses to overwrite it wit
 		expect(init.exitCode).toBe(0);
 		expect(init.stdout).toContain(join(root, ".revue", "keybindings.json"));
 		const written = await Bun.file(join(root, ".revue", "keybindings.json")).text();
-		expect(written).toContain('// "quit": ["q"]');
+		expect(written).toContain('// "quit": ["q","Q"]');
 
 		const again = await run(root, ["keybindings", "init"], { HOME: root });
 		expect(again.exitCode).toBe(1);

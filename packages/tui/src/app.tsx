@@ -97,13 +97,16 @@ import {
 	expandedPatchText,
 	type FileExpansion,
 } from "./expand.ts";
+import { HelpSurface } from "./helpSurface.tsx";
 import type { KeymapIssue } from "./keybindings.ts";
 import {
 	deriveAppKeys,
+	footerHints,
+	formatKeymapKey,
 	KEYMAP,
 	type KeymapAction,
+	type KeymapSurface,
 	keymapHint,
-	keymapSections,
 	matchKeymapAction,
 } from "./keymap.ts";
 import {
@@ -2300,127 +2303,6 @@ function SemanticChapterView({
 	);
 }
 
-// ── Keyboard help ──────────────────────────────────────────────────────────
-const HELP_MODAL_MAX_WIDTH = 66;
-
-/** Floats over the review rather than displacing it, so the page stays in sight. */
-function HelpModal({
-	terminalWidth,
-	terminalHeight,
-	scrollRef,
-	onClose,
-	keymap = KEYMAP,
-	issues = [],
-	themeIssues = [],
-}: {
-	terminalWidth: number;
-	terminalHeight: number;
-	scrollRef: RefObject<ScrollBoxRenderable | null>;
-	onClose: () => void;
-	keymap?: readonly KeymapAction[];
-	issues?: readonly KeymapIssue[];
-	themeIssues?: readonly ThemeIssue[];
-}) {
-	const theme = useTheme();
-	const sections = useMemo(() => keymapSections(keymap), [keymap]);
-	const shortcutRows = useMemo(
-		() =>
-			sections.reduce((total, section) => total + section.lines.length + 1, 0) +
-			(issues.length > 0 ? issues.length + 1 : 0) +
-			(themeIssues.length > 0 ? themeIssues.length + 1 : 0),
-		[sections, issues, themeIssues],
-	);
-	const width = Math.max(20, Math.min(HELP_MODAL_MAX_WIDTH, terminalWidth - 4));
-	const height = Math.max(5, Math.min(shortcutRows + 3, terminalHeight - 4));
-	return (
-		<>
-			<box
-				position="absolute"
-				top={0}
-				left={0}
-				width="100%"
-				height="100%"
-				zIndex={60}
-				shouldFill={false}
-				onMouseDown={(event) => {
-					event.preventDefault();
-					event.stopPropagation();
-					onClose();
-				}}
-			/>
-			<box
-				position="absolute"
-				top={Math.max(0, Math.round((terminalHeight - height) / 2))}
-				left={Math.max(0, Math.round((terminalWidth - width) / 2))}
-				width={width}
-				height={height}
-				zIndex={70}
-				border
-				borderColor={theme.accent}
-				backgroundColor={theme.background}
-				title=" Keyboard shortcuts "
-				flexDirection="column"
-				onMouseDown={(event) => event.stopPropagation()}
-			>
-				<scrollbox
-					ref={scrollRef}
-					flexGrow={1}
-					flexShrink={1}
-					minHeight={0}
-					paddingLeft={1}
-					paddingRight={1}
-					scrollY
-					verticalScrollbarOptions={{ trackOptions: { foregroundColor: theme.border } }}
-				>
-					{issues.length > 0 ? (
-						<box flexDirection="column" width="100%">
-							<text fg={theme.badgeRemoved}>Keybinding overrides ignored</text>
-							{issues.map((issue) => (
-								<text
-									key={`${issue.entry}-${issue.reason}`}
-									fg={theme.badgeRemoved}
-									wrapMode="none"
-									truncate
-								>
-									{`  ${issue.entry}: ${issue.reason}`}
-								</text>
-							))}
-						</box>
-					) : null}
-					{themeIssues.length > 0 ? (
-						<box flexDirection="column" width="100%">
-							<text fg={theme.badgeRemoved}>Theme issues ignored</text>
-							{themeIssues.map((issue) => (
-								<text
-									key={`${issue.entry}-${issue.reason}`}
-									fg={theme.badgeRemoved}
-									wrapMode="none"
-									truncate
-								>
-									{`  ${issue.entry}: ${issue.reason}`}
-								</text>
-							))}
-						</box>
-					) : null}
-					{sections.map((section) => (
-						<box key={section.title} flexDirection="column" width="100%">
-							<text fg={theme.heading}>{section.title}</text>
-							{section.lines.map((line) => (
-								<text key={line} fg={theme.text} wrapMode="none" truncate>
-									{`  ${line}`}
-								</text>
-							))}
-						</box>
-					))}
-				</scrollbox>
-				<box flexShrink={0} height={1} paddingLeft={1}>
-					<text fg={theme.muted}>? or Esc to close</text>
-				</box>
-			</box>
-		</>
-	);
-}
-
 function ConfirmDialog({
 	message,
 	confirmLabel,
@@ -2684,11 +2566,11 @@ export function App({
 	onReload?: () => void;
 	/** The registry merged with any `~/.revue/keybindings.json` overrides. */
 	keymap?: readonly KeymapAction[];
-	/** User keybinding entries dropped during the merge, surfaced in the footer and help overlay. */
+	/** User keybinding entries dropped during the merge, surfaced in the footer and keys surface. */
 	keymapIssues?: readonly KeymapIssue[];
 	/** Themes read from `~/.revue/themes`; shadow bundled themes that share an id. */
 	customThemes?: readonly Theme[];
-	/** Custom theme files or keys dropped while loading, surfaced in the footer and help overlay. */
+	/** Custom theme files or keys dropped while loading, surfaced in the footer and keys surface. */
 	themeIssues?: readonly ThemeIssue[];
 }) {
 	const renderer = useRenderer();
@@ -2787,6 +2669,7 @@ export function App({
 		request: number;
 	} | null>(null);
 	const [showHelp, setShowHelp] = useState(false);
+	const [helpFilter, setHelpFilter] = useState("");
 	const [indexExpanded, setIndexExpandedState] = useState(initialPreferences.indexExpanded ?? true);
 	const [sidebarPreference, setSidebarPreferenceState] = useState<SidebarPreference>(
 		initialPreferences.sidebarPreference ?? "auto",
@@ -2829,7 +2712,6 @@ export function App({
 	const helpScroll = useRef<ScrollBoxRenderable>(null);
 	const resizingPanel = useRef(false);
 	const startupViewRestored = useRef(false);
-	const chapterNavigationPrefix = useRef<"[" | "]" | null>(null);
 	const [requestedPanelWidth, setRequestedPanelWidthState] = useState(
 		initialPreferences.panelWidth ?? defaultPanelWidth(width),
 	);
@@ -2848,6 +2730,7 @@ export function App({
 	const page = commentsSurface ? COMMENTS_PAGE : allFiles ? filesPage : pages[current];
 	const surface: ReviewSurface =
 		page?.kind === "files" ? "files" : page?.kind === "comments" ? "comments" : "story";
+	const keymapSurface: KeymapSurface = page?.kind === "comments" ? "comments" : "page";
 	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	const interlude = chapter ? isInterlude(chapter) : false;
 	/**
@@ -4001,18 +3884,28 @@ export function App({
 		if (!chapter || index < 0 || index >= chapter.keyChanges.length) return;
 		commit(toggleKeyChange(vs, chapter, index));
 	}
-	function handleChapterChord(name: string) {
-		const prefix = chapterNavigationPrefix.current;
-		chapterNavigationPrefix.current = null;
-		if (name === "[" || name === "]") {
-			chapterNavigationPrefix.current = name;
-			return true;
-		}
-		if (name !== "c" || !prefix) return false;
-		movePage(prefix === "]" ? 1 : -1);
-		return true;
+	function moveFileFocus(delta: number) {
+		if (!focusTargets.length) return;
+		const at = focusedExcerpt
+			? focusTargets.findIndex(
+					(target) => target.kind === "excerpt" && target.key === focusedExcerpt,
+				)
+			: focusTargets.findIndex((target) => target.kind === "file" && target.index === selectedFile);
+		const next =
+			focusTargets[(Math.max(0, at) + delta + focusTargets.length) % focusTargets.length];
+		if (!next) return;
+		if (next.kind === "file") {
+			setFocusedExcerpt(null);
+			setSelectedFile(next.index);
+		} else setFocusedExcerpt(next.key);
+		requestFileFocus();
+	}
+	function closeHelp() {
+		setShowHelp(false);
+		setHelpFilter("");
 	}
 	function toggleShortcutHelp() {
+		setHelpFilter("");
 		setShowHelp((visible) => !visible);
 	}
 	function movePage(delta: number) {
@@ -4330,25 +4223,35 @@ export function App({
 			return;
 		}
 
+		// The filter owns every printable key, so `j`/`k`/`q` type here rather than acting. That
+		// costs vim users their scrolling, which is why the arrows and Home/End are bound instead.
 		if (showHelp && !menu.activeMenuId) {
-			if (name === "escape" || name === "?" || name === "q" || name === "f10") setShowHelp(false);
-			else if (name === "j" || name === "down") helpScroll.current?.scrollBy(1);
-			else if (name === "k" || name === "up") helpScroll.current?.scrollBy(-1);
+			if (name === "escape") {
+				if (helpFilter) setHelpFilter("");
+				else closeHelp();
+			} else if (name === "?" || name === "f1" || name === "f10" || name === "f9") closeHelp();
+			else if (name === "backspace") setHelpFilter((value) => value.slice(0, -1));
+			else if (name === "down") helpScroll.current?.scrollBy(1);
+			else if (name === "up") helpScroll.current?.scrollBy(-1);
 			else if (name === "pagedown" || name === "pageup")
 				helpScroll.current?.scrollBy(name === "pagedown" ? 1 : -1, "viewport");
+			else if (name === "home") helpScroll.current?.scrollTo(0);
+			else if (name === "end") helpScroll.current?.scrollTo(helpScroll.current.scrollHeight);
+			else if (name === "space") setHelpFilter((value) => `${value} `);
+			else if (name && name.length === 1 && !key.ctrl)
+				setHelpFilter((value) => value + name.toLowerCase());
 			return;
 		}
 
 		if (menu.activeMenuId) {
-			if (name === "escape" || name === "f10") menu.close();
+			if (name === "escape" || name === "f10" || name === "f9") menu.close();
 			else if (name === "left" || name === "right") menu.switchMenu(name === "left" ? -1 : 1);
 			else if (name === "up" || name === "down") menu.move(name === "up" ? -1 : 1);
 			else if (name === "return") menu.activate();
 			return;
 		}
-		const keymapContext = page?.kind === "comments" ? "comments" : "page";
 		const actionId = matchKeymapAction(
-			keymapContext,
+			keymapSurface,
 			{
 				name: name ?? "",
 				ctrl: key.ctrl,
@@ -4358,7 +4261,6 @@ export function App({
 		);
 
 		if (actionId === "open-menu") {
-			chapterNavigationPrefix.current = null;
 			menu.open("file");
 			return;
 		}
@@ -4366,7 +4268,12 @@ export function App({
 			moveKeyChangeFocus(actionId === "previous-key-change" ? -1 : 1);
 			return;
 		}
-		if (handleChapterChord(name)) return;
+		// Hoisted above the context split so page navigation keeps working on the
+		// Comments surface, whose switch would otherwise fall through to no-op.
+		if (actionId === "previous-page" || actionId === "next-page") {
+			movePage(actionId === "next-page" ? 1 : -1);
+			return;
+		}
 		if (copyNotice) setCopyNotice(null);
 
 		if (name === "escape") {
@@ -4374,7 +4281,7 @@ export function App({
 			return;
 		}
 
-		if (keymapContext === "comments") {
+		if (keymapSurface === "comments") {
 			switch (actionId) {
 				case "quit":
 					quit();
@@ -4471,26 +4378,12 @@ export function App({
 			case "scroll-top":
 				pageScroll.current?.scrollTo(0);
 				break;
-			case "focus-file": {
-				if (!focusTargets.length) break;
-				const delta = key.shift ? -1 : 1;
-				const at = focusedExcerpt
-					? focusTargets.findIndex(
-							(target) => target.kind === "excerpt" && target.key === focusedExcerpt,
-						)
-					: focusTargets.findIndex(
-							(target) => target.kind === "file" && target.index === selectedFile,
-						);
-				const next =
-					focusTargets[(Math.max(0, at) + delta + focusTargets.length) % focusTargets.length];
-				if (!next) break;
-				if (next.kind === "file") {
-					setFocusedExcerpt(null);
-					setSelectedFile(next.index);
-				} else setFocusedExcerpt(next.key);
-				requestFileFocus();
+			case "next-file":
+				moveFileFocus(1);
 				break;
-			}
+			case "previous-file":
+				moveFileFocus(-1);
+				break;
 			case "toggle-file-diff": {
 				if (!chapter) break;
 				// A standing quoted selection is what the reviewer is acting on, so Enter comments on
@@ -4558,6 +4451,9 @@ export function App({
 		page?.kind === "chapter"
 			? `Ch ${page.chapter.order}/${chapters.length} · ${page.chapter.title}`
 			: (page?.label ?? "revue");
+	const statusHints = showHelp ? [] : footerHints(keymapSurface, keymap);
+	const helpKeyLabel = formatKeymapKey(keymapHint("toggle-shortcut-help", keymap) ?? "?");
+	const quitKeyLabel = formatKeymapKey(keymapHint("quit", keymap) ?? "q");
 	const configIssuesNotice: StatusNotice | null =
 		keymapIssues.length > 0 && themeIssues.length > 0
 			? {
@@ -4606,10 +4502,7 @@ export function App({
 					onHover={(id) => {
 						if (menu.activeMenuId) menu.open(id);
 					}}
-					onToggle={(id) => {
-						chapterNavigationPrefix.current = null;
-						menu.toggle(id);
-					}}
+					onToggle={menu.toggle}
 					onClose={menu.close}
 				/>
 				{showChapterPanel || page?.kind === "comments" ? null : (
@@ -4843,11 +4736,12 @@ export function App({
 					/>
 				) : null}
 				{showHelp ? (
-					<HelpModal
+					<HelpSurface
+						surface={keymapSurface}
+						filter={helpFilter}
 						terminalWidth={width}
 						terminalHeight={height}
 						scrollRef={helpScroll}
-						onClose={() => setShowHelp(false)}
 						keymap={keymap}
 						issues={keymapIssues}
 						themeIssues={themeIssues}
@@ -4877,6 +4771,9 @@ export function App({
 					openThreads={openThreadCount}
 					viewMode={viewMode}
 					notice={statusNotice}
+					hints={statusHints}
+					helpKey={helpKeyLabel}
+					quitKey={quitKeyLabel}
 					terminalWidth={width}
 				/>
 			</box>

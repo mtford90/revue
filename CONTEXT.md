@@ -120,11 +120,12 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   from the composer footer keys and the right-click menu alike. A GitHub permalink is offered per
   side only when that side's endpoint is a pinned commit; unpinned sides are greyed out with the
   reason.
-- **Keybindings** — every shortcut derives from one typed keymap registry (handler, help overlay,
+- **Keybindings** — every shortcut derives from one typed keymap registry (handler, keys surface,
   menu hints, and CLI all read it). Reviewers override actions via hand-edited JSONC at
-  `~/.revue/keybindings.json`; escape, digits, and chord prefixes are reserved, and validation
-  drops just the broken entry with a surfaced warning. `revue keybindings` prints the effective
-  map.
+  `~/.revue/keybindings.json`; escape and digits are reserved, and validation drops just the broken
+  entry with a surfaced warning. Most actions carry several keys so that muscle memory from Vim,
+  `less`, the diff TUIs and plain arrow-key use all resolve; `revue keybindings` prints the
+  effective map, including the aliases the keys surface holds back.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes

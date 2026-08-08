@@ -32,6 +32,24 @@ const TINY_BAR_WIDTH = 40;
 
 export type StatusNotice = { text: string; tone: "success" | "error" };
 
+/**
+ * Hints shed whole from the right rather than truncating, because half a hint teaches nothing.
+ * Silent on a narrow bar: the segments to its left have already started shedding by then.
+ */
+export const hintText = (
+	hints: readonly { keys: string; label: string }[],
+	{ narrow, budget }: { narrow: boolean; budget: number },
+) => {
+	if (narrow) return "";
+	const kept: string[] = [];
+	for (const hint of hints) {
+		const next = [...kept, `${hint.keys} ${hint.label}`];
+		if (next.join(" · ").length + 1 > budget) break;
+		kept.push(`${hint.keys} ${hint.label}`);
+	}
+	return kept.length === 0 ? "" : ` ${kept.join(" · ")}`;
+};
+
 /** How much of the diff a partial narrative covers. Null at full depth: full is the baseline. */
 export type NarrativeCoverage = { label: string; narrated: number; total: number };
 
@@ -50,6 +68,9 @@ export function coverageSegment(
 	return ` ${coverage.label} · ${counts}${hunks} `;
 }
 
+/** What the bar names for the current surface: a few keys, and the pair that never leaves. */
+export type StatusHints = { keys: string; label: string }[];
+
 export function StatusBar({
 	context,
 	reviewedFiles,
@@ -58,6 +79,9 @@ export function StatusBar({
 	openThreads,
 	viewMode,
 	notice,
+	hints: hintList = [],
+	helpKey = "?",
+	quitKey = "q",
 	terminalWidth,
 }: {
 	context: string;
@@ -67,6 +91,9 @@ export function StatusBar({
 	openThreads: number;
 	viewMode: "patch" | "semantic";
 	notice: StatusNotice | null;
+	hints?: StatusHints;
+	helpKey?: string;
+	quitKey?: string;
 	terminalWidth: number;
 }) {
 	const theme = useTheme();
@@ -79,6 +106,24 @@ export function StatusBar({
 	const boundary = bar.indexOf("▱");
 	const filled = boundary === -1 ? bar : bar.slice(0, boundary);
 	const empty = boundary === -1 ? "" : bar.slice(boundary);
+	const filesText = tiny ? "" : ` ${reviewedFiles}/${totalFiles} files `;
+	const threadsText =
+		!narrow && openThreads > 0
+			? ` ${openThreads} ${openThreads === 1 ? "thread" : "threads"} │`
+			: "";
+	const viewText = narrow ? "" : ` ${viewMode === "patch" ? "Patch" : "Semantic"} │`;
+	const tailText = tiny ? ` ${helpKey} · ${quitKey} ` : ` ${helpKey} help · ${quitKey} quit `;
+	const spent =
+		" revue ".length +
+		(tiny ? 0 : context.length + 2) +
+		(wide ? bar.length + 1 : 0) +
+		filesText.length +
+		(coverageText?.length ?? 0) +
+		threadsText.length +
+		viewText.length +
+		tailText.length +
+		(arrows ? 4 : 0);
+	const hints = hintText(hintList, { narrow, budget: terminalWidth - spent });
 	return (
 		<box height={1} width="100%" flexShrink={0} flexDirection="row">
 			<text flexShrink={0} fg={theme.background} bg={theme.accent}>
@@ -116,11 +161,11 @@ export function StatusBar({
 					{empty}
 				</text>
 			) : null}
-			{tiny ? null : (
+			{filesText ? (
 				<text flexShrink={0} fg={theme.text} bg={theme.panel}>
-					{` ${reviewedFiles}/${totalFiles} files `}
+					{filesText}
 				</text>
-			)}
+			) : null}
 			{coverageText ? (
 				<text flexShrink={0} fg={theme.muted} bg={theme.panel}>
 					{coverageText}
@@ -142,25 +187,30 @@ export function StatusBar({
 					>
 						{` ${notice.text}`}
 					</text>
-				) : null}
+				) : (
+					// Hints yield the whole region to a notice rather than stacking beside it.
+					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
+						{hints}
+					</text>
+				)}
 			</box>
 			{arrows ? (
 				<text flexShrink={0} fg={theme.panelAlt}>
 					{LEFT_ARROW}
 				</text>
 			) : null}
-			{!narrow && openThreads > 0 ? (
+			{threadsText ? (
 				<text flexShrink={0} fg={theme.badgeModified} bg={theme.panelAlt}>
-					{` ${openThreads} ${openThreads === 1 ? "thread" : "threads"} │`}
+					{threadsText}
 				</text>
 			) : null}
-			{narrow ? null : (
+			{viewText ? (
 				<text flexShrink={0} fg={theme.muted} bg={theme.panelAlt}>
-					{` ${viewMode === "patch" ? "Patch" : "Semantic"} │`}
+					{viewText}
 				</text>
-			)}
+			) : null}
 			<text flexShrink={0} fg={theme.muted} bg={theme.panelAlt}>
-				{tiny ? " ? · q " : " ? help · q quit "}
+				{tailText}
 			</text>
 		</box>
 	);

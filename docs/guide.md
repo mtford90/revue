@@ -405,15 +405,23 @@ chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused 
 the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking chapter, file, or key-
 change content navigates without changing review state—only its checkbox toggles it.
 
-Navigation follows Vim/less conventions: `j`/`k` (or `↑`/`↓`) scroll by line · `d`/`u` or
-`Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
-scroll by page · `g`/`G` jump to the top/bottom · `]c`/`[c` move between chapters · `{`/`}` focus key
-changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · `c`/`e` collapse/expand
-all diffs · `a` jumps to the next unreviewed chapter · `w` opens the Files surface · `o` opens the
-Comments surface · `p` cycles path display · `s` shows/hides the sidebar · `y` copies the
-highlighted text · `Ctrl-y`/`Ctrl-g` copy the open thread's location/GitHub link · `F10` opens the
-menu · `?` toggles shortcut help · `Ctrl-r` (or File → Reload) reloads ·
-`q`/`esc` quits.
+Most actions answer to several keys, so muscle memory from Vim, `less`, the diff TUIs, the IDEs or
+plain arrow-key use lands on the right thing. `j`/`k`, `↑`/`↓`, or `Ctrl-n`/`Ctrl-p` scroll by line ·
+`d`/`u` or `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/
+`Page Up` scroll by page · `g`/`G`, `Home`/`End`, or `<`/`>` jump to the top/bottom · `,`/`.` move
+between pages · `{`/`}` or `F7`/`Shift-F7` focus key changes · `tab`/`shift-tab` or `J`/`K` focus
+files · `enter` toggles the focused diff · `c`/`e` collapse/expand all diffs · `a` jumps to the next
+unreviewed chapter · `w` opens the Files surface · `o` opens the Comments surface · `p` cycles path
+display · `s` shows/hides the sidebar · `x` marks the chapter reviewed, `f` or `v` the focused file ·
+`y` copies the highlighted text · `Ctrl-y`/`Ctrl-g` copy the open thread's location/GitHub link ·
+`F10` or `F9` opens the menu · `?` or `F1` toggles the keys surface · `Ctrl-r`/`F5` (or File →
+Reload) reloads · `q`/`esc` quits. The status bar names the few keys that matter where you are.
+
+`?` opens the keys surface: every action for the surface you are on under **Here**, everything that
+does not fire there dimmed under **Elsewhere** with the key that gets you to it. Type to filter by
+key, description or action id; `Esc` clears the filter, then closes. `revue keybindings` lists every
+alias, including the ones the surface holds back.
+
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
 or file display change, and switching Patch/Semantic carries the reviewer's relative position through
 the chapter.
@@ -440,12 +448,12 @@ collapsed files, and the main and chapter-panel scroll offsets. Saved threads lo
 
 ### Remapping shortcuts
 
-Every action listed in the help overlay or `revue keybindings` can be rebound in
+Every action listed on the keys surface or by `revue keybindings` can be rebound in
 `~/.revue/keybindings.json`, a JSONC file (`//` and `/* */` comments are stripped before
 parsing — trailing commas are not, so keep the JSON itself strict) of `"action-id": "key"` or
 `"action-id": ["key", "key"]` entries — an entry replaces that action's full default key list
 rather than adding to it. Ctrl-y/Ctrl-g (copy the open thread's location/GitHub link) are
-hardcoded outside the registry and cannot be rebound this way. The help overlay (`?`) shows each
+hardcoded outside the registry and cannot be rebound this way. The keys surface (`?`) shows each
 action's ID next to its keys, and:
 
 ```bash
@@ -453,22 +461,24 @@ revue keybindings          # every action, its description, default keys, and ef
 revue keybindings init     # write a commented starter template to ~/.revue/keybindings.json
 ```
 
-For example, to swap half-page scrolling onto `Ctrl-d`/`Ctrl-u`:
+For example, to reach the Comments surface with `C` as well as `o`:
 
 ```jsonc
 {
-  "half-page-down": "ctrl+d",
-  "half-page-up": "ctrl+u"
+  "toggle-comments": ["o", "C"]
 }
 ```
 
+Note that `o` is listed again. Because an entry replaces the action's full default key list, naming
+only `"C"` would take `o` away — so spell out every key you want to keep.
+
 Keys are lowercase named keys (`up`, `pageup`, `return`, `f1`–`f12`, …), a `ctrl+` prefix, a
 single-character literal, an uppercase letter for a shifted character (`G`, not `shift+g`), or a
-`shift+` prefix over a named/special key (`shift+tab`). `escape`, the raw `[`/`]` chord prefixes,
-and the digits `1`–`9` are reserved and cannot be bound; the `]c`/`[c` chapter-navigation chord
-itself is fixed. An invalid, unknown, or conflicting entry is dropped with a warning — surfaced in
-`revue keybindings`'s output and the TUI's footer/help overlay — while the rest of the file still
-applies.
+`shift+` prefix over a named/special key (`shift+tab`). Shifted letters and `{`/`}` pick up their
+`shift+` alias automatically, so a binding works whichever way a terminal reports the keystroke.
+`escape` and the digits `1`–`9` are reserved and cannot be bound. An invalid, unknown, or
+conflicting entry is dropped with a warning — surfaced in `revue keybindings`'s output and the TUI's
+footer and keys surface — while the rest of the file still applies.
 
 ### Custom themes
 
@@ -499,7 +509,7 @@ A custom file whose id matches a bundled theme shadows it in place (shown once, 
 "customised"); any other id is appended as a new theme. Validation is lenient and per-file: a
 malformed file, a missing `background`/`extends`, or an unknown `extends` drops the whole theme; a
 bad colour, syntax theme, or override slot drops just that key. Dropped entries and their reasons
-show up in `revue themes`'s Issues block and the TUI's footer/help overlay.
+show up in `revue themes`'s Issues block and the TUI's footer and keys surface.
 
 ```bash
 revue themes               # bundled + custom themes, grouped by appearance, plus any issues

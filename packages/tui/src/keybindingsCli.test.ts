@@ -2,18 +2,13 @@ import { afterAll, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	expandShiftAliases,
-	loadEffectiveKeymap,
-	mergeKeymap,
-	stripJsonComments,
-} from "./keybindings.ts";
+import { loadEffectiveKeymap, mergeKeymap, stripJsonComments } from "./keybindings.ts";
 import {
 	formatKeybindingsListing,
 	generateKeybindingsTemplate,
 	initKeybindingsFile,
 } from "./keybindingsCli.ts";
-import { KEYMAP } from "./keymap.ts";
+import { expandShiftAliases, KEYMAP } from "./keymap.ts";
 
 const tmpDirs: string[] = [];
 afterAll(async () => {
@@ -54,7 +49,7 @@ test("the listing shows every action's id, description, and effective keys", () 
 test("the listing flags an overridden action against its default", () => {
 	const { keymap } = mergeKeymap(KEYMAP, { quit: "z" });
 	const listing = formatKeybindingsListing(KEYMAP, keymap, []);
-	expect(listing).toMatch(/quit\s+z\s+Quit \(Esc also works\) \(overridden, default: q\)/);
+	expect(listing).toMatch(/quit\s+z\s+Quit \(Esc also works\) \(overridden, default: q\/Q\)/);
 });
 
 test("the listing shows the full default match set, not the display-only alias form", () => {
@@ -64,18 +59,19 @@ test("the listing shows the full default match set, not the display-only alias f
 });
 
 test("the listing does not flag an unchanged value as overridden once shift aliases are re-added", () => {
-	// comments-last's own default is ["G"]; mergeKeymap expands a verbatim "G" override to
-	// ["G", "shift+g"], which must not read as a change from the default.
-	const { keymap, issues } = mergeKeymap(KEYMAP, { "comments-last": "G" });
+	// Restating comments-last's own default verbatim expands "G" back to ["G", "shift+g"], which
+	// must not read as a change — the registry and the override go through the same expansion.
+	const { keymap, issues } = mergeKeymap(KEYMAP, { "comments-last": ["G", "end", ">"] });
 	expect(issues).toEqual([]);
 	const listing = formatKeybindingsListing(KEYMAP, keymap, []);
-	expect(listing).not.toMatch(/comments-last\s+G\s+.*overridden/);
+	expect(listing).not.toMatch(/comments-last\s+.*overridden/);
 });
 
-test("the listing marks chord actions as fixed and not rebindable", () => {
+test("the listing shows page navigation as an ordinary rebindable action", () => {
 	const listing = formatKeybindingsListing(KEYMAP, KEYMAP, []);
-	expect(listing).toMatch(/previous-page\s+\S+.*\(fixed, not rebindable\)/);
-	expect(listing).toMatch(/next-page\s+\S+.*\(fixed, not rebindable\)/);
+	expect(listing).toMatch(/previous-page\s+,/);
+	expect(listing).toMatch(/next-page\s+\./);
+	expect(listing).not.toContain("fixed, not rebindable");
 });
 
 test("the listing reports validation issues", () => {
@@ -86,14 +82,9 @@ test("the listing reports validation issues", () => {
 	expect(listing).toContain('not-a-real-action: unknown action "not-a-real-action"');
 });
 
-test("the template omits every chord action and includes every rebindable one", () => {
+test("the template includes every action, since every action is now rebindable", () => {
 	const template = generateKeybindingsTemplate(KEYMAP);
-	const chordActions = KEYMAP.filter((action) => action.context === "chord");
-	expect(chordActions.length).toBeGreaterThan(0);
-	for (const action of chordActions) expect(template).not.toContain(`"${action.id}"`);
-	for (const action of KEYMAP.filter((a) => a.context !== "chord")) {
-		expect(template).toContain(`"${action.id}"`);
-	}
+	for (const action of KEYMAP) expect(template).toContain(`"${action.id}"`);
 });
 
 test("the template's entries keep every validator-accepted key, including ctrl+ chords", () => {
@@ -114,7 +105,7 @@ test("uncommenting every template entry at once round-trips with no issues and r
 	const { keymap, issues } = await loadEffectiveKeymap(path);
 	expect(issues).toEqual([]);
 
-	for (const action of KEYMAP.filter((a) => a.context !== "chord")) {
+	for (const action of KEYMAP) {
 		const effective = keymap.find((candidate) => candidate.id === action.id);
 		expect(sameKeySet(effective?.keys ?? [], action.keys)).toBe(true);
 	}

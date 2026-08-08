@@ -46,6 +46,7 @@
 		"docs/plans/diff-package-refactor.md",
 		"docs/plans/narrative-depth-prd.md",
 		"docs/plans/narrative-depth.md",
+		"docs/proposals/",
 		"packages/diff-opentui/",
 		"packages/markdown-export/",
 		"packages/prep/",

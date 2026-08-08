@@ -1,6 +1,80 @@
 import { expect, test } from "bun:test";
-import { RUN_COMPARISON, RUN_SCOPE_MODE } from "@revue/types";
-import { PrepArgumentError, parseScopeRequest } from "./scope.ts";
+import { RUN_COMPARISON, RUN_ENDPOINT_KIND, RUN_SCOPE_MODE, type RunScope } from "@revue/types";
+import { PrepArgumentError, parseScopeRequest, rerunArgsFor } from "./scope.ts";
+
+const sha = "a".repeat(40);
+
+const committedScope = (
+	comparison: typeof RUN_COMPARISON.DIRECT | typeof RUN_COMPARISON.MERGE_BASE,
+	headRef: string,
+): RunScope => ({
+	mode: RUN_SCOPE_MODE.COMMITTED,
+	comparison,
+	base: { ref: "main", sha },
+	head: { ref: headRef, sha },
+	mergeBaseSha: sha,
+	oldEndpoint: { kind: RUN_ENDPOINT_KIND.COMMIT, revision: sha },
+	newEndpoint: { kind: RUN_ENDPOINT_KIND.COMMIT, revision: sha },
+});
+
+const workingTreeScope = (mode: typeof RUN_SCOPE_MODE.STAGED): RunScope => ({
+	mode,
+	comparison: RUN_COMPARISON.STAGED,
+	base: { ref: "HEAD", sha },
+	head: { ref: "HEAD", sha },
+	mergeBaseSha: sha,
+	oldEndpoint: { kind: RUN_ENDPOINT_KIND.COMMIT, revision: sha },
+	newEndpoint: { kind: RUN_ENDPOINT_KIND.INDEX_TREE, revision: sha },
+});
+
+test("rerunArgsFor round-trips a committed/direct scope through parseScopeRequest", () => {
+	const scope = committedScope(RUN_COMPARISON.DIRECT, "feature");
+	const args = rerunArgsFor(scope, { revueIgnore: [], session: ["*.lock"] });
+	expect(args).toEqual(["main..feature", "--ignore", "*.lock"]);
+	const request = parseScopeRequest(args ?? []);
+	expect(request).toMatchObject({
+		comparison: RUN_COMPARISON.DIRECT,
+		baseRef: scope.base.ref,
+		headRef: scope.head.ref,
+		explicitRefs: true,
+		ignorePatterns: ["*.lock"],
+	});
+});
+
+test("rerunArgsFor round-trips a committed/merge-base scope through parseScopeRequest", () => {
+	const scope = committedScope(RUN_COMPARISON.MERGE_BASE, "feature");
+	const args = rerunArgsFor(scope);
+	expect(args).toEqual(["--base", "main", "--compare", "feature"]);
+	const request = parseScopeRequest(args ?? []);
+	expect(request).toMatchObject({
+		comparison: RUN_COMPARISON.MERGE_BASE,
+		baseRef: scope.base.ref,
+		headRef: scope.head.ref,
+		explicitRefs: true,
+	});
+});
+
+test("rerunArgsFor round-trips a working-tree scope through parseScopeRequest", () => {
+	const scope = workingTreeScope(RUN_SCOPE_MODE.STAGED);
+	const args = rerunArgsFor(scope, { revueIgnore: [], session: [] });
+	expect(args).toEqual(["--ref", "staged", "--base", "HEAD"]);
+	const request = parseScopeRequest(args ?? []);
+	expect(request).toMatchObject({
+		mode: scope.mode,
+		baseRef: scope.base.ref,
+		explicitRefs: true,
+	});
+});
+
+test("rerunArgsFor returns null for a --pr run recorded as pull/<n>/head", () => {
+	const scope = committedScope(RUN_COMPARISON.MERGE_BASE, "pull/123/head");
+	expect(rerunArgsFor(scope)).toBeNull();
+});
+
+test("rerunArgsFor returns null for a --pr run recorded as owner/repo#n", () => {
+	const scope = committedScope(RUN_COMPARISON.MERGE_BASE, "octo/widgets#7");
+	expect(rerunArgsFor(scope)).toBeNull();
+});
 
 test("--pr with a number targets the origin pull head under merge-base comparison", () => {
 	const request = parseScopeRequest(["--pr", "123"]);

@@ -1,4 +1,4 @@
-import { RUN_COMPARISON, RUN_SCOPE_MODE, type RunScope } from "@revue/types";
+import { RUN_COMPARISON, RUN_SCOPE_MODE, type RunIgnoreInputs, type RunScope } from "@revue/types";
 
 export class PrepArgumentError extends Error {}
 
@@ -149,4 +149,26 @@ export function parseScopeRequest(args: string[]): ScopeRequest {
 		explicitRefs,
 		ignorePatterns: parsed.ignorePatterns,
 	};
+}
+
+// Matches the two label shapes parsePullRequest records as a --pr run's head.ref: neither is a
+// ref that git can resolve on its own, so a run recorded with one of these cannot be re-prepped.
+const PR_HEAD_LABEL_PATTERNS = [/^pull\/\d+\/head$/, /^[^/]+\/[^/]+#\d+$/];
+
+/** The prep arguments that reproduce a recorded scope, or null when the scope cannot round-trip (a --pr run). */
+export function rerunArgsFor(scope: RunScope, ignore?: RunIgnoreInputs): string[] | null {
+	if (
+		scope.mode === RUN_SCOPE_MODE.COMMITTED &&
+		PR_HEAD_LABEL_PATTERNS.some((pattern) => pattern.test(scope.head.ref))
+	) {
+		return null;
+	}
+	const ignoreArgs = (ignore?.session ?? []).flatMap((pattern) => ["--ignore", pattern]);
+	if (scope.mode !== RUN_SCOPE_MODE.COMMITTED) {
+		return ["--ref", scope.mode, "--base", scope.base.ref, ...ignoreArgs];
+	}
+	if (scope.comparison === RUN_COMPARISON.DIRECT) {
+		return [`${scope.base.ref}..${scope.head.ref}`, ...ignoreArgs];
+	}
+	return ["--base", scope.base.ref, "--compare", scope.head.ref, ...ignoreArgs];
 }

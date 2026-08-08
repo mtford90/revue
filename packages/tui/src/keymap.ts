@@ -68,6 +68,13 @@ const KEYMAP_DEF = [
 		section: "Menus",
 	},
 	{
+		id: "reload",
+		description: "Reload: re-prep the same scope and reopen the run",
+		keys: ["ctrl+r"],
+		context: "global",
+		section: "Menus",
+	},
+	{
 		id: "toggle-comments",
 		description: "Comments: every thread in one list · enter jumps to it",
 		keys: ["o"],

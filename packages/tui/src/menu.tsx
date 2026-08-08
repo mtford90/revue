@@ -116,6 +116,7 @@ export const buildAppMenus = ({
 	setLineNumbers,
 	setChangeMarkers,
 	requestQuit,
+	requestReload,
 	movePrevious,
 	moveNext,
 	moveNextUnreviewed,
@@ -154,6 +155,7 @@ export const buildAppMenus = ({
 	setLineNumbers: (visible: boolean) => void;
 	setChangeMarkers: (visible: boolean) => void;
 	requestQuit: () => void;
+	requestReload: () => void;
 	movePrevious: () => void;
 	moveNext: () => void;
 	moveNextUnreviewed: () => void;
@@ -166,7 +168,15 @@ export const buildAppMenus = ({
 	themeLabel: string;
 	keymap?: readonly KeymapAction[];
 }): Record<MenuId, MenuEntry[]> => ({
-	file: [{ kind: "item", label: "Quit", hint: keymapHint("quit", keymap), action: requestQuit }],
+	file: [
+		{
+			kind: "item",
+			label: "Reload",
+			hint: keymapHint("reload", keymap),
+			action: requestReload,
+		},
+		{ kind: "item", label: "Quit", hint: keymapHint("quit", keymap), action: requestQuit },
+	],
 	navigate: [
 		{
 			kind: "item",

@@ -2,6 +2,41 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.7.0](https://github.com/mtford90/revue/compare/v0.6.1...v0.7.0) (2026-08-08)
+
+
+### Features
+
+* add a reload action to the TUI ([9869e01](https://github.com/mtford90/revue/commit/9869e01741e771dabb2fff2e54a96906bfc73b3a))
+* carry review marks through a reload, minus the files that moved ([b8500b7](https://github.com/mtford90/revue/commit/b8500b76275681fa507e4972a21ed4f06083a05c))
+* carry review marks through a reload, minus the files that moved ([5521260](https://github.com/mtford90/revue/commit/55212603cc43c4fa17bcd2251a075d3e162f1ab5))
+* choose a light theme and a dark theme, and follow the terminal ([e95fb0b](https://github.com/mtford90/revue/commit/e95fb0be9249ed86352028162ef33cdc64d89d85))
+* comment on excerpt lines with their own anchor kind ([1f9a55f](https://github.com/mtford90/revue/commit/1f9a55f4a2daf91744055bf872a6608d50f6c074))
+* **diff:** colour quoted excerpt lines ([5fcd0b2](https://github.com/mtford90/revue/commit/5fcd0b23bfcc1a500d476a3ef83d17320bc58ad4))
+* **diff:** make excerpt gutters live like a diff line's ([518b17a](https://github.com/mtford90/revue/commit/518b17a3d98b73f34cf5d4193f50d248383ce0dc))
+* **diff:** plan and render context excerpt blocks ([a8f73ad](https://github.com/mtford90/revue/commit/a8f73adf9a751eeb26ed98cfdff1a42baaf5a85b))
+* **diff:** plan and render diagram blocks ([a7f179e](https://github.com/mtford90/revue/commit/a7f179e954d925c275061a0f3420c9caf8f70bb6))
+* **markdown-export:** state coverage in a partial export ([830d1ad](https://github.com/mtford90/revue/commit/830d1ade06f935618d61543b63a9655fd18a84f3))
+* narrative depth, context excerpts, and interludes ([40adb25](https://github.com/mtford90/revue/commit/40adb2500ef2d3dd8952c3a0ae5af838192ad69c))
+* **prep,tui:** freeze cited code off disk with revue context freeze ([7bc0c39](https://github.com/mtford90/revue/commit/7bc0c391dccf2e09ca1a7235f8bf3827818fe2ce))
+* **tui:** render interlude pages in the story sequence ([c1aad54](https://github.com/mtford90/revue/commit/c1aad54f0dfe3fb0569c587bc913a9f4509b3a58))
+* **tui:** render narration fences as code and diagrams ([9bc588e](https://github.com/mtford90/revue/commit/9bc588e29ce970f27c486f22ba647f0ec90ed0d4))
+* **tui:** select, copy and link excerpt lines ([9bfb024](https://github.com/mtford90/revue/commit/9bfb0246938ec0a36b3d5875fca29dfc29016f31))
+* **tui:** show cited excerpts in the chapter stream ([d1669de](https://github.com/mtford90/revue/commit/d1669dec3537c67c1224bd8dfa47c640efe114e6))
+* **tui:** state coverage for a zoomed-out narrative ([11ff53b](https://github.com/mtford90/revue/commit/11ff53b49606f35ce41674253819ce7eb220e8c1))
+* **tui:** yank chapter narration, with or without its reference ([f75b96a](https://github.com/mtford90/revue/commit/f75b96a252d4672f2a8389e30fe9d29c31bccd54))
+* **types,prep:** key coverage strictness on declared narrative depth ([43bd99e](https://github.com/mtford90/revue/commit/43bd99e6450d9ce8505d2735d420186c4c015bbc))
+* **types:** let a chapter cite ranges of unchanged code ([f8ef31a](https://github.com/mtford90/revue/commit/f8ef31aec0e4f58fb9c111e97851bb6d4039ba53))
+* widen the default keymap and replace the shortcut overlay with a keys surface ([a401e1e](https://github.com/mtford90/revue/commit/a401e1ede87b43c310ee2cd03feb322e26bf2063))
+
+
+### Bug Fixes
+
+* close defects the adversarial review found in narrative depth ([840ffd8](https://github.com/mtford90/revue/commit/840ffd814a06b55dcd59eb5e808b13c66939b651))
+* **diff:** reserve the sign slot for excerpt and diagram blocks ([96c732f](https://github.com/mtford90/revue/commit/96c732f9f6d58a927741ada6e10f9f934f31f12e))
+* **tui:** draw figures and say what prep left out ([292a37e](https://github.com/mtford90/revue/commit/292a37e6b09db6759baafabfd56aba4741aba55c))
+* **tui:** name skill drift on unrecognised chapters fields ([942ccde](https://github.com/mtford90/revue/commit/942ccde6f03aecb0fd5b1c69f6e60429bee75cf5))
+
 ## [0.6.1](https://github.com/mtford90/revue/compare/v0.6.0...v0.6.1) (2026-08-07)
 
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.0](https://github.com/mtford90/revue/compare/revuediff-v0.1.2...revuediff-v0.2.0) (2026-08-08)
+
+
+### Features
+
+* add a reload action to the TUI ([9869e01](https://github.com/mtford90/revue/commit/9869e01741e771dabb2fff2e54a96906bfc73b3a))
+* carry review marks through a reload, minus the files that moved ([b8500b7](https://github.com/mtford90/revue/commit/b8500b76275681fa507e4972a21ed4f06083a05c))
+* carry review marks through a reload, minus the files that moved ([5521260](https://github.com/mtford90/revue/commit/55212603cc43c4fa17bcd2251a075d3e162f1ab5))
+* choose a light theme and a dark theme, and follow the terminal ([e95fb0b](https://github.com/mtford90/revue/commit/e95fb0be9249ed86352028162ef33cdc64d89d85))
+* **diff:** colour quoted excerpt lines ([5fcd0b2](https://github.com/mtford90/revue/commit/5fcd0b23bfcc1a500d476a3ef83d17320bc58ad4))
+* **diff:** make excerpt gutters live like a diff line's ([518b17a](https://github.com/mtford90/revue/commit/518b17a3d98b73f34cf5d4193f50d248383ce0dc))
+* **diff:** plan and render context excerpt blocks ([a8f73ad](https://github.com/mtford90/revue/commit/a8f73adf9a751eeb26ed98cfdff1a42baaf5a85b))
+* **diff:** plan and render diagram blocks ([a7f179e](https://github.com/mtford90/revue/commit/a7f179e954d925c275061a0f3420c9caf8f70bb6))
+* narrative depth, context excerpts, and interludes ([40adb25](https://github.com/mtford90/revue/commit/40adb2500ef2d3dd8952c3a0ae5af838192ad69c))
+* widen the default keymap and replace the shortcut overlay with a keys surface ([a401e1e](https://github.com/mtford90/revue/commit/a401e1ede87b43c310ee2cd03feb322e26bf2063))
+
+
+### Bug Fixes
+
+* **diff:** reserve the sign slot for excerpt and diagram blocks ([96c732f](https://github.com/mtford90/revue/commit/96c732f9f6d58a927741ada6e10f9f934f31f12e))
+
 ## [0.1.2](https://github.com/mtford90/revue/compare/revuediff-v0.1.1...revuediff-v0.1.2) (2026-08-07)
 
 

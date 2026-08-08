@@ -155,6 +155,7 @@ import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
 import { mergeCustomThemes, type ThemeIssue } from "./themes.ts";
 import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
 import {
+	ALL_FILES_CHAPTER_ID,
 	chapterFilePaths,
 	isChapterReviewed,
 	isFileReviewed,
@@ -270,7 +271,6 @@ type Page =
 	| { kind: "files"; label: string; chapter: Chapter }
 	| { kind: "comments"; label: string };
 
-export const ALL_FILES_CHAPTER_ID = "__files__";
 const ALL_FILES_LABEL = "All files";
 const COMMENTS_PAGE_ID = "__comments__";
 const COMMENTS_PAGE: Page = { kind: "comments", label: "Comments" };

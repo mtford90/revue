@@ -410,8 +410,11 @@ way to pick up a `chapters.json` an agent just wrote, or new changes to the diff
 Reload never invokes the revue skill and never writes narration itself. Because runs are
 content-addressed, reloading unchanged content is a true no-op that keeps threads, progress, and
 position exactly as they were. Reloading changed content opens a new run: a new run key means the
-Story surface is gone until an agent re-narrates it, existing threads stay on disk under the old
-run and aren't shown, and review marks start fresh — the status bar's notice says which happened. A
+Story surface is gone until an agent re-narrates it, and existing threads stay on disk under the old
+run and aren't shown. Review marks carry over file by file — a file whose diff is untouched stays
+reviewed, while one you have edited since marking it comes back unreviewed, and so does any chapter
+holding it. Key-change ticks don't carry, since they answer questions about the old snapshot. The
+status bar's notice says which happened. A
 re-prep that fails (for example outside a Git repository, or against a scope Git can no longer
 resolve) leaves the current review untouched and reports the error in the same notice.
 Semantic mode is intentionally read-only. Key-change anchors and severity-tinted exact ranges work

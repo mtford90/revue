@@ -316,11 +316,21 @@ changes · `tab`/`shift-tab` focus files · `enter` toggles the focused diff · 
 all diffs · `a` jumps to the next unreviewed chapter · `w` opens the Files surface · `o` opens the
 Comments surface · `p` cycles path display · `s` shows/hides the sidebar · `y` copies the
 highlighted text · `Ctrl-y`/`Ctrl-g` copy the open thread's location/GitHub link · `F10` opens the
-menu · `?` toggles shortcut help ·
+menu · `?` toggles shortcut help · `Ctrl-r` (or File → Reload) reloads ·
 `q`/`esc` quits.
 Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
 or file display change, and switching Patch/Semantic carries the reviewer's relative position through
 the chapter.
+
+Reload re-preps the same scope and reopens the resulting run in place, without quitting revue — the
+way to pick up a `chapters.json` an agent just wrote, or new changes to the diff it's reviewing.
+Reload never invokes the revue skill and never writes narration itself. Because runs are
+content-addressed, reloading unchanged content is a true no-op that keeps threads, progress, and
+position exactly as they were. Reloading changed content opens a new run: a new run key means the
+Story surface is gone until an agent re-narrates it, existing threads stay on disk under the old
+run and aren't shown, and review marks start fresh — the status bar's notice says which happened. A
+re-prep that fails (for example outside a Git repository, or against a scope Git can no longer
+resolve) leaves the current review untouched and reports the error in the same notice.
 Semantic mode is intentionally read-only. Key-change anchors and severity-tinted exact ranges work
 in both views by source line number; Difftastic rows never become durable review anchors. Binary,
 symlink, mode-only, and content-identical metadata changes are described rather than passed off as

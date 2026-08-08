@@ -341,6 +341,33 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 	});
 });
 
+test("ctrl+r saves the session position and invokes onReload", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const sessions: ReviewSessionState[] = [];
+	let reloads = 0;
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			onSessionStateChange={(next) => sessions.push(next)}
+			onReload={() => (reloads += 1)}
+		/>,
+		{ width: 130, height: 30, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+
+	await act(async () => {
+		t.mockInput.pressKey("r", { ctrl: true });
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	expect(reloads).toBe(1);
+	expect(sessions.at(-1)).toMatchObject({ pageId: "chapter-1" });
+});
+
 test("the status bar carries progress, the view mode, and the help hints", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
 	await t.renderOnce();
@@ -885,7 +912,7 @@ test("the keymap floats over the review instead of replacing it", async () => {
 	let quits = 0;
 	const t = await testRender(<App file={file} onQuit={() => (quits += 1)} />, {
 		width: 110,
-		height: 60,
+		height: 61,
 		kittyKeyboard: true,
 	});
 	await t.renderOnce();

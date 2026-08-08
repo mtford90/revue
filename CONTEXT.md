@@ -103,7 +103,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   scaffolding.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
   hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
-  totals. Creation time and narration are deliberately excluded.
+  totals. Creation time and narration are deliberately excluded. Content-addressing means
+  re-preparing an unchanged scope reproduces the same runId, which is what makes the TUI's reload
+  action a true no-op when the reviewed content hasn't moved.
 - **Run key** — `sha256(runId + chapters)`, truncated for local persistence; a chapterless run
   hashes `runId` plus a chapterless sentinel so its progress keys on the snapshot alone. Review
   progress belongs to one pinned code snapshot narrated one specific way; changing either starts

@@ -2299,6 +2299,7 @@ export function App({
 	initialTheme = resolveTheme(undefined),
 	initialSyntaxTheme = initialTheme.syntaxTheme,
 	syntaxWarning,
+	initialNotice,
 	transparentSurfaces = false,
 	initialThreads = [],
 	threadActions,
@@ -2310,6 +2311,7 @@ export function App({
 	onPreferencesChange,
 	onThemeChange,
 	onQuit,
+	onReload,
 	keymap = KEYMAP,
 	keymapIssues = [],
 	customThemes = [],
@@ -2329,6 +2331,8 @@ export function App({
 	initialSyntaxTheme?: string;
 	/** A one-time native syntax fallback warning surfaced through the existing status bar. */
 	syntaxWarning?: string;
+	/** A transient status-bar notice for this mount, such as the outcome of the reload that produced it. */
+	initialNotice?: StatusNotice;
 	transparentSurfaces?: boolean;
 	initialThreads?: ReviewThread[];
 	threadActions?: ThreadActions;
@@ -2341,6 +2345,7 @@ export function App({
 	onPreferencesChange?: (next: Preferences) => void;
 	onThemeChange?: (next: Theme) => void;
 	onQuit?: () => void;
+	onReload?: () => void;
 	/** The registry merged with any `~/.revue/keybindings.json` overrides. */
 	keymap?: readonly KeymapAction[];
 	/** User keybinding entries dropped during the merge, surfaced in the footer and help overlay. */
@@ -2441,6 +2446,7 @@ export function App({
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 	// The nonce re-arms the timeout when the same text is copied twice running.
 	const [copyNotice, setCopyNotice] = useState<{ text: string; nonce: number } | null>(null);
+	const [mountNotice, setMountNotice] = useState<StatusNotice | null>(initialNotice ?? null);
 	const selectionFlashCleanup = useRef<(() => void) | null>(null);
 	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
@@ -2733,6 +2739,10 @@ export function App({
 		saveCurrentSession();
 		onQuit?.();
 	}
+	function reload() {
+		saveCurrentSession();
+		onReload?.();
+	}
 
 	useEffect(() => {
 		if (!loadFileLines || !chapter) return;
@@ -2892,6 +2902,12 @@ export function App({
 		const clear = setTimeout(() => setCopyNotice(null), COPY_NOTICE_MS);
 		return () => clearTimeout(clear);
 	}, [copyNotice]);
+
+	useEffect(() => {
+		if (!mountNotice) return;
+		const clear = setTimeout(() => setMountNotice(null), COPY_NOTICE_MS);
+		return () => clearTimeout(clear);
+	}, [mountNotice]);
 
 	useEffect(() => () => selectionFlashCleanup.current?.(), []);
 
@@ -3547,6 +3563,7 @@ export function App({
 		setLineNumbers: changeLineNumbers,
 		setChangeMarkers: changeChangeMarkers,
 		requestQuit: quit,
+		requestReload: reload,
 		movePrevious: () => movePage(-1),
 		moveNext: () => movePage(1),
 		moveNextUnreviewed,
@@ -3714,6 +3731,9 @@ export function App({
 				case "quit":
 					quit();
 					break;
+				case "reload":
+					reload();
+					break;
 				case "toggle-shortcut-help":
 					toggleShortcutHelp();
 					break;
@@ -3775,6 +3795,9 @@ export function App({
 			}
 			case "quit":
 				quit();
+				break;
+			case "reload":
+				reload();
 				break;
 			case "page-up":
 				pageScroll.current?.scrollBy(-1, "viewport");
@@ -3887,7 +3910,9 @@ export function App({
 			? { text: threadNotice, tone: "error" }
 			: copyNotice
 				? { text: copyNotice.text, tone: "success" }
-				: (configIssuesNotice ?? (syntaxWarning ? { text: syntaxWarning, tone: "error" } : null));
+				: (mountNotice ??
+					configIssuesNotice ??
+					(syntaxWarning ? { text: syntaxWarning, tone: "error" } : null));
 
 	return (
 		<ThemeProvider value={theme}>
@@ -4187,6 +4212,8 @@ export async function runApp(
 		/** The syntax theme highlights were already prepared for, before the terminal replied. */
 		initialSyntaxTheme?: string;
 		syntaxWarning?: string;
+		/** A transient status-bar notice for this mount, such as the outcome of the reload that produced it. */
+		initialNotice?: StatusNotice;
 		transparentSurfaces?: boolean;
 		onViewStateChange?: (next: ViewState) => void;
 		onSessionStateChange?: (next: ReviewSessionState) => void;
@@ -4201,15 +4228,15 @@ export async function runApp(
 		/** Custom theme files or keys dropped while loading. */
 		themeIssues?: readonly ThemeIssue[];
 	} = {},
-): Promise<void> {
+): Promise<"quit" | "reload"> {
 	const renderer = await createCliRenderer({ exitOnCtrlC: true });
 	const themeMode = await renderer.waitForThemeMode(THEME_MODE_TIMEOUT_MS).catch(() => null);
 	const initialTheme =
 		options.resolveInitialTheme?.(themeMode) ?? resolveTheme(undefined, themeMode);
 	const root = createRoot(renderer);
-	let quit = () => {};
-	const quitting = new Promise<void>((resolve) => {
-		quit = resolve;
+	let resolveOutcome: (outcome: "quit" | "reload") => void = () => {};
+	const outcome = new Promise<"quit" | "reload">((resolve) => {
+		resolveOutcome = resolve;
 	});
 
 	try {
@@ -4225,6 +4252,7 @@ export async function runApp(
 				initialTheme={initialTheme}
 				initialSyntaxTheme={options.initialSyntaxTheme}
 				syntaxWarning={options.syntaxWarning}
+				initialNotice={options.initialNotice}
 				transparentSurfaces={options.transparentSurfaces}
 				initialThreads={options.initialThreads}
 				threadActions={options.threadActions}
@@ -4234,14 +4262,15 @@ export async function runApp(
 				onSessionStateChange={options.onSessionStateChange}
 				onPreferencesChange={options.onPreferencesChange}
 				onThemeChange={options.onThemeChange}
-				onQuit={quit}
+				onQuit={() => resolveOutcome("quit")}
+				onReload={() => resolveOutcome("reload")}
 				keymap={options.keymap}
 				keymapIssues={options.keymapIssues}
 				customThemes={options.customThemes}
 				themeIssues={options.themeIssues}
 			/>,
 		);
-		await quitting;
+		return await outcome;
 	} finally {
 		root.unmount();
 		renderer.destroy();

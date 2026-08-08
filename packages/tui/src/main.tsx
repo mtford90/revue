@@ -14,6 +14,7 @@ import {
 	prepareRun,
 	ReviewCoverageError,
 	RunArtifactError,
+	rerunArgsFor,
 } from "@revue/prep";
 import { isBundledShikiThemeId, resolveTheme, type Theme } from "@revue/theme";
 import {
@@ -32,6 +33,7 @@ import { ChaptersFileError, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
+import type { StatusNotice } from "./statusBar.tsx";
 import { formatChapterlessSummary, formatSummary } from "./summary.ts";
 import {
 	defaultThemesDir,
@@ -52,7 +54,7 @@ import {
 	validateThreadsForRun,
 } from "./threads.ts";
 import { REVUE_VERSION } from "./version.ts";
-import { defaultStatePath, loadViewState, runKey } from "./viewState.ts";
+import { defaultStatePath, loadViewState, type ReviewSessionState, runKey } from "./viewState.ts";
 
 const HELP = `revue — narrative code review in your terminal
 
@@ -585,6 +587,42 @@ async function cmdShow(args: string[]): Promise<number> {
 	});
 }
 
+/** Re-preps the scope that produced `run`, or (a chapterless-only refresh, or a `--pr` run) just re-reads its directory. */
+async function reprepForReload(
+	run: Awaited<ReturnType<typeof loadReviewRun>>,
+	currentDirectory: string,
+	prepArgs: string[] | undefined,
+): Promise<{ directory: string } | { notice: StatusNotice }> {
+	const args = prepArgs ?? rerunArgsFor(run.manifest.scope, run.manifest.ignore);
+	if (!args) return { directory: currentDirectory };
+	try {
+		const prepared = await prepareRun(args, repositoryRootForRun(currentDirectory) ?? undefined);
+		return { directory: prepared.directory };
+	} catch (error) {
+		if (
+			error instanceof PrepError ||
+			error instanceof GitError ||
+			error instanceof RunArtifactError
+		) {
+			return { notice: { text: error.message, tone: "error" } };
+		}
+		throw error;
+	}
+}
+
+const reloadNotice = (
+	previous: Awaited<ReturnType<typeof loadReviewRun>>,
+	next: Awaited<ReturnType<typeof loadReviewRun>>,
+): StatusNotice => {
+	if (next.manifest.runId === previous.manifest.runId) {
+		return { text: "Reloaded — no changes", tone: "success" };
+	}
+	if (previous.chapters && !next.chapters) {
+		return { text: "Reloaded — diff changed, narration is stale", tone: "error" };
+	}
+	return { text: "Reloaded", tone: "success" };
+};
+
 async function showRun(
 	directory: string,
 	options: {
@@ -592,6 +630,8 @@ async function showRun(
 		check?: boolean;
 		transparentBg?: boolean;
 		theme: ThemeLoad;
+		/** The prep args `cmdDiff` parsed to launch this review, reused verbatim on every reload. */
+		prepArgs?: string[];
 	},
 ): Promise<number> {
 	const { customThemes, issues: themeIssues } = options.theme;
@@ -605,17 +645,6 @@ async function showRun(
 			error instanceof RunArtifactError ||
 			error instanceof ReviewCoverageError
 		) {
-			process.stderr.write(`${error.message}\n`);
-			return 1;
-		}
-		throw error;
-	}
-
-	let threads: ReviewThread[];
-	try {
-		threads = loadValidatedThreads(defaultThreadsPath(directory), run);
-	} catch (error) {
-		if (error instanceof ThreadStoreError) {
 			process.stderr.write(`${error.message}\n`);
 			return 1;
 		}
@@ -645,55 +674,104 @@ async function showRun(
 			import("./semantic.ts"),
 			import("./viewState.ts"),
 		]);
-	let syntaxWarning: string | undefined;
-	const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme, (warning) => {
-		syntaxWarning = warning;
-	});
-	const store = await openRunStateStore(defaultStatePath(), run.manifest.runId, run.chapters);
-	const threadStore = openThreadStore(defaultThreadsPath(directory), run.manifest.runId);
-	const repositoryRoot = repositoryRootForRun(directory);
-	const humanAuthor = resolveHumanAuthor(repositoryRoot);
-	const fileLineCache = new Map<string, Promise<string[] | null>>();
-	const loadFileLines = (path: string): Promise<string[] | null> => {
-		const cached = fileLineCache.get(path);
-		if (cached) return cached;
-		const entry = run.manifest.files.find((candidate) => candidate.path === path);
-		const promise =
-			entry?.newBlob && !entry.isBinary
-				? readFile(join(directory, "blobs", entry.newBlob), "utf8")
-						.then(splitFileLines)
-						.catch(() => null)
-				: Promise.resolve(null);
-		fileLineCache.set(path, promise);
-		return promise;
-	};
-	await runApp(run.chapters, {
-		diffFiles,
-		syntaxWarning,
-		loadSemanticDiff: () => generateSemanticDiff(run),
-		loadFileLines,
-		initialViewState: store.get(),
-		initialSessionState: store.getSession(),
-		initialPreferences: preferences,
-		keymap,
-		keymapIssues,
-		customThemes,
-		themeIssues,
-		resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance, customThemes),
-		initialSyntaxTheme: startupTheme.syntaxTheme,
-		transparentSurfaces,
-		onPreferencesChange: (next) => savePreferences(preferencesPath, next),
-		initialThreads: threads,
-		threadActions: threadStore,
-		humanAuthor,
-		permalinks: permalinkContextFor({
-			scope: run.manifest.scope,
-			remoteUrl: originRemoteUrl(repositoryRoot),
-		}),
-		onViewStateChange: (next) => store.set(next),
-		onSessionStateChange: (next) => store.setSession(next),
-	});
-	return 0;
+
+	let currentDirectory = directory;
+	let carriedSessionState: ReviewSessionState | undefined;
+	let notice: StatusNotice | undefined;
+
+	for (;;) {
+		let threads: ReviewThread[];
+		try {
+			threads = loadValidatedThreads(defaultThreadsPath(currentDirectory), run);
+		} catch (error) {
+			if (error instanceof ThreadStoreError) {
+				process.stderr.write(`${error.message}\n`);
+				return 1;
+			}
+			throw error;
+		}
+
+		let syntaxWarning: string | undefined;
+		const diffFiles = await preparePatch(run.patch, startupTheme.syntaxTheme, (warning) => {
+			syntaxWarning = warning;
+		});
+		const store = await openRunStateStore(defaultStatePath(), run.manifest.runId, run.chapters);
+		const threadStore = openThreadStore(defaultThreadsPath(currentDirectory), run.manifest.runId);
+		const repositoryRoot = repositoryRootForRun(currentDirectory);
+		const humanAuthor = resolveHumanAuthor(repositoryRoot);
+		const fileLineCache = new Map<string, Promise<string[] | null>>();
+		const loadFileLines = (path: string): Promise<string[] | null> => {
+			const cached = fileLineCache.get(path);
+			if (cached) return cached;
+			const entry = run.manifest.files.find((candidate) => candidate.path === path);
+			const promise =
+				entry?.newBlob && !entry.isBinary
+					? readFile(join(currentDirectory, "blobs", entry.newBlob), "utf8")
+							.then(splitFileLines)
+							.catch(() => null)
+					: Promise.resolve(null);
+			fileLineCache.set(path, promise);
+			return promise;
+		};
+		const storedSession = store.getSession();
+		const hasSavedPosition = Object.keys(storedSession.pages).length > 0;
+
+		const outcome = await runApp(run.chapters, {
+			diffFiles,
+			syntaxWarning,
+			initialNotice: notice,
+			loadSemanticDiff: () => generateSemanticDiff(run),
+			loadFileLines,
+			initialViewState: store.get(),
+			initialSessionState: hasSavedPosition ? storedSession : carriedSessionState,
+			initialPreferences: preferences,
+			keymap,
+			keymapIssues,
+			customThemes,
+			themeIssues,
+			resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance, customThemes),
+			initialSyntaxTheme: startupTheme.syntaxTheme,
+			transparentSurfaces,
+			onPreferencesChange: (next) => savePreferences(preferencesPath, next),
+			initialThreads: threads,
+			threadActions: threadStore,
+			humanAuthor,
+			permalinks: permalinkContextFor({
+				scope: run.manifest.scope,
+				remoteUrl: originRemoteUrl(repositoryRoot),
+			}),
+			onViewStateChange: (next) => store.set(next),
+			onSessionStateChange: (next) => {
+				store.setSession(next);
+				carriedSessionState = next;
+			},
+		});
+
+		if (outcome === "quit") return 0;
+
+		const repreped = await reprepForReload(run, currentDirectory, options.prepArgs);
+		if ("notice" in repreped) {
+			notice = repreped.notice;
+			continue;
+		}
+		currentDirectory = repreped.directory;
+
+		const previousRun = run;
+		try {
+			run = await loadReviewRun(currentDirectory);
+		} catch (error) {
+			if (
+				error instanceof ChaptersFileError ||
+				error instanceof RunArtifactError ||
+				error instanceof ReviewCoverageError
+			) {
+				notice = { text: error.message, tone: "error" };
+				continue;
+			}
+			throw error;
+		}
+		notice = reloadNotice(previousRun, run);
+	}
 }
 
 async function cmdDiff(args: string[]): Promise<number> {
@@ -740,7 +818,12 @@ async function cmdDiff(args: string[]): Promise<number> {
 		throw error;
 	}
 	process.stderr.write(`${prepSummary(run)}\n${run.directory}\n`);
-	return showRun(run.directory, { requestedTheme, transparentBg, theme: themeLoad.theme });
+	return showRun(run.directory, {
+		requestedTheme,
+		transparentBg,
+		theme: themeLoad.theme,
+		prepArgs,
+	});
 }
 
 const SKILL_HELP = `usage: revue skill install [--user]

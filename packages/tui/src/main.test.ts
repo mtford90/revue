@@ -729,6 +729,34 @@ test("show names its themes, including custom ones, and refuses an unknown one b
 	}
 });
 
+test("show validates each half of the light/dark pair, and only --theme may say auto", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-theme-pair-"));
+	try {
+		const directory = await copySampleRun(root);
+
+		const pair = await run(
+			root,
+			["show", directory, "--theme-light", "ayu-light", "--theme-dark", "nord", "--check"],
+			{ HOME: root },
+		);
+		expect(pair.exitCode).toBe(0);
+		expect(pair.stdout).toContain("run is valid");
+
+		const unknownHalf = await run(root, ["show", directory, "--theme-dark", "solarised-dark"], {
+			HOME: root,
+		});
+		expect(unknownHalf).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(unknownHalf.stderr).toContain("unknown theme: solarised-dark");
+
+		// A half names one theme; only --theme defers to the terminal.
+		const autoHalf = await run(root, ["show", directory, "--theme-light", "auto"], { HOME: root });
+		expect(autoHalf).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(autoHalf.stderr).toContain("unknown theme: auto");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("show resolves a custom theme by id from ~/.revue/themes", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-custom-theme-"));
 	try {

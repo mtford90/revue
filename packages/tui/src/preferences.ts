@@ -8,7 +8,10 @@ import { PATH_DISPLAY_MODES } from "./pathDisplay.ts";
 export type FileDisplayPreference = "all" | "focused";
 
 const PreferencesSchema = z.object({
+	/** A pinned theme id, or `auto` to follow the terminal using the light/dark pair below. */
 	themeId: z.string().optional(),
+	lightThemeId: z.string().optional(),
+	darkThemeId: z.string().optional(),
 	transparentBackground: z.boolean().optional(),
 	indexExpanded: z.boolean().optional(),
 	sidebarPreference: z.enum(["auto", "shown", "hidden"]).optional(),

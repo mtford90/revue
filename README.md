@@ -140,6 +140,8 @@ the code it points at. Quoted lines comment like any other line.
 
 Every shortcut can be remapped in `~/.revue/keybindings.json`; the help overlay (`?`) shows each
 action's ID alongside its keys. `revue keybindings init` writes a commented starter file.
+Themes follow the terminal: keep a light theme and a dark theme, and Revue paints whichever the
+terminal's background asks for, switching with it mid-review. Press `t` to pick both, or pin one.
 Themes can be customised too, deriving from a bundled palette in `~/.revue/themes/*.json`;
 `revue themes init <name>` writes a commented starter file.
 

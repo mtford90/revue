@@ -19,7 +19,13 @@ import {
 	RunArtifactError,
 	rerunArgsFor,
 } from "@revue/prep";
-import { isBundledShikiThemeId, resolveTheme, type Theme } from "@revue/theme";
+import {
+	followsTerminal,
+	isBundledShikiThemeId,
+	resolveThemeChoice,
+	type Theme,
+	type ThemeChoice,
+} from "@revue/theme";
 import {
 	excerptRangeLabel,
 	type ReviewThread,
@@ -98,13 +104,18 @@ runs without a chapters.json open as a flat file-by-file diff.
 
 const SHOW_HELP = `usage: revue show <run-directory> [--check]
                    [--theme <name> | --theme auto | --theme list]
-                   [--transparent-bg]`;
+                   [--theme-light <name>] [--theme-dark <name>]
+                   [--transparent-bg]
+
+By default Revue follows the terminal's own background, painting the
+--theme-light or --theme-dark theme. --theme <name> pins one regardless.`;
 const DIFF_HELP = `usage: revue diff [main | main feature | main..feature | main...feature]
                   [--base <ref>] [--compare <ref>]
                   [--pr <number | github-pull-request-url>]
                   [--ref committed|staged|unstaged|work]
                   [--ignore <gitignore-pattern>]...
                   [--theme <name> | --theme auto] [--transparent-bg]
+                  [--theme-light <name>] [--theme-dark <name>]
 
 Preps the requested scope and opens it immediately as a flat diff — no chapters required.
 The run directory is printed to stderr so agents can target it with revue threads.`;
@@ -659,23 +670,43 @@ type ThemeLoad = { customThemes: Theme[]; issues: ThemeIssue[] };
 const UNKNOWN_THEME_HINT =
 	"Run `revue show <run-directory> --theme list` or `revue themes` for details.";
 
+/** The theme ids one invocation named, before they are known to exist. */
+type RequestedThemes = {
+	/** `--theme`: a pinned id, or `auto` to follow the terminal. */
+	themeId?: string;
+	/** `--theme-light` / `--theme-dark`: the halves the terminal chooses between. */
+	lightThemeId?: string;
+	darkThemeId?: string;
+};
+
+/** Which half of a theme choice each command-line option fills. */
+const THEME_OPTION_SLOTS: Record<string, keyof RequestedThemes | undefined> = {
+	"--theme": "themeId",
+	"--theme-light": "lightThemeId",
+	"--theme-dark": "darkThemeId",
+};
+
+/** The first requested id that names no theme. Only `--theme` may say `auto`; a half may not. */
+const unknownThemeId = (requested: RequestedThemes, customThemes: readonly Theme[]) => {
+	const known = (themeId: string) =>
+		isBundledShikiThemeId(themeId) || customThemes.some((theme) => theme.id === themeId);
+	const pinned = followsTerminal(requested.themeId) ? undefined : requested.themeId;
+	return [pinned, requested.lightThemeId, requested.darkThemeId].find(
+		(themeId) => themeId !== undefined && !known(themeId),
+	);
+};
+
 /**
- * Loads custom themes (a cheap directory read) and, when a theme id was requested, validates it
- * against the merged bundled/custom set before any run loading or git prep — so an unknown theme
- * fails fast rather than after paying for work whose result is about to be discarded.
+ * Loads custom themes (a cheap directory read) and validates every requested id against the
+ * merged bundled/custom set before any run loading or git prep — so an unknown theme fails fast
+ * rather than after paying for work whose result is about to be discarded.
  */
 async function loadAndValidateTheme(
-	requestedTheme: string | undefined,
+	requested: RequestedThemes,
 ): Promise<{ theme: ThemeLoad } | { error: string }> {
 	const { themes: customThemes, issues } = await loadCustomThemes(defaultThemesDir());
-	if (
-		requestedTheme &&
-		requestedTheme !== "auto" &&
-		!isBundledShikiThemeId(requestedTheme) &&
-		!customThemes.some((theme) => theme.id === requestedTheme)
-	) {
-		return { error: `unknown theme: ${requestedTheme}\n${UNKNOWN_THEME_HINT}\n` };
-	}
+	const unknown = unknownThemeId(requested, customThemes);
+	if (unknown) return { error: `unknown theme: ${unknown}\n${UNKNOWN_THEME_HINT}\n` };
 	return { theme: { customThemes, issues } };
 }
 
@@ -686,7 +717,11 @@ async function cmdShow(args: string[]): Promise<number> {
 	}
 	let options: CommandOptions;
 	try {
-		options = parseCommandOptions(args, ["--theme"], ["--check", "--transparent-bg"]);
+		options = parseCommandOptions(
+			args,
+			["--theme", "--theme-light", "--theme-dark"],
+			["--check", "--transparent-bg"],
+		);
 	} catch (error) {
 		process.stderr.write(
 			`${error instanceof Error ? error.message : String(error)}\n${SHOW_HELP}\n`,
@@ -705,13 +740,18 @@ async function cmdShow(args: string[]): Promise<number> {
 		process.stderr.write(`${SHOW_HELP}\n`);
 		return 1;
 	}
-	const themeLoad = await loadAndValidateTheme(requestedTheme);
+	const requestedThemes: RequestedThemes = {
+		themeId: requestedTheme,
+		lightThemeId: options.values.get("--theme-light"),
+		darkThemeId: options.values.get("--theme-dark"),
+	};
+	const themeLoad = await loadAndValidateTheme(requestedThemes);
 	if ("error" in themeLoad) {
 		process.stderr.write(themeLoad.error);
 		return 1;
 	}
 	return showRun(directory, {
-		requestedTheme,
+		requestedThemes,
 		check: options.booleans.has("--check"),
 		transparentBg: options.booleans.has("--transparent-bg"),
 		theme: themeLoad.theme,
@@ -757,7 +797,7 @@ const reloadNotice = (
 async function showRun(
 	directory: string,
 	options: {
-		requestedTheme?: string;
+		requestedThemes?: RequestedThemes;
 		check?: boolean;
 		transparentBg?: boolean;
 		theme: ThemeLoad;
@@ -792,11 +832,15 @@ async function showRun(
 	const preferencesPath = defaultPreferencesPath();
 	const preferences = await loadPreferences(preferencesPath);
 	const { keymap, issues: keymapIssues } = await loadEffectiveKeymap(defaultKeybindingsPath());
-	const themeId = options.requestedTheme ?? preferences.themeId;
+	const themeChoice: ThemeChoice = {
+		themeId: options.requestedThemes?.themeId ?? preferences.themeId,
+		lightThemeId: options.requestedThemes?.lightThemeId ?? preferences.lightThemeId,
+		darkThemeId: options.requestedThemes?.darkThemeId ?? preferences.darkThemeId,
+	};
 	const transparentSurfaces = options.transparentBg || preferences.transparentBackground === true;
 	// The terminal has not reported its own background yet, so highlight against the theme the
 	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
-	const startupTheme = resolveTheme(themeId, null, customThemes);
+	const startupTheme = resolveThemeChoice(themeChoice, null, customThemes);
 
 	const [
 		{ runApp },
@@ -874,7 +918,7 @@ async function showRun(
 			keymapIssues,
 			customThemes,
 			themeIssues,
-			resolveInitialTheme: (appearance) => resolveTheme(themeId, appearance, customThemes),
+			initialThemeChoice: themeChoice,
 			initialSyntaxTheme: startupTheme.syntaxTheme,
 			transparentSurfaces,
 			onPreferencesChange: (next) => savePreferences(preferencesPath, next),
@@ -932,24 +976,25 @@ async function cmdDiff(args: string[]): Promise<number> {
 		return 0;
 	}
 	const prepArgs: string[] = [];
-	let requestedTheme: string | undefined;
+	const requestedThemes: RequestedThemes = {};
 	let transparentBg = false;
 	for (let index = 0; index < args.length; index++) {
 		const argument = args[index];
-		if (argument === "--theme") {
+		const slot = THEME_OPTION_SLOTS[argument ?? ""];
+		if (slot) {
 			const value = args[++index];
 			if (!value || value.startsWith("--")) {
-				process.stderr.write(`--theme requires a value\n${DIFF_HELP}\n`);
+				process.stderr.write(`${argument} requires a value\n${DIFF_HELP}\n`);
 				return 1;
 			}
-			requestedTheme = value;
+			requestedThemes[slot] = value;
 		} else if (argument === "--transparent-bg") {
 			transparentBg = true;
 		} else if (argument !== undefined) {
 			prepArgs.push(argument);
 		}
 	}
-	const themeLoad = await loadAndValidateTheme(requestedTheme);
+	const themeLoad = await loadAndValidateTheme(requestedThemes);
 	if ("error" in themeLoad) {
 		process.stderr.write(themeLoad.error);
 		return 1;
@@ -971,7 +1016,7 @@ async function cmdDiff(args: string[]): Promise<number> {
 	}
 	process.stderr.write(`${prepSummary(run)}\n${run.directory}\n`);
 	return showRun(run.directory, {
-		requestedTheme,
+		requestedThemes,
 		transparentBg,
 		theme: themeLoad.theme,
 		prepArgs,

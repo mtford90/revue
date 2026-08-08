@@ -43,9 +43,13 @@ import {
 } from "@revue/diff-opentui";
 import {
 	type Appearance,
-	resolveTheme,
+	FOLLOW_TERMINAL,
+	followsTerminal,
+	pairedThemeId,
+	resolveThemeChoice,
 	THEMES,
 	type Theme,
+	type ThemeChoice,
 	withTransparentSurfaces,
 } from "@revue/theme";
 import {
@@ -191,6 +195,12 @@ import {
 const PANEL_INDEX_MAX_ROWS = 8;
 /** The chapter viewport scrollbox pads its content by one row. */
 const VIEWPORT_TOP_PADDING = 1;
+
+/** Fill the half of a followed pair that matches a theme's own appearance. */
+const withThemeHalf = (choice: ThemeChoice, theme: Theme): ThemeChoice =>
+	theme.appearance === "light"
+		? { ...choice, lightThemeId: theme.id }
+		: { ...choice, darkThemeId: theme.id };
 
 /**
  * Slots pure-custom themes into the picker's list right after the bundled/shadowed entries that
@@ -2608,8 +2618,10 @@ export function App({
 	initialViewState = emptyViewState(),
 	initialSessionState = { pages: {} },
 	initialPreferences = {},
-	initialTheme = resolveTheme(undefined),
-	initialSyntaxTheme = initialTheme.syntaxTheme,
+	initialThemeChoice = {},
+	initialAppearance = null,
+	subscribeAppearance,
+	initialSyntaxTheme,
 	syntaxWarning,
 	initialNotice,
 	transparentSurfaces = false,
@@ -2645,7 +2657,12 @@ export function App({
 	initialViewState?: ViewState;
 	initialSessionState?: ReviewSessionState;
 	initialPreferences?: Preferences;
-	initialTheme?: Theme;
+	/** The pinned theme, or the light/dark pair the terminal chooses between. */
+	initialThemeChoice?: ThemeChoice;
+	/** The terminal's reported background, or null while it has said nothing. */
+	initialAppearance?: Appearance | null;
+	/** Later terminal light/dark reports, so a followed theme keeps up mid-review. */
+	subscribeAppearance?: (listener: (appearance: Appearance) => void) => () => void;
 	/** The syntax theme the caller already prepared highlights for. */
 	initialSyntaxTheme?: string;
 	/** A one-time native syntax fallback warning surfaced through the existing status bar. */
@@ -2676,11 +2693,27 @@ export function App({
 }) {
 	const renderer = useRenderer();
 	const { width, height } = useTerminalDimensions();
-	const [chosenTheme, setChosenTheme] = useState(initialTheme);
+	const [themeChoice, setThemeChoice] = useState(initialThemeChoice);
+	const [appearance, setAppearance] = useState(initialAppearance);
 	const { themes: pickerThemes, customIds: customThemeIds } = useMemo(() => {
 		const merged = mergeCustomThemes(customThemes);
 		return { themes: orderThemesForPicker(merged.themes), customIds: merged.customIds };
 	}, [customThemes]);
+	const chosenTheme = useMemo(
+		() => resolveThemeChoice(themeChoice, appearance, customThemes),
+		[themeChoice, appearance, customThemes],
+	);
+	const followTerminal = followsTerminal(themeChoice.themeId);
+	// A followed pair keeps both halves marked, so the picker shows what the other appearance holds.
+	const activeThemeIds = useMemo(
+		() =>
+			new Set(
+				followTerminal
+					? [pairedThemeId(themeChoice, "light"), pairedThemeId(themeChoice, "dark")]
+					: [chosenTheme.id],
+			),
+		[followTerminal, themeChoice, chosenTheme.id],
+	);
 	const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
 	const shownTheme = previewTheme ?? chosenTheme;
@@ -2825,7 +2858,9 @@ export function App({
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
-	const [preparedSyntaxTheme, setPreparedSyntaxTheme] = useState(initialSyntaxTheme);
+	const [preparedSyntaxTheme, setPreparedSyntaxTheme] = useState(
+		initialSyntaxTheme ?? chosenTheme.syntaxTheme,
+	);
 	const diffTheme =
 		preparedSyntaxTheme === theme.syntaxTheme
 			? theme
@@ -3399,6 +3434,10 @@ export function App({
 		const clear = setTimeout(() => setMountNotice(null), COPY_NOTICE_MS);
 		return () => clearTimeout(clear);
 	}, [mountNotice]);
+
+	// A terminal that switches between light and dark mid-review reports it, so a followed theme
+	// changes with it rather than waiting for the next launch.
+	useEffect(() => subscribeAppearance?.(setAppearance), [subscribeAppearance]);
 
 	useEffect(() => () => selectionFlashCleanup.current?.(), []);
 
@@ -4025,14 +4064,39 @@ export function App({
 		setThemePicker({ selected });
 		setPreviewTheme(pickerThemes[selected] ?? null);
 	}
+	function changeThemeChoice(next: ThemeChoice) {
+		setThemeChoice(next);
+		updatePreferences(next);
+		onThemeChange?.(resolveThemeChoice(next, appearance, customThemes));
+	}
+	/**
+	 * While following the terminal a pick fills the half matching its own appearance, so the
+	 * reviewer sets both halves from one list; pinned, it replaces the single theme.
+	 */
 	function chooseTheme(index: number) {
 		const next = pickerThemes[index];
 		if (!next) return;
-		setChosenTheme(next);
+		changeThemeChoice(
+			followTerminal ? withThemeHalf(themeChoice, next) : { ...themeChoice, themeId: next.id },
+		);
 		setPreviewTheme(null);
 		setThemePicker(null);
-		updatePreferences({ themeId: next.id });
-		onThemeChange?.(next);
+		// Picking the half the terminal is not currently asking for leaves the screen unchanged,
+		// so the status bar says which half moved.
+		if (followTerminal && next.appearance !== chosenTheme.appearance) {
+			setMountNotice({
+				text: `${next.label} is now the ${next.appearance} theme`,
+				tone: "success",
+			});
+		}
+	}
+	function toggleFollowTerminal() {
+		// Pinning keeps what is on screen; following restores the pair, leaving both halves as set.
+		changeThemeChoice({
+			...themeChoice,
+			themeId: followTerminal ? chosenTheme.id : FOLLOW_TERMINAL,
+		});
+		setPreviewTheme(null);
 	}
 	function closeThemePicker() {
 		setThemePicker(null);
@@ -4261,6 +4325,7 @@ export function App({
 			if (name === "escape" || name === "q") closeThemePicker();
 			else if (name === "up" || name === "k") moveThemePreview(-1);
 			else if (name === "down" || name === "j") moveThemePreview(1);
+			else if (name === "a") toggleFollowTerminal();
 			else if (name === "return") chooseTheme(themePicker.selected);
 			return;
 		}
@@ -4795,10 +4860,12 @@ export function App({
 							themes={pickerThemes}
 							customThemeIds={customThemeIds}
 							selectedIndex={themePicker.selected}
-							activeThemeId={chosenTheme.id}
+							activeThemeIds={activeThemeIds}
+							followTerminal={followTerminal}
 							terminalWidth={width}
 							terminalHeight={height}
 							onPick={chooseTheme}
+							onToggleFollowTerminal={toggleFollowTerminal}
 						/>
 					</>
 				) : null}
@@ -4837,8 +4904,8 @@ export async function runApp(
 		threadActions?: ThreadActions;
 		humanAuthor?: ThreadAuthor;
 		permalinks?: PermalinkContext | null;
-		/** Resolve the startup theme once the terminal has reported its own background. */
-		resolveInitialTheme?: (appearance: Appearance | null) => Theme;
+		/** The pinned theme, or the light/dark pair the terminal chooses between. */
+		initialThemeChoice?: ThemeChoice;
 		/** The syntax theme highlights were already prepared for, before the terminal replied. */
 		initialSyntaxTheme?: string;
 		syntaxWarning?: string;
@@ -4861,9 +4928,11 @@ export async function runApp(
 ): Promise<"quit" | "reload"> {
 	const renderer = await createCliRenderer({ exitOnCtrlC: true });
 	const themeMode = await renderer.waitForThemeMode(THEME_MODE_TIMEOUT_MS).catch(() => null);
-	const initialTheme =
-		options.resolveInitialTheme?.(themeMode) ?? resolveTheme(undefined, themeMode);
 	const root = createRoot(renderer);
+	const subscribeAppearance = (listener: (appearance: Appearance) => void) => {
+		renderer.on("theme_mode", listener);
+		return () => renderer.off("theme_mode", listener);
+	};
 	let resolveOutcome: (outcome: "quit" | "reload") => void = () => {};
 	const outcome = new Promise<"quit" | "reload">((resolve) => {
 		resolveOutcome = resolve;
@@ -4880,7 +4949,9 @@ export async function runApp(
 				initialViewState={options.initialViewState}
 				initialSessionState={options.initialSessionState}
 				initialPreferences={options.initialPreferences}
-				initialTheme={initialTheme}
+				initialThemeChoice={options.initialThemeChoice}
+				initialAppearance={themeMode}
+				subscribeAppearance={subscribeAppearance}
 				initialSyntaxTheme={options.initialSyntaxTheme}
 				syntaxWarning={options.syntaxWarning}
 				initialNotice={options.initialNotice}

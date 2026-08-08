@@ -44,9 +44,13 @@ const defaultTheme = (appearance: Appearance | null | undefined): Theme => {
 const extraThemeById = (extraThemes: readonly Theme[] | undefined, themeId: string) =>
 	extraThemes?.find((theme) => theme.id === themeId);
 
+/** Look one theme up by id; a custom theme shadows the bundled theme sharing its id. */
+const namedTheme = (themeId: string, extraThemes: readonly Theme[] | undefined) =>
+	extraThemeById(extraThemes, themeId) ?? themeById(themeId);
+
 /**
- * Resolve a named theme; absence uses Ayu Dark while `auto` follows the terminal.
- * `extraThemes` shadow bundled themes that share an id, but never satisfy `auto` or absence.
+ * Resolve a named theme; absence uses Ayu Dark, and an unknown name the Ayu theme for the
+ * terminal's appearance. `extraThemes` shadow bundled themes that share an id.
  */
 export const resolveTheme = (
 	requested: string | undefined,
@@ -54,8 +58,57 @@ export const resolveTheme = (
 	extraThemes?: readonly Theme[],
 ): Theme => {
 	if (requested === undefined) return defaultTheme(null);
-	if (requested === "auto") return defaultTheme(appearance);
-	return extraThemeById(extraThemes, requested) ?? themeById(requested) ?? defaultTheme(appearance);
+	return namedTheme(requested, extraThemes) ?? defaultTheme(appearance);
+};
+
+/** The id standing for "whichever half of the pair matches the terminal" rather than one theme. */
+export const FOLLOW_TERMINAL = "auto";
+
+/**
+ * What the reviewer painted with: either one pinned theme, or a light/dark pair the terminal's
+ * own background chooses between.
+ */
+export type ThemeChoice = {
+	/** A pinned theme id; `auto` or absence follows the terminal instead. */
+	themeId?: string;
+	/** The halves the terminal chooses between; absence uses the Ayu default for that appearance. */
+	lightThemeId?: string;
+	darkThemeId?: string;
+};
+
+/** The pinned id, or nothing when the choice defers to the terminal. */
+const pinnedThemeId = (themeId: string | undefined): string | undefined =>
+	themeId === undefined || themeId === FOLLOW_TERMINAL ? undefined : themeId;
+
+/** Whether a stored or requested theme id follows the terminal rather than pinning one theme. */
+export const followsTerminal = (themeId: string | undefined): boolean =>
+	pinnedThemeId(themeId) === undefined;
+
+/** The half of the pair the terminal asks for; an unreported appearance takes the dark half. */
+export const pairedThemeId = (
+	choice: ThemeChoice,
+	appearance: Appearance | null | undefined,
+): string =>
+	appearance === "light"
+		? (choice.lightThemeId ?? DEFAULT_LIGHT_THEME_ID)
+		: (choice.darkThemeId ?? DEFAULT_DARK_THEME_ID);
+
+/**
+ * The theme to paint with. A pinned theme wins outright; otherwise the terminal's appearance
+ * picks a half of the pair. Ids that no longer name a theme fall back to the Ayu defaults, so a
+ * deleted custom theme leaves the reviewer readable rather than unstyled.
+ */
+export const resolveThemeChoice = (
+	choice: ThemeChoice,
+	appearance?: Appearance | null,
+	extraThemes?: readonly Theme[],
+): Theme => {
+	const pinned = pinnedThemeId(choice.themeId);
+	return (
+		(pinned === undefined ? undefined : namedTheme(pinned, extraThemes)) ??
+		namedTheme(pairedThemeId(choice, appearance), extraThemes) ??
+		defaultTheme(appearance)
+	);
 };
 
 /** Colour slots a custom theme may pin verbatim after derivation. */

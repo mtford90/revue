@@ -18,7 +18,9 @@ test("reviewer preferences round-trip theme, layout, and view choices", async ()
 	tmpDirs.push(directory);
 	const path = join(directory, "preferences.json");
 	const preferences = {
-		themeId: "ayu-dark",
+		themeId: "auto",
+		lightThemeId: "vitesse-light",
+		darkThemeId: "vitesse-dark",
 		indexExpanded: false,
 		sidebarPreference: "hidden" as const,
 		diffPreference: "stacked" as const,

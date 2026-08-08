@@ -14,8 +14,8 @@ const MIN_WIDTH = 34;
 const MAX_WIDTH = 52;
 const MIN_ROWS = 4;
 const MAX_HEIGHT = 24;
-// Border, title, the help row, and the overflow row all sit outside the list window.
-const CHROME_ROWS = 6;
+// Border, title, the two help rows, and the overflow row all sit outside the list window.
+const CHROME_ROWS = 7;
 
 const pickerHeight = (terminalHeight: number) =>
 	Math.min(Math.max(MIN_ROWS + CHROME_ROWS, terminalHeight - 4), MAX_HEIGHT);
@@ -31,19 +31,24 @@ export function ThemePicker({
 	themes,
 	customThemeIds = new Set(),
 	selectedIndex,
-	activeThemeId,
+	activeThemeIds,
+	followTerminal,
 	terminalWidth,
 	terminalHeight,
 	onPick,
+	onToggleFollowTerminal,
 }: {
 	themes: readonly Theme[];
 	/** Ids sourced from `~/.revue/themes`, marked "(custom)" or "(customised)" in the list. */
 	customThemeIds?: ReadonlySet<string>;
 	selectedIndex: number;
-	activeThemeId: string;
+	/** Both halves of a followed pair, or the single pinned theme. */
+	activeThemeIds: ReadonlySet<string>;
+	followTerminal: boolean;
 	terminalWidth: number;
 	terminalHeight: number;
 	onPick: (index: number) => void;
+	onToggleFollowTerminal: () => void;
 }) {
 	const theme = useTheme();
 	const width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, terminalWidth - 8));
@@ -52,6 +57,7 @@ export function ThemePicker({
 	const start = windowStart(selectedIndex, themes.length, rows);
 	const visible = themes.slice(start, start + rows);
 	const remaining = themes.length - start - visible.length;
+	const selectedAppearance = themes[selectedIndex]?.appearance;
 
 	return (
 		<box
@@ -76,10 +82,25 @@ export function ThemePicker({
 			<text fg={theme.muted} wrapMode="none" truncate>
 				↑/↓ preview · enter accept · esc cancel
 			</text>
+			<text
+				wrapMode="none"
+				truncate
+				fg={theme.muted}
+				onMouseUp={(event: OpenTUIMouseEvent) => {
+					event.stopPropagation();
+					onToggleFollowTerminal();
+				}}
+			>
+				a follow terminal:{" "}
+				<span fg={followTerminal ? theme.badgeAdded : theme.muted}>
+					{followTerminal ? "on" : "off"}
+				</span>
+				{followTerminal ? ` · enter → ${selectedAppearance} theme` : ""}
+			</text>
 			{visible.map((candidate, offset) => {
 				const index = start + offset;
 				const selected = index === selectedIndex;
-				const active = candidate.id === activeThemeId;
+				const active = activeThemeIds.has(candidate.id);
 				return (
 					<box
 						key={candidate.id}

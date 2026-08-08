@@ -8,8 +8,11 @@ import {
 	buildThemeFromInputs,
 	DEFAULT_DARK_THEME_ID,
 	DEFAULT_LIGHT_THEME_ID,
+	FOLLOW_TERMINAL,
+	followsTerminal,
 	OVERRIDABLE_THEME_SLOTS,
 	resolveTheme,
+	resolveThemeChoice,
 	THEMES,
 	type Theme,
 	TRANSPARENT,
@@ -210,6 +213,52 @@ describe("resolveTheme", () => {
 		expect(resolveTheme("auto", "dark", [shadow]).id).toBe(DEFAULT_DARK_THEME_ID);
 		expect(resolveTheme("auto", "dark", [shadow])).not.toBe(shadow);
 		expect(resolveTheme(undefined, null, [shadow])).not.toBe(shadow);
+	});
+});
+
+describe("resolveThemeChoice", () => {
+	const pair = { lightThemeId: "vitesse-light", darkThemeId: "vitesse-dark" };
+
+	test("the terminal's appearance picks a half of the pair", () => {
+		expect(resolveThemeChoice(pair, "light").id).toBe("vitesse-light");
+		expect(resolveThemeChoice(pair, "dark").id).toBe("vitesse-dark");
+	});
+
+	test("a terminal that never reported its background takes the dark half", () => {
+		expect(resolveThemeChoice(pair, null).id).toBe("vitesse-dark");
+		expect(resolveThemeChoice(pair).id).toBe("vitesse-dark");
+	});
+
+	test("an absent half uses the Ayu default for that appearance", () => {
+		expect(resolveThemeChoice({ darkThemeId: "nord" }, "light").id).toBe(DEFAULT_LIGHT_THEME_ID);
+		expect(resolveThemeChoice({}, "dark").id).toBe(DEFAULT_DARK_THEME_ID);
+	});
+
+	test("an empty choice follows the terminal rather than defaulting to dark", () => {
+		expect(resolveThemeChoice({}, "light").id).toBe(DEFAULT_LIGHT_THEME_ID);
+		expect(followsTerminal(undefined)).toBe(true);
+		expect(followsTerminal(FOLLOW_TERMINAL)).toBe(true);
+		expect(followsTerminal("nord")).toBe(false);
+	});
+
+	test("a pinned theme wins over the terminal's appearance", () => {
+		expect(resolveThemeChoice({ ...pair, themeId: "nord" }, "light").id).toBe("nord");
+		expect(resolveThemeChoice({ ...pair, themeId: FOLLOW_TERMINAL }, "light").id).toBe(
+			"vitesse-light",
+		);
+	});
+
+	test("a custom theme can be pinned or serve as a half of the pair", () => {
+		const custom = buildThemeFromInputs({ id: "mine", background: "#ffffff" });
+		expect(resolveThemeChoice({ themeId: "mine" }, "dark", [custom])).toBe(custom);
+		expect(resolveThemeChoice({ lightThemeId: "mine" }, "light", [custom])).toBe(custom);
+	});
+
+	test("ids that no longer name a theme fall back rather than leaving the reviewer unstyled", () => {
+		expect(resolveThemeChoice({ themeId: "deleted", ...pair }, "light").id).toBe("vitesse-light");
+		expect(resolveThemeChoice({ lightThemeId: "deleted" }, "light").id).toBe(
+			DEFAULT_LIGHT_THEME_ID,
+		);
 	});
 });
 

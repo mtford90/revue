@@ -330,26 +330,39 @@ Patch active and shows a terminal-safe explanation.
 
 Every colour Revue paints comes from one theme, derived from one bundled editor theme: the shell,
 the diff body, and the highlighted source always agree. Press `t` (or **View → Theme**) to open the
-picker; arrow keys preview a palette live, `Enter` accepts, `Escape` cancels. The accepted theme is
-remembered machine-wide in `~/.revue/preferences.json`, alongside the reviewer's layout choices.
+picker; arrow keys preview a palette live, `Enter` accepts, `Escape` cancels. Choices are remembered
+machine-wide in `~/.revue/preferences.json`, alongside the reviewer's layout choices.
+
+Revue follows the terminal by default, keeping a **light theme and a dark theme** and painting
+whichever the terminal's own background asks for. A terminal that switches between light and dark
+mid-review says so, and Revue repaints without waiting for the next launch.
+
+In the picker, `a` toggles `follow terminal`. While it is on, `Enter` files the highlighted palette
+under its own appearance — a light theme becomes your light theme, a dark one your dark theme — so
+both halves are set from the one list, and both stay marked `✓`. Picking the half the terminal is
+not currently asking for leaves the screen as it is and says so in the status bar. Turning
+`follow terminal` off pins whatever is on screen, and `Enter` then simply replaces that one theme.
 
 ```bash
-# name a theme for this run
+# pin one theme for this run, whatever the terminal is doing
 bun run revue show examples/sample-run --theme catppuccin-mocha
 
 # list every available name
 bun run revue show examples/sample-run --theme list
 
-# let the terminal's own background choose between the light and dark defaults
+# follow the terminal, naming both halves
+bun run revue show examples/sample-run --theme-light ayu-light --theme-dark catppuccin-mocha
+
+# follow the terminal using the remembered pair
 bun run revue show examples/sample-run --theme auto
 
 # keep the terminal background visible behind Revue's neutral surfaces
 bun run revue show examples/sample-run --transparent-bg
 ```
 
-Without `--theme`, Revue uses the remembered theme and otherwise starts with `ayu-dark`. Pass
-`--theme auto` to ask the terminal for its background colour and choose `ayu-light` or `ayu-dark`.
-Derivation enforces WCAG contrast floors, so body
+Each option overrides the remembered preference for that run only. Halves left unnamed default to
+`ayu-light` and `ayu-dark`, and so does a terminal that never reports its background — it is
+treated as dark. Custom themes serve as either half. Derivation enforces WCAG contrast floors, so body
 text, status colours, and diff row tints stay readable on light and dark themes alike. Syntax
 highlighting normally uses Revue's adjacent native Syntect addon; a missing or corrupt addon warns
 once in the status bar and dynamically uses Shiki instead, preserving syntax highlighting. For

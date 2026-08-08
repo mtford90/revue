@@ -1695,7 +1695,7 @@ test("the theme picker previews a palette, applies the accepted one, and reports
 	const t = await testRender(
 		<App
 			file={file}
-			initialTheme={resolveTheme("nord")}
+			initialThemeChoice={{ themeId: "nord" }}
 			onThemeChange={(next) => chosen.push(next.id)}
 		/>,
 		{ width: 110, height: 32 },
@@ -1729,6 +1729,122 @@ test("the theme picker previews a palette, applies the accepted one, and reports
 	expect(chosen).toEqual(["one-dark-pro"]);
 });
 
+/** Steps down the picker from `fromId` to the first theme of the other appearance. */
+const stepsToOtherAppearance = (fromId: string) => {
+	const start = THEME_IDS.indexOf(fromId);
+	const from = THEMES[start]?.appearance;
+	const target = THEMES.findIndex(
+		(candidate, index) => index > start && candidate.appearance !== from,
+	);
+	return { steps: target - start, id: THEME_IDS[target] as string };
+};
+
+test("while following the terminal, a pick fills the half matching its own appearance", async () => {
+	const preferences: Preferences[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			initialThemeChoice={{ darkThemeId: "nord" }}
+			initialAppearance="dark"
+			onPreferencesChange={(next) => preferences.push(next)}
+		/>,
+		{ width: 110, height: 32 },
+	);
+	await t.renderOnce();
+	const background = () => t.captureSpans().lines[1]?.spans[0]?.bg;
+	const nordBackground = background();
+
+	await press(t, "t");
+	expect(t.captureCharFrame()).toContain("follow terminal: on");
+
+	const light = stepsToOtherAppearance("nord");
+	for (let i = 0; i < light.steps; i++) await arrow(t, "down");
+	expect(t.captureCharFrame()).toContain("enter → light theme");
+
+	await act(async () => {
+		t.mockInput.pressEnter();
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	// The dark terminal keeps painting the dark half; only the light half moved.
+	expect(background()).toEqual(nordBackground);
+	expect(statusLine(t)).toContain("is now the light theme");
+	expect(preferences.at(-1)).toMatchObject({ lightThemeId: light.id, darkThemeId: "nord" });
+});
+
+test("a terminal that switches to light mid-review repaints with the light half", async () => {
+	let report: ((appearance: "light" | "dark") => void) | null = null;
+	const t = await testRender(
+		<App
+			file={file}
+			initialThemeChoice={{ lightThemeId: "ayu-light", darkThemeId: "nord" }}
+			initialAppearance="dark"
+			subscribeAppearance={(listener) => {
+				report = listener;
+				return () => {
+					report = null;
+				};
+			}}
+		/>,
+		{ width: 110, height: 32 },
+	);
+	await t.renderOnce();
+	const background = () => t.captureSpans().lines[1]?.spans[0]?.bg;
+	const nordBackground = background();
+
+	await act(async () => {
+		report?.("light");
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	expect(background()).not.toEqual(nordBackground);
+	expect(background()?.toString()).toEqual(
+		RGBA.fromHex(resolveTheme("ayu-light").background).toString(),
+	);
+});
+
+test("pinning a theme stops it following the terminal", async () => {
+	const preferences: Preferences[] = [];
+	let report: ((appearance: "light" | "dark") => void) | null = null;
+	const t = await testRender(
+		<App
+			file={file}
+			initialThemeChoice={{ darkThemeId: "nord" }}
+			initialAppearance="dark"
+			subscribeAppearance={(listener) => {
+				report = listener;
+				return () => {
+					report = null;
+				};
+			}}
+			onPreferencesChange={(next) => preferences.push(next)}
+		/>,
+		{ width: 110, height: 32 },
+	);
+	await t.renderOnce();
+	const background = () => t.captureSpans().lines[1]?.spans[0]?.bg;
+	const nordBackground = background();
+
+	await press(t, "t");
+	await press(t, "a");
+	expect(t.captureCharFrame()).toContain("follow terminal: off");
+	expect(t.captureCharFrame()).toContain("enter accept");
+	expect(preferences.at(-1)).toMatchObject({ themeId: "nord" });
+
+	await press(t, "q");
+	await act(async () => {
+		report?.("light");
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	expect(background()).toEqual(nordBackground);
+});
+
 test("a custom theme with extends and an override is selectable via the picker and paints the TUI", async () => {
 	const custom = parseCustomTheme(
 		"zzz-custom",
@@ -1742,7 +1858,7 @@ test("a custom theme with extends and an override is selectable via the picker a
 	const t = await testRender(
 		<App
 			file={file}
-			initialTheme={resolveTheme("nord")}
+			initialThemeChoice={{ themeId: "nord" }}
 			customThemes={[custom, shadow]}
 			onThemeChange={(next) => chosen.push(next.id)}
 		/>,

@@ -84,7 +84,11 @@ file, and review-question checkboxes are deterministically unchecked.
 The document includes the prologue overview, key changes, focus areas and optional Mermaid diagram;
 ordered chapter titles and summaries; pinned file paths, statuses and whole-file line counts; review
 questions and line anchors; chapter/file/question review state; and threads for the selected chapters.
-It does not recompute Git state. Full and chapter exports preserve each thread and message ID, thread
+A partial narrative states its depth and coverage in a line of its own; a full-depth export says
+nothing and stays byte-identical to what it produced before depth existed. Interludes render as
+ordinary chapters with no files, threads on quoted code are attributed to the chapter that cites
+them, and threads the narration no longer has a home for appear under an "Orphaned threads"
+heading. Quoted excerpt bodies themselves are not printed. It does not recompute Git state. Full and chapter exports preserve each thread and message ID, thread
 status, exact review-unit anchor, author kind/name, creation time, and multi-line body; prologue-only
 exports contain no threads.
 
@@ -111,6 +115,78 @@ a dirty branch the bare command shows uncommitted work, not the branch against i
 It prints the run directory to stderr, so agents can still target the run with `revue threads`.
 Generating chapters for that same run later upgrades it to the full narrated review; `revue export`
 still requires a narrated run.
+
+## Narrative depth
+
+A flat diff is the whole change with no narration; a full narrative is the whole change with all of
+it. Depth is the middle: the whole change prepared, deliberately less of it narrated.
+
+A chapters file declares the depth it was written at:
+
+```json
+"depth": { "kind": "partial", "label": "10,000ft" }
+```
+
+An absent `depth` means `{ "kind": "full" }`, so every narrative written before this existed still
+reads as full. The label is freeform and is shown to the reviewer verbatim — `10,000ft` is the
+preset for "just the overview", but `"just the API changes"` or `"migrations only"` are equally
+valid, and describing honestly what was left out is the point.
+
+### What relaxes, and what does not
+
+At full depth every review unit in `hunks.txt` must appear in exactly one chapter. A partial depth
+relaxes exactly one rule: units may be left out. A narrative still may not cite a unit twice, still
+may not cite a reference `hunks.txt` never printed, and key-change ranges must still fall inside the
+chapter's own units. Omitting units *without* declaring a partial depth remains a validation
+failure — the relaxation is keyed to the declaration, so nothing loosens silently.
+
+`revue show --check` reports coverage at every depth, including full:
+
+```text
+  22 of 249 review units narrated (10,000ft)
+```
+
+Inside the reviewer, a partial narrative says so twice: the depth label sits beside the
+`Chapters (N)` header with `22 of 249 hunks · rest in Files` under it, and the status bar carries a
+`10,000ft · 22/249 hunks` segment, which sheds the word `hunks` and then the whole segment as the
+terminal narrows. Both are absent entirely at full depth, because nothing was left out. Omitted
+hunks are not hidden — they are on the Files surface with the rest, reviewable as usual.
+
+### Freezing quoted code
+
+A chapter can cite a range of code it did not change. The agent never transcribes it; a separate
+step pins it from the run's own recorded endpoint:
+
+```bash
+revue context freeze .revue/runs/a1b2c3d4e5f6
+```
+
+This writes `context.json` beside `chapters.json` and prints its path. `context.json` is
+narration-side and excluded from `runId`, so freezing never invalidates a run and re-narrating never
+forces a re-prep. `revue show --check` requires frozen content for every citation and names this
+command when it is missing.
+
+Under a worktree endpoint the content is still on disk and can move, so freeze re-checks each cited
+file against what prep captured and refuses to pin a mixed snapshot — the same guard prep itself
+makes. One case it cannot check: a cited file that prep never captured, which is exactly the
+untouched file the feature exists to quote. Freeze pins it and warns that drift went unchecked
+rather than refusing.
+
+### Excerpts and interludes
+
+A frozen citation renders as scenery, not work: folded by default, opening in place, line-numbered
+in the additions gutter so quoted code lands on the same column as reviewable code, with no
+checkbox and no contribution to progress. Placement within a chapter is inferred rather than
+declared — the nth citation follows the nth file section, a citation past the last file closes the
+chapter, and a chapter with no files leads with its excerpts.
+
+A chapter with no hunks at all is an **interlude**: an ordinary page in the sequence that counts
+towards chapter progress and completes on `x` alone. Interludes are inferred from an empty
+`hunkRefs`, not flagged by a field.
+
+Within a chapter summary, a fence tagged `ascii` or `mermaid` leaves the prose and renders beside
+the diff wearing the same chrome as an excerpt; Mermaid is shown as source, never drawn. Every other
+fence stays inline as a snippet.
 
 ## Inline review threads
 
@@ -139,12 +215,19 @@ lock and re-reads the latest same-run threads before replacing the file, so conc
 writers preserve each other's feedback. Regenerating chapters for the same frozen code preserves
 feedback without modifying the run directory.
 
+Re-narrating at a different depth can legitimately stop quoting a range someone commented on. Those
+threads are never pruned: they are listed as orphaned in the Comments surface, dimmed and marked,
+so feedback survives a narrative it no longer has a home in.
+
 Agents create and reply through the verified public interface:
 
 ```bash
 revue threads create "$RUN" \
   --file src/value.ts --old-start 4 --side additions --start-line 8 --end-line 10 \
   --author "Review agent" --body "Should this limit be lower?"
+revue threads create "$RUN" --kind excerpt \
+  --file src/value.ts --start-line 8 --end-line 10 \
+  --author "Review agent" --body "This is the invariant that broke"
 revue threads reply "$RUN" <thread-id> --author "Fix agent" --body-file response.md
 revue threads list "$RUN" --json          # open threads only
 revue threads list "$RUN" --json --all    # include resolved threads

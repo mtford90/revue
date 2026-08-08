@@ -84,6 +84,20 @@ The reviewer is a full-screen TUI, so that last command runs in your own termina
 out and take the tour. Anything git can diff can be narrated: a branch, someone's GitHub PR,
 staged, unstaged, the working tree.
 
+### Ask for less
+
+Not every change needs a line-by-line tour. Ask for a `10,000ft` narrative and your agent writes a
+handful of chapters over the shape of the change, quoting the code that carries it and leaving the
+rest reachable on the Files surface:
+
+```text
+> /revue this branch against main at 10,000ft
+```
+
+The reviewer states the coverage it's giving you - `10,000ft · 22/249 hunks` in the status bar - so
+a skim never passes for a complete read. Full depth is the default, and still demands that every
+hunk be narrated exactly once.
+
 ### Just the diff
 
 For a fast review without narration, `revue diff` opens any scope immediately as a flat,
@@ -119,6 +133,10 @@ plain output. The `revue` CLI intentionally has no `pager` command. See the comp
 Comment on any line - click or drag the line-number gutter - and mark chapters off as you
 read. Threads live in plain JSON beside your repo and round-trip through a public CLI, so
 your agent can pick up every comment, fix it & reply inline against the same frozen scope.
+
+A chapter can also quote code it didn't change - frozen off disk by `revue context freeze`, never
+transcribed by the agent - and a chapter with no diff at all is an interlude: prose, a diagram, and
+the code it points at. Quoted lines comment like any other line.
 
 Every shortcut can be remapped in `~/.revue/keybindings.json`; the help overlay (`?`) shows each
 action's ID alongside its keys. `revue keybindings init` writes a commented starter file.

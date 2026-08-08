@@ -18,6 +18,10 @@ export function sanitizeTerminalLine(text: string): string {
 		.replace(lineControlCharacters, "");
 }
 
+/** One untrusted row, safe to measure and draw: no control strings, no tabs. */
+export const plainTerminalLine = (text: string): string =>
+	sanitizeTerminalLine(text).replaceAll("\t", "  ");
+
 /** Sanitize highlighted text without changing its colour metadata. */
 export function sanitizeTerminalSpans(spans: readonly RenderSpan[]): RenderSpan[] {
 	return spans.flatMap((span) => {

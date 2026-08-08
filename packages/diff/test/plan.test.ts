@@ -375,20 +375,45 @@ test("a diagram plans to a known height folded and open, on the excerpt's own co
 	expect(open.codeWidth).toBe(quoted.codeWidth);
 });
 
-test("a diagram's header names its kind, and mermaid is labelled as the source it is", () => {
-	const label = (kind: "ascii" | "mermaid", folded: boolean) =>
+test("a diagram's header names its kind, and undrawn mermaid says it is source", () => {
+	const plan = (kind: "ascii" | "mermaid", lines: string[], folded: boolean) =>
 		planDiagram({
 			key: "d",
-			diagram: { kind, lines: ["a --> b"] },
+			diagram: { kind, lines },
 			folded,
 			width: 110,
 			chrome: openTuiChrome,
-		}).rows[0];
+		});
+	const drawn = plan("mermaid", ["graph TD", "A[prep] --> B[show]"], false);
 
-	expect(label("ascii", false)).toMatchObject({ label: "diagram · ascii", action: "▲ hide" });
-	expect(label("mermaid", false)).toMatchObject({ label: "diagram · mermaid source" });
-	expect(label("mermaid", true)).toMatchObject({
+	expect(plan("ascii", ["a --> b"], false).rows[0]).toMatchObject({
+		label: "diagram · ascii",
+		action: "▲ hide",
+	});
+	// A drawn flowchart is a picture, and its rows are the drawing rather than the source.
+	expect(drawn.drawn).toBe(true);
+	expect(drawn.rows[0]).toMatchObject({ label: "diagram · mermaid", action: "▲ hide" });
+	expect(drawn.rows.length).toBeGreaterThan(1 + 2);
+	expect(plan("mermaid", ["a --> b"], false)).toMatchObject({
+		drawn: false,
+		rows: [{ label: "diagram · mermaid source" }, {}],
+	});
+	expect(plan("mermaid", ["a --> b"], true).rows[0]).toMatchObject({
 		label: "diagram · mermaid source",
 		action: "▼ show 1 line",
+	});
+});
+
+test("a mermaid figure the block is too narrow for keeps its source rather than wrapping", () => {
+	const diagram = {
+		kind: "mermaid",
+		lines: ["graph TD", "A[a deliberately long node label] --> B[and another long one]"],
+	} as const;
+	const shared = { key: "d", diagram, folded: false, chrome: openTuiChrome };
+
+	expect(planDiagram({ ...shared, width: 110 }).drawn).toBe(true);
+	expect(planDiagram({ ...shared, width: 40 })).toMatchObject({
+		drawn: false,
+		rows: [{ label: "diagram · mermaid source" }, {}, {}],
 	});
 });

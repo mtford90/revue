@@ -160,8 +160,12 @@ Omitting units without declaring a partial depth is a validation failure, not a 
   one idea each, separated by blank lines. Markdown allowed: `**bold**`, `*italics*`, `` `code` ``,
   and short fenced snippets (≤ 6 lines). No lists, tables or block quotes — they render as raw text.
 - **Diagrams:** a fence tagged `ascii` or `mermaid` is a figure rather than a snippet. It leaves the
-  prose and renders beside the diff as a folded block the reviewer opens. Mermaid is shown as source,
-  never drawn. Use them sparingly, and mostly on a chapter with no hunks.
+  prose and renders beside the diff as a block the reviewer folds away. A `mermaid`
+  `flowchart`/`graph` is drawn as ASCII boxes and arrows, laid out top to bottom whatever direction
+  it declares. Nodes, links and link labels are all that is drawn: a `subgraph`, a `style`/`classDef`
+  line, an `A & B` node list, a cycle, or any other diagram type turns the whole figure back into
+  source, so keep to plain flowcharts and leave styling out. Use them sparingly, and mostly on a
+  chapter with no hunks.
 
 ### Key change rules
 
@@ -234,6 +238,8 @@ A high-level overview of the whole change, shown before the reviewer dives into 
 - **diagram** (string | null): Mermaid source (no code fences) only when the change spans multiple
   components in a data/control flow. `null` for single-file/rename/config/test-only changes — **most
   changes have no diagram.** Keep under 10 nodes; quote labels with special chars (`A["@scope/pkg"]`).
+  Write a plain `flowchart`/`graph` with nodes and links: that is what the reviewer draws as ASCII,
+  and anything else is shown as source.
 - **keyChanges** (2–5): each `{ summary (6–10 words, outcome-focused), description (10–15 words) }`.
 - **focusAreas** (1–5): each `{ type, severity, title (3–5 words), description (why + a "confirm/verify/check"
   action), locations (file paths) }`. `type` ∈ security, breaking-change, high-complexity, data-integrity,

@@ -17,10 +17,12 @@ import {
 	type DiffLineRange,
 	type DiffSide,
 	type DiffVisualPlan,
+	drawMermaid,
 	EXCERPT_HUNK_OLD_START,
 	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	parsePatch,
+	plainTerminalLine,
 	planDiagram,
 	planExcerpt,
 	prepareQuotedSyntaxHighlighting,
@@ -914,16 +916,43 @@ function PrologueChapters({
 	);
 }
 
+/**
+ * The prologue's own figure. It is Mermaid source, so it is drawn as ASCII art when the engine
+ * can lay the flowchart out and shown as the source it is when it cannot.
+ */
+function PrologueDiagram({ source, width }: { source: string; width: number }) {
+	const theme = useTheme();
+	const lines = useMemo(() => source.split("\n").map(plainTerminalLine), [source]);
+	// The border and its padding are chrome the figure cannot draw into.
+	const figure = useMemo(
+		() => drawMermaid({ source: lines, maxWidth: Math.max(1, width - 4) }),
+		[lines, width],
+	);
+	return (
+		<box
+			flexDirection="column"
+			border
+			borderColor={theme.border}
+			paddingLeft={1}
+			title={figure ? " diagram (mermaid) " : " diagram (mermaid source) "}
+		>
+			<text fg={figure ? theme.text : theme.muted}>{(figure ?? lines).join("\n")}</text>
+		</box>
+	);
+}
+
 function PrologueView({
 	prologue,
 	pages,
 	vs,
+	width,
 	onSelectPage,
 	onSelectFocusArea,
 }: {
 	prologue: Prologue;
 	pages: Page[];
 	vs: ViewState;
+	width: number;
 	onSelectPage: (index: number) => void;
 	onSelectFocusArea: (locations: string[]) => void;
 }) {
@@ -986,11 +1015,7 @@ function PrologueView({
 				</PrologueSection>
 			) : null}
 
-			{prologue.diagram ? (
-				<box flexDirection="column" border borderColor={theme.border} title=" diagram (mermaid) ">
-					<text fg={theme.muted}>{prologue.diagram}</text>
-				</box>
-			) : null}
+			{prologue.diagram ? <PrologueDiagram source={prologue.diagram} width={width} /> : null}
 
 			<PrologueSection title="Chapters" gap={0}>
 				<PrologueChapters pages={pages} vs={vs} onSelectPage={onSelectPage} />
@@ -4597,6 +4622,7 @@ export function App({
 									prologue={page.prologue}
 									pages={pages}
 									vs={vs}
+									width={contentWidth}
 									onSelectPage={goto}
 									onSelectFocusArea={focusPrologueArea}
 								/>

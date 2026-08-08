@@ -185,8 +185,22 @@ towards chapter progress and completes on `x` alone. Interludes are inferred fro
 `hunkRefs`, not flagged by a field.
 
 Within a chapter summary, a fence tagged `ascii` or `mermaid` leaves the prose and renders beside
-the diff wearing the same chrome as an excerpt; Mermaid is shown as source, never drawn. Every other
-fence stays inline as a snippet.
+the diff wearing the same chrome as an excerpt. Every other fence stays inline as a snippet.
+
+An `ascii` fence is drawn exactly as written. A `mermaid` fence is drawn as ASCII art: a
+`flowchart`/`graph` of nodes, links and link labels is parsed and laid out as boxes joined by
+arrows, labelled `diagram · mermaid`, with each edge label kept beside the line it belongs to. The
+declared direction is accepted but not honoured — columns are the scarce axis in a terminal, so
+every flowchart is laid out top to bottom. The prologue's own Mermaid diagram is drawn the same way,
+inside the box it already had.
+
+Anything the drawing engine does not model is shown as the author's source instead, labelled
+`diagram · mermaid source` and coloured as source rather than as a picture: another diagram type
+(sequence, class, state, gantt), flowchart syntax outside the supported subset (`subgraph`, a
+`style`/`classDef` line, an `A & B` node list), a flowchart with a cycle, malformed source, and a
+figure too wide for the content column at the current terminal width. It is all-or-nothing per
+figure — one unsupported line shows the whole thing as source — because a half-drawn diagram
+misinforms and source does not.
 
 ## Inline review threads
 
@@ -535,5 +549,6 @@ bundled themes.
 - [x] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
 - [x] Authored inline **review threads** with replies and Revue-owned persistence/lifecycle
 - [x] **Themes** derived from bundled editor themes, with a live picker, `--theme`, and transparency
+- [x] **Mermaid flowcharts drawn as ASCII** in prologue and chapter diagram blocks, with source as
+      the fallback for anything outside the subset
 - [ ] Decide static-file vs live agent-driven session
-- [ ] Mermaid prologue diagram rendering (ASCII)

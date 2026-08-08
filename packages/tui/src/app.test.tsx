@@ -136,9 +136,9 @@ test("a chapterless run still reaches the Comments surface", async () => {
 	});
 	await t.renderOnce();
 	const bar = t.captureCharFrame().split("\n")[0] ?? "";
-	expect(bar).toContain("Files");
+	expect(bar).toContain("Diff");
 	expect(bar).toContain("Comments");
-	expect(bar).not.toContain("Story"); // nothing to narrate
+	expect(bar).not.toContain("Narrative"); // nothing to narrate
 
 	await press(t, "o");
 	expect(t.captureCharFrame()).toContain("No comments in this review yet.");
@@ -195,7 +195,7 @@ test("w jumps a narrated run to the whole diff and page navigation returns to th
 	expect(statusLine(t)).toContain("Ch 2/3");
 });
 
-test("the menu bar's Story and Files buttons switch surfaces with the pointer", async () => {
+test("the menu bar's Narrative and Diff buttons switch surfaces with the pointer", async () => {
 	const diffFiles = await loadPatch(PATCH);
 	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {
 		width: 130,
@@ -203,15 +203,15 @@ test("the menu bar's Story and Files buttons switch surfaces with the pointer", 
 	});
 	await t.renderOnce();
 	const bar = t.captureCharFrame().split("\n")[0] ?? "";
-	expect(bar).toContain("Story");
-	expect(bar).toContain("Files");
+	expect(bar).toContain("Narrative");
+	expect(bar).toContain("Diff");
 
-	await click(t, bar.indexOf("Files") + 1, 0);
+	await click(t, bar.indexOf("Diff") + 1, 0);
 	const frame = t.captureCharFrame();
 	expect(frame).toContain("Files (3)");
 	expect(frame).not.toContain("Chapters (");
 
-	await click(t, bar.indexOf("Story") + 1, 0);
+	await click(t, bar.indexOf("Narrative") + 1, 0);
 	expect(t.captureCharFrame()).toContain("Chapters (3)");
 });
 
@@ -220,10 +220,10 @@ test("the surface tabs abbreviate to initials when full labels no longer fit", a
 	const t = await testRender(<App file={file} diffFiles={diffFiles} />, { width: 50, height: 44 });
 	await t.renderOnce();
 	const bar = t.captureCharFrame().split("\n")[0] ?? "";
-	expect(bar).not.toContain("Story");
-	expect(bar.trimEnd()).toMatch(/ S {2}F {2}C$/);
+	expect(bar).not.toContain("Narrative");
+	expect(bar.trimEnd()).toMatch(/ N {2}D {2}C$/);
 
-	await click(t, bar.lastIndexOf(" F ") + 1, 0);
+	await click(t, bar.lastIndexOf(" D ") + 1, 0);
 	expect(t.captureCharFrame()).toContain("Files (3)");
 });
 
@@ -234,7 +234,7 @@ test("the surface tabs centre on the terminal, not the space left by the menus",
 	await t.renderOnce();
 	const bar = t.captureCharFrame().split("\n")[0] ?? "";
 
-	const tabsStart = bar.indexOf("Story") - 1;
+	const tabsStart = bar.indexOf("Narrative") - 1;
 	const tabsEnd = bar.indexOf("Comments") + "Comments".length + 1;
 	expect(Math.abs((tabsStart + tabsEnd) / 2 - width / 2)).toBeLessThanOrEqual(1);
 });
@@ -403,7 +403,7 @@ test("a zoomed-out narrative states its coverage in the index and the status bar
 	const frame = t.captureCharFrame();
 
 	expect(frame).toContain("Chapters (2) · 10,000ft");
-	expect(frame).toContain("2 of 3 hunks · rest in Files");
+	expect(frame).toContain("2 of 3 hunks · rest in Diff");
 	expect(statusLine(t)).toContain("10,000ft · 2/3 hunks");
 });
 
@@ -427,7 +427,7 @@ test("a full-depth narrative says nothing about coverage anywhere", async () => 
 
 	expect(frame).toContain("Chapters (3)");
 	expect(frame).not.toContain("10,000ft");
-	expect(frame).not.toContain("rest in Files");
+	expect(frame).not.toContain("rest in Diff");
 	expect(frame).not.toContain("hunks");
 });
 
@@ -990,7 +990,7 @@ test("next unreviewed is unavailable when every chapter is reviewed", async () =
 	await press(t, "F10");
 	await arrow(t, "right");
 	// On the last page Next page and Next unreviewed chapter are both spent, so focus
-	// skips them: down reaches All files, then Comments, and a third down wraps back
+	// skips them: down reaches Diff, then Comments, and a third down wraps back
 	// to Previous page.
 	await arrow(t, "down");
 	await arrow(t, "down");
@@ -1067,7 +1067,7 @@ test("the keys surface covers the review, keeps the bars, and gives the page bac
 	await nextChapter(t);
 	await press(t, "?");
 	const frame = t.captureCharFrame();
-	expect(frame).toContain("Here — Files & diff");
+	expect(frame).toContain("Here — Narrative & diff");
 	expect(frame).toContain("Scrolling");
 	// The surface substitutes for the review, not for the chrome: the bar underneath still names
 	// the chapter you were on, which is how you get it back unchanged.
@@ -1076,7 +1076,7 @@ test("the keys surface covers the review, keeps the bars, and gives the page bac
 
 	await press(t, "ESCAPE");
 	const closed = t.captureCharFrame();
-	expect(closed).not.toContain("Here — Files & diff");
+	expect(closed).not.toContain("Here — Narrative & diff");
 	expect(closed).toContain("Add a reusable backoff helper");
 	expect(quits).toBe(0);
 });
@@ -1093,7 +1093,7 @@ test("the keys surface documents the keys that fire here, and marks the ones tha
 	expect(frame).toContain("Jump to the selected thread");
 	// Page scrolling does not fire in Comments, so it is dimmed under Elsewhere rather than
 	// dropped: you would never learn it existed if it were hidden.
-	expect(frame).toContain("Elsewhere — Files & diff · press w to get there");
+	expect(frame).toContain("Elsewhere — Narrative & diff · press w to get there");
 	expect(frame).toContain("Scroll down half a page");
 });
 
@@ -1121,7 +1121,7 @@ test("typing into the filter narrows the list without firing the actions it spel
 	await press(t, "ESCAPE");
 	expect(t.captureCharFrame()).toContain("Scroll down one line");
 	await press(t, "ESCAPE");
-	expect(t.captureCharFrame()).not.toContain("Here — Files & diff");
+	expect(t.captureCharFrame()).not.toContain("Here — Narrative & diff");
 	expect(quits).toBe(0);
 });
 
@@ -1717,7 +1717,7 @@ test("o opens the Comments surface and Enter jumps back into the owning chapter"
 	};
 	const narrow = await testRender(
 		<App file={threadFile} diffFiles={[diffFile]} initialThreads={[openThread, resolvedThread]} />,
-		{ width: 58, height: 30 },
+		{ width: 60, height: 30 },
 	);
 	await narrow.renderOnce();
 	const narrowBar = narrow.captureCharFrame().split("\n")[0] ?? "";

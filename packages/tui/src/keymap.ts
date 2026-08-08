@@ -181,7 +181,7 @@ const KEYMAP_DEF = [
 	},
 	{
 		id: "toggle-all-files",
-		description: "All files: the whole diff without the story",
+		description: "Diff: the whole diff without the narrative",
 		keys: ["w"],
 		context: "page",
 		section: "Navigation",
@@ -266,7 +266,7 @@ const KEYMAP_DEF = [
 	},
 	{
 		id: "comments-select-files",
-		description: "Switch to the Files surface",
+		description: "Switch to the Diff surface",
 		keys: ["w"],
 		context: "comments",
 		section: "Navigation",
@@ -489,7 +489,7 @@ const KEYMAP_NOTES: readonly { section: KeymapSection; context: KeymapContext; t
 export type KeymapSurface = Exclude<KeymapContext, "global">;
 
 export const KEYMAP_SURFACE_LABELS: Record<KeymapSurface, string> = {
-	page: "Files & diff",
+	page: "Narrative & diff",
 	comments: "Comments",
 };
 

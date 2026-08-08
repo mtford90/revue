@@ -203,7 +203,7 @@ export const buildAppMenus = ({
 		{ kind: "separator", id: "surfaces" },
 		{
 			kind: "item",
-			label: "All files",
+			label: "Diff",
 			hint: keymapHint("toggle-all-files", keymap),
 			checked: allFiles,
 			disabled: !canToggleAllFiles,
@@ -358,8 +358,8 @@ const stopMouse = (event: OpenTUIMouseEvent) => {
 
 export type ReviewSurface = "story" | "files" | "comments";
 const SURFACE_LABELS: Record<ReviewSurface, string> = {
-	story: "Story",
-	files: "Files",
+	story: "Narrative",
+	files: "Diff",
 	comments: "Comments",
 };
 const SURFACES: readonly ReviewSurface[] = ["story", "files", "comments"];

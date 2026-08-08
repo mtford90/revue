@@ -741,7 +741,7 @@ function ChapterPanel({
 			{chapterCount > 0 && !filesSurface && coverage ? (
 				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
 					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
-						{`${coverage.narrated} of ${coverage.total} hunks · rest in Files`}
+						{`${coverage.narrated} of ${coverage.total} hunks · rest in Diff`}
 					</text>
 				</box>
 			) : null}

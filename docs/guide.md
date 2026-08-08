@@ -147,10 +147,10 @@ failure — the relaxation is keyed to the declaration, so nothing loosens silen
 ```
 
 Inside the reviewer, a partial narrative says so twice: the depth label sits beside the
-`Chapters (N)` header with `22 of 249 hunks · rest in Files` under it, and the status bar carries a
+`Chapters (N)` header with `22 of 249 hunks · rest in Diff` under it, and the status bar carries a
 `10,000ft · 22/249 hunks` segment, which sheds the word `hunks` and then the whole segment as the
 terminal narrows. Both are absent entirely at full depth, because nothing was left out. Omitted
-hunks are not hidden — they are on the Files surface with the rest, reviewable as usual.
+hunks are not hidden — they are on the Diff surface with the rest, reviewable as usual.
 
 ### Freezing quoted code
 
@@ -287,8 +287,8 @@ Press `F10` to open it, use arrow keys and `Enter`, and press `Escape` or click 
 Navigate walks pages and unreviewed chapters, View switches rendering, file display, and file
 collapse, and Help opens the keymap in a modal over the review.
 
-A review has three **surfaces**, switched from the strip under the menu bar: **Story** (the narrated
-chapter pages), **Files** (`w`, the whole diff without the story), and **Comments** (`o`, every
+A review has three **surfaces**, switched from the strip under the menu bar: **Narrative** (the
+narrated chapter pages), **Diff** (`w`, the whole diff without the narrative), and **Comments** (`o`, every
 thread in one list). The Comments tab shows its open-thread count while any remain.
 
 The bottom row is a powerline-style **status bar**: the review context, a reviewed-files gauge, the
@@ -445,7 +445,7 @@ way to pick up a `chapters.json` an agent just wrote, or new changes to the diff
 Reload never invokes the revue skill and never writes narration itself. Because runs are
 content-addressed, reloading unchanged content is a true no-op that keeps threads, progress, and
 position exactly as they were. Reloading changed content opens a new run: a new run key means the
-Story surface is gone until an agent re-narrates it, and existing threads stay on disk under the old
+Narrative surface is gone until an agent re-narrates it, and existing threads stay on disk under the old
 run and aren't shown. Review marks carry over file by file — a file whose diff is untouched stays
 reviewed, while one you have edited since marking it comes back unreviewed, and so does any chapter
 holding it. Key-change ticks don't carry, since they answer questions about the old snapshot. The

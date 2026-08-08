@@ -22,6 +22,7 @@ import {
 	type ExcerptQuotation,
 	findFocusedDecorationAnchor,
 	parsePatch,
+	plainTerminalLine,
 	planDiagram,
 	planExcerpt,
 	prepareQuotedSyntaxHighlighting,
@@ -921,10 +922,11 @@ function PrologueChapters({
  */
 function PrologueDiagram({ source, width }: { source: string; width: number }) {
 	const theme = useTheme();
+	const lines = useMemo(() => source.split("\n").map(plainTerminalLine), [source]);
+	// The border and its padding are chrome the figure cannot draw into.
 	const figure = useMemo(
-		// The border and its padding are chrome the figure cannot draw into.
-		() => drawMermaid({ source: source.split("\n"), maxWidth: Math.max(1, width - 4) }),
-		[source, width],
+		() => drawMermaid({ source: lines, maxWidth: Math.max(1, width - 4) }),
+		[lines, width],
 	);
 	return (
 		<box
@@ -934,7 +936,7 @@ function PrologueDiagram({ source, width }: { source: string; width: number }) {
 			paddingLeft={1}
 			title={figure ? " diagram (mermaid) " : " diagram (mermaid source) "}
 		>
-			<text fg={figure ? theme.text : theme.muted}>{figure ? figure.join("\n") : source}</text>
+			<text fg={figure ? theme.text : theme.muted}>{(figure ?? lines).join("\n")}</text>
 		</box>
 	);
 }

@@ -343,7 +343,9 @@ const drawSegment = (canvas: Canvas, segment: Segment, band: Band): void => {
 	if (segment.to.kind === "node") join(canvas, entry, band.arrowRow + 1, UP);
 };
 
-const rowEnd = (canvas: Canvas, y: number): number => canvas[y]?.length ?? 0;
+/** One past the rightmost cell on the row that holds anything; probing for space grows blanks. */
+const rowEnd = (canvas: Canvas, y: number): number =>
+	(canvas[y]?.findLastIndex((glyph) => glyph.mask !== 0 || glyph.text !== null) ?? -1) + 1;
 
 /** Inside the link's own horizontal run if it fits, else beside it, else past everything. */
 const drawLabel = (canvas: Canvas, segment: Segment, band: Band): void => {

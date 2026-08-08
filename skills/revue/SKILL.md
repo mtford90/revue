@@ -162,9 +162,10 @@ Omitting units without declaring a partial depth is a validation failure, not a 
 - **Diagrams:** a fence tagged `ascii` or `mermaid` is a figure rather than a snippet. It leaves the
   prose and renders beside the diff as a block the reviewer folds away. A `mermaid`
   `flowchart`/`graph` is drawn as ASCII boxes and arrows, laid out top to bottom whatever direction
-  it declares; any other diagram type, a cycle, or syntax outside nodes, links and link labels is
-  shown as source instead, so keep to plain flowcharts. Use them sparingly, and mostly on a chapter
-  with no hunks.
+  it declares. Nodes, links and link labels are all that is drawn: a `subgraph`, a `style`/`classDef`
+  line, an `A & B` node list, a cycle, or any other diagram type turns the whole figure back into
+  source, so keep to plain flowcharts and leave styling out. Use them sparingly, and mostly on a
+  chapter with no hunks.
 
 ### Key change rules
 

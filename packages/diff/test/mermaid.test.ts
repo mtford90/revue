@@ -30,6 +30,39 @@ test("labels, shapes, directions and comments parse into nodes and edges", () =>
 	]);
 });
 
+test("a quoted label keeps the separators that would otherwise end a statement", () => {
+	const chart = parseMermaidFlowchart(["graph TD", '  A["first; then 100%% done"] --> B[end]']);
+
+	expect(chart?.nodes[0]).toEqual({ id: "A", label: "first; then 100%% done" });
+	expect(chart?.edges).toHaveLength(1);
+});
+
+test("a node mentioned twice takes the label it was last given", () => {
+	const chart = parseMermaidFlowchart([
+		"graph TD",
+		"  A[working title] --> B",
+		"  A[real title] --> C",
+	]);
+
+	// Mermaid's own renderer shows the later label, and a drawing may not contradict the source.
+	expect(chart?.nodes[0]).toEqual({ id: "A", label: "real title" });
+	expect(chart?.nodes.map((node) => node.id)).toEqual(["A", "B", "C"]);
+});
+
+test("hyphenated ids and a direction statement are ordinary flowchart syntax", () => {
+	const chart = parseMermaidFlowchart([
+		"flowchart TD",
+		"  direction LR",
+		"  api-client --> backend.v2",
+	]);
+
+	expect(chart?.direction).toBe("LR");
+	expect(chart?.nodes.map((node) => node.id)).toEqual(["api-client", "backend.v2"]);
+	expect(chart?.edges).toEqual([
+		{ from: "api-client", to: "backend.v2", label: null, arrow: true },
+	]);
+});
+
 test("a chain draws as boxes joined by arrows", () => {
 	expect(draw("graph TD\n  A[prep] --> B[show]")).toEqual([
 		"┌──────┐",
@@ -61,6 +94,21 @@ test("an edge label reads beside the line it belongs to", () => {
 
 	expect(figure && boxLabels(figure)).toEqual(["Dashboard", "ApiClient", "Backend"]);
 	expect(figure?.join("\n")).toContain("│ retry on 503");
+});
+
+test("a labelled branch keeps each label on its own link", () => {
+	// The whole figure is the contract here: which line a label sits on is what says what it labels.
+	expect(draw("graph TD\n  A[dispatch] -->|ok| B[render]\n  A -->|fail| C[report]")).toEqual([
+		"     ┌──────────┐",
+		"     │ dispatch │",
+		"     └────┬─────┘",
+		"    ┌─ok──┤",
+		"    │     └─────┐ fail",
+		"    ▼           ▼",
+		"┌────────┐  ┌────────┐",
+		"│ render │  │ report │",
+		"└────────┘  └────────┘",
+	]);
 });
 
 test("a link spanning layers passes beside the boxes between, not through them", () => {
@@ -106,6 +154,16 @@ test("a figure that will not fit the block's width is shown as source", () => {
 
 	expect(draw(wide, 80)).not.toBeNull();
 	expect(draw(wide, 20)).toBeNull();
+});
+
+test("wide glyphs are measured in columns, so a box's rows stay the same width", () => {
+	const figure = draw("graph TD\n  A[日本語のラベル] --> B[🎉 party]", 40) ?? [];
+	const widths = figure.map((line) => Bun.stringWidth(line));
+
+	expect(figure).not.toHaveLength(0);
+	// A box's border, label and border rows all measure alike, or the figure is visibly broken.
+	expect(new Set(widths.slice(0, 3)).size).toBe(1);
+	expect(Math.max(...widths)).toBeLessThanOrEqual(40);
 });
 
 test("a label carrying terminal control sequences is drawn as inert text", () => {

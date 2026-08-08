@@ -721,7 +721,10 @@ const DIAGRAM_LABELS: Record<DiagramKind, string> = {
 	mermaid: "diagram · mermaid",
 };
 
-/** What the block actually holds: the figure itself, or the source it could not be drawn from. */
+/**
+ * What the block actually holds: the figure itself, or the source it could not be drawn from. A
+ * folded block still lays out, because whether it drew is what its own label has to say.
+ */
 type DiagramFigure = { drawn: boolean; label: string; lines: readonly string[] };
 
 const diagramFigure = (diagram: Diagram, codeWidth: number): DiagramFigure => {

@@ -188,16 +188,19 @@ Within a chapter summary, a fence tagged `ascii` or `mermaid` leaves the prose a
 the diff wearing the same chrome as an excerpt. Every other fence stays inline as a snippet.
 
 An `ascii` fence is drawn exactly as written. A `mermaid` fence is drawn as ASCII art: a
-`flowchart`/`graph` is parsed and laid out as boxes joined by arrows, labelled `diagram · mermaid`,
-with edge labels kept beside the line they belong to. The declared direction is accepted but not
-honoured — columns are the scarce axis in a terminal, so every flowchart is laid out top to bottom.
-The prologue's own Mermaid diagram is drawn the same way.
+`flowchart`/`graph` of nodes, links and link labels is parsed and laid out as boxes joined by
+arrows, labelled `diagram · mermaid`, with each edge label kept beside the line it belongs to. The
+declared direction is accepted but not honoured — columns are the scarce axis in a terminal, so
+every flowchart is laid out top to bottom. The prologue's own Mermaid diagram is drawn the same way,
+inside the box it already had.
 
 Anything the drawing engine does not model is shown as the author's source instead, labelled
 `diagram · mermaid source` and coloured as source rather than as a picture: another diagram type
-(sequence, class, state, gantt), flowchart syntax outside the supported subset (`subgraph`,
-`style`, `&` node lists), a flowchart with a cycle, malformed source, and a figure too wide for the
-content column at the current terminal width. Nothing is ever half-drawn.
+(sequence, class, state, gantt), flowchart syntax outside the supported subset (`subgraph`, a
+`style`/`classDef` line, an `A & B` node list), a flowchart with a cycle, malformed source, and a
+figure too wide for the content column at the current terminal width. It is all-or-nothing per
+figure — one unsupported line shows the whole thing as source — because a half-drawn diagram
+misinforms and source does not.
 
 ## Inline review threads
 

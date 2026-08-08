@@ -20,8 +20,10 @@ characters, and a flowchart is exactly the shape they can carry.
 
 **A supported Mermaid flowchart is parsed and drawn as box-and-arrow ASCII art; everything else
 falls back to the author's source.** The parser and the drawing engine live in `@revue/diff`
-beside the rest of the width-aware visual plan (ADR 0002), so `planDiagram` decides what a block
-holds and every presentation adapter renders the result the same way.
+beside the rest of the width-aware visual plan (ADR 0002): `planDiagram` decides what a diagram
+block holds, and every presentation adapter renders that decision rather than re-deciding it. The
+prologue keeps the bordered box it already had — one figure, no fold, its own title — and calls the
+same engine with its own interior width; migrating it into a diagram block is a later decision.
 
 **The subset is `flowchart`/`graph` and nothing else.** Nodes in any bracket form (all drawn as
 boxes, since a terminal diamond reads worse than a rectangle), directed and undirected links, link

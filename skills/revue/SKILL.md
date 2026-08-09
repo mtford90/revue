@@ -151,12 +151,55 @@ A narrative that declares a **partial** depth may leave review units out. Nothin
 still may not cite a unit twice, and still may not cite a reference `hunks.txt` does not print.
 Omitting units without declaring a partial depth is a validation failure, not a shortcut.
 
+### Voice
+
+These rules govern every string the reviewer reads: chapter titles and summaries, key changes, and
+every prologue field.
+
+Write for a competent engineer who has never seen this code. Present tense, active voice, the code
+as the subject — "the API client retries 503s", not "retry logic has been added". One idea per
+sentence, nearly all of them under 25 words.
+
+- **Say what the diff cannot.** The reviewer is reading you with the lines already in front of them,
+  so restating those lines spends the only prose they get. Write the reason, the consequence, what
+  breaks without it, the alternative that was passed over.
+- **Plain words.** `use` not `utilise` or `leverage`, `run` not `facilitate`, `create` not
+  `instantiate`, `to` not `in order to`. Say `is`, not `serves as`. Cut `ensure`, `enable`,
+  `provide`, `robust`, `seamless`, `comprehensive`, `powerful`, `significantly`.
+- **Report, don't grade.** No `cleanly`, `elegantly`, `neatly`, `nicely` — whether the code is good
+  is the reviewer's call, and grading it pre-empts the judgment they came to make.
+- **Name things as the code names them.** Use the identifier rather than a paraphrase of it. A domain
+  term the reader may not know gets a handful of words of definition once, then plain use.
+- **Say when you don't know.** "The diff doesn't say why the cap is five seconds" beats a hedge or a
+  guess, and points the reviewer at a real gap.
+- **Nothing carries between chapters.** A reviewer on chapter 7 does not remember chapter 2. Restate
+  the dependency in a few words instead of referring back to it.
+
+Before writing any string, delete:
+
+1. Openers that announce the change: "This change…", "This chapter…", "Here we…".
+2. Closing participles carrying no fact: "…, ensuring consistency", "…, improving maintainability".
+3. Negative parallelism: "not just X, but Y", "rather than X, instead Y".
+4. Any three-item list of adjectives or verbs where one of them would do.
+5. Metaphors and idioms — "under the hood", "surface area", "plumbing". Write the literal thing.
+6. Every em dash past the first in a paragraph.
+7. Hedging adverbs carrying no information: "perhaps", "essentially", "effectively", "simply". Keep a
+   hedge that marks real uncertainty; deleting that one manufactures confidence.
+
+Then read it aloud. If you would not say it to a colleague at their desk, write it again.
+
+> Instead of: "This change introduces a robust retry mechanism, ensuring transient failures are
+> handled gracefully and significantly improving dashboard reliability."
+>
+> Write: "The API client now retries a 503 instead of throwing. A deploy takes the backend down a few
+> seconds at a time, which was long enough to blank a dashboard until someone refreshed it."
+
 ### Narration rules
 
-- **Title:** action-oriented verb phrase, max 8 words ("Wire org ID through the API layer"). No
-  filler like "Add support for".
-- **Summary:** 2–3 sentences — what this chapter enables and why. Lead with impact. When a chapter
-  builds on a previous one, open with the causal link ("Now that X is in place…"). Short paragraphs,
+- **Title:** imperative verb phrase naming its real subject, max 8 words ("Wire org ID through the
+  API layer"). Not a gerund, not a file name, no filler like "Add support for".
+- **Summary:** 2–3 sentences. The first says what the code now does; the rest say why it had to.
+  Open every chapter differently — one shared formula across a run reads as filler. Short paragraphs,
   one idea each, separated by blank lines. Markdown allowed: `**bold**`, `*italics*`, `` `code` ``,
   and short fenced snippets (≤ 6 lines). No lists, tables or block quotes — they render as raw text.
 - **Diagrams:** a fence tagged `ascii` or `mermaid` is a figure rather than a snippet. It leaves the
@@ -247,7 +290,8 @@ A high-level overview of the whole change, shown before the reviewer dives into 
   info (points of interest). Always at least one.
 - **complexity**: `{ level ∈ low|medium|high|very-high, reasoning }`.
 
-Talk like a coworker, not a changelog. No "this change introduces/implements/adds".
+Every field here obeys the Voice rules in Step 3. `motivation` and `outcome` especially: state the
+situation someone was living with and the behaviour that replaced it, not the benefit.
 
 ## Step 5 — Write the chapters file
 

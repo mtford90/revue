@@ -2,6 +2,20 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.8.0](https://github.com/mtford90/revue/compare/v0.7.0...v0.8.0) (2026-08-09)
+
+
+### Features
+
+* draw mermaid flowcharts as ascii instead of showing their source ([3ed73ed](https://github.com/mtford90/revue/commit/3ed73ed601a75f74ed6628fb2ad99c2f9b44186e))
+* rename the Story and Files surfaces to Narrative and Diff ([50f8220](https://github.com/mtford90/revue/commit/50f8220e60da028ee53ce1a65bc528adc26e9723))
+
+
+### Bug Fixes
+
+* remove redundant sidebar labels ([9cbe8b8](https://github.com/mtford90/revue/commit/9cbe8b8a7c5b9ee9e27e3021b9a8bcdc5b2ea48c))
+* widen the drawn mermaid subset and stop a stale label winning ([2416ad6](https://github.com/mtford90/revue/commit/2416ad6e50074d1fac0476bdbe664809984e5c6e))
+
 ## [0.7.0](https://github.com/mtford90/revue/compare/v0.6.1...v0.7.0) (2026-08-08)
 
 

@@ -624,7 +624,7 @@ function ChapterBrief({
 	}
 	return (
 		<box flexDirection="column" width="100%" gap={1}>
-			<text fg={theme.accent}>{chapter.title}</text>
+			{chapter.id === ALL_FILES_CHAPTER_ID ? null : <text fg={theme.accent}>{chapter.title}</text>}
 			{prose ? <Narration text={prose} fg={theme.muted} onMouseDown={proseMenu} /> : null}
 			<KeyChanges
 				chapter={chapter}
@@ -718,11 +718,6 @@ function ChapterPanel({
 				if (event.x === width - 1) onResizeStart(event);
 			}}
 		>
-			<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
-				<text flexShrink={0} fg={theme.accent}>
-					revue
-				</text>
-			</box>
 			{chapterCount > 0 && !filesSurface ? (
 				<box
 					flexDirection="row"

@@ -282,7 +282,6 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	await t.renderOnce();
 	const frame = t.captureCharFrame();
 
-	expect(frame).toContain("revue"); // sidebar title
 	expect(frame).toContain("Chapters (3)"); // sidebar index disclosure
 	expect(frame).toContain("Prologue"); // sidebar entry
 	expect(frame).toContain("1. Add a re"); // sidebar chapter label (single-line truncated)

@@ -10,15 +10,17 @@
   <a href="https://github.com/mtford90/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-mtford90%2Ftap-orange?logo=homebrew&logoColor=white" alt="Homebrew"></a>
 </p>
 
+<img width="1518" height="1155" alt="CleanShot 2026-08-04 at 16 47 02" src="https://github.com/user-attachments/assets/836d541a-43ab-43ec-87b4-4c753b5cf294" />
+
 ## What it is
 
-A code review tool that organises large code changes into ordered, narrated chunks for easier consumption
+A terminal-based code review tool that organises large code changes into ordered, narrated chunks for easier consumption
 
 Think of it as a guided tour of a change, as opposed to the wall of files you often see in a pull request (especially these days!)
 
 Using the `/revue` skill, your agent of choice can generate and launch a tour in a new terminal session, or else give you the command to launch it
 
-You can then walk through the change, checking each item off but also, optionally, leaving inline comments that you can return to your agent -- your agent can also respond, creating a natural back & forth.
+You can then walk through the change, checking each item off but also - optionally - leaving inline comments that you can return to your agent. Your agent can also respond, creating a natural back & forth.
 
 If you don't need a narrative, `revue diff` makes available the same powerful diff tool for any change but without the narration.
 
@@ -36,8 +38,6 @@ Revue is not...
 - **...a `git diff` / delta pager.** Revue is a full-screen reviewer, not something you pipe diffs through (although I've made the pager that powers revue available seperately in case you like it, and would like to use it as a pager elsewhere in your workflow)
 - **...a hosted review service.** Runs and threads are local files beside your repo
 - **...a web UI or a GitHub PR replacement.** all review happens in your terminal, right where you work
-
-<img width="1518" height="1155" alt="CleanShot 2026-08-04 at 16 47 02" src="https://github.com/user-attachments/assets/836d541a-43ab-43ec-87b4-4c753b5cf294" />
 
 ## Install
 

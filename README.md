@@ -22,7 +22,7 @@ Using the `/revue` skill, your agent of choice can generate and launch a tour in
 
 You can then walk through the change, checking each item off but also - optionally - leaving inline comments that you can return to your agent. Your agent can also respond, creating a natural back & forth.
 
-If you don't need a narrative, `revue diff` makes available the same powerful diff tool for any change but without the narration.
+If you don't need a narrative, `revue diff` makes available the same powerful diff viewer for any change but without the narration.
 
 ## Why...?
 

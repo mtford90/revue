@@ -47,6 +47,7 @@ import { ChaptersFileError, loadChaptersFile, loadReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
+import { formatStatus, readStatus } from "./status.ts";
 import type { StatusNotice } from "./statusBar.tsx";
 import { formatChapterlessSummary, formatSummary, omissionNotice } from "./summary.ts";
 import {
@@ -84,6 +85,7 @@ Usage:
   revue prep [refs] [--base <ref>] [--compare <ref>] [--ref <mode>]
              [--ignore <pattern>]... [--show-ignored]
              [--carry-from <run-id> | --no-carry]
+  revue status [--json]                report the active run, its threads, and working-tree drift
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
   revue delta <run-directory>          print what a superseding run carried forward and still owes
@@ -165,6 +167,22 @@ unnarrated  every review unit no carried chapter covers, marked unchanged,
 
 Narration is complete once every unnarrated unit sits in a chapter; run
 revue context freeze and then revue show <run-directory> --check to confirm it.`;
+
+const STATUS_HELP = `usage: revue status [--json]
+
+Reads the repository's own review state off disk — nothing depends on an earlier session:
+
+activeRun   the newest narrated run of the lineage, its directory, and the prep
+            arguments that reproduce its scope
+pendingRun  a newer run that supersedes it and is not narrated yet, with a count
+            of what its delta carried, marked stale, and left to narrate
+threads     the run's threads, open ones split into those awaiting the agent (a
+            human spoke last) and those awaiting the reviewer (an agent did),
+            plus the carried anchors this run orphaned
+drift       whether re-prepping the active run's scope would capture different
+            code than the run pinned
+
+A repository with no prepared runs reports that and exits 0.`;
 
 const prepSummary = (run: PreparedRun): string => {
 	const { manifest } = run;
@@ -491,6 +509,43 @@ async function cmdDelta(args: string[]): Promise<number> {
 		return 0;
 	} catch (error) {
 		if (error instanceof RunArtifactError) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
+}
+
+async function cmdStatus(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${STATUS_HELP}\n`);
+		return 0;
+	}
+	let json = false;
+	try {
+		const options = parseCommandOptions(args, [], ["--json"]);
+		if (options.positionals.length) throw new Error("status takes no positional arguments");
+		json = options.booleans.has("--json");
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${STATUS_HELP}\n`,
+		);
+		return 1;
+	}
+	try {
+		const report = await readStatus();
+		process.stdout.write(
+			json ? `${JSON.stringify(report, null, 2)}\n` : `${formatStatus(report)}\n`,
+		);
+		return 0;
+	} catch (error) {
+		if (
+			error instanceof ChaptersFileError ||
+			error instanceof RunArtifactError ||
+			error instanceof ReviewCoverageError ||
+			error instanceof ThreadStoreError ||
+			error instanceof GitError
+		) {
 			process.stderr.write(`${error.message}\n`);
 			return 1;
 		}
@@ -1282,6 +1337,7 @@ async function main(): Promise<number> {
 	if (command === "export") return cmdExport(args);
 	if (command === "context") return cmdContext(args);
 	if (command === "delta") return cmdDelta(args);
+	if (command === "status") return cmdStatus(args);
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);

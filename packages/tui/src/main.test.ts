@@ -628,6 +628,168 @@ test("delta hands the agent the worklist a superseding run left it", async () =>
 	}
 });
 
+test("status says plainly that a repository has nothing to orient around yet", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-empty-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await writeFile(join(root, "alpha.ts"), "export const alpha = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+
+		const json = await run(root, ["status", "--json"]);
+		expect(json).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(json.stdout)).toMatchObject({
+			activeRun: null,
+			pendingRun: null,
+			threads: { runId: null, open: 0, awaitingAgent: 0, awaitingHuman: 0, orphaned: 0 },
+			drift: null,
+		});
+
+		const human = await run(root, ["status"]);
+		expect(human).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(human.stdout).toContain("No prepared runs");
+
+		const rejected = await run(root, ["status", "some-run"]);
+		expect(rejected).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(rejected.stderr).toContain("status takes no positional arguments");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("status orients a cold agent on the active run, its threads, and working-tree drift", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 1;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 2;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Feature work");
+
+		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const firstRunId = first.split("/").at(-1) ?? "";
+		const chapter = (id: string, order: number, filePath: string) => ({
+			id,
+			order,
+			title: `Chapter ${id}`,
+			summary: `What ${filePath} now does.`,
+			hunkRefs: [{ filePath, oldStart: 1 }],
+			keyChanges: [],
+			excerpts: [],
+		});
+		await writeFile(
+			join(first, "chapters.json"),
+			`${JSON.stringify({
+				chapters: [chapter("alpha", 1, "src/alpha.ts"), chapter("beta", 2, "src/beta.ts")],
+			})}\n`,
+		);
+
+		// The reviewer speaks first on both files; the agent answers only one of them.
+		const store = openThreadStore(join(root, ".revue", "threads.json"), firstRunId);
+		const reviewerThread = (filePath: string, body: string) =>
+			store.create(
+				{
+					kind: THREAD_ANCHOR_KIND.HUNK,
+					filePath,
+					oldStart: 1,
+					side: "additions",
+					startLine: 1,
+					endLine: 1,
+				},
+				{ kind: THREAD_AUTHOR_KIND.HUMAN, name: "Reviewer" },
+				body,
+			);
+		const answered = reviewerThread("src/alpha.ts", "Is two the right constant?");
+		reviewerThread("src/beta.ts", "Why does beta move at all?");
+		expect(
+			await run(root, [
+				"threads",
+				"reply",
+				first,
+				answered.id,
+				"--author",
+				"Review agent",
+				"--body",
+				"Two matches the caller.",
+			]),
+		).toMatchObject({ exitCode: 0 });
+
+		const narrated = await run(root, ["status", "--json"]);
+		expect(narrated).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(narrated.stdout)).toMatchObject({
+			repositoryRoot: expect.any(String),
+			activeRun: {
+				runId: firstRunId,
+				directory: first,
+				narrated: true,
+				supersedes: null,
+				scope: {
+					mode: "committed",
+					comparison: "merge-base",
+					base: "main",
+					head: "HEAD",
+					prepArgs: ["--base", "main", "--compare", "HEAD"],
+				},
+			},
+			pendingRun: null,
+			threads: {
+				runId: firstRunId,
+				open: 2,
+				awaitingAgent: 1,
+				awaitingHuman: 1,
+				dealtWith: 0,
+				orphaned: 0,
+			},
+			drift: { since: firstRunId, changed: false },
+		});
+
+		// The agent responds to the reviewer, so the next prep supersedes the run they read.
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 3;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Address the review");
+		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const secondRunId = second.split("/").at(-1) ?? "";
+
+		const superseded = await run(root, ["status", "--json"]);
+		expect(superseded).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(superseded.stdout)).toMatchObject({
+			activeRun: { runId: firstRunId, narrated: true },
+			pendingRun: {
+				runId: secondRunId,
+				directory: second,
+				narrated: false,
+				supersedes: firstRunId,
+				delta: { carried: 1, stale: 1, unnarrated: 1 },
+			},
+			// The threads followed the code onto the superseding run.
+			threads: { runId: secondRunId, open: 2, awaitingAgent: 1, awaitingHuman: 1 },
+			drift: { since: firstRunId, changed: true },
+		});
+
+		const human = await run(root, ["status"]);
+		expect(human).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(human.stdout).toContain(`Active run ${firstRunId.slice(0, 12)}`);
+		expect(human.stdout).toContain(`Pending    ${secondRunId.slice(0, 12)} not narrated`);
+		expect(human.stdout).toContain("1 chapter carried, 1 chapter stale, 1 review unit to narrate");
+		expect(human.stdout).toContain(
+			"2 open threads (1 awaiting the agent, 1 awaiting the reviewer)",
+		);
+		expect(human.stdout).toContain("the scope has changed since this run was prepped");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("threads carry onto the superseding run, orphaned rather than lost when their code goes", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-thread-carry-"));
 	try {

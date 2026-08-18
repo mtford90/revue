@@ -197,6 +197,15 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   Persistent rules run before session rules; both rename paths are tested, and every effective input
   and omission reason is pinned in the run. Local modes detect
   index/worktree races and fail rather than produce a mixed snapshot.
+- **Status** — `revue status`, the one call that answers "where is this review?" entirely from disk,
+  so a fresh agent session orients without remembering anything. It names the **active run** (the
+  newest narrated run of the lineage) and the prep arguments that reproduce its scope, any newer run
+  that supersedes it and is not narrated yet along with what its delta still owes, the run's open
+  threads split into those **awaiting the agent** (a human spoke last) and those **awaiting the
+  reviewer** (an agent did) plus the anchors it orphaned, and **drift**: whether re-prepping the
+  active run's scope would capture code the run never pinned. Drift is asked of the run ID rather
+  than of Git, because a run ID is a content address. A repository with no runs is reported as such,
+  not as an error.
 - **Theme** — the single palette Revue paints with, derived from one bundled editor theme rather
   than hand-picked: neutral surfaces, foregrounds, diff row tints, semantic status colours, and the
   Shiki theme highlighted source uses. Derivation enforces WCAG contrast floors, so a theme stays

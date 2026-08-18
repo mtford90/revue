@@ -1,12 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parsePatch } from "@revue/diff";
 import {
+	persistThreadStoreFile,
+	readThreadStoreFile,
+	sortThreads,
+	ThreadStoreError,
+	threadStorePath,
+	withThreadStoreLock,
+} from "@revue/prep";
+import {
 	type ExcerptThreadAnchor,
-	emptyThreadStoreFile,
 	frozenExcerptContaining,
 	isExcerptAnchor,
 	partialDepthLabel,
@@ -17,21 +24,17 @@ import {
 	type ThreadAnchor,
 	type ThreadAuthor,
 	type ThreadMessage,
-	type ThreadStoreFile,
 	threadAuthorSchema,
 	threadMessageSchema,
-	threadStoreFileSchema,
 } from "@revue/types";
-import { z } from "zod";
 import type { ReviewRun } from "./load.ts";
 
-export class ThreadStoreError extends Error {}
-
-const LOCK_RETRY_MS = 10;
-const LOCK_TIMEOUT_MS = 5_000;
-const lockWaiter = new Int32Array(new SharedArrayBuffer(4));
-
-type LockOwner = { pid: number; token: string };
+export {
+	persistThreadStoreFile,
+	readThreadStoreFile,
+	sortThreads,
+	ThreadStoreError,
+} from "@revue/prep";
 
 export type NewThreadOptions = {
 	id?: string;
@@ -74,7 +77,7 @@ export const repositoryRootForRun = (runDirectory = process.cwd()): string | nul
 	findRepositoryRoot(dirname(resolve(runDirectory))) ?? findRepositoryRoot(process.cwd());
 
 export const defaultThreadsPath = (runDirectory = process.cwd()): string =>
-	join(repositoryRootForRun(runDirectory) ?? process.cwd(), ".revue", "threads.json");
+	threadStorePath(repositoryRootForRun(runDirectory) ?? process.cwd());
 
 const gitAuthorName = (repositoryRoot: string | null): string | null => {
 	if (!repositoryRoot) return null;
@@ -112,12 +115,6 @@ export const resolveHumanAuthor = (repositoryRoot: string | null): ThreadAuthor 
 		"Could not resolve a terminal-safe reviewer name from Git or the system login",
 	);
 };
-
-export const sortThreads = (threads: readonly ReviewThread[]): ReviewThread[] =>
-	[...threads].sort(
-		(left, right) =>
-			left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
-	);
 
 export const createThreadMessage = (
 	author: ThreadAuthor,
@@ -233,106 +230,6 @@ export const setThreadStatus = (
 		updated,
 	};
 };
-
-export function readThreadStoreFile(path: string): ThreadStoreFile {
-	let raw: string;
-	try {
-		raw = readFileSync(path, "utf8");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyThreadStoreFile();
-		throw new ThreadStoreError(`Could not read thread store at ${path}: ${describe(error)}`);
-	}
-	let value: unknown;
-	try {
-		value = JSON.parse(raw);
-	} catch (error) {
-		throw new ThreadStoreError(`Thread store at ${path} is not valid JSON: ${describe(error)}`);
-	}
-	const parsed = threadStoreFileSchema.safeParse(value);
-	if (!parsed.success) {
-		throw new ThreadStoreError(
-			`Thread store at ${path} does not match the threads schema:\n${z.prettifyError(parsed.error)}`,
-		);
-	}
-	return parsed.data;
-}
-
-const lockOwner = (path: string): Partial<LockOwner> | null => {
-	try {
-		return JSON.parse(readFileSync(path, "utf8")) as Partial<LockOwner>;
-	} catch {
-		return null;
-	}
-};
-
-const processIsAlive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code !== "ESRCH";
-	}
-};
-
-const acquireLock = (path: string, token: string, startedAt: number): void => {
-	const owner: LockOwner = { pid: process.pid, token };
-	try {
-		writeFileSync(path, JSON.stringify(owner), { encoding: "utf8", flag: "wx", mode: 0o600 });
-		return;
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-			throw new ThreadStoreError(
-				`Could not acquire thread store lock at ${path}: ${describe(error)}`,
-			);
-		}
-	}
-	const existing = lockOwner(path);
-	if (typeof existing?.pid === "number" && !processIsAlive(existing.pid)) {
-		throw new ThreadStoreError(
-			`Thread store has an abandoned lock from process ${existing.pid} at ${path}; remove that lock file before retrying`,
-		);
-	}
-	if (Date.now() - startedAt >= LOCK_TIMEOUT_MS) {
-		throw new ThreadStoreError(`Thread store is busy: timed out waiting for lock at ${path}`);
-	}
-	Atomics.wait(lockWaiter, 0, 0, LOCK_RETRY_MS);
-	acquireLock(path, token, startedAt);
-};
-
-const releaseLock = (path: string, token: string): void => {
-	try {
-		const owner = JSON.parse(readFileSync(path, "utf8")) as Partial<LockOwner>;
-		if (owner.pid === process.pid && owner.token === token) rmSync(path, { force: true });
-	} catch {}
-};
-
-const withThreadStoreLock = <Value>(path: string, action: () => Value): Value => {
-	mkdirSync(dirname(path), { recursive: true });
-	const lockPath = `${path}.lock`;
-	const token = randomUUID();
-	acquireLock(lockPath, token, Date.now());
-	try {
-		return action();
-	} finally {
-		releaseLock(lockPath, token);
-	}
-};
-
-export function persistThreadStoreFile(path: string, file: ThreadStoreFile): void {
-	const parsed = threadStoreFileSchema.parse(file);
-	mkdirSync(dirname(path), { recursive: true });
-	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(temporary, `${JSON.stringify(parsed, null, 2)}\n`, {
-			encoding: "utf8",
-			mode: 0o600,
-		});
-		renameSync(temporary, path);
-	} catch (error) {
-		rmSync(temporary, { force: true });
-		throw new ThreadStoreError(`Could not persist thread store at ${path}: ${describe(error)}`);
-	}
-}
 
 export function openThreadStore(path: string, runId: string): ThreadStore {
 	let current = sortThreads(readThreadStoreFile(path).runs[runId] ?? []);
@@ -479,6 +376,3 @@ const staleAnchor = (thread: ReviewThread, reason: string): ThreadStoreError =>
 	new ThreadStoreError(
 		`Thread ${thread.id} has a corrupt or stale anchor: ${reason}. Restore the matching pinned run state or repair the corrupt repository-local thread store before retrying.`,
 	);
-
-const describe = (error: unknown): string =>
-	error instanceof Error ? error.message : String(error);

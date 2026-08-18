@@ -35,3 +35,11 @@ export {
 	rerunArgsFor,
 	type ScopeRequest,
 } from "./scope.ts";
+export {
+	persistThreadStoreFile,
+	readThreadStoreFile,
+	sortThreads,
+	ThreadStoreError,
+	threadStorePath,
+	withThreadStoreLock,
+} from "./threads.ts";

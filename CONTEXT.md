@@ -35,7 +35,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   `@revue/diff-ansi`, and otherwise fails open to full sanitised passthrough. It owns downstream
   pagination and never starts OpenTUI or reads prepared-run, narrative Revue, or `~/.revue` state.
 - **Chapter** — one narrative beat, with a `title`, a narrated `summary`, the `hunkRefs` it covers,
-  any `keyChanges`, and any context `excerpts` it quotes. Usually a coherent group of diff hunks the
+  any `keyChanges`, any context `excerpts` it quotes, and any `threadRefs` — feedback of this review
+  it was written in answer to, cited by thread id the way a key change cites lines and rendered as a
+  link into the conversation. Usually a coherent group of diff hunks the
   reviewer absorbs as a unit; a chapter with no hunks at all is an **interlude**. Fenced `ascii` and
   `mermaid` blocks in the summary leave the prose and draw as **diagrams** beside the excerpts; every
   other fence stays inline as a snippet. Ordered.
@@ -51,6 +53,14 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   no field can contradict the hunk list. An ordinary page otherwise — it navigates, marks read, and
   counts toward chapter progress — but it shows no file list and completes on the mark-read key
   alone, since it has no files to complete it vacuously.
+- **Epilogue** — the last chapter of a run that supersedes a narrated one: *Changes since your
+  review*, the reviewer's designated re-entry point. Unlike an interlude it is *declared*
+  (`role: "epilogue"`), because what makes a chapter the epilogue is editorial rather than
+  structural. For a localised fix it narrates the fix hunks and cites the **threads** that prompted
+  them; after a structural rework it shrinks to an orientation note naming the chapters to re-read,
+  which needs no hunks at all. `revue show --check` requires exactly one, ending the narration, of
+  every run that inherited narration, and holds its thread citations to feedback the run has. It is
+  new by definition, so it always presents unread.
 - **Hunk reference (`hunkRef`)** — `(filePath, oldStart)`. The stable identity of a review unit; the
   agent copies these from `hunks.txt` rather than inventing them. Textual hunks use their pre-image
   start. A file with no textual hunk (pure rename, mode-only change, or empty file) receives one
@@ -182,10 +192,13 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Run key** — `sha256(runId + chapters)`, truncated for local persistence; a chapterless run
   hashes `runId` plus a chapterless sentinel so its progress keys on the snapshot alone. Review
   progress belongs to one pinned code snapshot narrated one specific way; changing either starts
-  fresh, except for two seeds into an as-yet unreviewed run: a newly narrated run inherits any
-  chapterless progress for the same snapshot (a one-way migration), and a run opened by reload
+  fresh, except for three seeds into an as-yet unreviewed run: a newly narrated run inherits any
+  chapterless progress for the same snapshot (a one-way migration); a run opened by reload
   inherits the progress of the run it replaced, keeping a file's mark only where that file's frozen
-  snapshots are identical in both runs. Threads use the full immutable **run ID** instead, so
+  snapshots are identical in both runs; and a run **superseding** a narrated one inherits every mark
+  its predecessor carried on a chapter the **run delta** carried through verbatim — files and
+  answered key changes alike, since the code they speak for came through untouched — which is what
+  the reload's file rule cannot know. Threads use the full immutable **run ID** instead, so
   feedback survives chapter regeneration for unchanged frozen code.
 - **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
   revue's, persisted to `.revue/state.json` (a `{ [runKey]: ViewState }` map).

@@ -104,7 +104,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Page** — a TUI navigation unit: the prologue (if present) followed by each chapter in order.
 - **Surface** — a top-level tab above pages: **Story** (the narrated page sequence), **Files** (the
   whole run as one flat stream), and **Comments** (every thread with open/dealt-with status,
-  jumping to its owning chapter). Internally Files — and any chapterless run — is one synthetic
+  jumping to its owning chapter; threads **awaiting the reviewer** lead the list, and a thread this
+  run no longer anchors — a dropped quotation or a **carried thread** whose code is gone — is listed
+  and marked rather than hidden). Internally Files — and any chapterless run — is one synthetic
   chapter covering every hunk, so all features work identically there.
 - **Diff view** — Patch (the default, authoritative line-numbered review surface) or Semantic (a
   lazy, read-only Difftastic rendering of the same run's pinned old/new blobs). Chapter/file focus
@@ -219,6 +221,15 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   active run's scope would capture code the run never pinned. Drift is asked of the run ID rather
   than of Git, because a run ID is a content address. A repository with no runs is reported as such,
   not as an error.
+- **Watching** — the open TUI notices two things on disk without being asked, through one small
+  debounced filesystem watch. A thread-store write — an agent's reply, or the reviewer's own second
+  terminal — applies silently in place: badges, inline conversations and the Comments surface
+  refresh with no layout shift, and the reviewer keeps the thread they were standing on even when a
+  new reply reorders the list. A run that **supersedes** this one raises a persistent banner naming
+  what changed, but only once that run loads cleanly and narrates itself; a half-written run
+  reports again on its next write rather than offering a broken review. Revue never switches runs
+  on its own — the banner redirects the existing reload key, which then opens the superseding run
+  on its **epilogue** with carried progress intact.
 - **Theme** — the single palette Revue paints with, derived from one bundled editor theme rather
   than hand-picked: neutral surfaces, foregrounds, diff row tints, semantic status colours, and the
   Shiki theme highlighted source uses. Derivation enforces WCAG contrast floors, so a theme stays

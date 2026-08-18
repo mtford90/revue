@@ -30,6 +30,7 @@ import {
 } from "@revue/theme";
 import {
 	excerptRangeLabel,
+	isEpilogue,
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
 	type RunDeltaFile,
@@ -39,12 +40,13 @@ import {
 	type ThreadAuthor,
 	type ViewState,
 } from "@revue/types";
+import type { ReviewUpdate } from "./app.tsx";
 import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
 import { KEYMAP } from "./keymap.ts";
-import { ChaptersFileError, loadChaptersFile, loadReviewRun } from "./load.ts";
+import { ChaptersFileError, loadChaptersFile, loadReviewRun, type ReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
@@ -73,11 +75,13 @@ import { REVUE_VERSION } from "./version.ts";
 import {
 	carryReviewProgress,
 	defaultStatePath,
+	epilogueSession,
 	loadViewState,
 	type ReviewSessionState,
 	runKey,
 	supersededProgress,
 } from "./viewState.ts";
+import { watchRun } from "./watch.ts";
 
 const HELP = `revue — narrative code review in your terminal
 
@@ -935,6 +939,74 @@ const supersededSeed = async (
 	});
 };
 
+/** What the banner says the agent did: the chapters it had to re-narrate, and the account of why. */
+const supersedeSummary = (run: ReviewRun): string => {
+	const revised = run.delta?.stale.length ?? 0;
+	return [
+		`${revised} ${revised === 1 ? "chapter" : "chapters"} revised`,
+		...(run.chapters?.chapters.some(isEpilogue) ? ["epilogue added"] : []),
+	].join(", ");
+};
+
+/**
+ * The bridge between the filesystem watcher and the open review: the watcher reports what changed,
+ * this reads what it means. A superseding run is offered only once it loads cleanly — reload must
+ * never land on a half-written run, and one still being written simply reports again on its next
+ * event. Nothing here switches runs; that stays the reviewer's keypress.
+ */
+const watchForUpdates = (run: ReviewRun, directory: string) => {
+	const threadsPath = defaultThreadsPath(directory);
+	let listener: ((update: ReviewUpdate) => void) | null = null;
+	let announced: ReviewUpdate | null = null;
+	let superseding: { directory: string; run: ReviewRun } | null = null;
+
+	const publish = (update: ReviewUpdate) => {
+		if (listener) listener(update);
+		else if (update.kind === "superseded") announced = update;
+	};
+
+	const publishThreads = () => {
+		try {
+			const { threads, orphaned } = loadValidatedThreads(threadsPath, run);
+			publish({ kind: "threads", threads, orphaned: orphaned.map((entry) => entry.thread.id) });
+		} catch {
+			// A store caught mid-write, or one this run cannot answer for, leaves the review as it is.
+		}
+	};
+
+	const adopt = async (candidate: string) => {
+		if (superseding) return;
+		const next = await loadReviewRun(candidate).catch(() => null);
+		if (!next?.chapters) return;
+		superseding = { directory: candidate, run: next };
+		publish({ kind: "superseded", summary: supersedeSummary(next) });
+	};
+
+	const dispose = watchRun({
+		threadsPath,
+		runsDirectory: defaultRunsDirectory(repositoryRootForRun(directory) ?? process.cwd()),
+		runId: run.manifest.runId,
+		onEvent: (event) => {
+			if (event.kind === "threads-changed") publishThreads();
+			else void adopt(event.directory);
+		},
+	});
+
+	return {
+		dispose,
+		superseding: () => superseding,
+		subscribe: (next: (update: ReviewUpdate) => void) => {
+			listener = next;
+			// The watcher's opening sweep can beat the render, so a banner raised then still lands.
+			if (announced) next(announced);
+			announced = null;
+			return () => {
+				listener = null;
+			};
+		},
+	};
+};
+
 const reloadNotice = (
 	previous: Awaited<ReturnType<typeof loadReviewRun>>,
 	next: Awaited<ReturnType<typeof loadReviewRun>>,
@@ -1015,8 +1087,11 @@ async function showRun(
 
 	for (;;) {
 		let threads: ReviewThread[];
+		let orphaned: string[];
 		try {
-			threads = loadValidatedThreads(defaultThreadsPath(currentDirectory), run).threads;
+			const loaded = loadValidatedThreads(defaultThreadsPath(currentDirectory), run);
+			threads = loaded.threads;
+			orphaned = loaded.orphaned.map((entry) => entry.thread.id);
 		} catch (error) {
 			if (error instanceof ThreadStoreError) {
 				process.stderr.write(`${error.message}\n`);
@@ -1056,6 +1131,7 @@ async function showRun(
 		};
 		const storedSession = store.getSession();
 		const hasSavedPosition = Object.keys(storedSession.pages).length > 0;
+		const watched = watchForUpdates(run, currentDirectory);
 
 		const outcome = await runApp(run.chapters, {
 			context: run.context,
@@ -1077,6 +1153,8 @@ async function showRun(
 			transparentSurfaces,
 			onPreferencesChange: (next) => savePreferences(preferencesPath, next),
 			initialThreads: threads,
+			initialOrphanedThreads: orphaned,
+			subscribeUpdates: watched.subscribe,
 			threadActions: threadStore,
 			humanAuthor,
 			permalinks: permalinkContextFor({
@@ -1090,7 +1168,20 @@ async function showRun(
 			},
 		});
 
+		watched.dispose();
 		if (outcome === "quit") return 0;
+
+		// Reload follows the banner when one is up: the reviewer asked for the run that continues
+		// their review, not for another prep of the scope it already replaced.
+		const superseding = watched.superseding();
+		if (superseding) {
+			const supersededRun = run;
+			currentDirectory = superseding.directory;
+			run = superseding.run;
+			carriedSessionState = epilogueSession(run.chapters) ?? carriedSessionState;
+			notice = reloadNotice(supersededRun, run);
+			continue;
+		}
 
 		const previous = { files: run.manifest.files, chapters: run.chapters, state: store.get() };
 		const repreped = await reprepForReload(run, currentDirectory, options.prepArgs);

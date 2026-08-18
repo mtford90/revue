@@ -81,6 +81,7 @@ Usage:
   revue diff [refs] [prep options]     same, with an explicit review scope
   revue prep [refs] [--base <ref>] [--compare <ref>] [--ref <mode>]
              [--ignore <pattern>]... [--show-ignored]
+             [--carry-from <run-id> | --no-carry]
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
   revue context freeze <run-directory> pin the code the narration quotes into context.json
@@ -139,7 +140,11 @@ const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main
                   [--base <ref>] [--compare <ref>]
                   [--pr <number | github-pull-request-url>]
                   [--ref committed|staged|unstaged|work]
-                  [--ignore <gitignore-pattern>]... [--show-ignored]`;
+                  [--ignore <gitignore-pattern>]... [--show-ignored]
+                  [--carry-from <run-id> | --no-carry]
+
+A new run records the most recent narrated run of the same scope in supersedes.
+--carry-from names that predecessor explicitly; --no-carry starts a fresh review.`;
 
 const prepSummary = (run: PreparedRun): string => {
 	const { manifest } = run;

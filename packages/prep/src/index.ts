@@ -17,8 +17,10 @@ export {
 export { ReviewCoverageError, validateReviewCoverage } from "./coverage.ts";
 export { exclusionSource } from "./format.ts";
 export { GitError } from "./git.ts";
+export { resolveSupersedes } from "./lineage.ts";
 export { PrepError, prepareRun } from "./prep.ts";
 export {
+	type CarryRequest,
 	PrepArgumentError,
 	parseScopeRequest,
 	rerunArgsFor,

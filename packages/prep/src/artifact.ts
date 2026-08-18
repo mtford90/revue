@@ -25,6 +25,8 @@ export type WritePreparedRunInput = {
 	hunks: string;
 	blobs: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
 	createdAt?: string;
+	/** The narrated run this one continues, recorded once at creation and never mutated. */
+	supersedes?: string;
 };
 
 export const digest = (content: string | Uint8Array<ArrayBuffer>): string =>
@@ -45,8 +47,12 @@ const canonicalJson = (value: unknown): string => {
 export const runIdFor = (content: RunManifestContent): string =>
 	digest(canonicalJson(runManifestContentSchema.parse(content)));
 
-const manifestContent = ({ runId: _runId, createdAt: _createdAt, ...content }: RunManifest) =>
-	content;
+const manifestContent = ({
+	runId: _runId,
+	createdAt: _createdAt,
+	supersedes: _supersedes,
+	...content
+}: RunManifest) => content;
 
 const parseJson = <T>(path: string, raw: string, parser: (value: unknown) => T): T => {
 	let value: unknown;
@@ -153,6 +159,7 @@ export async function writePreparedRun(input: WritePreparedRunInput): Promise<Pr
 		...content,
 		runId: runIdFor(content),
 		createdAt: input.createdAt ?? new Date().toISOString(),
+		...(input.supersedes ? { supersedes: input.supersedes } : {}),
 	});
 	const directory = join(input.runsDirectory, manifest.runId);
 	if (await pathExists(directory)) return loadPreparedRun(directory);

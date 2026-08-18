@@ -22,6 +22,7 @@ import {
 	type SnapshotSource,
 	verifyRawCapture,
 } from "./git.ts";
+import { resolveSupersedes } from "./lineage.ts";
 import { parseScopeRequest } from "./scope.ts";
 
 export class PrepError extends Error {}
@@ -219,11 +220,13 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 	const hunks = formatAgentInput(commits, files, exclusions);
 	await verifyRawCapture(plan, capture);
 	await verifyWorktreeSnapshots(plan, files);
+	const runsDirectory = defaultRunsDirectory(plan.context.root);
+	const scope = runScope(plan, patch, files);
 	return writePreparedRun({
-		runsDirectory: defaultRunsDirectory(plan.context.root),
+		runsDirectory,
 		content: {
 			schemaVersion: RUN_SCHEMA_VERSION,
-			scope: runScope(plan, patch, files),
+			scope,
 			files: files.map(({ runFile }) => runFile),
 			commits,
 			ignore,
@@ -233,5 +236,6 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 		patch,
 		hunks,
 		blobs,
+		supersedes: await resolveSupersedes({ runsDirectory, scope, ignore, carry: request.carry }),
 	});
 }

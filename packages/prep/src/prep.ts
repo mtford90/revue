@@ -8,7 +8,13 @@ import {
 	type RunManifestContent,
 	type RunScope,
 } from "@revue/types";
-import { defaultRunsDirectory, digest, type PreparedRun, writePreparedRun } from "./artifact.ts";
+import {
+	defaultRunsDirectory,
+	digest,
+	type PreparedRun,
+	preparedRunId,
+	writePreparedRun,
+} from "./artifact.ts";
 import { recordRunDelta } from "./delta.ts";
 import { exclusionFor, loadFilterRules } from "./filter.ts";
 import { type AgentInputFile, formatAgentInput } from "./format.ts";
@@ -24,7 +30,7 @@ import {
 	verifyRawCapture,
 } from "./git.ts";
 import { resolveSupersedes } from "./lineage.ts";
-import { parseScopeRequest } from "./scope.ts";
+import { type CarryRequest, parseScopeRequest } from "./scope.ts";
 import { migrateSupersededThreads, threadStorePath } from "./threads.ts";
 
 export class PrepError extends Error {}
@@ -196,7 +202,17 @@ const totals = (
 	reviewUnits: files.reduce((total, file) => total + file.runFile.referenceStarts.length, 0),
 });
 
-export async function prepareRun(args: string[], directory?: string): Promise<PreparedRun> {
+type PreparedContent = {
+	repositoryRoot: string;
+	content: Omit<RunManifestContent, "patchSha256" | "hunksSha256">;
+	patch: string;
+	hunks: string;
+	blobs: Map<string, Uint8Array<ArrayBuffer>>;
+	carry: CarryRequest;
+};
+
+/** Everything a run is made of, resolved and verified but not yet written anywhere. */
+async function prepareContent(args: string[], directory?: string): Promise<PreparedContent> {
 	const request = parseScopeRequest(args);
 	const plan = await resolveScopePlan(request, directory);
 	const capture = await captureRawPatch(plan);
@@ -222,13 +238,11 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 	const hunks = formatAgentInput(commits, files, exclusions);
 	await verifyRawCapture(plan, capture);
 	await verifyWorktreeSnapshots(plan, files);
-	const runsDirectory = defaultRunsDirectory(plan.context.root);
-	const scope = runScope(plan, patch, files);
-	const run = await writePreparedRun({
-		runsDirectory,
+	return {
+		repositoryRoot: plan.context.root,
 		content: {
 			schemaVersion: RUN_SCHEMA_VERSION,
-			scope,
+			scope: runScope(plan, patch, files),
 			files: files.map(({ runFile }) => runFile),
 			commits,
 			ignore,
@@ -238,13 +252,40 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 		patch,
 		hunks,
 		blobs,
-		supersedes: await resolveSupersedes({ runsDirectory, scope, ignore, carry: request.carry }),
+		carry: request.carry,
+	};
+}
+
+/**
+ * The run id the given prep arguments would produce right now, without writing a run. Run ids are
+ * content addresses, so comparing one against a run's own id says whether the code it pinned has
+ * moved on.
+ */
+export async function previewRunId(args: string[], directory?: string): Promise<string> {
+	const { content, patch, hunks } = await prepareContent(args, directory);
+	return preparedRunId({ content, patch, hunks });
+}
+
+export async function prepareRun(args: string[], directory?: string): Promise<PreparedRun> {
+	const { repositoryRoot, content, patch, hunks, blobs, carry } = await prepareContent(
+		args,
+		directory,
+	);
+	const { scope, ignore } = content;
+	const runsDirectory = defaultRunsDirectory(repositoryRoot);
+	const run = await writePreparedRun({
+		runsDirectory,
+		content,
+		patch,
+		hunks,
+		blobs,
+		supersedes: await resolveSupersedes({ runsDirectory, scope, ignore, carry }),
 	});
 	await recordRunDelta(run, runsDirectory);
 	await migrateSupersededThreads({
 		run,
 		runsDirectory,
-		threadsPath: threadStorePath(plan.context.root),
+		threadsPath: threadStorePath(repositoryRoot),
 	});
 	return run;
 }

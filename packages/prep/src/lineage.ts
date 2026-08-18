@@ -50,27 +50,37 @@ const readManifest = async (directory: string): Promise<RunManifest | null> => {
 	}
 };
 
-const candidateFor = async (
-	runsDirectory: string,
-	runId: string,
-	key: string,
-): Promise<Candidate | null> => {
+/** One run on disk: its manifest, where it lives, and whether anyone has narrated it. */
+export type RunRecord = { directory: string; manifest: RunManifest; narrated: boolean };
+
+const recordFor = async (runsDirectory: string, runId: string): Promise<RunRecord | null> => {
 	const directory = join(runsDirectory, runId);
 	const manifest = await readManifest(directory);
-	if (!manifest || scopeKey(manifest.scope, manifest.ignore) !== key) return null;
-	if (!(await pathExists(join(directory, "chapters.json")))) return null;
-	return { runId: manifest.runId, createdAt: manifest.createdAt };
+	if (!manifest) return null;
+	return { directory, manifest, narrated: await pathExists(join(directory, "chapters.json")) };
 };
 
-const narratedCandidates = async (runsDirectory: string, key: string): Promise<Candidate[]> => {
+/** Every readable run of a repository, newest first. */
+export async function readRunRecords(runsDirectory: string): Promise<RunRecord[]> {
 	const entries = await readdir(runsDirectory).catch(() => [] as string[]);
 	const found = await Promise.all(
-		entries
-			.filter((entry) => RUN_ID_PATTERN.test(entry))
-			.map((runId) => candidateFor(runsDirectory, runId, key)),
+		entries.filter((entry) => RUN_ID_PATTERN.test(entry)).map((id) => recordFor(runsDirectory, id)),
 	);
-	return found.filter((candidate): candidate is Candidate => candidate !== null);
-};
+	return found
+		.filter((record): record is RunRecord => record !== null)
+		.sort(
+			(left, right) =>
+				right.manifest.createdAt.localeCompare(left.manifest.createdAt) ||
+				right.manifest.runId.localeCompare(left.manifest.runId),
+		);
+}
+
+const narratedCandidates = async (runsDirectory: string, key: string): Promise<Candidate[]> =>
+	(await readRunRecords(runsDirectory))
+		.filter(
+			({ manifest, narrated }) => narrated && scopeKey(manifest.scope, manifest.ignore) === key,
+		)
+		.map(({ manifest }) => ({ runId: manifest.runId, createdAt: manifest.createdAt }));
 
 const explicitPredecessor = async (runsDirectory: string, runId: string): Promise<string> => {
 	const manifest = await readManifest(join(runsDirectory, runId));

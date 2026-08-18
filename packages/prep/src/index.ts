@@ -3,6 +3,7 @@ export {
 	digest,
 	loadPreparedRun,
 	type PreparedRun,
+	preparedRunId,
 	RunArtifactError,
 	runIdFor,
 	type WritePreparedRunInput,
@@ -28,9 +29,9 @@ export {
 	runDeltaPath,
 } from "./delta.ts";
 export { exclusionSource } from "./format.ts";
-export { GitError } from "./git.ts";
-export { resolveSupersedes } from "./lineage.ts";
-export { PrepError, prepareRun } from "./prep.ts";
+export { findGitContext, GitError } from "./git.ts";
+export { type RunRecord, readRunRecords, resolveSupersedes } from "./lineage.ts";
+export { PrepError, prepareRun, previewRunId } from "./prep.ts";
 export {
 	type CarryRequest,
 	PrepArgumentError,

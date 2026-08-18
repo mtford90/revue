@@ -149,12 +149,20 @@ const writeBlobs = async (
 	);
 };
 
-export async function writePreparedRun(input: WritePreparedRunInput): Promise<PreparedRun> {
-	const content = runManifestContentSchema.parse({
+type RunContentInput = Pick<WritePreparedRunInput, "content" | "patch" | "hunks">;
+
+const runContent = (input: RunContentInput): RunManifestContent =>
+	runManifestContentSchema.parse({
 		...input.content,
 		patchSha256: digest(input.patch),
 		hunksSha256: digest(input.hunks),
 	});
+
+/** The id a run made of this content would carry, without writing it. */
+export const preparedRunId = (input: RunContentInput): string => runIdFor(runContent(input));
+
+export async function writePreparedRun(input: WritePreparedRunInput): Promise<PreparedRun> {
+	const content = runContent(input);
 	const manifest = runManifestSchema.parse({
 		...content,
 		runId: runIdFor(content),

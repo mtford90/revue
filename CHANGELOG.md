@@ -2,7 +2,23 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
-## [0.8.1](https://github.com/mtford90/revue/compare/v0.8.0...v0.8.1) (2026-08-18)
+## [0.9.0](https://github.com/mtford90/revue/compare/v0.8.0...v0.9.0) (2026-08-18)
+
+
+### Features
+
+* exclude .revue directory and more lockfiles by default ([eef3e2c](https://github.com/mtford90/revue/commit/eef3e2c49df94ccd0b63eae4dec8ab05abe20667))
+* record supersedes lineage when prep creates a run ([f344ab1](https://github.com/mtford90/revue/commit/f344ab14006bce0957a610de53f95f6abc64f1f6))
+* classify a superseding run's hunks and carry chapters forward ([43e7528](https://github.com/mtford90/revue/commit/43e752802414e32557c258fc71ef3c6fd0c56e69))
+* surface the carry-forward worklist through revue delta ([431769d](https://github.com/mtford90/revue/commit/431769d361ff1c5f3358711117b03dee90f4d6c5))
+* carry review threads onto the run that supersedes their own ([75f9a18](https://github.com/mtford90/revue/commit/75f9a18688bd13d3a6bac13793a1b68ec17b91c8))
+* orient a cold agent with revue status ([d2c05d2](https://github.com/mtford90/revue/commit/d2c05d29bc59c75e0ded1b82a0fce316a9f9a69f))
+* check a superseding run's epilogue and its thread citations ([f9952d3](https://github.com/mtford90/revue/commit/f9952d3384641b968d1674181b70d7ce6ef05fdf))
+* carry read marks onto the run that supersedes their own ([3ee72b6](https://github.com/mtford90/revue/commit/3ee72b666d9f05d9850e793b45b0466cdce8eaf7))
+* render the epilogue's thread citations as links into the conversation ([4469426](https://github.com/mtford90/revue/commit/44694266dc0d80f37a51950cc663d2e13202ed1d))
+* notice thread and run changes on disk while a review is open ([2fe60df](https://github.com/mtford90/revue/commit/2fe60df18851a4676926d6268f8786ea5b6296eb))
+* refresh threads in place and offer a superseding run without taking it ([ae8e7e0](https://github.com/mtford90/revue/commit/ae8e7e031020509527ee3fa7d935a69571b0a540))
+* run the review's watch and let reload follow the banner ([ea9e16d](https://github.com/mtford90/revue/commit/ea9e16d0e265980d5c98b22d1142f7b53f703d60))
 
 
 ### Bug Fixes

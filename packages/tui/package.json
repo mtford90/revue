@@ -1,6 +1,6 @@
 {
 	"name": "@revue/tui",
-	"version": "0.8.1",
+	"version": "0.9.0",
 	"private": true,
 	"description": "The narrative Revue CLI and interactive OpenTUI reviewer.",
 	"type": "module",

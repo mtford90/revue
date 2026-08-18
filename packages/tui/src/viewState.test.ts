@@ -1,12 +1,13 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Chapter, RunFile } from "@revue/types";
-import { emptyViewState, viewStateFileId } from "@revue/types";
+import type { Chapter, RunDeltaFile, RunFile } from "@revue/types";
+import { emptyViewState, viewStateFileId, viewStateKeyChangeId } from "@revue/types";
 import {
 	ALL_FILES_CHAPTER_ID,
 	carryReviewProgress,
+	carrySupersededProgress,
 	emptyReviewSessionState,
 	isChapterReviewed,
 	isFileReviewed,
@@ -14,6 +15,7 @@ import {
 	openFileStore,
 	openRunStateStore,
 	runKey,
+	supersededProgress,
 	toggleChapter,
 	toggleFile,
 } from "./viewState.ts";
@@ -250,6 +252,106 @@ test("a reload carries narrated marks onto the flat page and drops stale key cha
 		files: [viewStateFileId(ALL_FILES_CHAPTER_ID, "a.ts")],
 		keyChanges: [],
 	});
+});
+
+const PREDECESSOR = "a".repeat(64);
+
+const questioned = (base: Chapter): Chapter => ({
+	...base,
+	keyChanges: [
+		{
+			content: "Is the retry budget shared?",
+			severity: "info",
+			lineRefs: [{ filePath: "a.ts", side: "additions", startLine: 1, endLine: 2 }],
+		},
+	],
+});
+
+const epilogue = (order: number): Chapter => ({
+	...chapter("epilogue", order, ["b.ts"]),
+	title: "Changes since your review",
+	role: "epilogue",
+});
+
+test("supersession keeps the marks on chapters it carried and no others", () => {
+	const carried = questioned(chapter("c1", 1, ["a.ts", "b.ts"]));
+	const stale = chapter("c2", 2, ["c.ts"]);
+	const previous = {
+		chapters: ["c1", "c2"],
+		files: [
+			viewStateFileId("c1", "a.ts"),
+			viewStateFileId("c1", "b.ts"),
+			viewStateFileId("c2", "c.ts"),
+		],
+		keyChanges: [viewStateKeyChangeId("c1", 0)],
+	};
+
+	const kept = carrySupersededProgress({
+		previous,
+		carried: [carried],
+		chapters: {
+			chapters: [carried, { ...stale, summary: "Re-narrated after the fix." }, epilogue(3)],
+		},
+	});
+
+	expect(kept).toEqual({
+		chapters: ["c1"],
+		files: [viewStateFileId("c1", "a.ts"), viewStateFileId("c1", "b.ts")],
+		keyChanges: [viewStateKeyChangeId("c1", 0)],
+	});
+
+	// A carried chapter the agent edited anyway is narration the reviewer has not read.
+	const edited = { ...carried, summary: "Reworded." };
+	expect(
+		carrySupersededProgress({
+			previous,
+			carried: [carried],
+			chapters: { chapters: [edited, epilogue(2)] },
+		}),
+	).toEqual(emptyViewState());
+});
+
+test("a superseding run seeds itself from the progress made on the run it continues", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "revue-vs-supersede-"));
+	tmpDirs.push(dir);
+	const statePath = join(dir, "state.json");
+	const runsDirectory = join(dir, "runs");
+	const carried = chapter("c1", 1, ["a.ts"]);
+	const narration = { chapters: [carried, chapter("c2", 2, ["c.ts"])] };
+	const chapters = { chapters: [carried, epilogue(2)] };
+	const delta: RunDeltaFile = {
+		runId: "b".repeat(64),
+		supersedes: PREDECESSOR,
+		carried: [carried],
+		stale: [{ id: "c2", title: "Chapter 2", reasons: ['review unit "c.ts"@0 changed'] }],
+		unnarrated: [],
+	};
+
+	// Nothing is carried until the predecessor's own narration is on disk to key its progress by.
+	expect(await supersededProgress({ statePath, runsDirectory, delta, chapters })).toBeUndefined();
+
+	await mkdir(join(runsDirectory, PREDECESSOR), { recursive: true });
+	await writeFile(join(runsDirectory, PREDECESSOR, "chapters.json"), JSON.stringify(narration));
+	const before = await openFileStore(statePath, runKey(PREDECESSOR, narration));
+	before.set(
+		toggleChapter(toggleChapter(emptyViewState(), carried), narration.chapters[1] as Chapter),
+	);
+
+	expect(await supersededProgress({ statePath, runsDirectory, delta, chapters })).toEqual({
+		chapters: ["c1"],
+		files: [viewStateFileId("c1", "a.ts")],
+		keyChanges: [],
+	});
+
+	// A run that inherited no chapter seeds itself however it otherwise would.
+	expect(
+		await supersededProgress({
+			statePath,
+			runsDirectory,
+			delta: { ...delta, carried: [] },
+			chapters,
+		}),
+	).toBeUndefined();
 });
 
 test("a reload leaves a run the reviewer has already made progress on alone", async () => {

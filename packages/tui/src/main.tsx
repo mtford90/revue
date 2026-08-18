@@ -8,6 +8,7 @@ import {
 	type MarkdownExportSelection,
 } from "@revue/markdown-export";
 import {
+	defaultRunsDirectory,
 	freezeRunContext,
 	GitError,
 	loadPreparedRun,
@@ -75,6 +76,7 @@ import {
 	loadViewState,
 	type ReviewSessionState,
 	runKey,
+	supersededProgress,
 } from "./viewState.ts";
 
 const HELP = `revue — narrative code review in your terminal
@@ -914,6 +916,25 @@ async function reprepForReload(
 	}
 }
 
+/**
+ * The marks the reviewer keeps when they open the run that continues their review. The delta names
+ * what came through the change untouched, so it decides this in place of the reload's file-snapshot
+ * rule, which knows what code moved but not which narration was read.
+ */
+const supersededSeed = async (
+	directory: string,
+	run: Awaited<ReturnType<typeof loadReviewRun>>,
+): Promise<ViewState | undefined> => {
+	const root = repositoryRootForRun(directory);
+	if (!run.delta || !run.chapters || !root) return undefined;
+	return supersededProgress({
+		statePath: defaultStatePath(),
+		runsDirectory: defaultRunsDirectory(root),
+		delta: run.delta,
+		chapters: run.chapters,
+	});
+};
+
 const reloadNotice = (
 	previous: Awaited<ReturnType<typeof loadReviewRun>>,
 	next: Awaited<ReturnType<typeof loadReviewRun>>,
@@ -1013,7 +1034,7 @@ async function showRun(
 			defaultStatePath(),
 			run.manifest.runId,
 			run.chapters,
-			carriedProgress,
+			(await supersededSeed(currentDirectory, run)) ?? carriedProgress,
 		);
 		carriedProgress = undefined;
 		const threadStore = openThreadStore(defaultThreadsPath(currentDirectory), run.manifest.runId);

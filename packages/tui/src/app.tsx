@@ -74,6 +74,7 @@ import {
 	type ThreadAnchor,
 	type ThreadAuthor,
 	type ThreadMessage,
+	threadReferences,
 	type ViewState,
 } from "@revue/types";
 import {
@@ -356,7 +357,25 @@ const excerptAnchor = (paths: readonly string[], index: number): string | null =
 /** Fold keys for figures, namespaced away from excerpt keys, which are cited ranges. */
 const diagramFoldKey = (chapterId: string, index: number) => `diagram:${chapterId}:${index}`;
 
-type ChapterFocusTarget = { kind: "file"; index: number } | { kind: "excerpt"; key: string };
+type ChapterFocusTarget =
+	| { kind: "file"; index: number }
+	| { kind: "excerpt"; key: string }
+	| { kind: "thread"; threadId: string };
+
+const threadRefRowId = (chapterId: string, threadId: string) =>
+	`chapter-thread-ref:${chapterId}:${threadId}`;
+
+/**
+ * What a chapter cites of the review's own conversation. An epilogue narrates fixes the reviewer
+ * asked for, so each citation is a link back to the thread that asked: the cursor stops on it and
+ * Enter opens it where the conversation lives, on the Comments surface.
+ */
+type ChapterThreadRefs = {
+	threads: readonly ReviewThread[];
+	focused: string | null;
+	onFocus: (threadId: string) => void;
+	onOpen: (threadId: string) => void;
+};
 
 /** Distinct citations in declared order; a repeated range is one block, opened once. */
 const distinctExcerpts = (chapter: Chapter): { key: string; excerpt: ContextExcerpt }[] => {
@@ -580,6 +599,7 @@ function ChapterBrief({
 	stats,
 	pathDisplay,
 	width,
+	threadRefs,
 	onSelectFile,
 	onFocusKeyChange,
 	onToggleFileReview,
@@ -593,6 +613,7 @@ function ChapterBrief({
 	stats: Map<string, FileStat>;
 	pathDisplay: PathDisplayMode;
 	width: number;
+	threadRefs?: ChapterThreadRefs;
 	onSelectFile: (index: number) => void;
 	onFocusKeyChange: (index: number) => void;
 	onToggleFileReview: (path: string) => void;
@@ -623,6 +644,7 @@ function ChapterBrief({
 					<text fg={theme.muted}>{INTERLUDE_NOTE}</text>
 				</box>
 				{prose ? <Narration text={prose} fg={theme.muted} onMouseDown={proseMenu} /> : null}
+				<ThreadReferences chapter={chapter} refs={threadRefs} />
 			</box>
 		);
 	}
@@ -630,6 +652,7 @@ function ChapterBrief({
 		<box flexDirection="column" width="100%" gap={1}>
 			{chapter.id === ALL_FILES_CHAPTER_ID ? null : <text fg={theme.accent}>{chapter.title}</text>}
 			{prose ? <Narration text={prose} fg={theme.muted} onMouseDown={proseMenu} /> : null}
+			<ThreadReferences chapter={chapter} refs={threadRefs} />
 			<KeyChanges
 				chapter={chapter}
 				vs={vs}
@@ -666,6 +689,7 @@ function ChapterPanel({
 	selectedKeyChange,
 	stats,
 	pathDisplay,
+	threadRefs,
 	onNavigatePage,
 	onToggleIndex,
 	onResizeStart,
@@ -692,6 +716,7 @@ function ChapterPanel({
 	selectedKeyChange: number;
 	stats: Map<string, FileStat>;
 	pathDisplay: PathDisplayMode;
+	threadRefs?: ChapterThreadRefs;
 	onNavigatePage: (index: number) => void;
 	onToggleIndex: () => void;
 	onResizeStart: (event: OpenTUIMouseEvent) => void;
@@ -815,6 +840,7 @@ function ChapterPanel({
 						stats={stats}
 						pathDisplay={pathDisplay}
 						width={Math.max(20, width - 4)}
+						threadRefs={threadRefs}
 						onSelectFile={onSelectFile}
 						onFocusKeyChange={onFocusKeyChange}
 						onToggleFileReview={onToggleFileReview}
@@ -1151,6 +1177,44 @@ function FileList({
 						onSelect={() => onSelect(index)}
 						onToggleReview={onToggleReview}
 					/>
+				);
+			})}
+		</box>
+	);
+}
+
+// ── Chapter thread citations ──────────────────────────────────────────────────
+/** The threads a chapter answers, listed as links into the conversation each one holds. */
+function ThreadReferences({ chapter, refs }: { chapter: Chapter; refs?: ChapterThreadRefs }) {
+	const theme = useTheme();
+	if (!refs?.threads.length) return null;
+	return (
+		<box flexDirection="column">
+			<text fg={theme.badgeModified}>In reply to</text>
+			{refs.threads.map((thread) => {
+				const active = thread.id === refs.focused;
+				return (
+					<box
+						id={threadRefRowId(chapter.id, thread.id)}
+						key={thread.id}
+						height={1}
+						width="100%"
+						flexDirection="row"
+						onMouseDown={() => {
+							refs.onFocus(thread.id);
+							refs.onOpen(thread.id);
+						}}
+					>
+						<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
+							{active ? "▸ " : "  "}
+						</text>
+						<text flexShrink={0} wrapMode="none" fg={active ? theme.accent : theme.text}>
+							{threadLocation(thread)}
+						</text>
+						<text flexGrow={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
+							{` ${thread.messages[0]?.body.split("\n")[0] ?? ""}`}
+						</text>
+					</box>
 				);
 			})}
 		</box>
@@ -2682,6 +2746,8 @@ export function App({
 	);
 	/** The excerpt the file cursor has stepped onto; excerpt rows carry no focus marker. */
 	const [focusedExcerpt, setFocusedExcerpt] = useState<string | null>(null);
+	/** The cited thread the chapter cursor is on, so Enter knows which conversation to open. */
+	const [focusedThreadRef, setFocusedThreadRef] = useState<string | null>(null);
 	/** A quoted range the gutter drag left behind. It has no composer to hold it, so it lives here. */
 	const [excerptSelection, setExcerptSelection] = useState<DiffLineRange | null>(null);
 	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
@@ -2918,9 +2984,15 @@ export function App({
 			};
 		});
 	}, [chapter, plannedBody, foldedDiagrams, contentWidth]);
+	/** The threads this chapter cites, in citation order, minus any the run no longer holds. */
+	const citedThreads = useMemo(() => {
+		const byId = new Map(threads.map((thread) => [thread.id, thread]));
+		return (chapter ? threadReferences(chapter) : []).flatMap((id) => byId.get(id) ?? []);
+	}, [chapter, threads]);
 	/**
 	 * What the file cursor steps through, in narration order. An excerpt is a stop on that walk
-	 * so `toggle-file-diff` can open it, which is why folding needs no shortcut of its own.
+	 * so `toggle-file-diff` can open it, which is why folding needs no shortcut of its own. A cited
+	 * thread leads the walk, because the narration cites it before it says anything else.
 	 */
 	const focusTargets = useMemo<ChapterFocusTarget[]>(() => {
 		const paths = chapter ? chapterFilePaths(chapter) : [];
@@ -2930,6 +3002,12 @@ export function App({
 				.filter((entry) => entry.after === path)
 				.map((entry) => ({ kind: "excerpt", key: entry.key }));
 		return [
+			...citedThreads.map(
+				(thread): ChapterFocusTarget => ({
+					kind: "thread",
+					threadId: thread.id,
+				}),
+			),
 			...excerptsAfter(null),
 			...paths.flatMap((path, index): ChapterFocusTarget[] => [
 				{ kind: "file", index },
@@ -2939,7 +3017,13 @@ export function App({
 				.filter((entry) => entry.after !== null && !anchored.has(entry.after))
 				.map((entry): ChapterFocusTarget => ({ kind: "excerpt", key: entry.key })),
 		];
-	}, [chapter, chapterExcerpts]);
+	}, [chapter, chapterExcerpts, citedThreads]);
+	const chapterThreadRefs: ChapterThreadRefs = {
+		threads: citedThreads,
+		focused: focusedThreadRef,
+		onFocus: setFocusedThreadRef,
+		onOpen: openReferencedThread,
+	};
 	const chapterThreadList = useMemo(() => {
 		if (!chapter) return [];
 		if (viewMode === "semantic") {
@@ -3244,7 +3328,18 @@ export function App({
 	}, [current, indexExpanded]);
 
 	useEffect(() => {
-		if (!chapter || fileFocusRequest === 0) return;
+		if (!chapter || !focusedThreadRef) return;
+		const host = showChapterPanel ? panelScroll : pageScroll;
+		host.current?.scrollChildIntoView(threadRefRowId(chapter.id, focusedThreadRef));
+	}, [chapter, focusedThreadRef, showChapterPanel]);
+
+	useEffect(() => {
+		if (!commentsSurface) return;
+		pageScroll.current?.scrollChildIntoView(commentRowId(selectedThread));
+	}, [commentsSurface, selectedThread]);
+
+	useEffect(() => {
+		if (!chapter || fileFocusRequest === 0 || focusedThreadRef) return;
 		const path = chapterFilePaths(chapter)[selectedFile];
 		const segment = focusedExcerpt
 			? excerptSegmentId(focusedExcerpt)
@@ -3270,7 +3365,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [chapter, selectedFile, focusedExcerpt, fileFocusRequest]);
+	}, [chapter, selectedFile, focusedExcerpt, focusedThreadRef, fileFocusRequest]);
 
 	useEffect(() => {
 		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
@@ -3615,6 +3710,7 @@ export function App({
 		setOpenExcerpts(new Set(restored.openExcerpts));
 		setFoldedDiagrams(new Set(restored.foldedDiagrams));
 		setFocusedExcerpt(null);
+		setFocusedThreadRef(null);
 		setExpansions(new Map());
 		setExpandedVariants(new Map());
 		setFileFocusRequest(0);
@@ -3913,19 +4009,37 @@ export function App({
 	}
 	function moveFileFocus(delta: number) {
 		if (!focusTargets.length) return;
-		const at = focusedExcerpt
-			? focusTargets.findIndex(
-					(target) => target.kind === "excerpt" && target.key === focusedExcerpt,
-				)
-			: focusTargets.findIndex((target) => target.kind === "file" && target.index === selectedFile);
+		const at = currentFocusTarget();
 		const next =
 			focusTargets[(Math.max(0, at) + delta + focusTargets.length) % focusTargets.length];
 		if (!next) return;
-		if (next.kind === "file") {
-			setFocusedExcerpt(null);
-			setSelectedFile(next.index);
-		} else setFocusedExcerpt(next.key);
+		setFocusedExcerpt(next.kind === "excerpt" ? next.key : null);
+		setFocusedThreadRef(next.kind === "thread" ? next.threadId : null);
+		if (next.kind === "file") setSelectedFile(next.index);
 		requestFileFocus();
+	}
+	function currentFocusTarget(): number {
+		if (focusedThreadRef) {
+			return focusTargets.findIndex(
+				(target) => target.kind === "thread" && target.threadId === focusedThreadRef,
+			);
+		}
+		if (focusedExcerpt) {
+			return focusTargets.findIndex(
+				(target) => target.kind === "excerpt" && target.key === focusedExcerpt,
+			);
+		}
+		return focusTargets.findIndex(
+			(target) => target.kind === "file" && target.index === selectedFile,
+		);
+	}
+	/** A cited thread is a link: activating it opens the conversation where it lives. */
+	function openReferencedThread(threadId: string) {
+		const index = orderedThreads.findIndex((thread) => thread.id === threadId);
+		if (index < 0) return;
+		saveCurrentSession(COMMENTS_PAGE_ID);
+		setCommentsSurface(true);
+		setSelectedThread(index);
 	}
 	function closeHelp() {
 		setShowHelp(false);
@@ -4419,6 +4533,10 @@ export function App({
 					commentOnExcerptRange(excerptSelection);
 					break;
 				}
+				if (focusedThreadRef) {
+					openReferencedThread(focusedThreadRef);
+					break;
+				}
 				if (focusedExcerpt) {
 					toggleExcerpt(focusedExcerpt);
 					break;
@@ -4561,6 +4679,7 @@ export function App({
 							selectedKeyChange={selectedKeyChange}
 							stats={stats}
 							pathDisplay={pathDisplay}
+							threadRefs={chapterThreadRefs}
 							onNavigatePage={goto}
 							onToggleIndex={() => changeIndexExpanded(!indexExpanded)}
 							onResizeStart={startPanelResize}
@@ -4610,6 +4729,7 @@ export function App({
 											stats={stats}
 											pathDisplay={pathDisplay}
 											width={contentWidth}
+											threadRefs={chapterThreadRefs}
 											onSelectFile={selectFile}
 											onFocusKeyChange={focusKeyChange}
 											onToggleFileReview={toggleFileReview}

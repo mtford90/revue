@@ -9,6 +9,7 @@ import {
 	carryReviewProgress,
 	carrySupersededProgress,
 	emptyReviewSessionState,
+	epilogueSession,
 	isChapterReviewed,
 	isFileReviewed,
 	nextUnreviewedChapter,
@@ -271,6 +272,17 @@ const epilogue = (order: number): Chapter => ({
 	...chapter("epilogue", order, ["b.ts"]),
 	title: "Changes since your review",
 	role: "epilogue",
+});
+
+test("a superseding run opens on its epilogue, and a run without one opens wherever it would", () => {
+	const carried = chapter("c1", 1, ["a.ts"]);
+
+	expect(epilogueSession({ chapters: [carried, epilogue(2)] })).toEqual({
+		pageId: "epilogue",
+		pages: {},
+	});
+	expect(epilogueSession({ chapters: [carried] })).toBeUndefined();
+	expect(epilogueSession(null)).toBeUndefined();
 });
 
 test("supersession keeps the marks on chapters it carried and no others", () => {

@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import {
 	type Chapter,
 	emptyViewState,
+	isEpilogue,
 	type RevueChaptersFile,
 	RevueChaptersFileSchema,
 	type RunDeltaFile,
@@ -293,6 +294,18 @@ const ReviewSessionStateSchema = z.object({
 export type ReviewSessionState = z.infer<typeof ReviewSessionStateSchema>;
 
 export const emptyReviewSessionState = (): ReviewSessionState => ({ pages: {} });
+
+/**
+ * Where the reviewer lands when they follow the banner onto the run that continues their review.
+ * The epilogue is the account of what changed since their last pass, so it is the re-entry point
+ * rather than wherever they happened to be standing in the run it replaces.
+ */
+export const epilogueSession = (
+	chapters: RevueChaptersFile | null,
+): ReviewSessionState | undefined => {
+	const epilogue = chapters?.chapters.find(isEpilogue);
+	return epilogue ? { pageId: epilogue.id, pages: {} } : undefined;
+};
 
 export interface ViewStateStore {
 	get(): ViewState;

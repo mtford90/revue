@@ -1591,6 +1591,14 @@ function InlineThread({
 
 const commentRowId = (index: number) => `comment-row:${index}`;
 
+/**
+ * An open thread whose last word came from an agent: the reviewer is the one who closes threads, so
+ * this is the pile waiting on them. Deliberately implicit — no status of its own to keep in step.
+ */
+const awaitsVerification = (thread: ReviewThread): boolean =>
+	thread.status === THREAD_STATUS.OPEN &&
+	thread.messages.at(-1)?.author.kind === THREAD_AUTHOR_KIND.AGENT;
+
 const threadLocation = (thread: ReviewThread) =>
 	`${thread.anchor.filePath}:${thread.anchor.startLine}${
 		thread.anchor.endLine === thread.anchor.startLine ? "" : `-${thread.anchor.endLine}`
@@ -1703,6 +1711,39 @@ function CommentsView({
 					onJump={onJump}
 				/>
 			))}
+		</box>
+	);
+}
+
+/**
+ * A change on disk the open review adopts without being asked. Threads apply silently in place;
+ * a run that continues this one only ever offers itself, because switching runs is the reviewer's
+ * decision to make and never the filesystem's.
+ */
+export type ReviewUpdate =
+	| { kind: "threads"; threads: readonly ReviewThread[]; orphaned: readonly string[] }
+	| { kind: "superseded"; summary: string };
+
+/**
+ * The one piece of chrome that interrupts: a run continuing this review is ready, and the reload
+ * key now leads there instead of re-prepping. Persistent by design — a transient notice would be
+ * missed by a reviewer deep in a chapter, and there is nothing else to dismiss it.
+ */
+function SupersedeBanner({ summary, reloadKey }: { summary: string; reloadKey: string }) {
+	const theme = useTheme();
+	return (
+		<box height={1} width="100%" flexShrink={0} flexDirection="row" backgroundColor={theme.accent}>
+			<text
+				flexGrow={1}
+				minWidth={0}
+				wrapMode="none"
+				truncate
+				fg={theme.background}
+				bg={theme.accent}
+				attributes={createTextAttributes({ bold: true })}
+			>
+				{` Revue updated: ${summary} — press ${reloadKey} to read what changed `}
+			</text>
 		</box>
 	);
 }
@@ -2599,6 +2640,8 @@ export function App({
 	initialNotice,
 	transparentSurfaces = false,
 	initialThreads = [],
+	initialOrphanedThreads = [],
+	subscribeUpdates,
 	threadActions,
 	humanAuthor = defaultHumanAuthor,
 	permalinks = null,
@@ -2644,6 +2687,10 @@ export function App({
 	initialNotice?: StatusNotice;
 	transparentSurfaces?: boolean;
 	initialThreads?: ReviewThread[];
+	/** Threads the run no longer anchors, which only a validated load can tell from corruption. */
+	initialOrphanedThreads?: readonly string[];
+	/** Changes on disk the review adopts in place; the caller decides what is worth reporting. */
+	subscribeUpdates?: (listener: (update: ReviewUpdate) => void) => () => void;
 	threadActions?: ThreadActions;
 	humanAuthor?: ThreadAuthor;
 	/** Where the reviewed lines live on GitHub; absent when no GitHub remote is configured. */
@@ -2784,6 +2831,11 @@ export function App({
 	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
 	const [vs, setVs] = useState(initialViewState);
 	const [threads, setThreads] = useState(() => sortThreads(initialThreads));
+	const [carriedOrphans, setCarriedOrphans] = useState<ReadonlySet<string>>(
+		() => new Set(initialOrphanedThreads),
+	);
+	/** What the run continuing this review offers, once one exists; never acted on unasked. */
+	const [supersedeSummary, setSupersedeSummary] = useState<string | null>(null);
 	const [threadDraft, setThreadDraft] = useState<ThreadDraft | null>(null);
 	const [threadBody, setThreadBody] = useState("");
 	const [threadNotice, setThreadNotice] = useState<string | null>(null);
@@ -3039,26 +3091,32 @@ export function App({
 		[chapter, threads, viewMode],
 	);
 	/**
-	 * Threads on code the frozen context no longer quotes. Re-narrating at another depth can
-	 * legitimately drop an excerpt, so these stay in the store and stay listed rather than being
-	 * pruned; they simply have no quoted line to render against.
+	 * Threads whose anchored code this run no longer holds. Re-narrating at another depth can
+	 * legitimately drop an excerpt, and supersession legitimately deletes code a carried thread was
+	 * written against, so these stay in the store and stay listed rather than being pruned; they
+	 * simply have no line to render against. The caller reports the carried ones, which only a
+	 * validated load can tell apart from corruption.
 	 */
 	const orphanedThreads = useMemo(
 		() =>
-			new Set(
-				threads
+			new Set([
+				...carriedOrphans,
+				...threads
 					.filter(
 						(thread) =>
 							isExcerptAnchor(thread.anchor) && !frozenExcerptContaining(context, thread.anchor),
 					)
 					.map((thread) => thread.id),
-			),
-		[threads, context],
+			]),
+		[threads, context, carriedOrphans],
 	);
+	// Threads the agent has already answered lead the list: the reviewer owes them a verdict, and
+	// everything below is ordered by where in the code it sits, as it always was.
 	const orderedThreads = useMemo(
 		() =>
 			[...threads].sort(
 				(left, right) =>
+					Number(awaitsVerification(right)) - Number(awaitsVerification(left)) ||
 					left.anchor.filePath.localeCompare(right.anchor.filePath) ||
 					left.anchor.startLine - right.anchor.startLine ||
 					left.createdAt.localeCompare(right.createdAt) ||
@@ -3147,6 +3205,12 @@ export function App({
 	viewportFilesRef.current = plannedViewportFiles;
 	const threadsRef = useRef(threads);
 	threadsRef.current = threads;
+	// A watcher event arrives outside the render, so the place it must preserve is read through refs.
+	const orderedThreadsRef = useRef(orderedThreads);
+	orderedThreadsRef.current = orderedThreads;
+	const selectedThreadRef = useRef(selectedThread);
+	selectedThreadRef.current = selectedThread;
+	const restoreSelectedThread = useRef<string | null>(null);
 	/**
 	 * Where an inline attachment sits in the planned content. Quoted code is measured against its
 	 * own excerpt segment: a chapter can both diff and quote one file, and matching an excerpt
@@ -3337,6 +3401,33 @@ export function App({
 		if (!commentsSurface) return;
 		pageScroll.current?.scrollChildIntoView(commentRowId(selectedThread));
 	}, [commentsSurface, selectedThread]);
+
+	/**
+	 * Selection is an index into the ordered list, but the reviewer's place is a thread: an agent
+	 * reply can promote its own thread to the top, so the id is carried across a refresh and the
+	 * index re-derived once the new order exists.
+	 */
+	useEffect(() => {
+		const id = restoreSelectedThread.current;
+		if (id === null) return;
+		restoreSelectedThread.current = null;
+		const index = orderedThreads.findIndex((thread) => thread.id === id);
+		if (index >= 0) setSelectedThread(index);
+	}, [orderedThreads]);
+
+	useEffect(() => {
+		if (!subscribeUpdates) return;
+		return subscribeUpdates((update) => {
+			if (update.kind === "superseded") {
+				setSupersedeSummary(update.summary);
+				return;
+			}
+			restoreSelectedThread.current =
+				orderedThreadsRef.current[selectedThreadRef.current]?.id ?? null;
+			setThreads(sortThreads(update.threads));
+			setCarriedOrphans(new Set(update.orphaned));
+		});
+	}, [subscribeUpdates]);
 
 	useEffect(() => {
 		if (!chapter || fileFocusRequest === 0 || focusedThreadRef) return;
@@ -4599,6 +4690,7 @@ export function App({
 	const statusHints = showHelp ? [] : footerHints(keymapSurface, keymap);
 	const helpKeyLabel = formatKeymapKey(keymapHint("toggle-shortcut-help", keymap) ?? "?");
 	const quitKeyLabel = formatKeymapKey(keymapHint("quit", keymap) ?? "q");
+	const reloadKeyLabel = formatKeymapKey(keymapHint("reload", keymap) ?? "ctrl+r");
 	const configIssuesNotice: StatusNotice | null =
 		keymapIssues.length > 0 && themeIssues.length > 0
 			? {
@@ -4650,6 +4742,9 @@ export function App({
 					onToggle={menu.toggle}
 					onClose={menu.close}
 				/>
+				{supersedeSummary ? (
+					<SupersedeBanner summary={supersedeSummary} reloadKey={reloadKeyLabel} />
+				) : null}
 				{showChapterPanel || page?.kind === "comments" ? null : (
 					<PageNavStrip
 						page={page}
@@ -4947,6 +5042,10 @@ export async function runApp(
 		initialSessionState?: ReviewSessionState;
 		initialPreferences?: Preferences;
 		initialThreads?: ReviewThread[];
+		/** Threads the run no longer anchors, as the validated load reported them. */
+		initialOrphanedThreads?: readonly string[];
+		/** Changes on disk the review adopts in place. */
+		subscribeUpdates?: (listener: (update: ReviewUpdate) => void) => () => void;
 		threadActions?: ThreadActions;
 		humanAuthor?: ThreadAuthor;
 		permalinks?: PermalinkContext | null;
@@ -5003,6 +5102,8 @@ export async function runApp(
 				initialNotice={options.initialNotice}
 				transparentSurfaces={options.transparentSurfaces}
 				initialThreads={options.initialThreads}
+				initialOrphanedThreads={options.initialOrphanedThreads}
+				subscribeUpdates={options.subscribeUpdates}
 				threadActions={options.threadActions}
 				humanAuthor={options.humanAuthor}
 				permalinks={options.permalinks}

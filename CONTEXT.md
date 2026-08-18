@@ -73,6 +73,16 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   pruned, because re-narrating at another depth legitimately drops a citation. A thread has ordered
   messages and a thread-level `open` or reversible `dealt-with` status; multiple threads may share
   an anchor.
+- **Carried thread** — a thread prep moved onto a run from the run it **supersedes**, open and
+  dealt-with alike, so the conversation and its history stay with the code rather than stranding on
+  a dead run. Threads move rather than copy — the superseded run is left with none — and keep their
+  identity, status, and every message, gaining only a note of the run they came from. Hunk anchors
+  are re-mapped through the run delta's unit matching: a unit that came through with its content
+  intact shifts exactly, one the change rewrote keeps the offset it was commented at, and an anchor
+  no unit of the new run can hold is orphaned rather than fatal, because supersession legitimately
+  deletes code. That leniency is the carried thread's alone; an anchor written against the run it
+  names can only stop resolving through corruption. Excerpt anchors are re-resolved against the new
+  run's frozen context and orphan exactly as they always have.
 - **Thread message** — one independently identified root message or reply containing a terminal-safe
   body, creation time, and `{ kind: "human" | "agent", name }` author. Human TUI names resolve from
   repository-aware `git config user.name`, then the system login. Agent CLI messages require an
@@ -161,7 +171,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   pre-copied with its hunk references and key-change line ranges re-mapped, and with the code it
   quotes re-frozen against the new run. Any other chapter is **stale**, named with the reason, and
   re-narrated rather than patched. What no carried chapter covers is the agent's worklist. Like
-  `chapters.json` and `context.json` the delta is narration-side and outside the run ID.
+  `chapters.json` and `context.json` the delta is narration-side and outside the run ID. The same
+  unit classification re-anchors **carried threads**, so feedback and narration follow the code by
+  one shared rule.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
   hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
   totals. Creation time and narration are deliberately excluded. Content-addressing means
@@ -257,7 +269,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   reviewed repository from the supplied run, validates and atomically replaces its
   `.revue/threads.json`, keyed by full `runId`; prepared run directories remain immutable. Mutations
   take a cross-process lock and transform the latest same-run state, preventing TUI/agent writers
-  from replacing one another's feedback. Durable hunk anchors include review-unit `oldStart`;
+  from replacing one another's feedback — including prep, which takes the same lock to move threads
+  onto a run that supersedes the one they were left on. Durable hunk anchors include review-unit
+  `oldStart`;
   excerpt anchors carry none and resolve against the run's frozen context instead
   (see `docs/adr/0014`). The renderer exposes only feedback-neutral gutter
   selection and inline attachment placement. Revue owns thread/message UUIDs, authors, lifecycle,

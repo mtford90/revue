@@ -25,6 +25,7 @@ import {
 } from "./git.ts";
 import { resolveSupersedes } from "./lineage.ts";
 import { parseScopeRequest } from "./scope.ts";
+import { migrateSupersededThreads, threadStorePath } from "./threads.ts";
 
 export class PrepError extends Error {}
 
@@ -240,5 +241,10 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 		supersedes: await resolveSupersedes({ runsDirectory, scope, ignore, carry: request.carry }),
 	});
 	await recordRunDelta(run, runsDirectory);
+	await migrateSupersededThreads({
+		run,
+		runsDirectory,
+		threadsPath: threadStorePath(plan.context.root),
+	});
 	return run;
 }

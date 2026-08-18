@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { parsePatch } from "@revue/diff";
+import { type DiffFile, parsePatch } from "@revue/diff";
 import {
 	persistThreadStoreFile,
 	readThreadStoreFile,
@@ -15,6 +15,7 @@ import {
 import {
 	type ExcerptThreadAnchor,
 	frozenExcerptContaining,
+	type HunkThreadAnchor,
 	isExcerptAnchor,
 	partialDepthLabel,
 	type ReviewThread,
@@ -302,9 +303,44 @@ const excerptOrphan = (run: ReviewRun, thread: ReviewThread): OrphanedThread | n
 	};
 };
 
+/** Why this anchor names no pinned review unit of the run, or null when it names exactly one. */
+const hunkAnchorIssue = (files: readonly DiffFile[], anchor: HunkThreadAnchor): string | null => {
+	const file = files.find(
+		(candidate) =>
+			candidate.path === anchor.filePath || candidate.metadata.name === anchor.filePath,
+	);
+	if (!file) return `file ${JSON.stringify(anchor.filePath)} is absent`;
+	const hunk = file.metadata.hunks.find((candidate) => candidate.deletionStart === anchor.oldStart);
+	if (!hunk) return `review unit oldStart ${anchor.oldStart} is absent`;
+	const start = anchor.side === "additions" ? hunk.additionStart : hunk.deletionStart;
+	const count = anchor.side === "additions" ? hunk.additionCount : hunk.deletionCount;
+	if (count > 0 && anchor.startLine >= start && anchor.endLine <= start + count - 1) return null;
+	return `${anchor.side} range ${anchor.startLine}-${anchor.endLine} is outside that review unit`;
+};
+
+/** Why the narration does not own this anchor's review unit exactly once, if it does not. */
+const chapterOwnershipIssue = (run: ReviewRun, anchor: HunkThreadAnchor): string | null => {
+	if (!run.chapters) return null;
+	const owners = run.chapters.chapters.filter((chapter) =>
+		chapter.hunkRefs.some(
+			(reference) =>
+				reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
+		),
+	);
+	// A partial narrative leaves units out of the story on purpose and Files still reaches them, so
+	// feedback on an unnarrated unit is a narration choice rather than corruption. Two owners is a
+	// broken narrative at any depth.
+	const leftOutDeliberately = owners.length === 0 && partialDepthLabel(run.chapters) !== null;
+	if (owners.length === 1 || leftOutDeliberately) return null;
+	return `review unit has ${owners.length} chapter owners instead of one`;
+};
+
 /**
  * Reject every anchor that does not belong to exactly one pinned review unit, and report — rather
- * than reject — excerpt anchors the frozen context no longer covers.
+ * than reject — anchors that legitimately stopped resolving: excerpt anchors the frozen context no
+ * longer covers, and hunk anchors carried here from a superseded run whose code this one no longer
+ * has. Only a carried anchor earns that leniency, because supersession deletes code as a matter of
+ * course while an anchor written against this run can only stop resolving through corruption.
  */
 export function validateThreadsForRun(
 	run: ReviewRun,
@@ -324,43 +360,17 @@ export function validateThreadsForRun(
 			continue;
 		}
 		const anchor = thread.anchor;
-		const file = files.find(
-			(candidate) =>
-				candidate.path === anchor.filePath || candidate.metadata.name === anchor.filePath,
-		);
-		if (!file) {
-			throw staleAnchor(thread, `file ${JSON.stringify(anchor.filePath)} is absent`);
-		}
-		const hunk = file.metadata.hunks.find(
-			(candidate) => candidate.deletionStart === anchor.oldStart,
-		);
-		if (!hunk) {
-			throw staleAnchor(thread, `review unit oldStart ${anchor.oldStart} is absent`);
-		}
-		const sideStart = anchor.side === "additions" ? hunk.additionStart : hunk.deletionStart;
-		const sideCount = anchor.side === "additions" ? hunk.additionCount : hunk.deletionCount;
-		const sideEnd = sideStart + sideCount - 1;
-		if (sideCount === 0 || anchor.startLine < sideStart || anchor.endLine > sideEnd) {
-			throw staleAnchor(
+		const issue = hunkAnchorIssue(files, anchor);
+		if (issue) {
+			if (!thread.migratedFrom) throw staleAnchor(thread, issue);
+			orphaned.push({
 				thread,
-				`${anchor.side} range ${anchor.startLine}-${anchor.endLine} is outside that review unit`,
-			);
+				reason: `this thread was carried from a superseded run and ${issue}`,
+			});
+			continue;
 		}
-		if (run.chapters) {
-			const owners = run.chapters.chapters.filter((chapter) =>
-				chapter.hunkRefs.some(
-					(reference) =>
-						reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
-				),
-			);
-			// A partial narrative leaves units out of the story on purpose and Files still reaches
-			// them, so feedback on an unnarrated unit is a narration choice rather than corruption.
-			// Two owners is a broken narrative at any depth.
-			const leftOutDeliberately = owners.length === 0 && partialDepthLabel(run.chapters) !== null;
-			if (owners.length !== 1 && !leftOutDeliberately) {
-				throw staleAnchor(thread, `review unit has ${owners.length} chapter owners instead of one`);
-			}
-		}
+		const ownership = chapterOwnershipIssue(run, anchor);
+		if (ownership) throw staleAnchor(thread, ownership);
 	}
 	return orphaned;
 }

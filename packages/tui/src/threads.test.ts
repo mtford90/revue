@@ -17,6 +17,7 @@ import {
 	defaultThreadsPath,
 	loadValidatedThreads,
 	openThreadStore,
+	persistThreadStoreFile,
 	readThreadStoreFile,
 	resolveHumanAuthor,
 	ThreadStoreError,
@@ -324,6 +325,39 @@ test("a corrupt hunk anchor still refuses to load", async () => {
 		const run = await loadReviewRun(directory);
 		expect(() => loadValidatedThreads(threadsPath, run)).toThrow(ThreadStoreError);
 		expect(() => loadValidatedThreads(threadsPath, run)).toThrow("outside that review unit");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("the same anchor, carried from a superseded run, is orphaned instead", async () => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-carried-anchor-"));
+	try {
+		const { directory, runId, threadsPath } = await narratedRun(root, [CITED]);
+		const thread = openThreadStore(threadsPath, runId).create(
+			{ ...anchor, filePath: "src/lib/backoff.ts", oldStart: 0, startLine: 999, endLine: 999 },
+			agent,
+			"The fix deleted the code this was about",
+		);
+		// Prep stamps a thread it carried with the run it came from. Supersession deletes code as a
+		// matter of course, so a carried anchor may honestly have nothing left to point at.
+		const store = readThreadStoreFile(threadsPath);
+		persistThreadStoreFile(threadsPath, {
+			...store,
+			runs: {
+				[runId]: (store.runs[runId] ?? []).map((entry) => ({
+					...entry,
+					migratedFrom: "b".repeat(64),
+				})),
+			},
+		});
+
+		const run = await loadReviewRun(directory);
+		const loaded = loadValidatedThreads(threadsPath, run);
+
+		expect(loaded.threads.map((entry) => entry.id)).toEqual([thread.id]);
+		expect(loaded.orphaned.map((entry) => entry.thread.id)).toEqual([thread.id]);
+		expect(loaded.orphaned[0]?.reason).toContain("carried from a superseded run");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

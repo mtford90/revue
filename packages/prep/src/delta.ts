@@ -38,7 +38,7 @@ export const runDeltaPath = (directory: string): string => join(directory, "delt
  * One review unit reduced to what comparing runs needs: its `(filePath, oldStart)` identity, the
  * lines it occupies on each side, and a digest of its content that ignores where those lines sit.
  */
-type ReviewUnit = {
+export type ReviewUnit = {
 	filePath: string;
 	oldStart: number;
 	oldCount: number;
@@ -49,7 +49,7 @@ type ReviewUnit = {
 
 type ClassifiedUnit = { unit: ReviewUnit; status: ReviewUnitStatus; previous?: ReviewUnit };
 
-const unitKey = (filePath: string, oldStart: number): string =>
+export const unitKey = (filePath: string, oldStart: number): string =>
 	JSON.stringify([filePath, oldStart]);
 
 const unitLabel = (filePath: string, oldStart: number): string =>
@@ -157,16 +157,48 @@ const classifyReviewUnits = (previous: ReviewUnit[], current: ReviewUnit[]): Cla
 	});
 };
 
-const sideStart = (unit: ReviewUnit, side: LineRef["side"]): number =>
-	side === "additions" ? unit.newStart : unit.oldStart;
+/** A review unit of the predecessor and the unit of this run that carries it. */
+export type ReviewUnitMatch = {
+	previous: ReviewUnit;
+	current: ReviewUnit;
+	status: ReviewUnitStatus;
+};
 
-const sideCount = (unit: ReviewUnit, side: LineRef["side"]): number =>
-	side === "additions" ? unit.newCount : unit.oldCount;
+/**
+ * What each review unit of the predecessor became in the run superseding it, by unit key. A unit the
+ * change dropped is simply absent, which is what tells a caller its code is gone.
+ */
+export const matchReviewUnits = (
+	predecessor: PreparedRun,
+	run: PreparedRun,
+): Map<string, ReviewUnitMatch> =>
+	new Map(
+		classifyReviewUnits(reviewUnits(predecessor), reviewUnits(run)).flatMap((entry) =>
+			entry.previous
+				? ([
+						[
+							unitKey(entry.previous.filePath, entry.previous.oldStart),
+							{ previous: entry.previous, current: entry.unit, status: entry.status },
+						],
+					] as const)
+				: [],
+		),
+	);
+
+/** Where a review unit's lines begin on one side of the diff, and how many it has there. */
+export const unitSide = (
+	unit: ReviewUnit,
+	side: LineRef["side"],
+): { start: number; count: number } =>
+	side === "additions"
+		? { start: unit.newStart, count: unit.newCount }
+		: { start: unit.oldStart, count: unit.oldCount };
+
+const sideStart = (unit: ReviewUnit, side: LineRef["side"]): number => unitSide(unit, side).start;
 
 const containing = (reference: LineRef, units: ReviewUnit[]): ReviewUnit | undefined =>
 	units.find((unit) => {
-		const start = sideStart(unit, reference.side);
-		const count = sideCount(unit, reference.side);
+		const { start, count } = unitSide(unit, reference.side);
 		return (
 			unit.filePath === reference.filePath &&
 			count > 0 &&

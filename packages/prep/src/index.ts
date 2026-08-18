@@ -19,6 +19,9 @@ export { ReviewCoverageError, validateReviewCoverage } from "./coverage.ts";
 export {
 	computeRunDelta,
 	loadRunDelta,
+	matchReviewUnits,
+	type ReviewUnit,
+	type ReviewUnitMatch,
 	type RunDeltaInput,
 	type RunDeltaResult,
 	recordRunDelta,
@@ -36,9 +39,12 @@ export {
 	type ScopeRequest,
 } from "./scope.ts";
 export {
+	migrateSupersededThreads,
 	persistThreadStoreFile,
 	readThreadStoreFile,
 	sortThreads,
+	type ThreadMigration,
+	type ThreadMigrationInput,
 	ThreadStoreError,
 	threadStorePath,
 	withThreadStoreLock,

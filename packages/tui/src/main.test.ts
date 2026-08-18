@@ -3,6 +3,7 @@ import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+	type ReviewThread,
 	RevueChaptersFileSchema,
 	runManifestSchema,
 	THREAD_ANCHOR_KIND,
@@ -622,6 +623,112 @@ test("delta hands the agent the worklist a superseding run left it", async () =>
 			})}\n`,
 		);
 		expect(await run(root, ["show", second, "--check"])).toMatchObject({ exitCode: 0 });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("threads carry onto the superseding run, orphaned rather than lost when their code goes", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-thread-carry-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 1;\n");
+		await writeFile(join(root, "src", "gamma.ts"), "export const gamma = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 2;\n");
+		await writeFile(join(root, "src", "gamma.ts"), "export const gamma = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Feature work");
+
+		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		await writeFile(
+			join(first, "chapters.json"),
+			`${JSON.stringify({
+				chapters: ["alpha", "gamma"].map((name, index) => ({
+					id: name,
+					order: index + 1,
+					title: `Chapter ${name}`,
+					summary: `What src/${name}.ts now does.`,
+					hunkRefs: [{ filePath: `src/${name}.ts`, oldStart: 1 }],
+					keyChanges: [],
+					excerpts: [],
+				})),
+			})}\n`,
+		);
+		const comment = async (filePath: string, body: string) => {
+			const created = await run(root, [
+				"threads",
+				"create",
+				first,
+				"--file",
+				filePath,
+				"--old-start",
+				"1",
+				"--side",
+				"additions",
+				"--start-line",
+				"1",
+				"--end-line",
+				"1",
+				"--author",
+				"Review agent",
+				"--body",
+				body,
+			]);
+			expect(created).toMatchObject({ exitCode: 0, stderr: "" });
+			return JSON.parse(created.stdout).thread.id as string;
+		};
+		const kept = await comment("src/alpha.ts", "Is two the right constant?");
+		const doomed = await comment("src/gamma.ts", "Was this change needed at all?");
+		await run(root, [
+			"threads",
+			"reply",
+			first,
+			kept,
+			"--author",
+			"Review agent",
+			"--body",
+			"Two matches the caller.",
+		]);
+		expect(await run(root, ["threads", "mark-dealt", first, doomed])).toMatchObject({
+			exitCode: 0,
+		});
+
+		// The agent responds by dropping the gamma change entirely, which deletes what it anchors.
+		await writeFile(join(root, "src", "gamma.ts"), "export const gamma = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Address the review");
+		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+
+		const listed = await run(root, ["threads", "list", second, "--json", "--all"]);
+		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
+		const payload = JSON.parse(listed.stdout);
+		expect(payload.threads.map((thread: ReviewThread) => thread.id)).toEqual([kept, doomed]);
+		expect(payload.threads[0]).toMatchObject({
+			runId: second.split("/").at(-1),
+			migratedFrom: first.split("/").at(-1),
+			status: "open",
+			anchor: { filePath: "src/alpha.ts", oldStart: 1, startLine: 1, endLine: 1 },
+		});
+		expect(payload.threads[0].messages.map((message: { body: string }) => message.body)).toEqual([
+			"Is two the right constant?",
+			"Two matches the caller.",
+		]);
+		// The reverted change took its review unit with it: the thread is kept and listed, not pruned,
+		// and the run still loads.
+		expect(payload.threads[1]).toMatchObject({ id: doomed, status: "dealt-with" });
+		expect(payload.orphaned).toEqual([
+			{ id: doomed, reason: expect.stringContaining("carried from a superseded run") },
+		]);
+
+		const superseded = await run(root, ["threads", "list", first, "--json", "--all"]);
+		expect(superseded).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(superseded.stdout).threads).toEqual([]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

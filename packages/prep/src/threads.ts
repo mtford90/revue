@@ -3,15 +3,19 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import {
 	emptyThreadStoreFile,
+	isExcerptAnchor,
 	type ReviewThread,
+	type ThreadAnchor,
 	type ThreadStoreFile,
 	threadStoreFileSchema,
 } from "@revue/types";
 import { z } from "zod";
+import { loadPreparedRun, type PreparedRun } from "./artifact.ts";
+import { matchReviewUnits, type ReviewUnitMatch, unitKey, unitSide } from "./delta.ts";
 
 // Threads are the mutable overlay on immutable runs, so the store lives beside the runs rather than
-// inside them and every writer takes the same cross-process lock. The store lives here, below the
-// terminal, because prep writes to it too.
+// inside them and every writer takes the same cross-process lock. Prep writes here for one reason:
+// when a run supersedes another, the feedback on the superseded run has to follow the code.
 
 export class ThreadStoreError extends Error {}
 
@@ -128,6 +132,93 @@ export function persistThreadStoreFile(path: string, file: ThreadStoreFile): voi
 		rmSync(temporary, { force: true });
 		throw new ThreadStoreError(`Could not persist thread store at ${path}: ${describe(error)}`);
 	}
+}
+
+/**
+ * Where a carried anchor reads in the superseding run. A unit that came through with its content
+ * intact shifts exactly, and one the change rewrote keeps the offset the reviewer commented at, so
+ * feedback lands on the code that answers it. An anchor no unit of this run can hold keeps the
+ * range it was written against: the run reports it as orphaned rather than moving it somewhere it
+ * was never aimed.
+ */
+const carriedAnchor = (
+	anchor: ThreadAnchor,
+	matches: Map<string, ReviewUnitMatch>,
+): ThreadAnchor => {
+	if (isExcerptAnchor(anchor)) return anchor;
+	const match = matches.get(unitKey(anchor.filePath, anchor.oldStart));
+	if (!match) return anchor;
+	const before = unitSide(match.previous, anchor.side);
+	const after = unitSide(match.current, anchor.side);
+	const shift = after.start - before.start;
+	const startLine = anchor.startLine + shift;
+	const endLine = anchor.endLine + shift;
+	const outside = startLine < after.start || endLine > after.start + after.count - 1;
+	if (after.count === 0 || outside) return anchor;
+	return { ...anchor, oldStart: match.current.oldStart, startLine, endLine };
+};
+
+const carriedThread = (
+	thread: ReviewThread,
+	runId: string,
+	matches: Map<string, ReviewUnitMatch>,
+): ReviewThread => ({
+	...thread,
+	runId,
+	migratedFrom: thread.runId,
+	anchor: carriedAnchor(thread.anchor, matches),
+});
+
+const withoutRun = (runs: ThreadStoreFile["runs"], runId: string): ThreadStoreFile["runs"] =>
+	Object.fromEntries(Object.entries(runs).filter(([key]) => key !== runId));
+
+export type ThreadMigrationInput = {
+	run: PreparedRun;
+	runsDirectory: string;
+	threadsPath: string;
+};
+
+/** What a superseding run took over from the run it continues. */
+export type ThreadMigration = {
+	runId: string;
+	supersedes: string;
+	carried: ReviewThread[];
+};
+
+/**
+ * Move the superseded run's feedback onto the run that continues it, anchors and all. Threads are
+ * moved rather than copied because a thread is one conversation about code that has moved on:
+ * leaving a second copy on the dead run would let the two halves answer each other differently.
+ * Nothing is dropped, whatever became of the code, and a re-prep that dedupes onto an already
+ * migrated run finds nothing left to move.
+ */
+export async function migrateSupersededThreads({
+	run,
+	runsDirectory,
+	threadsPath,
+}: ThreadMigrationInput): Promise<ThreadMigration | null> {
+	const { runId, supersedes } = run.manifest;
+	if (!supersedes) return null;
+	const predecessor = await loadPreparedRun(join(runsDirectory, supersedes));
+	const matches = matchReviewUnits(predecessor, run);
+	return withThreadStoreLock(threadsPath, () => {
+		const store = readThreadStoreFile(threadsPath);
+		const pending = store.runs[supersedes] ?? [];
+		if (!pending.length) return null;
+		const settled = store.runs[runId] ?? [];
+		const known = new Set(settled.map((thread) => thread.id));
+		const carried = pending
+			.filter((thread) => !known.has(thread.id))
+			.map((thread) => carriedThread(thread, runId, matches));
+		persistThreadStoreFile(threadsPath, {
+			...store,
+			runs: {
+				...withoutRun(store.runs, supersedes),
+				[runId]: sortThreads([...settled, ...carried]),
+			},
+		});
+		return { runId, supersedes, carried };
+	});
 }
 
 const describe = (error: unknown): string =>

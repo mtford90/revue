@@ -9,6 +9,7 @@ import {
 	type RunScope,
 } from "@revue/types";
 import { defaultRunsDirectory, digest, type PreparedRun, writePreparedRun } from "./artifact.ts";
+import { recordRunDelta } from "./delta.ts";
 import { exclusionFor, loadFilterRules } from "./filter.ts";
 import { type AgentInputFile, formatAgentInput } from "./format.ts";
 import {
@@ -222,7 +223,7 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 	await verifyWorktreeSnapshots(plan, files);
 	const runsDirectory = defaultRunsDirectory(plan.context.root);
 	const scope = runScope(plan, patch, files);
-	return writePreparedRun({
+	const run = await writePreparedRun({
 		runsDirectory,
 		content: {
 			schemaVersion: RUN_SCHEMA_VERSION,
@@ -238,4 +239,6 @@ export async function prepareRun(args: string[], directory?: string): Promise<Pr
 		blobs,
 		supersedes: await resolveSupersedes({ runsDirectory, scope, ignore, carry: request.carry }),
 	});
+	await recordRunDelta(run, runsDirectory);
+	return run;
 }

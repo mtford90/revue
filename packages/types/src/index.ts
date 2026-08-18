@@ -1,5 +1,6 @@
 export * from "./chapters.ts";
 export * from "./context.ts";
+export * from "./delta.ts";
 export * from "./file.ts";
 export * from "./prologue.ts";
 export * from "./run.ts";

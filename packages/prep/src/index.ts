@@ -12,9 +12,18 @@ export {
 	type FreezeContextResult,
 	freezeRunContext,
 	loadRunContext,
+	resolveRunContext,
 	runContextPath,
 } from "./context.ts";
 export { ReviewCoverageError, validateReviewCoverage } from "./coverage.ts";
+export {
+	computeRunDelta,
+	loadRunDelta,
+	type RunDeltaInput,
+	type RunDeltaResult,
+	recordRunDelta,
+	runDeltaPath,
+} from "./delta.ts";
 export { exclusionSource } from "./format.ts";
 export { GitError } from "./git.ts";
 export { resolveSupersedes } from "./lineage.ts";

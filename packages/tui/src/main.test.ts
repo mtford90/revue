@@ -615,14 +615,118 @@ test("delta hands the agent the worklist a superseding run left it", async () =>
 			unnarrated: [{ filePath: "src/beta.ts", oldStart: 1, status: "modified" }],
 		});
 
-		// The carried chapter plus the worklist is a complete narration of the superseding run.
+		// The carried chapter plus the worklist, capped by the epilogue a superseding run owes its
+		// reviewer, is a complete narration.
 		await writeFile(
 			join(second, "chapters.json"),
 			`${JSON.stringify({
-				chapters: [...JSON.parse(delta.stdout).carried, chapter("beta-2", 2, "src/beta.ts")],
+				chapters: [
+					...JSON.parse(delta.stdout).carried,
+					{
+						...chapter("epilogue", 2, "src/beta.ts"),
+						role: "epilogue",
+						title: "Changes since your review",
+					},
+				],
 			})}\n`,
 		);
 		expect(await run(root, ["show", second, "--check"])).toMatchObject({ exitCode: 0 });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("--check holds a superseding run to its epilogue and the threads it cites", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-epilogue-cli-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 1;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 2;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Feature work");
+
+		const chapter = (id: string, order: number, filePath: string) => ({
+			id,
+			order,
+			title: `Chapter ${id}`,
+			summary: `What ${filePath} now does.`,
+			hunkRefs: [{ filePath, oldStart: 1 }],
+			keyChanges: [],
+			excerpts: [],
+		});
+		const narrate = async (directory: string, chapters: unknown[]) => {
+			await writeFile(join(directory, "chapters.json"), `${JSON.stringify({ chapters })}\n`);
+			return run(root, ["show", directory, "--check"]);
+		};
+
+		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		expect(
+			await narrate(first, [
+				chapter("alpha", 1, "src/alpha.ts"),
+				chapter("beta", 2, "src/beta.ts"),
+			]),
+		).toMatchObject({ exitCode: 0 });
+
+		const created = await run(root, [
+			"threads",
+			"create",
+			first,
+			"--file",
+			"src/beta.ts",
+			"--old-start",
+			"1",
+			"--side",
+			"additions",
+			"--start-line",
+			"1",
+			"--end-line",
+			"1",
+			"--author",
+			"Reviewer",
+			"--body",
+			"Make beta agree with alpha.",
+		]);
+		expect(created).toMatchObject({ exitCode: 0, stderr: "" });
+		const threadId = JSON.parse(created.stdout).thread.id;
+
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 3;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Address the review");
+		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const carried = JSON.parse((await run(root, ["delta", second])).stdout).carried;
+
+		const withoutEpilogue = await narrate(second, [
+			...carried,
+			chapter("beta-2", 2, "src/beta.ts"),
+		]);
+		expect(withoutEpilogue).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(withoutEpilogue.stderr).toContain('no chapter has "role": "epilogue"');
+
+		const epilogue = {
+			...chapter("epilogue", 2, "src/beta.ts"),
+			title: "Changes since your review",
+			summary: "Beta now agrees with alpha, as you asked.",
+			role: "epilogue",
+			threadRefs: [threadId],
+		};
+		expect(await narrate(second, [...carried, epilogue])).toMatchObject({ exitCode: 0 });
+
+		const dangling = await narrate(second, [
+			...carried,
+			{ ...epilogue, threadRefs: ["4ad7f1cd-8b6f-4f7a-9f43-6c2b2e4b8f11"] },
+		]);
+		expect(dangling).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(dangling.stderr).toContain(
+			"references thread 4ad7f1cd-8b6f-4f7a-9f43-6c2b2e4b8f11, which this run does not have",
+		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

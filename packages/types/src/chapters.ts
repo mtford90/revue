@@ -81,14 +81,38 @@ export const narrativeDepthSchema = z.discriminatedUnion("kind", [
 ]);
 export type NarrativeDepth = z.infer<typeof narrativeDepthSchema>;
 
+/**
+ * The part a chapter plays in the narrative, absent on an ordinary one. A run that supersedes a
+ * narrated one ends with the **epilogue**: what changed since the reviewer's last pass, and the
+ * threads that prompted it. The role is a convention rather than a shape — an epilogue is an
+ * ordinary chapter that says what it is — so nothing written before epilogues existed changes.
+ */
+export const CHAPTER_ROLE = {
+	EPILOGUE: "epilogue",
+} as const;
+export type ChapterRole = (typeof CHAPTER_ROLE)[keyof typeof CHAPTER_ROLE];
+
 /** One narrative beat: a coherent group of hunks the reviewer can absorb as a unit. */
 export const chapterSchema = z.strictObject({
 	id: z.string().min(1),
 	order: z.number().int().positive(),
 	title: z.string().min(1),
 	summary: z.string().min(1),
+	role: z.enum(CHAPTER_ROLE).optional(),
 	hunkRefs: z.array(hunkReferenceSchema),
 	keyChanges: z.array(keyChangeSchema),
 	excerpts: z.array(contextExcerptSchema).default([]),
+	/**
+	 * Threads this chapter answers, cited by id the way key changes cite lines, so the reviewer can
+	 * walk from the fix to the feedback that asked for it. Absent rather than empty when a chapter
+	 * cites none, because review progress keys on the narration verbatim.
+	 */
+	threadRefs: z.array(z.uuid()).optional(),
 });
 export type Chapter = z.infer<typeof chapterSchema>;
+
+/** The designated re-entry point of a superseding run: changes since the reviewer's last pass. */
+export const isEpilogue = (chapter: Chapter): boolean => chapter.role === CHAPTER_ROLE.EPILOGUE;
+
+/** The threads a chapter cites, in citation order. */
+export const threadReferences = (chapter: Chapter): string[] => chapter.threadRefs ?? [];

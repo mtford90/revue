@@ -16,7 +16,11 @@ export {
 	resolveRunContext,
 	runContextPath,
 } from "./context.ts";
-export { ReviewCoverageError, validateReviewCoverage } from "./coverage.ts";
+export {
+	type NarrationLineage,
+	ReviewCoverageError,
+	validateReviewCoverage,
+} from "./coverage.ts";
 export {
 	computeRunDelta,
 	loadRunDelta,

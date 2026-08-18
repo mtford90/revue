@@ -41,3 +41,11 @@ export const runDeltaFileSchema = z.strictObject({
 	unnarrated: z.array(unnarratedUnitSchema),
 });
 export type RunDeltaFile = z.infer<typeof runDeltaFileSchema>;
+
+/**
+ * Whether this run continues a narrated review. Every chapter of the predecessor lands in exactly
+ * one of `carried` and `stale`, so an empty pair means there was no narration to inherit and the
+ * run owes the reviewer no account of what changed since they read it.
+ */
+export const supersedesNarration = (delta: RunDeltaFile): boolean =>
+	delta.carried.length + delta.stale.length > 0;

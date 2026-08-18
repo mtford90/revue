@@ -2,7 +2,6 @@ import {
 	defaultRunsDirectory,
 	findGitContext,
 	GitError,
-	loadRunDelta,
 	PrepArgumentError,
 	PrepError,
 	previewRunId,
@@ -145,7 +144,7 @@ export async function readStatus(directory?: string): Promise<StatusReport> {
 
 	const run = await loadReviewRun(reference.directory);
 	const { threads, orphaned } = loadValidatedThreads(threadStorePath(root), run);
-	const delta = pending ? await loadRunDelta(run) : null;
+	const delta = pending ? run.delta : null;
 	return {
 		repositoryRoot: root,
 		activeRun: active ? runStatus(active) : null,

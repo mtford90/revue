@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { type RevueChaptersFile, RevueChaptersFileSchema, type RunContextFile } from "@revue/types";
+import {
+	type Chapter,
+	type ReviewThread,
+	type RevueChaptersFile,
+	RevueChaptersFileSchema,
+	type RunContextFile,
+	type RunDeltaFile,
+} from "@revue/types";
 import { loadPreparedRun } from "../src/artifact.ts";
 import { validateReviewCoverage } from "../src/coverage.ts";
 
@@ -12,6 +20,61 @@ const sample = async () => ({
 		await Bun.file(resolve(sampleDirectory, "chapters.json")).json(),
 	),
 });
+
+/** A delta that inherited narration, which is what makes a run owe the reviewer an epilogue. */
+const continuing = (runId: string): RunDeltaFile => ({
+	runId,
+	supersedes: "a".repeat(64),
+	carried: [],
+	stale: [{ id: "chapter-1", title: "The client", reasons: ["review unit changed"] }],
+	unnarrated: [],
+});
+
+const thread = (runId: string, id: string): ReviewThread => ({
+	id,
+	runId,
+	anchor: {
+		kind: "hunk",
+		filePath: "src/lib/apiClient.ts",
+		oldStart: 1,
+		side: "additions",
+		startLine: 1,
+		endLine: 1,
+	},
+	status: "open",
+	createdAt: "2024-01-01T00:00:00.000Z",
+	messages: [
+		{
+			id: randomUUID(),
+			author: { kind: "human", name: "Reviewer" },
+			body: "Share the retry budget?",
+			createdAt: "2024-01-01T00:00:00.000Z",
+		},
+	],
+});
+
+/** The narration a superseding run writes: the last chapter's hunks re-told as the epilogue. */
+const withEpilogue = (chapters: RevueChaptersFile, overrides: Partial<Chapter> = {}) => {
+	const replaced = chapters.chapters.at(-1);
+	if (!replaced) throw new Error("Expected a sample chapter");
+	return {
+		...chapters,
+		chapters: [
+			...chapters.chapters.slice(0, -1),
+			{
+				id: "epilogue",
+				order: replaced.order,
+				title: "Changes since your review",
+				summary: "The retry budget is shared now, as you asked.",
+				role: "epilogue" as const,
+				hunkRefs: replaced.hunkRefs,
+				keyChanges: [],
+				excerpts: [],
+				...overrides,
+			},
+		],
+	};
+};
 
 /** The same narration, declared as a deliberately incomplete one. */
 const zoomedOut = (file: RevueChaptersFile): RevueChaptersFile => ({
@@ -207,6 +270,72 @@ test("coverage validation rejects chapter identities that would corrupt review s
 	expect(() => validateReviewCoverage(run, duplicated)).toThrow("duplicate chapter id");
 	expect(() => validateReviewCoverage(run, duplicated)).toThrow("duplicate chapter order");
 	expect(() => validateReviewCoverage(run, zoomedOut(duplicated))).toThrow("duplicate chapter id");
+});
+
+test("a narration continuing a narrated review has to end with an epilogue", async () => {
+	const { run, chapters } = await sample();
+	const delta = continuing(run.manifest.runId);
+
+	expect(() => validateReviewCoverage(run, chapters, null, { delta, threads: [] })).toThrow(
+		`supersedes narrated run ${delta.supersedes.slice(0, 12)} but no chapter has "role": "epilogue"`,
+	);
+	expect(() =>
+		validateReviewCoverage(run, withEpilogue(chapters), null, { delta, threads: [] }),
+	).not.toThrow();
+
+	// A run that starts a lineage, and one continuing a predecessor nobody narrated, owe nothing.
+	expect(() => validateReviewCoverage(run, chapters)).not.toThrow();
+	expect(() =>
+		validateReviewCoverage(run, chapters, null, {
+			delta: { ...delta, stale: [] },
+			threads: [],
+		}),
+	).not.toThrow();
+});
+
+test("the epilogue is one chapter and it ends the story", async () => {
+	const { run, chapters } = await sample();
+	const delta = continuing(run.manifest.runId);
+	const narrated = withEpilogue(chapters);
+	const twice = {
+		...narrated,
+		chapters: narrated.chapters.map((chapter, index) =>
+			index === 0 ? { ...chapter, role: "epilogue" as const } : chapter,
+		),
+	};
+	const outOfOrder = {
+		...narrated,
+		chapters: narrated.chapters.map((chapter) => ({
+			...chapter,
+			order: chapter.id === "epilogue" ? 1 : chapter.order + 1,
+		})),
+	};
+
+	expect(() => validateReviewCoverage(run, twice, null, { delta, threads: [] })).toThrow(
+		"2 chapters claim the epilogue role",
+	);
+	expect(() => validateReviewCoverage(run, outOfOrder, null, { delta, threads: [] })).toThrow(
+		'epilogue "epilogue" is not the last chapter',
+	);
+});
+
+test("narration may only cite threads the run actually holds", async () => {
+	const { run, chapters } = await sample();
+	const delta = continuing(run.manifest.runId);
+	const threadId = randomUUID();
+	const narrated = withEpilogue(chapters, { threadRefs: [threadId] });
+
+	expect(() =>
+		validateReviewCoverage(run, narrated, null, {
+			delta,
+			threads: [thread(run.manifest.runId, threadId)],
+		}),
+	).not.toThrow();
+	expect(() => validateReviewCoverage(run, narrated, null, { delta, threads: [] })).toThrow(
+		`chapter "epilogue" references thread ${threadId}, which this run does not have`,
+	);
+	// An unreadable thread store says nothing about the citation either way.
+	expect(() => validateReviewCoverage(run, narrated, null, { delta, threads: null })).not.toThrow();
 });
 
 test("coverage validation keeps key-change ranges inside their chapter units", async () => {

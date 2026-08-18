@@ -3,11 +3,16 @@ import {
 	type Chapter,
 	excerptKey,
 	excerptRangeLabel,
+	isEpilogue,
 	type LineRef,
 	partialDepthLabel,
+	type ReviewThread,
 	type RevueChaptersFile,
 	type RunContextFile,
+	type RunDeltaFile,
 	type RunExclusion,
+	supersedesNarration,
+	threadReferences,
 } from "@revue/types";
 import type { PreparedRun } from "./artifact.ts";
 import { exclusionSource } from "./format.ts";
@@ -207,10 +212,63 @@ const excerptIssues = (
 	);
 };
 
+/**
+ * What a run inherited, which is what says whether its narration owes the reviewer an epilogue and
+ * which threads it may cite. `threads` is null when the store could not be read: a broken store is
+ * its own error with its own message wherever threads are used, and must never be reported here as
+ * narration citing feedback that does not exist.
+ */
+export type NarrationLineage = {
+	delta: RunDeltaFile | null;
+	threads: readonly ReviewThread[] | null;
+};
+
+/**
+ * A run that continues a narrated review ends with the epilogue the reviewer re-enters through, so
+ * a narration that supersedes one and never says what changed is incomplete rather than merely
+ * terse. A run starting a fresh lineage owes nothing.
+ */
+const epilogueIssues = (file: RevueChaptersFile, delta: RunDeltaFile | null): string[] => {
+	const epilogues = file.chapters.filter(isEpilogue);
+	const [epilogue] = epilogues;
+	const last = [...file.chapters].sort((left, right) => left.order - right.order).at(-1);
+	return [
+		...(!epilogue && delta && supersedesNarration(delta)
+			? [
+					`this run supersedes narrated run ${delta.supersedes.slice(0, 12)} but no chapter has "role": "epilogue"; a superseding narration ends with what changed since the reviewer read it`,
+				]
+			: []),
+		...(epilogues.length > 1
+			? [`${epilogues.length} chapters claim the epilogue role; a review has one re-entry point`]
+			: []),
+		...(epilogue && last && !isEpilogue(last)
+			? [`epilogue ${JSON.stringify(epilogue.id)} is not the last chapter of the narration`]
+			: []),
+	];
+};
+
+/** A citation of feedback the run does not have points the reviewer at nothing. */
+const threadReferenceIssues = (
+	file: RevueChaptersFile,
+	threads: readonly ReviewThread[] | null,
+): string[] => {
+	if (!threads) return [];
+	const known = new Set(threads.map((thread) => thread.id));
+	return file.chapters.flatMap((chapter) =>
+		threadReferences(chapter)
+			.filter((id) => !known.has(id))
+			.map(
+				(id) =>
+					`chapter ${JSON.stringify(chapter.id)} references thread ${id}, which this run does not have`,
+			),
+	);
+};
+
 export function validateReviewCoverage(
 	run: PreparedRun,
 	file: RevueChaptersFile,
 	context: RunContextFile | null = null,
+	lineage: NarrationLineage = { delta: null, threads: null },
 ): void {
 	const files = parsePatch(run.patch);
 	const issues = [
@@ -219,6 +277,8 @@ export function validateReviewCoverage(
 		...reviewUnitIssues(run, file),
 		...lineReferenceIssues(run, new Map(files.map((entry) => [entry.path, entry])), file.chapters),
 		...excerptIssues(run, file, context),
+		...epilogueIssues(file, lineage.delta),
+		...threadReferenceIssues(file, lineage.threads),
 	];
 	if (issues.length) {
 		throw new ReviewCoverageError(

@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { chapterSchema, contextExcerptSchema, keyChangeSchema } from "../src/chapters.ts";
+import { randomUUID } from "node:crypto";
+import {
+	chapterSchema,
+	contextExcerptSchema,
+	isEpilogue,
+	keyChangeSchema,
+	threadReferences,
+} from "../src/chapters.ts";
 import { partialDepthLabel, RevueChaptersFileSchema } from "../src/file.ts";
 
 const keyChange = {
@@ -46,6 +53,38 @@ test("a chapter that cites nothing still has an excerpt list", () => {
 	};
 
 	expect(chapterSchema.parse(chapter).excerpts).toEqual([]);
+});
+
+test("an epilogue says what it is and cites the threads it answers", () => {
+	const chapter = {
+		id: "epilogue",
+		order: 4,
+		title: "Changes since your review",
+		summary: "The retry budget is now shared.",
+		hunkRefs: [],
+		keyChanges: [],
+	};
+	const threadId = randomUUID();
+
+	// A chapter written before epilogues existed is unchanged by their arrival: no role, no
+	// citations, and nothing added to what its progress is keyed on.
+	const ordinary = chapterSchema.parse(chapter);
+	expect(isEpilogue(ordinary)).toBe(false);
+	expect(threadReferences(ordinary)).toEqual([]);
+	expect(Object.hasOwn(ordinary, "role")).toBe(false);
+	expect(Object.hasOwn(ordinary, "threadRefs")).toBe(false);
+
+	const epilogue = chapterSchema.parse({
+		...chapter,
+		role: "epilogue",
+		threadRefs: [threadId],
+	});
+	expect(isEpilogue(epilogue)).toBe(true);
+	expect(threadReferences(epilogue)).toEqual([threadId]);
+
+	expect(chapterSchema.safeParse({ ...chapter, role: "prologue" }).success).toBe(false);
+	// Revue owns thread ids, so a citation that is not one cannot name a thread.
+	expect(chapterSchema.safeParse({ ...chapter, threadRefs: ["thread-1"] }).success).toBe(false);
 });
 
 test("a narrative declares its depth, and an undeclared one is full", () => {

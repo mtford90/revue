@@ -1,6 +1,6 @@
 ---
 name: revue
-description: Review any git diff — a branch, a pull request, two refs, staged, or the working tree — as narrated chapters in the revue terminal UI.
+description: Review any git diff — a branch, a pull request, two refs, staged, or the working tree — as narrated chapters in the revue terminal UI, and answer the review comments left on one.
 user-invocable: true
 ---
 
@@ -11,15 +11,25 @@ freezes the review scope — a branch, someone's pull request, any two refs, or 
 agent reads its numbered hunks, clusters them into narrative **chapters** and a **prologue**,
 writes `chapters.json` into the run, and hands that same run to `revue show`.
 
+The review continues from there. The reviewer leaves **threads** on the code, the agent answers
+them, and the next prep of the same scope **supersedes** the run they read: chapters the change left
+alone carry forward verbatim, the rest are re-narrated, and an **epilogue** tells the reviewer what
+moved since they last looked. Step 8 is that half of the workflow.
+
 This skill is adapted from ReviewStage/stage-cli's `stage-chapters` skill (MIT). The clustering,
 narration, and prologue rules remain the same. Revue differs by preserving one immutable patch and
 its old/new snapshots instead of recomputing Git state during display.
 
 ## Invocation behaviour
 
-Invoking this skill is a request to generate a narrated review. Start the workflow immediately;
-do not stop after loading or summarising these instructions.
+Invoking this skill is a request to work on a narrated review — to generate one, or to answer the
+feedback on one. Start the workflow immediately; do not stop after loading or summarising these
+instructions.
 
+- When the user points at review feedback rather than a scope — "I added comments", "check the
+  threads", "deal with my review feedback", "I've left you notes on the revue" — go straight to
+  Step 8 and orient with `revue status`. The review already exists; preparing a fresh run to answer
+  it discards every chapter the reviewer has read.
 - With no arguments, use bare `revue prep` and generate the narrative for its auto-selected scope.
 - With arguments, treat them as the requested review scope and pass the corresponding scope to
   `revue prep`.
@@ -75,6 +85,23 @@ The URL form fetches directly from that repository, so it works from any local c
 history with the PR's target. For other diff sources, fetch the relevant refs first and pass them
 to prep as ordinary refs.
 
+Prep also records lineage. When the scope it prepares has already been narrated once, the new run
+**supersedes** that narrated run: chapters the change did not touch are carried forward with their
+references re-mapped, the reviewer's threads move onto the new run, and what is left becomes a
+worklist. Prep says so on stderr:
+
+```
+supersedes 8cf38d260d5c
+1 chapter carried, 1 chapter stale
+1 review unit to narrate — revue delta <run-directory>
+```
+
+Those three lines mean you are continuing a review, not starting one. Narrate the run through Step
+8's regeneration steps (carried chapters copied in, stale ones rewritten, the epilogue last) rather
+than from a blank page. `--carry-from <run-id>` names the predecessor when detection picks the wrong
+one, and `--no-carry` starts a genuinely fresh review of the same scope, leaving the reviewer's
+threads and read marks behind on the old run.
+
 Repeatable `--ignore <gitignore-pattern>` options exclude files from this prep only, evaluated
 after any `.revueignore` at the repository root. Pass `--show-ignored` to list the effective
 patterns and omissions. Git's standard exclusions (`.gitignore`, `.git/info/exclude`, and
@@ -87,7 +114,7 @@ a command to hand to the user, never one to run yourself. It prints the run dire
 so review threads (Step 8) can still be targeted against it.
 
 If prep exits non-zero, relay its error and stop. Do not edit `run.json`, `diff.patch`, `hunks.txt`,
-or `blobs/`; they are one immutable input.
+`delta.json`, or `blobs/`; they are prep's record of the run, and yours to read only.
 
 ## Step 2 — Read the prepared hunks
 
@@ -271,6 +298,15 @@ spans them. **Most reviews have none.** Never open a review with one — the pro
 that job — and never use one to restate what a chapter's `summary` should say. An interlude in
 every review makes the product worse, not richer.
 
+### Epilogues
+
+A run that carries narration forward from the run it supersedes ends with an **epilogue**: one
+chapter declaring `"role": "epilogue"`, saying what changed since the reviewer read the last run,
+and citing in `threadRefs` the feedback that prompted it. Unlike an interlude it is declared rather
+than inferred, and it may carry hunks of its own; an epilogue with none obeys the interlude rule and
+leaves `keyChanges` empty. A first narration never has one, and the rules for writing one are in
+Step 8, because it belongs to a regeneration pass.
+
 ## Step 4 — Generate the prologue
 
 A high-level overview of the whole change, shown before the reviewer dives into chapters.
@@ -337,7 +373,9 @@ integer copied from `hunks.txt`, and the array is empty only for an interlude; e
 has ≥ 1 entry with positive `startLine ≤ endLine`. `excerpts` is optional and defaults to empty —
 each entry needs a `filePath` and positive new-side `startLine ≤ endLine`, with an optional
 non-empty `caption` and no code of its own. `depth` is optional and means `{ "kind": "full" }` when
-absent; a partial depth is `{ "kind": "partial", "label": "…" }` with a non-empty label. `prologue`
+absent; a partial depth is `{ "kind": "partial", "label": "…" }` with a non-empty label. `role` is
+optional, is only ever `"epilogue"`, and belongs to the last chapter of a run that supersedes a
+narrated one; `threadRefs` is optional and holds ids of threads this run has. `prologue`
 is optional, so the minimal skeleton omits it. When included, obey
 Step 4’s key-change and focus-area cardinalities. See `examples/sample-run/chapters.json` for a full
 valid example and `packages/types/src/` for the authoritative zod schema.
@@ -368,10 +406,12 @@ revue show "$RUN" --check
 
 `--check` verifies the run hashes, validates `chapters.json`, requires every prepared review unit
 exactly once at full depth (once or not at all when a partial depth is declared), checks key-change
-ranges against their chapter hunks, confirms every excerpt was frozen in Step 6, and prints a
-plain-text summary without launching the UI. A run with no `chapters.json` opens as a flat file-by-file diff
-rather than erroring — so a missing chapters file is not caught here; confirm Step 5 wrote it
-before treating a flat display as intentional.
+ranges against their chapter hunks, confirms every excerpt was frozen in Step 6, requires exactly
+one epilogue ending the narration of a run that carried chapters forward, holds that epilogue's
+thread citations to threads the run has, and prints a plain-text summary without launching the UI.
+A run with no `chapters.json` opens as a flat file-by-file diff rather than erroring — so a missing
+chapters file is not caught here; confirm Step 5 wrote it before treating a flat display as
+intentional.
 
 The reviewer itself is a full-screen TUI and cannot run inside an agent harness — not through
 your shell tool, and not through an inline-shell prefix like Claude Code's `!`. Never launch
@@ -385,41 +425,214 @@ revue show <run-directory>
 Show accepts `--theme <name>`, `--theme auto`, `--theme list`, and `--transparent-bg`; without a
 flag it uses the reviewer's remembered theme.
 
-## Step 8 — Act on review threads
+## Step 8 — Responding to review feedback
 
-Once the user has finished reviewing, retrieve open threads through Revue's public JSON interface. Do not
-scrape terminal output and do not read or edit `.revue/threads.json` directly.
+The user says "I added comments", "check the threads", "deal with my review feedback", "I've left
+you notes on the revue", or asks what is still outstanding on a review. That is this step. The
+review already exists, so never start it by preparing a fresh run: that discards the narration the
+reviewer has been reading and the marks recording how far they got.
+
+One pass answers everything at once — orient, read every thread, make the changes you agree with,
+reply to all of them, report in chat, and regenerate the review a single time at the end.
+
+### Orient from disk
+
+Never work from what you remember of an earlier conversation. A review runs across compactions, new
+sessions and days, and everything you need is on disk:
 
 ```bash
+revue status --json
+```
+
+Status reports the repository's own review state. `activeRun` is the newest narrated run, with its
+directory and the `prepArgs` that reproduce its scope. `pendingRun` is a newer run that supersedes
+it and has no narration yet, with counts of what its delta carried, marked stale, and left to
+narrate. `threads` counts the open threads, split into those **awaiting the agent** (a human spoke
+last) and those **awaiting the reviewer** (an agent did), plus dealt-with and orphaned. `drift` says
+whether re-prepping that scope would now capture different code than the run pinned. Without
+`--json` the same state prints for a human; a repository with no runs says so and exits 0.
+
+Work against the directory status prints for `pendingRun` when there is one, and the `activeRun`
+directory otherwise. Prep moves the conversation onto the newest run, so that is where the threads
+are.
+
+```bash
+RUN=<the run directory status printed>
 revue threads list "$RUN" --json
 ```
 
-Each thread includes a stable ID, exact path/review-unit/side/range anchor, thread-level status, and
-ordered messages. Every message includes its own stable ID, multi-line body, creation time, and
-`human` or `agent` author. Address every open thread against the same prepared scope.
+Each thread carries a stable id, its exact path/review-unit/side/range anchor, an `open` or
+`dealt-with` status, and ordered messages — each with its own id, multi-line body, creation time,
+and `human` or `agent` author. Add `--all` when dealt-with history matters. Read threads only
+through this interface: do not scrape the TUI's output, and never read or edit `.revue/threads.json`
+yourself.
 
-Agents must identify themselves explicitly when adding a root message or reply. Use a stable,
-human-readable role name; do not impersonate the repository's Git user:
+A `pendingRun` is unfinished narration rather than a new starting point. Its delta is recorded and
+the threads have already moved onto it, so finish narrating that run — from *Read the worklist*
+below — instead of preparing another one.
+
+### Read every thread before changing anything
+
+Read all of them first: the anchor, the whole message history, and the code each one points at. A
+later comment often withdraws or reframes an earlier one, and a fix made before you have read the
+rest gets made twice.
+
+Answer the threads awaiting the agent. One awaiting the reviewer already has your answer — leave it
+alone unless a new message has arrived on it. A thread the list reports as **orphaned** is anchored
+to code this run no longer has; answer it like any other and say in the chat report that the code it
+was written against is gone.
+
+### Triage each thread into one of three lanes
+
+Judge every comment on its merits, the way a colleague would. A review comment is an argument, not a
+work order.
+
+**Clear, and you agree.** Make the change, then reply on the thread describing it. The reviewer
+reads the reply beside the code, so name what moved and why that answers them, not that you
+complied.
+
+**Clear, and you disagree.** Change nothing. Reply with the counter-argument: what the comment
+assumes, what following it would cost, what you would do instead. Then raise it in the chat report
+as needing the user's decision. Making a change you believe is wrong buries the disagreement, and
+making none without saying so loses it.
+
+**Ambiguous, a question, or an opinion.** Reply with the answer, or with your reading of the comment
+and what you would do about it. Then ask in chat whether they want that change. Do not guess at a
+change, and do not leave the thread silent while you wait for the answer.
+
+### Reply on every thread, and close none
+
+Every lane ends in a reply. A thread you left unanswered reads as one you never saw.
 
 ```bash
 revue threads reply "$RUN" <thread-id> \
   --author "revue agent" \
-  --body "Adjusted the retry cap and kept the interactive path within its budget."
+  --body "The retry cap is 5s now, and the interactive path stays inside its budget."
 ```
 
-Only after the requested change has been made should that exact thread be resolved:
+Identify yourself with a stable, human-readable role name; never impersonate the repository's Git
+user. `--body-file <path|->` takes a multi-line body. The reviewer's open TUI shows each reply as it
+lands, so write one considered reply per thread rather than a running commentary.
+
+**Never mark a thread dealt-with.** A resolved thread means the reviewer checked the fix, so
+resolving one is theirs to do, from their own reader. `revue threads mark-dealt` and `revue threads
+reopen` exist for them, not for you, and this holds for a question you answered outright as much as
+for a fix. An open thread whose last message is yours is exactly how they see "ready to check".
+
+### Report the pass in chat
+
+Finish with one message to the user: what you fixed, where you pushed back, and what needs their
+call, with the open questions numbered so they can answer by number.
+
+```
+Fixed 4, pushed back on 2, 3 need your call.
+
+Fixed: retry cap, the org-id thread on api.ts, two naming comments.
+Pushed back: the suggested cache (it breaks the multi-org invariant) and moving the
+guard into the caller.
+
+Your call:
+1. Should retryCount reset when the user switches orgs?
+2. …
+```
+
+Chat and threads must tell the same story — a reviewer who reads only one of the two cannot end up
+with a different picture of what happened.
+
+### Regenerate the review, once, at the end of the pass
+
+If the pass changed no code — every thread answered, nothing edited — stop here. There is nothing to
+re-narrate, and prepping a run to prove it only hands the reviewer a superseding run to reload for
+no reason.
+
+Otherwise regenerate once for the whole pass, never once per fix: the reviewer gets one coherent run
+describing where the code ended up, instead of a stream of half-answered ones.
+
+Whether the fixes have to be committed first is a question of scope, not of policy. A working-tree
+scope (bare prep on local changes, `--ref work`, `--ref unstaged`) picks an edit up as soon as it is
+saved; `--ref staged` needs it staged; a committed scope (`main`, `main..feature`, `--pr`) sees it
+only once it is committed on the reviewed branch. Whether and when to commit is the user's call and
+the repository's convention — this skill takes no position on it. Read the active run's scope from
+`revue status` and make sure the code you changed is inside that scope before re-prepping.
+
+**1. Re-prep the same scope.** Pass the `prepArgs` status printed, verbatim:
 
 ```bash
-revue threads mark-dealt "$RUN" <thread-id>
+RUN=$(revue prep --ref work --base master)   # whatever prepArgs status printed
 ```
 
-Use `--all` when resolved history is relevant. Reopen feedback when it still applies or was marked
-prematurely:
+Lineage is automatic: prep finds the narrated run of that scope, records the supersession, carries
+the untouched chapters forward, moves the threads across, and prints the three supersession lines
+from Step 1. If it prints none, the scope did not match and you have begun a fresh review — fix the
+arguments rather than narrating a run with no lineage.
+
+**2. Read the worklist.**
 
 ```bash
-revue threads list "$RUN" --json --all
-revue threads reopen "$RUN" <thread-id>
+revue delta "$RUN"
 ```
+
+Three keys of JSON. `carried`: whole chapter objects, hunk references and key-change ranges already
+re-mapped onto this run. `stale`: the chapters whose code changed, each with the reason it went
+stale. `unnarrated`: every review unit no carried chapter covers, marked `unchanged`, `modified`, or
+`new` against the run this one supersedes. Read `$RUN/hunks.txt` for the units you have to narrate,
+exactly as in Step 2 — the references you cite come from this run's file, never the old one.
+
+**3. Copy the carried chapters in verbatim.** Field for field, `order` included. Read marks carry
+over only for chapters that come through byte-identical, so touching up a summary costs the reviewer
+a chapter they had already finished, for nothing.
+
+**4. Re-narrate every stale chapter in place.** Keep its id and its place in the order, and rewrite
+the summary against this run's hunks so it describes the code as it now stands. Never amend around
+the old text ("this now also handles…") — a stale chapter is rewritten, not patched. When the delta
+marks most of the narration stale, the change was structural: rewrite it as if narrating afresh,
+and say so in the epilogue.
+
+**5. Narrate what is left.** Every unit in `unnarrated` belongs in exactly one chapter: the
+re-narrated chapter that owns its file where there is one, and the epilogue otherwise. The coverage
+rule in Step 3 is unchanged — at full depth every review unit of the new run appears exactly once,
+carried chapters counting towards it.
+
+**6. Write the epilogue last.** A run that carried narration forward ends with exactly one chapter
+marked `"role": "epilogue"`, and it is where the reviewer's reload lands:
+
+```json
+{
+  "id": "epilogue",
+  "order": 7,
+  "role": "epilogue",
+  "title": "Changes since your review",
+  "summary": "div throws on a zero divisor rather than returning Infinity…",
+  "hunkRefs": [{ "filePath": "src/maths.ts", "oldStart": 12 }],
+  "keyChanges": [],
+  "threadRefs": ["1f0bd6c4-2f8e-4a35-8a4b-6f2a6a9c1f77"]
+}
+```
+
+Write it for someone who read the previous run and wants to know what moved. After a localised fix
+it narrates the fix hunks and cites in `threadRefs` the threads that prompted them, by id, which the
+reviewer follows as links into those conversations. After a structural rework it needs no hunks of
+its own: it shrinks to an orientation note naming the chapters that were rewritten and the order to
+re-read them in. Say what changed and why it changed, not that the feedback has been addressed. Cite
+only threads this run has — `--check` rejects an id the run does not hold, and threads move with the
+run, so list them against `$RUN` rather than trusting an id from earlier in the pass.
+
+**7. Freeze, then validate.** Freeze whenever any chapter in the file cites excerpts; prep already
+re-froze the carried ones, and freezing again re-resolves the lot against this run:
+
+```bash
+revue context freeze "$RUN"
+revue show "$RUN" --check
+```
+
+`--check` applies everything in Step 7, and the epilogue rules on top.
+
+**8. Hand it over.** If the reviewer still has the previous run open, Revue raises a banner the
+moment the new run validates, and their reload key opens it on the epilogue with their carried
+progress intact — tell them it is ready rather than telling them to restart anything. Otherwise give
+them the `revue show <run-directory>` command for the new run, as in Step 7.
+
+### Threads you start yourself
 
 An agent may start a new visible thread when it has concrete anchored feedback. Copy the exact
 review-unit identity and line range from the prepared run rather than inventing an anchor:
@@ -439,6 +652,8 @@ revue threads create "$RUN" --kind excerpt \
   --file src/orders.ts --start-line 88 --end-line 96 \
   --author "review agent" --body-file -
 ```
+
+### Deleting feedback
 
 Hard deletion is only for a thread or reply the reviewer identifies as erroneous. Never delete
 feedback merely because it is difficult, already addressed, or disagreed with:

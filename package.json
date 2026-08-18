@@ -1,6 +1,6 @@
 {
 	"name": "revue-monorepo",
-	"version": "0.8.0",
+	"version": "0.8.1",
 	"private": true,
 	"description": "Revue narrative code review and the standalone Revuediff ANSI diff pager.",
 	"type": "module",

@@ -2,6 +2,14 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.8.1](https://github.com/mtford90/revue/compare/v0.8.0...v0.8.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* ignore the untracked .scratch planning tree and refresh release route markers ([f34d036](https://github.com/mtford90/revue/commit/f34d036fa423c7fac450383a4c114e4479ccdb86))
+* make chapter index height responsive ([e05a2ee](https://github.com/mtford90/revue/commit/e05a2eee9b4bb59a5649a80e5bea8b3789ef3cf5))
+
 ## [0.8.0](https://github.com/mtford90/revue/compare/v0.7.0...v0.8.0) (2026-08-09)
 
 

@@ -559,6 +559,74 @@ test("context freeze pins cited code and --check refuses a narrative that skippe
 	}
 });
 
+test("delta hands the agent the worklist a superseding run left it", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-delta-cli-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 1;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 2;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Feature work");
+
+		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const chapter = (id: string, order: number, filePath: string) => ({
+			id,
+			order,
+			title: `Chapter ${id}`,
+			summary: `What ${filePath} now does.`,
+			hunkRefs: [{ filePath, oldStart: 1 }],
+			keyChanges: [],
+			excerpts: [],
+		});
+		await writeFile(
+			join(first, "chapters.json"),
+			`${JSON.stringify({
+				chapters: [chapter("alpha", 1, "src/alpha.ts"), chapter("beta", 2, "src/beta.ts")],
+			})}\n`,
+		);
+		expect(await run(root, ["show", first, "--check"])).toMatchObject({ exitCode: 0 });
+
+		const fresh = await run(root, ["delta", first]);
+		expect(fresh).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(fresh.stderr).toContain("This run starts a fresh review");
+
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 3;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Address the review");
+		const preped = await run(root, ["prep", "main", "HEAD"]);
+		const second = preped.stdout.trim();
+		expect(preped.stderr).toContain(`supersedes ${first.split("/").at(-1)?.slice(0, 12)}`);
+		expect(preped.stderr).toContain("1 chapter carried, 1 chapter stale");
+
+		const delta = await run(root, ["delta", second]);
+		expect(delta).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(delta.stdout)).toMatchObject({
+			carried: [chapter("alpha", 1, "src/alpha.ts")],
+			stale: [{ id: "beta", reasons: ['review unit "src/beta.ts"@1 changed'] }],
+			unnarrated: [{ filePath: "src/beta.ts", oldStart: 1, status: "modified" }],
+		});
+
+		// The carried chapter plus the worklist is a complete narration of the superseding run.
+		await writeFile(
+			join(second, "chapters.json"),
+			`${JSON.stringify({
+				chapters: [...JSON.parse(delta.stdout).carried, chapter("beta-2", 2, "src/beta.ts")],
+			})}\n`,
+		);
+		expect(await run(root, ["show", second, "--check"])).toMatchObject({ exitCode: 0 });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("--check says how much of the change an ignore rule kept out of the run", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-omitted-"));
 	try {

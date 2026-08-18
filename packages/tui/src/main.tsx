@@ -11,6 +11,7 @@ import {
 	freezeRunContext,
 	GitError,
 	loadPreparedRun,
+	loadRunDelta,
 	PrepArgumentError,
 	type PreparedRun,
 	PrepError,
@@ -30,6 +31,7 @@ import {
 	excerptRangeLabel,
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
+	type RunDeltaFile,
 	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	type ThreadAnchor,
@@ -84,6 +86,7 @@ Usage:
              [--carry-from <run-id> | --no-carry]
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
+  revue delta <run-directory>          print what a superseding run carried forward and still owes
   revue context freeze <run-directory> pin the code the narration quotes into context.json
   revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
@@ -143,8 +146,25 @@ const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main
                   [--ignore <gitignore-pattern>]... [--show-ignored]
                   [--carry-from <run-id> | --no-carry]
 
-A new run records the most recent narrated run of the same scope in supersedes.
---carry-from names that predecessor explicitly; --no-carry starts a fresh review.`;
+A new run records the most recent narrated run of the same scope in supersedes,
+carries forward every chapter the change did not touch, and writes the worklist
+for the rest to delta.json. --carry-from names that predecessor explicitly;
+--no-carry starts a fresh review.`;
+
+const DELTA_HELP = `usage: revue delta <run-directory>
+
+Prints, as JSON, the worklist prep recorded when this run superseded a narrated one:
+
+carried     chapters the change left alone, hunk references and key-change line
+            ranges already re-mapped to this run — copy them into chapters.json
+            verbatim and narrate around them
+stale       chapters whose narration no longer describes the code, each with the
+            reason it went stale; re-narrate them from this run's hunks.txt
+unnarrated  every review unit no carried chapter covers, marked unchanged,
+            modified, or new relative to the superseded run
+
+Narration is complete once every unnarrated unit sits in a chapter; run
+revue context freeze and then revue show <run-directory> --check to confirm it.`;
 
 const prepSummary = (run: PreparedRun): string => {
 	const { manifest } = run;
@@ -157,6 +177,16 @@ const prepSummary = (run: PreparedRun): string => {
 		`${manifest.totals.files} files, ${manifest.totals.reviewUnits} review units, +${manifest.totals.additions} -${manifest.totals.deletions}, ${manifest.totals.excluded} omitted`,
 	].join("\n");
 };
+
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/** What a superseding run inherited, so a prep that continues a review says so on the spot. */
+const deltaSummary = (directory: string, delta: RunDeltaFile): string =>
+	[
+		`supersedes ${delta.supersedes.slice(0, 12)}`,
+		`${plural(delta.carried.length, "chapter")} carried, ${plural(delta.stale.length, "chapter")} stale`,
+		`${plural(delta.unnarrated.length, "review unit")} to narrate — revue delta ${directory}`,
+	].join("\n");
 
 const exclusionSource = (reason: string): string => {
 	if (reason === RUN_EXCLUSION_REASON.REVUE_IGNORE) return ".revueignore";
@@ -196,6 +226,8 @@ async function cmdPrep(args: string[]): Promise<number> {
 		const prepArgs = args.filter((argument) => argument !== "--show-ignored");
 		const run = await prepareRun(prepArgs);
 		process.stderr.write(`${prepSummary(run)}\n`);
+		const delta = await loadRunDelta(run);
+		if (delta) process.stderr.write(`${deltaSummary(run.directory, delta)}\n`);
 		if (showIgnored) process.stderr.write(`${ignoredDetails(run)}\n`);
 		process.stdout.write(`${run.directory}\n`);
 		return 0;
@@ -423,6 +455,47 @@ async function freezeContext(directory: string): Promise<number> {
 	);
 	process.stdout.write(`${path}\n`);
 	return 0;
+}
+
+const missingDeltaReason = (run: PreparedRun): string =>
+	run.manifest.supersedes
+		? `This run supersedes ${run.manifest.supersedes.slice(0, 12)} but no delta was recorded for it.`
+		: "This run starts a fresh review — it supersedes nothing, so there is nothing to carry forward.";
+
+async function cmdDelta(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${DELTA_HELP}\n`);
+		return 0;
+	}
+	let directory: string | undefined;
+	try {
+		const options = parseCommandOptions(args, []);
+		directory = options.positionals[0];
+		if (!directory || options.positionals.length !== 1) {
+			throw new Error("delta requires one run directory");
+		}
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${DELTA_HELP}\n`,
+		);
+		return 1;
+	}
+	try {
+		const run = await loadPreparedRun(directory);
+		const delta = await loadRunDelta(run);
+		if (!delta) {
+			process.stderr.write(`${missingDeltaReason(run)}\n`);
+			return 1;
+		}
+		process.stdout.write(`${JSON.stringify(delta, null, 2)}\n`);
+		return 0;
+	} catch (error) {
+		if (error instanceof RunArtifactError) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
 }
 
 const entityIdPattern =
@@ -1208,6 +1281,7 @@ async function main(): Promise<number> {
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
 	if (command === "context") return cmdContext(args);
+	if (command === "delta") return cmdDelta(args);
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);

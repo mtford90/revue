@@ -146,12 +146,22 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   the immutable run. Unfinished thread drafts are deliberately excluded.
 - **Run** — an immutable directory under `.revue/runs/<runId>/` containing `run.json`, the pinned
   `diff.patch`, agent-facing `hunks.txt`, content-addressed old/new blobs, and — optionally — the
-  agent-written `chapters.json` plus the `context.json` that `revue context freeze` pins the code
-  the narration quotes into. Both of those are narration-side and excluded from the run ID, so
-  narrating or freezing a run can never invalidate the code it describes. `show` consumes this
+  agent-written `chapters.json`, the `context.json` that `revue context freeze` pins the code
+  the narration quotes into, and — when the run supersedes another — the `delta.json` prep records.
+  All three are narration-side and excluded from the run ID, so narrating, freezing, or carrying
+  narration forward can never invalidate the code it describes. `show` consumes this
   directory and never recomputes Git state. A
   run without chapters is fully reviewable as a flat diff; narration is an overlay, not
   scaffolding.
+- **Run delta** — what a run inherits from the narrated run it **supersedes**, recorded once at
+  creation in `delta.json` and printed by `revue delta`. Every review unit of the new run is
+  classified against the predecessor's by content rather than position — **unchanged** however far
+  its lines moved, **modified** where it rewrites the same pre-image lines differently, otherwise
+  **new**. A chapter every one of whose units came through unchanged is **carried forward**:
+  pre-copied with its hunk references and key-change line ranges re-mapped, and with the code it
+  quotes re-frozen against the new run. Any other chapter is **stale**, named with the reason, and
+  re-narrated rather than patched. What no carried chapter covers is the agent's worklist. Like
+  `chapters.json` and `context.json` the delta is narration-side and outside the run ID.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
   hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
   totals. Creation time and narration are deliberately excluded. Content-addressing means

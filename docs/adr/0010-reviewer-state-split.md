@@ -5,45 +5,48 @@
 
 ## Context
 
-Preferences (theme, layout, view mode, display modes) originally persisted per repository in
-`./.revue/`, so every checkout forgot the reviewer's choices. Meanwhile run progress and session
-position are meaningless outside the repository whose runs they describe. Two different lifetimes
-were sharing one location.
+Revue first kept the preferences in `./.revue/`, with one copy for each repository. The preferences
+are the theme, the layout, the view mode, and the display modes. Thus each new checkout lost the
+choices of the reviewer. But the run progress and the session position have no meaning outside the
+repository that holds their runs. One location held two different lifetimes.
 
 ## Decision
 
-State splits by owner:
+The state splits by owner:
 
 - **Reviewer-owned, machine-wide** — `~/.revue/`:
-  - `preferences.json` — machine-written on UI actions: theme id, layout, view mode, path/file
-    display modes.
-  - `keybindings.json` and `themes/` — hand-edited, machine-untouched (ADRs 0008, 0009).
+  - `preferences.json` — the machine writes this file on UI actions. It holds the theme id, the
+    layout, the view mode, and the display modes for paths and files.
+  - `keybindings.json` and `themes/` — the user edits these by hand, and the machine does not write
+    to them (ADRs 0008, 0009).
 - **Repository-owned** — `./.revue/`:
-  - `state.json` — review progress plus per-page session state (focused file/hunk/question,
-    collapsed files, scroll offsets), keyed by run key.
+  - `state.json` — the review progress and the session state of each page, keyed by run key. The
+    session state holds the focused file, hunk, or question, the collapsed files, and the scroll
+    offsets.
   - `threads.json` and `runs/` per ADRs 0003 and 0004.
 
-Within `~/.revue`, the load-bearing boundary is **machine-owned versus user-owned**: files the TUI
-rewrites must never share a file with hand edits, or comments and formatting are clobbered. New
-config surfaces must pick a side before picking a filename.
+Inside `~/.revue`, the important boundary is **machine-owned against user-owned**. Data that the TUI
+rewrites must never share a file with hand edits. If it does, the rewrite destroys the comments and
+the format. A new config surface must choose its side before it gets a filename.
 
-All preference and state writes are non-fatal: a read-only checkout still reviews; it just forgets
-the choice.
+A failed write of a preference or of the state is never fatal. A read-only checkout still permits a
+review. It only forgets the choice.
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| Per-repository preferences (status quo) | Rejected | The reviewer's theme is not a property of the repository. |
-| One merged state file | Rejected | Mixes lifetimes and owners; a repo wipe would eat preferences, a machine move would eat progress. |
-| XDG config directories | Rejected | `~/.revue` matches the existing `~/.revue`-adjacent conventions of comparable tools and keeps all reviewer state discoverable in one place. |
-| Persist layout choices per run in view state | Rejected | View state is review progress; layout is ephemeral session taste. |
-| Reviewer-owned `~/.revue` split from repo-owned `./.revue` | Chosen | Each artefact lives with its owner and lifetime. |
+| Per-repository preferences (status quo) | Rejected | The theme of the reviewer is not a property of the repository. |
+| One merged state file | Rejected | It mixes the lifetimes and the owners. A deletion of the repository data destroys the preferences. A move to another machine destroys the progress. |
+| XDG config directories | Rejected | `~/.revue` agrees with the conventions of comparable tools, and it keeps all reviewer state in one place. |
+| Persist layout choices per run in view state | Rejected | The view state is review progress. The layout is a short-lived choice for one session. |
+| Reviewer-owned `~/.revue` split from repo-owned `./.revue` | Chosen | Each artefact lives with its owner and its lifetime. |
 
 ## Consequences
 
-- Three artefacts already share the `~/.revue` contract (preferences, keybindings, themes); this
-  ADR names the rule they follow.
-- Sidebar and diff-layout preferences are deliberately session-only — not persisted anywhere.
-- `./.revue/state.json` is safe to delete (loses progress, nothing else); `~/.revue` is safe to
-  copy between machines.
+- Three artefacts already obey the `~/.revue` contract: the preferences, the keybindings, and the
+  themes. This ADR gives a name to the rule that they follow.
+- Revue keeps the sidebar preference and the diff-layout preference for one session only. Revue
+  writes them to no file. This is deliberate.
+- You can delete `./.revue/state.json` safely: you lose the progress and nothing more. You can copy
+  `~/.revue` between machines safely.

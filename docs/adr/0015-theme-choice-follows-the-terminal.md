@@ -5,41 +5,46 @@
 
 ## Context
 
-Revue remembered one `themeId`. `--theme auto` existed but chose between the two hard-coded Ayu
-defaults, so a reviewer whose terminal follows the system light/dark setting could have the theme
-they picked, or a theme that matched their terminal, but not both. Nothing carried a second
-preference, and nothing reacted when a terminal changed appearance mid-review.
+Revue remembered one `themeId`. `--theme auto` existed, but it chose between the two hardcoded Ayu
+defaults. Some terminals follow the light/dark setting of the system. A reviewer with such a
+terminal could have the theme that they picked, or a theme that matched their terminal, but not
+both. Nothing held a second preference. Nothing changed when a terminal changed its appearance
+during a review.
 
 ## Decision
 
-A theme choice is `{ themeId, lightThemeId, darkThemeId }`. `themeId` pins one theme; `auto` — or
-its absence, which is now the default — defers to the terminal, which picks a half of the pair.
-A terminal that never reports its background is treated as dark. Unnamed halves and ids that no
-longer name a theme fall back to the Ayu defaults, so a deleted custom theme leaves the reviewer
-readable rather than unstyled. Either half may be a custom theme.
+A theme choice is `{ themeId, lightThemeId, darkThemeId }`. `themeId` pins one theme. `auto`, or the
+absence of a value, gives the choice to the terminal, and the terminal picks one half of the pair.
+The absence of a value is now the default. Revue treats a terminal that never reports its background
+as dark.
 
-`resolveThemeChoice` in `@revue/theme` is the single resolver; the shell holds the choice and the
-terminal's reported appearance as state and derives the theme from both, so a `theme_mode` report
-repaints mid-review through the same path as a pick.
+A half with no name, and an id that no longer names a theme, fall back to the Ayu defaults. Thus a
+deleted custom theme leaves the reviewer with readable text, not with unstyled text. Either half can
+be a custom theme.
 
-The picker stays one flat list. `a` toggles `follow terminal`; while it is on, `Enter` files the
-highlighted theme under its own appearance, and both halves stay marked. Picking the half the
-terminal is not currently asking for changes nothing on screen, so the status bar names the half
-that moved.
+`resolveThemeChoice` in `@revue/theme` is the only resolver. The shell holds two items of state: the
+choice, and the appearance that the terminal reports. The shell derives the theme from both. Thus a
+`theme_mode` report repaints during a review through the same path as a pick.
+
+The picker stays one flat list. `a` toggles `follow terminal`. While the toggle is on, `Enter` files
+the highlighted theme under its own appearance, and both halves stay marked. If you pick the half
+that the terminal does not ask for now, the screen does not change. Thus the status bar gives the
+name of the half that moved.
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| One theme id, `auto` picking the Ayu defaults (status quo) | Rejected | Following the terminal and choosing your own theme were mutually exclusive. |
-| Three-way Auto/Light/Dark mode header in the picker | Rejected | More chrome and more keys to explain than the toggle, for the same two slots. |
-| A separate light-theme picker | Rejected | Doubles the surface; the list already groups and labels themes by appearance. |
-| Adopt the pinned theme into its half when following is switched on | Rejected | Silently overwrites a half the reviewer deliberately set. |
-| Pair plus a follow toggle, filling the half by appearance | Chosen | One list sets both halves; the mark and the appearance column already carry the state. |
+| One theme id, `auto` picking the Ayu defaults (status quo) | Rejected | You could follow the terminal, or choose your own theme, but not both. |
+| Three-way Auto/Light/Dark mode header in the picker | Rejected | It adds more chrome and more keys to explain than the toggle, for the same two slots. |
+| A separate light-theme picker | Rejected | It doubles the surface. The list already groups the themes by appearance and labels them. |
+| Adopt the pinned theme into its half when following is switched on | Rejected | It overwrites a half that the reviewer set deliberately, and it gives no message. |
+| Pair plus a follow toggle, filling the half by appearance | Chosen | One list sets both halves. The mark and the appearance column already carry the state. |
 
 ## Consequences
 
-- Live following depends on the terminal reporting appearance changes; terminals that do not still
-  resolve correctly at launch.
-- `--theme-light` / `--theme-dark` join `--theme` as per-run overrides, validated up front like it.
-- Custom themes now satisfy a followed choice, which the single-id resolver never allowed.
+- A live follow needs a terminal that reports its appearance changes. A terminal that does not
+  report them still resolves correctly at launch.
+- `--theme-light` and `--theme-dark` join `--theme` as overrides for one run. Revue validates all
+  three at the start.
+- A custom theme can now satisfy a followed choice. The resolver with one id never allowed this.

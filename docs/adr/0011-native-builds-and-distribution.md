@@ -5,48 +5,54 @@
 
 ## Context
 
-Revue targets reviewers who do not have Bun or Node installed, so distribution means compiled
-executables. OpenTUI ships per-platform native libraries; a cross-compiled binary can silently
-embed the wrong native code — or none — and the failure only appears when a real terminal drives
-the TUI. Versioning also had three potential sources of truth (package.json files, git tags, the
-embedded skill), and the Homebrew formula had already gone stale once through manual bumping.
+Revue is for reviewers who do not have Bun or Node on their machine. Thus Revue must ship compiled
+executables. OpenTUI ships one native library for each platform. A cross-compiled binary can hold
+the wrong native code, or no native code, and give no message. The failure occurs only when a real
+terminal drives the TUI.
+
+The version also had three possible sources of truth: the `package.json` files, the git tags, and
+the embedded skill. Manual version changes had already made the Homebrew formula out of date one
+time.
 
 ## Decision
 
-Each release tag compiles the CLI **natively on its own runner** — macOS arm64/x64 and Linux x64 —
-with no cross-compilation. The tag is the single version source, stamped into the package before
-compilation, which also versions the embedded skill (they ride one release train; `revue doctor`
-detects drift).
+Each release tag compiles the CLI **natively on its own runner**, with no cross-compilation. The
+runners are macOS arm64, macOS x64, and Linux x64. The tag is the one source of the version. The
+build stamps the tag into the package before compilation. The same stamp gives the version of the
+embedded skill, because the binary and the skill move on one release train. `revue doctor` detects a
+difference between them.
 
-Every artefact must pass `scripts/release-smoke.sh`, which drives the compiled binary through a
-**real PTY** including an alternate-screen enter/leave check — proving the native terminal layer
-survived compilation, which `--version` or `--check` never exercises. Releases ship sha256
-checksums and bundled third-party licence texts collected from the production dependency closure
-at build time.
+Every artefact must pass `scripts/release-smoke.sh`. The script drives the compiled binary through a
+**real PTY**. The script also makes a check of the entry to and the exit from the alternate screen.
+Thus the script proves that the native terminal layer survived the compilation. `--version` and
+`--check` never use that layer. Each release ships sha256 checksums and the licence texts of the
+third parties. The build collects those texts from the closure of the production dependencies.
 
-Release automation is release-please over conventional commits. On release, CI regenerates the
-Homebrew tap formula (`mtford90/tap`) from the checksums and pushes it with a scoped cross-repo
-token, and `site/install.sh` provides a curl-pipe-sh path for non-brew platforms. npm distribution
-is deliberately absent. Optional native dependencies are never bundled: difftastic is probed at
-runtime, advised at install time (formula caveats), and its absence degrades to patch view.
+release-please automates the release from the conventional commits. At each release, CI makes the
+Homebrew tap formula (`mtford90/tap`) again from the checksums, and pushes the formula with a scoped
+cross-repo token. For platforms without brew, `site/install.sh` gives a curl-pipe-sh path. Revue
+does not ship to npm, and this is deliberate. Revue never bundles an optional native dependency.
+Revue looks for difftastic at run time, and the formula caveats advise difftastic at install time.
+If difftastic is absent, Revue shows the patch view.
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| Publish to npm | Rejected | Requires users to have a JS runtime; the audience is "anyone reviewing code". |
-| Cross-compile from one runner | Rejected | Other platforms' OpenTUI native packages are not in `node_modules`; it fails silently. |
-| `--version`/`--check` smoke tests | Rejected | Never exercises the terminal/input layer — exactly the part native packaging can break. |
-| Manual version bumps and formula updates | Rejected | Already produced a stale formula; tag-driven automation removes the human step. |
-| `depends_on "difftastic"` in the formula | Rejected | Forces a large install on users who never open semantic view. |
-| Native matrix + PTY gate + tag-driven automation | Chosen | The matrix is the strategy, not an optimisation; the gate has already caught a real Intel-only hang. |
+| Publish to npm | Rejected | It needs a JS runtime on the user's machine. But the audience is each person who reviews code. |
+| Cross-compile from one runner | Rejected | The OpenTUI native packages of the other platforms are not in `node_modules`. The build then fails and gives no message. |
+| `--version`/`--check` smoke tests | Rejected | They never use the terminal layer or the input layer. Native packaging can break exactly that part. |
+| Manual version bumps and formula updates | Rejected | They had already made an out-of-date formula. Tag-driven automation removes the human step. |
+| `depends_on "difftastic"` in the formula | Rejected | It forces a large install on users who never open the semantic view. |
+| Native matrix + PTY gate + tag-driven automation | Chosen | The matrix is the strategy, not a speed improvement. The gate already found a real hang on Intel only. |
 
 ## Consequences
 
-- Adding a platform (e.g. linux-arm64, currently a gap) means adding a runner, not a flag.
-- The PTY smoke test is load-bearing; simplifying it away reintroduces the silent-native-breakage
-  risk it exists to catch.
-- A dependency change that breaks licence collection fails CI rather than shipping an
-  under-attributed binary.
-- Skill distribution policy (embed in binary, delegate installs to the skills CLI, never install
-  binaries from the skill) is recorded in CONTEXT.md's key decisions and versioned by this train.
+- To add a platform, add a runner, not a flag. linux-arm64 is such a gap now.
+- The PTY smoke test is necessary. Do not remove it. If you remove it, native breakage occurs again
+  with no message.
+- If a change of a dependency breaks the collection of the licences, CI fails. Revue does not ship a
+  binary with insufficient attribution.
+- The key decisions in CONTEXT.md record the policy for skill distribution, and this release train
+  gives that policy its version. The policy is: embed the skill in the binary; let the skills CLI do
+  the installs; never install a binary from the skill.

@@ -5,45 +5,65 @@
 
 ## Context
 
-Shortcuts were hardcoded three times over — the keyboard handler, the help surface, and the menu
-hints — and drifted. Users then asked for configurable keybindings, which requires a single source
-of truth to override against, and a config format that survives hand editing.
+Three places declared the shortcuts: the keyboard handler, the help surface, and the menu hints. The
+three declarations became different. Users then asked for configurable keybindings. Configurable
+keybindings need one source of truth to override. They also need a config format that survives hand
+edits.
 
 ## Decision
 
-All context-level shortcuts derive from one typed registry (`packages/tui/src/keymap.ts`): each
-action carries an id, its keys, help text, and a context (`global`, `page`, `comments`). The
-handler, keys surface, menu hints, status-bar hints, and the `revue keybindings` CLI all read the registry; nothing
-declares a shortcut anywhere else.
+One typed registry (`packages/tui/src/keymap.ts`) holds all context-level shortcuts. Each action
+carries these fields:
 
-Overrides live in `~/.revue/keybindings.json`, a hand-edited JSONC map of action id → key array
-(action-to-keys, not key-to-action). The contract:
+- an id;
+- its keys;
+- its help text;
+- a context (`global`, `page`, or `comments`).
 
-- **Reserved**: escape and the digits are unbindable. Every registry action can be rebound.
-- Shifted letters expand automatically — in the defaults as well as in overrides, both of which go
-  through the same expansion — so `"Q"` and `shift+q` are aliases and no entry has to spell out both.
-- The merge runs to a fixed point, so a default key freed by one override is reassignable by
-  another regardless of file order.
-- Validation is per-entry lenient: a bad entry is dropped with a footer warning and keys-surface
-  detail; the file as a whole never fails. Unreadable files warn rather than silently reset.
+These surfaces read the registry:
 
-`revue keybindings` prints the effective map with overridden flags; `keybindings init` writes a
-commented starter file. The file is user-owned and machine-untouched (see ADR 0010).
+- the keyboard handler;
+- the keys surface;
+- the menu hints;
+- the status-bar hints;
+- the `revue keybindings` CLI.
+
+No other code declares a shortcut.
+
+The overrides live in `~/.revue/keybindings.json`. The reviewer edits this JSONC file by hand. The
+file maps an action id to an array of keys. The direction is action-to-keys, not key-to-action. The
+contract has these rules:
+
+- **Reserved**: you cannot bind escape or the digits. You can rebind every registry action.
+- Shifted letters expand automatically. The same expansion applies to the defaults and to the
+  overrides. Thus `"Q"` and `shift+q` are aliases, and no entry must give both.
+- The merge runs to a fixed point. If one override frees a default key, another override can take
+  that key. The order of the entries in the file does not change the result.
+- Validation is lenient for each entry. Revue drops a bad entry, shows a warning in the footer, and
+  shows the detail on the keys surface. The full file never fails. If Revue cannot read the file,
+  Revue gives a warning. Revue does not reset the keys without a message.
+
+`revue keybindings` prints the effective map with the overridden flags. `keybindings init` writes a
+start file with comments. The user owns the file, and the machine does not write to it (see ADR
+0010).
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| Keep per-site hardcoded shortcuts | Rejected | Triple maintenance had already drifted. |
-| Fold overrides into `preferences.json` | Rejected | The machine rewrites that file on every UI action and would clobber hand edits and comments. |
-| Key-to-action mapping direction | Rejected | Action-to-keys keeps one action's bindings in one place and makes conflicts detectable. |
-| Strict reject-file-on-error validation | Rejected | One typo would revert every binding mid-review. |
-| Make digits rebindable | Rejected | Digit jumps are structural; rebinding them breaks the navigation grammar. |
-| A `revue.config.ts` code-based config | Deferred | Bigger scope (loader, sandboxing); if it happens, keybindings migrate in as one section. |
+| Keep per-site hardcoded shortcuts | Rejected | Three copies need maintenance, and they had already become different. |
+| Fold overrides into `preferences.json` | Rejected | The machine rewrites that file on each UI action. The rewrite destroys hand edits and comments. |
+| Key-to-action mapping direction | Rejected | Action-to-keys keeps the bindings of one action in one place, and it shows conflicts. |
+| Strict reject-file-on-error validation | Rejected | One typing error reverts every binding during a review. |
+| Make digits rebindable | Rejected | The digit jumps are structural. A rebind of a digit breaks the navigation grammar. |
+| A `revue.config.ts` code-based config | Deferred | The scope is larger, because it needs a loader and a sandbox. If Revue adds it, the keybindings move in as one section. |
 
 ## Consequences
 
-- Adding an action means adding one registry entry; help, menus, CLI, and overrides follow.
-- The action ids in `keybindings.json` are a public contract; renaming an id is a breaking change.
-- Fixed-point merging makes override files order-independent but means conflicts resolve by rule,
-  not position — the CLI's overridden/conflict flags are the debugging surface.
+- To add an action, add one registry entry. The help, the menus, the CLI, and the overrides then
+  follow.
+- The action ids in `keybindings.json` are a public contract. A rename of an id is a breaking
+  change.
+- The fixed-point merge makes the order of the entries unimportant. But rules resolve the conflicts,
+  not position. To find the cause of a conflict, read the overridden flags and the conflict flags of
+  the CLI.

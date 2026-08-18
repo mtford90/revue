@@ -5,94 +5,123 @@
 
 ## Context
 
-The patch view marks the changed characters inside a paired removed/added line with a stronger
-diff-tinted background. Producing that emphasis requires two decisions per change block — a run of
-N deletion lines followed by M addition lines: which removed line is a revision of which added line,
-and which characters within a pair actually changed.
+The patch view marks the changed characters in a pair of one removed line and one added line. It
+marks them with a stronger background in the diff tint. A change block is a sequence of N deletion
+lines and then M addition lines. Each change block needs two decisions:
 
-Existing tools answer both differently. GitHub pairs only equal-count blocks, by position, and gives
-unequal blocks no emphasis at all. Delta pairs by Levenshtein distance under a 0.6 max-line-distance
-gate. Git's `diff-highlight` trims a common prefix and suffix and emphasises the remainder, again
-only for equal-count blocks. `codediff.nvim` defaults to similarity pairing at a 0.75 threshold with
-a character-level LCS.
+- which removed line is a revision of which added line;
+- which characters inside a pair changed.
 
-Revue's constraints add two more pressures. Emphasis must be cheap enough to compute for whole files
-in a terminal render path, and its output must be readable at a glance: character-level results
-scatter single-character highlights through a line ("confetti") that cost more attention than they
-save.
+Other tools answer these two questions differently:
+
+- GitHub pairs only blocks with equal counts, and it pairs them by position. It gives no emphasis to
+  a block with unequal counts.
+- Delta pairs by Levenshtein distance, under a `max-line-distance` gate of 0.6.
+- The `diff-highlight` tool of Git trims a common prefix and a common suffix, and it emphasises the
+  remainder. It also does this only for blocks with equal counts.
+- `codediff.nvim` pairs by similarity, by default, at a threshold of 0.75, with an LCS at the
+  character level.
+
+The constraints of Revue add two more limits. First, the emphasis must be cheap enough to compute
+for whole files in a terminal render path. Second, a reader must understand the output immediately.
+A result at the character level puts many single-character highlights through a line. Those
+highlights cost more attention than they save.
 
 ## Decision
 
-`@revue/diff-model` owns the calculation as pure functions with no renderer or OpenTUI dependency.
+`@revue/diff-model` owns the calculation. The calculation is pure functions. It has no dependency on
+the renderer and no dependency on OpenTUI.
 
-**Pairing** is hybrid. Equal-count blocks pair by position, matching GitHub, because the positional
-reading is what reviewers already expect from the layout. Unequal blocks fall back to greedy
-similarity: candidates score as common prefix length plus common suffix length, the highest-scoring
-candidates are taken first, and accepted pairs forbid crossing ones so pairing stays
-order-preserving.
+**Pairing** is hybrid. A block with equal counts pairs by position, as GitHub does, because the
+layout already makes a reviewer expect that reading. A block with unequal counts falls back to
+greedy similarity. The score of a candidate is the length of the common prefix plus the length of
+the common suffix. Revue takes the candidates with the highest score first. An accepted pair forbids
+a pair that crosses it, thus the pairing keeps the order of the lines.
 
-**A similarity gate applies to both paths**: a pair is admitted only when its score covers roughly
-half the shorter line. Lines that clear no gate stay unpaired and carry no emphasis. Gating the
-positional pairs too is a deliberate deviation from GitHub parity. Ungated, a rewritten block of
-equal size pairs unrelated lines by position alone, and because they share almost nothing the spans
-then cover nearly the whole of both lines — emphasis that asserts "this line became that one" when
-it did not. Delta's `max-line-distance` and `diff-highlight`'s refusal to emphasise a whole line are
-the same conservatism: losing emphasis on a genuinely-rewritten pair costs a reviewer little, while
-garish emphasis across unrelated lines actively misleads. Positional pairs are still only ever
-gated, never re-matched: an equal-count block does not compete lines across positions, so surviving
-pairs always agree with the rows the layout shows.
+**A similarity gate applies to both paths.** Revue admits a pair only when its score covers about
+half of the shorter line. A line that passes no gate stays unpaired and gets no emphasis.
 
-**Spans** are token-level. For a pair, the common prefix and suffix are trimmed, the changed middle
-is widened to whole token boundaries on each side, and the two token streams — word runs of letters,
-digits and underscores; whitespace runs; punctuation runs — are compared by LCS. Unmatched tokens
-become spans, and contiguous unmatched tokens merge into one range. Output is 0-based, end-exclusive
-character ranges per side, in code units on both sides; the renderer separately owns tab and display
-width. Lines over 1,000 characters get no spans, mirroring the renderer's tokenizing limit.
-Whitespace-only edits do produce spans, because the background is their only visible signal.
+The gate on the positional pairs is a deliberate deviation from parity with GitHub. Without the
+gate, a block of equal size that is a rewrite pairs unrelated lines by position alone. Those lines
+share almost nothing, thus the spans then cover almost all of both lines. That emphasis states that
+one line became the other line, and that is not true.
+
+The `max-line-distance` of Delta and the refusal of `diff-highlight` to emphasise a whole line show
+the same care. The loss of emphasis on a pair that is a true rewrite costs a reviewer little. Strong
+emphasis across unrelated lines gives the reviewer wrong information.
+
+Revue only gates a positional pair. It never matches that pair again. A block with equal counts does
+not compete lines across positions. Thus a pair that survives always agrees with the rows that the
+layout shows.
+
+**Spans** are at the token level. For a pair, Revue does these steps:
+
+1. It trims the common prefix and the common suffix.
+2. It widens the changed middle to whole token boundaries on each side.
+3. It compares the two token streams by LCS.
+
+A token stream has three kinds of token:
+
+- a word group of letters, digits and underscores;
+- a whitespace group;
+- a punctuation group.
+
+A token with no match becomes a span. Adjacent tokens with no match merge into one range. The output
+is a character range for each side. A range starts at 0, excludes its end, and counts code units on
+both sides. The renderer separately owns the tab and the display width. A line of more than 1,000
+characters gets no spans; this limit is the same as the tokenize limit of the renderer. An edit of
+whitespace only does produce spans, because the background is its only visible signal.
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| Pair only equal-count blocks by position (GitHub) | Rejected | Leaves the common one-line-becomes-two case with no emphasis at all. |
-| Pair by Levenshtein distance gate (delta) | Rejected | Quadratic in line length for a decision that a common-affix score already makes well. |
-| Pair purely by similarity, including equal counts (codediff.nvim) | Rejected | Can reorder pairs the positional layout already implies, so emphasis disagrees with the rows. |
-| Hybrid: gated position for equal counts, gated greedy similarity otherwise | Chosen | Keeps GitHub's predictable reading and still emphasises unequal blocks. |
-| Pair equal counts by position with no gate (GitHub parity) | Rejected | A same-size rewrite paints near-whole-line emphasis across unrelated lines. |
-| Prefix/suffix trim only, emphasise the whole remainder (diff-highlight) | Rejected | One changed word in the middle of a line emphasises everything between the first and last edit. |
-| Character-level LCS | Rejected | Produces scattered single-character spans that read as noise, and a large LCS matrix per pair. |
-| Token-level LCS after prefix/suffix trim | Chosen | Spans land on word boundaries, and trimming keeps the token streams — and the matrix — small. |
+| Pair only equal-count blocks by position (GitHub) | Rejected | The common case where one line becomes two lines then gets no emphasis at all. |
+| Pair by Levenshtein distance gate (delta) | Rejected | It is quadratic in the length of a line. A score from the common affixes already makes that decision well. |
+| Pair purely by similarity, including equal counts (codediff.nvim) | Rejected | It can change the order of the pairs that the positional layout implies. Then the emphasis disagrees with the rows. |
+| Hybrid: gated position for equal counts, gated greedy similarity otherwise | Chosen | It keeps the predictable reading of GitHub and still emphasises blocks with unequal counts. |
+| Pair equal counts by position with no gate (GitHub parity) | Rejected | A rewrite of the same size puts emphasis on almost all of two unrelated lines. |
+| Prefix/suffix trim only, emphasise the whole remainder (diff-highlight) | Rejected | One changed word in the middle of a line emphasises all the text between the first edit and the last edit. |
+| Character-level LCS | Rejected | It makes many single-character spans that a reader cannot use. It also makes a large LCS matrix for each pair. |
+| Token-level LCS after prefix/suffix trim | Chosen | The spans stop at word boundaries. The trim keeps the token streams small, and thus the matrix small. |
 
 ## Consequences
 
-- Unpaired lines are a normal outcome, not a failure: a dissimilar removed line simply keeps its
-  plain row tint. This now includes equal-count blocks, so a same-size block can render with
-  emphasis on some rows and none on others where GitHub would emphasise every row.
-- The gate is a common-affix heuristic, so a rewrite that keeps a long shared prefix — a changed
-  argument list under an identical call, say — still pairs even when little else survives.
-- The half-the-shorter-line rule is vacuous for short lines, so the gate carries two extra guards: a
-  blank line pairs only with another blank line, and an affix under three characters never carries a
-  pair on its own. Without them a blank line "revised" into a statement, and a stray `}` matched any
-  line ending in one, each painting emphasis across a whole unrelated line. Two blank lines still
-  pair, so trailing-whitespace and indent-only edits keep the background that is their only signal.
-- Spans on each side are computed against that side's own token boundaries, so a trim that lands
-  mid-token can widen one side further than the other. The two range lists are independent, so the
-  asymmetry is visible only as a slightly wider highlight.
-- Punctuation runs are single tokens, so changing one character of `);` emphasises the run.
-- Ranges are code-unit offsets, and consumers must not treat them as code-point counts. Token
-  boundaries alone do not keep them off grapheme interiors: a combining mark tokenises as
-  punctuation, so `é` becoming `è` would otherwise emphasise the mark without its base. Ranges are
-  therefore snapped outwards to whole grapheme clusters, which the renderer relies on — it may not
-  cut a span inside a cluster.
-- Greedy pairing is quadratic in the number of lines in a change block, so a block of more than
-  100,000 removed×added candidates skips pairing entirely and its rows keep their plain tint — the
-  same degradation hosts apply to oversized content. Because the renderer memoises pairing, the cap
-  guards against absurdity rather than the cold cost: 90,000 candidates were measured at 22ms once,
-  where a whole-file block cost seconds and gigabytes. Equal-count blocks pair positionally in
-  linear time, so they are never capped.
-- Pairing results are therefore cheap enough to compute per parse, but not per render: the renderer
-  memoises them on the parsed change block.
+- An unpaired line is a normal result, not a failure. A removed line that is not similar keeps the
+  plain tint of its row. This now includes blocks with equal counts. Thus a block of the same size
+  can show emphasis on some rows and no emphasis on other rows, where GitHub would emphasise every
+  row.
+- The gate is a heuristic on the common affixes. Thus a rewrite that keeps a long shared prefix
+  still pairs, even when little else stays the same. One example is a changed argument list under an
+  identical call.
+- The rule of half the shorter line has no effect on short lines. Thus the gate has two more guards:
+  - a blank line pairs only with another blank line;
+  - an affix of less than three characters never holds a pair on its own.
+
+  Without these guards, a blank line paired with a statement, and a single `}` paired with any line
+  that ends in `}`. Each of these put emphasis across a whole unrelated line. Two blank lines still
+  pair. Thus an edit of trailing whitespace or of the indent keeps the background, which is its only
+  signal.
+- Revue computes the spans of each side against the token boundaries of that side. Thus a trim that
+  stops inside a token can widen one side more than the other side. The two lists of ranges are
+  independent. The difference is visible only as a highlight that is a little wider.
+- A punctuation group is one token. Thus a change to one character of `);` emphasises the whole
+  group.
+- A range is an offset in code units, and a consumer must not use it as a count of code points.
+  Token boundaries alone do not keep a range outside a grapheme. A combining mark tokenises as
+  punctuation. Thus `é` that becomes `è` would emphasise the mark without its base character. Revue
+  therefore moves each range outwards to whole grapheme clusters. The renderer depends on this,
+  because it must not cut a span inside a cluster.
+- Greedy pairing is quadratic in the number of lines in a change block. Thus a block with more than
+  100,000 candidates (removed lines × added lines) skips the pairing, and its rows keep the plain
+  tint. Hosts apply the same degradation to content that is too large. The renderer memoises the
+  pairing, thus the cap guards against an extreme case and not against the first computation. A
+  measurement gave 22ms for 90,000 candidates one time, but a block of a whole file cost seconds and
+  gigabytes. A block with equal counts pairs by position in linear time, thus the cap never applies
+  to it.
+- The pairing results are therefore cheap enough to compute for each parse, but not for each render.
+  The renderer memoises them on the parsed change block.
 
 ## Amendment
 
-ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.
+ADR 0013 replaces the active package boundary with `@revue/diff` and `@revue/diff-opentui`. The names above are historical. They describe the implementation at the time of this decision.

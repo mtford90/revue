@@ -197,7 +197,9 @@ import {
 	type WindowPlanItem,
 } from "./virtualRows.ts";
 
-const PANEL_INDEX_MAX_ROWS = 8;
+const PANEL_INDEX_MIN_ROWS = 8;
+const chapterIndexMaxRows = (terminalHeight: number) =>
+	Math.max(PANEL_INDEX_MIN_ROWS, Math.floor(terminalHeight / 2));
 /** The chapter viewport scrollbox pads its content by one row. */
 const VIEWPORT_TOP_PADDING = 1;
 
@@ -445,18 +447,20 @@ function PageIndex({
 	pages,
 	current,
 	vs,
+	maxRows,
 	onSelect,
 	scrollRef,
 }: {
 	pages: Page[];
 	current: number;
 	vs: ViewState;
+	maxRows: number;
 	onSelect: (index: number) => void;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
 }) {
 	const theme = useTheme();
 	const rows = <PageIndexRows pages={pages} current={current} vs={vs} onSelect={onSelect} />;
-	if (pages.length <= PANEL_INDEX_MAX_ROWS) {
+	if (pages.length <= maxRows) {
 		return (
 			<box flexDirection="column" flexShrink={0} width="100%" paddingLeft={1}>
 				{rows}
@@ -466,7 +470,7 @@ function PageIndex({
 	return (
 		<scrollbox
 			ref={scrollRef}
-			height={PANEL_INDEX_MAX_ROWS}
+			height={maxRows}
 			flexShrink={0}
 			width="100%"
 			paddingLeft={1}
@@ -655,6 +659,7 @@ function ChapterPanel({
 	coverage,
 	omittedNotice,
 	width,
+	terminalHeight,
 	vs,
 	indexExpanded,
 	selectedFile,
@@ -680,6 +685,7 @@ function ChapterPanel({
 	coverage: NarrativeCoverage | null;
 	omittedNotice: string | null;
 	width: number;
+	terminalHeight: number;
 	vs: ViewState;
 	indexExpanded: boolean;
 	selectedFile: number;
@@ -753,6 +759,7 @@ function ChapterPanel({
 					pages={pages}
 					current={current}
 					vs={vs}
+					maxRows={chapterIndexMaxRows(terminalHeight)}
 					onSelect={onNavigatePage}
 					scrollRef={indexScrollRef}
 				/>
@@ -4547,6 +4554,7 @@ export function App({
 							coverage={coverage}
 							omittedNotice={omittedNotice}
 							width={panelWidth}
+							terminalHeight={height}
 							vs={vs}
 							indexExpanded={indexExpanded}
 							selectedFile={selectedFile}

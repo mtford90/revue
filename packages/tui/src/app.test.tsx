@@ -22,6 +22,7 @@ import { App } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
 import { mergeKeymap } from "./keybindings.ts";
 import { KEYMAP } from "./keymap.ts";
+import { defaultPanelWidth } from "./layout.ts";
 import type { Preferences } from "./preferences.ts";
 import type { PermalinkContext } from "./sourceLink.ts";
 import { parseCustomTheme } from "./themes.ts";
@@ -287,6 +288,36 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("1. Add a re"); // sidebar chapter label (single-line truncated)
 	expect(frame).toContain("Dashboards stay up during deploys now"); // prologue outcome
 	expect(frame).toContain("0/3 files"); // none reviewed yet
+});
+
+const twelveChapters: RevueChaptersFile = {
+	...file,
+	chapters: Array.from({ length: 12 }, (_, index) => ({
+		id: `chapter-${index + 1}`,
+		order: index + 1,
+		title: `Responsive chapter ${index + 1}`,
+		summary: `Summary ${index + 1}`,
+		hunkRefs: [],
+		keyChanges: [],
+		excerpts: [],
+	})),
+};
+
+test("a tall terminal expands the chapter index while a short terminal keeps it bounded", async () => {
+	const width = 130;
+	const indexContainsLastChapter = (frame: string) =>
+		frame
+			.split("\n")
+			.some((line) =>
+				line.slice(0, defaultPanelWidth(width)).includes("12. Responsive chapter 12"),
+			);
+	const short = await testRender(<App file={twelveChapters} />, { width, height: 18 });
+	await short.renderOnce();
+	expect(indexContainsLastChapter(short.captureCharFrame())).toBe(false);
+
+	const tall = await testRender(<App file={twelveChapters} />, { width, height: 60 });
+	await tall.renderOnce();
+	expect(indexContainsLastChapter(tall.captureCharFrame())).toBe(true);
 });
 
 test("the prologue's mermaid diagram is drawn, and says so when it cannot be", async () => {

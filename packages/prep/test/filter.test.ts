@@ -16,6 +16,50 @@ const exclusion = (
 	previousPath?: string,
 ) => exclusionFor({ path, previousPath, isBinary: false, isGitlink: false }, rules);
 
+test("built-in rules exclude the .revue state directory", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-ignore-"));
+	roots.push(root);
+	const rules = await loadFilterRules(root);
+
+	expect(exclusion(".revue/state.json", rules)).toMatchObject({
+		reason: RUN_EXCLUSION_REASON.BUILT_IN,
+		pattern: ".revue/",
+	});
+	expect(exclusion(".revue/runs/abc/artifact.json", rules)).toMatchObject({
+		reason: RUN_EXCLUSION_REASON.BUILT_IN,
+		pattern: ".revue/",
+	});
+	expect(exclusion("src/.revue.ts", rules)).toBeUndefined();
+});
+
+test("built-in rules exclude common lockfiles and minified assets", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-ignore-"));
+	roots.push(root);
+	const rules = await loadFilterRules(root);
+
+	const excluded = [
+		".terraform.lock.hcl",
+		"Cartfile.resolved",
+		"Chart.lock",
+		"deno.lock",
+		"flake.lock",
+		"android/gradle.lockfile",
+		"mix.lock",
+		"ios/Podfile.lock",
+		"Package.resolved",
+		"packages.lock.json",
+		"pdm.lock",
+		"Pipfile.lock",
+		"pubspec.lock",
+		"renv.lock",
+		"dist/app.min.mjs",
+	];
+	for (const path of excluded) {
+		expect(exclusion(path, rules)).toMatchObject({ reason: RUN_EXCLUSION_REASON.BUILT_IN });
+	}
+	expect(exclusion("go.sum", rules)).toBeUndefined();
+});
+
 test("review ignores preserve gitignore semantics and append session rules", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-ignore-"));
 	roots.push(root);

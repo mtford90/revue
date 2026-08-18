@@ -1,5 +1,6 @@
 {
 	"ignored": [
+		".scratch/",
 		".release-please-manifest.json",
 		".release-please/revue/",
 		".release-please/revuediff/",

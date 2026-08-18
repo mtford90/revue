@@ -182,5 +182,8 @@ export type RunManifestContent = z.infer<typeof runManifestContentSchema>;
 export const runManifestSchema = runManifestContentSchema.extend({
 	runId: sha256Schema,
 	createdAt: z.iso.datetime(),
+	// Lineage sits outside the hashed content so re-prepping an unchanged scope still resolves to
+	// the identical run rather than forking a near-duplicate on every review pass.
+	supersedes: sha256Schema.optional(),
 });
 export type RunManifest = z.infer<typeof runManifestSchema>;

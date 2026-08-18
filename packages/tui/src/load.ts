@@ -4,11 +4,20 @@ import { join } from "node:path";
 import {
 	loadPreparedRun,
 	loadRunContext,
+	loadRunDelta,
 	type PreparedRun,
+	readThreadStoreFile,
 	validateReviewCoverage,
 } from "@revue/prep";
-import { type RevueChaptersFile, RevueChaptersFileSchema, type RunContextFile } from "@revue/types";
+import {
+	type ReviewThread,
+	type RevueChaptersFile,
+	RevueChaptersFileSchema,
+	type RunContextFile,
+	type RunDeltaFile,
+} from "@revue/types";
 import { z } from "zod";
+import { defaultThreadsPath } from "./threads.ts";
 
 export class ChaptersFileError extends Error {}
 
@@ -16,6 +25,21 @@ export class ChaptersFileError extends Error {}
 export type ReviewRun = PreparedRun & {
 	chapters: RevueChaptersFile | null;
 	context: RunContextFile | null;
+	/** What this run inherited from the run it supersedes, or null when it starts a lineage. */
+	delta: RunDeltaFile | null;
+};
+
+/**
+ * The feedback this run holds, or null when the store cannot be read. Narration citing threads is
+ * checked against it, and an unreadable store means "unknown" rather than "no such thread": it
+ * already fails loudly, with its own message, everywhere the threads themselves are used.
+ */
+const runThreads = (run: PreparedRun): ReviewThread[] | null => {
+	try {
+		return readThreadStoreFile(defaultThreadsPath(run.directory)).runs[run.manifest.runId] ?? [];
+	} catch {
+		return null;
+	}
 };
 
 export async function loadReviewRun(directory: string): Promise<ReviewRun> {
@@ -23,8 +47,11 @@ export async function loadReviewRun(directory: string): Promise<ReviewRun> {
 	const path = join(directory, "chapters.json");
 	const chapters = existsSync(path) ? await loadChaptersFile(path) : null;
 	const context = await loadRunContext(prepared);
-	if (chapters) validateReviewCoverage(prepared, chapters, context);
-	return { ...prepared, chapters, context };
+	const delta = await loadRunDelta(prepared);
+	if (chapters) {
+		validateReviewCoverage(prepared, chapters, context, { delta, threads: runThreads(prepared) });
+	}
+	return { ...prepared, chapters, context, delta };
 }
 
 /** Read, JSON-parse and validate a chapters file written by the revue skill. */

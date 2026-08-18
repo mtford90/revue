@@ -18,7 +18,7 @@ import {
 } from "@revue/types";
 import { act } from "react";
 import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
-import { App } from "./app.tsx";
+import { App, type ReviewUpdate } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
 import { mergeKeymap } from "./keybindings.ts";
 import { KEYMAP } from "./keymap.ts";
@@ -27,7 +27,7 @@ import type { Preferences } from "./preferences.ts";
 import type { PermalinkContext } from "./sourceLink.ts";
 import { parseCustomTheme } from "./themes.ts";
 import { createThread } from "./threads.ts";
-import type { ReviewSessionState } from "./viewState.ts";
+import { epilogueSession, type ReviewSessionState } from "./viewState.ts";
 
 const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
 const theme = resolveTheme("catppuccin-mocha");
@@ -3111,4 +3111,370 @@ test("a fenced snippet in narration renders as code rather than raw backticks", 
 	// A snippet is code, not a diagram: it stays in the narration and gets no fold.
 	expect(frame).not.toContain("diagram · ");
 	expect(frame).not.toContain("[▼ show");
+});
+
+test("the epilogue ends the story, links its threads, and leaves carried progress alone", async () => {
+	const runId = "a".repeat(64);
+	const threadId = "00000000-0000-4000-8000-000000000020";
+	const supersedingFile = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "carried",
+				order: 1,
+				title: "The value it starts from",
+				summary: "Untouched by the fix, so you have read this already.",
+				hunkRefs: [{ filePath: "value.ts", oldStart: 1 }],
+				keyChanges: [],
+			},
+			{
+				id: "epilogue",
+				order: 2,
+				role: "epilogue",
+				title: "Changes since your review",
+				summary: "The retry budget is shared now, as you asked.",
+				hunkRefs: [{ filePath: "retry.ts", oldStart: 1 }],
+				keyChanges: [],
+				threadRefs: [threadId],
+			},
+		],
+	});
+	const diffFiles = parsePatch(`diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-old value
++new value
+diff --git a/retry.ts b/retry.ts
+--- a/retry.ts
++++ b/retry.ts
+@@ -1 +1 @@
+-retry(own)
++retry(shared)
+`);
+	const thread: ReviewThread = {
+		id: threadId,
+		runId,
+		migratedFrom: "b".repeat(64),
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.HUNK,
+			filePath: "retry.ts",
+			oldStart: 1,
+			side: "additions",
+			startLine: 1,
+			endLine: 1,
+		},
+		status: THREAD_STATUS.OPEN,
+		createdAt: "2026-08-02T10:00:00.000Z",
+		messages: [
+			{
+				id: "00000000-0000-4000-8000-000000000021",
+				author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Matt Reviewer" },
+				body: "Share the retry budget",
+				createdAt: "2026-08-02T10:00:00.000Z",
+			},
+		],
+	};
+	const t = await testRender(
+		<App
+			file={supersedingFile}
+			diffFiles={diffFiles}
+			initialThreads={[thread]}
+			initialViewState={{
+				chapters: ["carried"],
+				files: ["carried::value.ts"],
+				keyChanges: [],
+			}}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+
+	// The chapter carried through supersession keeps the mark it was read under.
+	expect(t.captureCharFrame()).toContain("[x] Chapter 1/2");
+
+	await nextChapter(t);
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("[ ] Chapter 2/2"); // the epilogue is new, so it is unread
+	expect(frame).toContain("Changes since your review");
+	expect(frame).toContain("In reply to");
+	expect(frame).toContain("retry.ts:1");
+	expect(frame).toContain("Share the retry budget");
+	expect(frame).toContain("retry(shared)"); // and it narrates the fix hunk itself
+
+	// The citation is the first stop on the chapter walk, and Enter opens the conversation.
+	await press(t, "J");
+	expect(t.captureCharFrame()).toContain("▸ retry.ts:1");
+	await act(async () => {
+		t.mockInput.pressEnter();
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+
+	expect(statusLine(t)).toContain("Comments");
+	expect(t.captureCharFrame()).toContain("1 open · 0 resolved");
+	expect(t.captureCharFrame()).toContain("Share the retry budget");
+});
+
+// ── Watching a live review ───────────────────────────────────────────────────
+// The TUI adopts what the agent writes without being asked, so these drive the App with injected
+// watcher updates: filesystem-watch timing belongs to watch.test.ts, not to a render test.
+
+const WATCHED_RUN = "a".repeat(64);
+const HUMAN: ThreadAuthor = { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Matt Reviewer" };
+const AGENT: ThreadAuthor = { kind: THREAD_AUTHOR_KIND.AGENT, name: "Review agent" };
+
+const watchedChapters = RevueChaptersFileSchema.parse({
+	chapters: [
+		{
+			id: "watched",
+			order: 1,
+			title: "The retry budget",
+			summary: "Three lines worth arguing about.",
+			hunkRefs: [{ filePath: "retry.ts", oldStart: 1 }],
+			keyChanges: [],
+		},
+	],
+});
+
+const watchedDiff = parsePatch(`diff --git a/retry.ts b/retry.ts
+--- a/retry.ts
++++ b/retry.ts
+@@ -1,3 +1,3 @@
+-retry(one)
+-retry(two)
+-retry(three)
++retry(alpha)
++retry(beta)
++retry(gamma)
+`);
+
+const watchedThread = ({
+	line,
+	body,
+	reply,
+}: {
+	line: number;
+	body: string;
+	reply?: string;
+}): ReviewThread => ({
+	id: `00000000-0000-4000-8000-00000000004${line}`,
+	runId: WATCHED_RUN,
+	anchor: {
+		kind: THREAD_ANCHOR_KIND.HUNK,
+		filePath: "retry.ts",
+		oldStart: 1,
+		side: "additions",
+		startLine: line,
+		endLine: line,
+	},
+	status: THREAD_STATUS.OPEN,
+	createdAt: `2026-08-02T10:0${line}:00.000Z`,
+	messages: [
+		{
+			id: `00000000-0000-4000-8000-00000000005${line}`,
+			author: HUMAN,
+			body,
+			createdAt: `2026-08-02T10:0${line}:00.000Z`,
+		},
+		...(reply
+			? [
+					{
+						id: `00000000-0000-4000-8000-00000000006${line}`,
+						author: AGENT,
+						body: reply,
+						createdAt: `2026-08-02T11:0${line}:00.000Z`,
+					},
+				]
+			: []),
+	],
+});
+
+/** A stand-in for the filesystem watcher: the same seam, driven by the test rather than by disk. */
+const updateDriver = () => {
+	const listeners: ((update: ReviewUpdate) => void)[] = [];
+	return {
+		subscribe: (listener: (update: ReviewUpdate) => void) => {
+			listeners.push(listener);
+			return () => {
+				listeners.splice(listeners.indexOf(listener), 1);
+			};
+		},
+		emit: async (t: Awaited<ReturnType<typeof testRender>>, update: ReviewUpdate) => {
+			await act(async () => {
+				for (const listener of [...listeners]) listener(update);
+			});
+			await act(async () => {
+				await t.renderOnce();
+			});
+		},
+	};
+};
+
+const rowOf = (t: Awaited<ReturnType<typeof testRender>>, needle: string) =>
+	t
+		.captureCharFrame()
+		.split("\n")
+		.findIndex((line) => line.includes(needle));
+
+test("an agent reply lands in the open review without a keypress, leaving the page where it was", async () => {
+	const driver = updateDriver();
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[thread]}
+			subscribeUpdates={driver.subscribe}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	const before = rowOf(t, "retry(alpha)");
+	expect(t.captureCharFrame()).not.toContain("Budget is shared now");
+
+	await driver.emit(t, {
+		kind: "threads",
+		threads: [
+			watchedThread({ line: 1, body: "Share the retry budget", reply: "Budget is shared now" }),
+		],
+		orphaned: [],
+	});
+
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Budget is shared now");
+	expect(frame).toContain("Review agent");
+	// The narration under the reviewer's eyes did not move, and neither did the page they were on.
+	expect(rowOf(t, "retry(alpha)")).toBe(before);
+	expect(statusLine(t)).toContain("Ch 1/1");
+});
+
+test("threads awaiting the reviewer's verdict lead the Comments surface, and selection follows its thread", async () => {
+	const driver = updateDriver();
+	const threads = [
+		watchedThread({ line: 1, body: "Share the retry budget" }),
+		watchedThread({ line: 2, body: "Name this constant" }),
+		watchedThread({ line: 3, body: "Why three retries?" }),
+	];
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={threads}
+			subscribeUpdates={driver.subscribe}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await press(t, "o");
+	await arrow(t, "down"); // the reviewer is standing on the second thread
+
+	expect(rowOf(t, "retry.ts:1")).toBeLessThan(rowOf(t, "retry.ts:3"));
+	expect(t.captureCharFrame().split("\n")[rowOf(t, "retry.ts:2")]).toContain("▸");
+
+	await driver.emit(t, {
+		kind: "threads",
+		threads: [
+			threads[0] as ReviewThread,
+			threads[1] as ReviewThread,
+			watchedThread({ line: 3, body: "Why three retries?", reply: "Three is the tested budget" }),
+		],
+		orphaned: [],
+	});
+
+	// The answered thread is now the reviewer's to close, so it leads.
+	expect(rowOf(t, "retry.ts:3")).toBeLessThan(rowOf(t, "retry.ts:1"));
+	// And the reviewer is still standing on the thread they picked, not on its old row.
+	expect(t.captureCharFrame().split("\n")[rowOf(t, "retry.ts:2")]).toContain("▸");
+});
+
+test("a carried thread this run no longer anchors is marked, not hidden", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[thread]}
+			initialOrphanedThreads={[thread.id]}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await press(t, "o");
+
+	expect(t.captureCharFrame()).toContain("retry.ts:1 · no longer quoted");
+	expect(t.captureCharFrame()).toContain("Share the retry budget");
+});
+
+test("a superseding run raises a banner, changes nothing on its own, and redirects the reload key", async () => {
+	const driver = updateDriver();
+	let reloads = 0;
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			subscribeUpdates={driver.subscribe}
+			onReload={() => (reloads += 1)}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	expect(t.captureCharFrame()).not.toContain("Revue updated");
+
+	await driver.emit(t, {
+		kind: "superseded",
+		summary: "1 chapter revised, epilogue added",
+	});
+
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("Revue updated: 1 chapter revised, epilogue added");
+	expect(frame).toContain("press Ctrl-r to read what changed");
+	expect(frame).toContain("retry(alpha)"); // the review itself never moves under the reviewer
+	expect(statusLine(t)).toContain("Ch 1/1");
+
+	await act(async () => {
+		t.mockInput.pressKey("r", { ctrl: true });
+	});
+	await act(async () => {
+		await t.renderOnce();
+	});
+	expect(reloads).toBe(1);
+});
+
+test("following the banner opens the superseding run on its epilogue", async () => {
+	const supersedingFile = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "watched",
+				order: 1,
+				title: "The retry budget",
+				summary: "Untouched by the fix, so you have read this already.",
+				hunkRefs: [{ filePath: "retry.ts", oldStart: 1 }],
+				keyChanges: [],
+			},
+			{
+				id: "epilogue",
+				order: 2,
+				role: "epilogue",
+				title: "Changes since your review",
+				summary: "The retry budget is shared now, as you asked.",
+				hunkRefs: [],
+				keyChanges: [],
+			},
+		],
+	});
+	const t = await testRender(
+		<App
+			file={supersedingFile}
+			diffFiles={watchedDiff}
+			initialSessionState={epilogueSession(supersedingFile)}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+
+	expect(statusLine(t)).toContain("Ch 2/2");
+	expect(t.captureCharFrame()).toContain("Changes since your review");
 });

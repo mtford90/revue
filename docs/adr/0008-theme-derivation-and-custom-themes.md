@@ -5,49 +5,61 @@
 
 ## Context
 
-Revue once carried two hand-picked palettes (shell and renderer) that disagreed, plus a pinned
-syntax theme. Every new UI surface forced another round of colour picking, and nothing enforced
-readability. Users then asked for their own themes, which raised the classic trade-off: a full
-hand-authored palette per theme is tedious, produces unreadable combinations, and breaks every time
-a new colour slot is added.
+Revue once carried two palettes that a person selected by hand, one for the shell and one for the
+renderer. The two palettes disagreed. Revue also carried a pinned syntax theme. Each new UI surface
+needed another selection of colours, and nothing enforced readability.
+
+Users then asked for their own themes. That request raised a known trade-off: a full palette written
+by hand for each theme is slow work, it gives combinations that a reader cannot read, and it breaks
+each time someone adds a new colour slot.
 
 ## Decision
 
-`@revue/theme` derives the complete palette — shell surfaces, renderer rows, diff tints, semantic
-status colours, and the Shiki syntax theme — from four inputs: `background`, `foreground`,
-`diffColors`, `syntaxTheme`. Derivation enforces WCAG contrast floors. The derivation core is
-adapted from Hunk v0.17.7 under MIT with provenance in `THIRD_PARTY_NOTICES.md`.
+`@revue/theme` derives the complete palette from four inputs: `background`, `foreground`,
+`diffColors`, and `syntaxTheme`. The palette contains:
 
-Custom themes are **derivation-input files, not palettes**: JSONC files under `~/.revue/themes/`
-that either `extends` a bundled theme or supply their own inputs, with `overrides` pinning
-individual derived slots verbatim afterwards. The overridable slot names are derived mechanically
-from the theme type, so new slots become overridable without maintenance. A custom id matching a
-bundled one shadows it.
+- the shell surfaces;
+- the renderer rows;
+- the diff tints;
+- the colours of the semantic status;
+- the Shiki syntax theme.
 
-Validation is lenient and per-file: a broken theme, or a wrong-typed key within one, is dropped
-with a surfaced issue — never the whole directory. Package boundaries follow functional-core /
-imperative-shell: `@revue/theme` owns schema, derivation (`buildThemeFromInputs`), and override
-application; the TUI owns file loading, issue surfacing, the picker, and the `revue themes` /
-`themes init` CLI. The renderer takes the theme as a prop and the shell reads one context, so no
-package keeps a palette of its own.
+The derivation enforces the WCAG contrast floors. The core of the derivation is adapted from Hunk
+v0.17.7 under the MIT licence. `THIRD_PARTY_NOTICES.md` records the provenance.
+
+A custom theme is **a file of derivation inputs, not a palette**. Custom themes are JSONC files under
+`~/.revue/themes/`. A custom theme uses `extends` on a bundled theme, or it supplies its own inputs.
+After the derivation, `overrides` pins single derived slots word for word. Revue derives the names
+of the overridable slots mechanically from the theme type, thus a new slot becomes overridable with
+no maintenance. A custom id that is the same as a bundled id shadows the bundled theme.
+
+The validation is lenient and applies to one file at a time. Revue drops a broken theme, or a key
+with the wrong type inside a theme, and it shows an issue. It never drops the whole directory.
+
+The package boundaries follow the pattern of a functional core and an imperative shell.
+`@revue/theme` owns the schema, the derivation (`buildThemeFromInputs`), and the application of the
+overrides. The TUI owns the file load, the display of the issues, the picker, and the CLI for
+`revue themes` and `themes init`. The renderer takes the theme as a prop, and the shell reads one
+context. Thus no package keeps a palette of its own.
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| Hand-picked full palettes per theme (status quo) | Rejected | Disagreeing palettes, unreadable combinations, breaks on every new slot. |
-| Custom themes as full hand-authored palettes | Rejected | Same problems exported to users, plus a compatibility burden on slot changes. |
-| Strict fail-the-file validation | Rejected | One typo would kill a user's whole theme; per-key dropping degrades gracefully. |
-| Repo-local theme files | Rejected | A theme is the reviewer's preference, not the repository's (see ADR 0010). |
-| A separate `@revue/theme-loader` package | Rejected | Overkill; a pure `parseCustomTheme` plus a thin loader in the TUI suffices. |
-| Derivation inputs + `extends` + `overrides` | Chosen | Matches ecosystem convention (Helix, bat, delta): nobody specifies every slot; overrides are the customisation currency. |
+| Hand-picked full palettes per theme (status quo) | Rejected | The palettes disagree, some combinations are not readable, and each new slot breaks them. |
+| Custom themes as full hand-authored palettes | Rejected | It gives the same problems to the users. It also adds a compatibility burden when a slot changes. |
+| Strict fail-the-file validation | Rejected | One typing error would stop the whole theme of a user. The drop of one key degrades better. |
+| Repo-local theme files | Rejected | A theme is the preference of the reviewer, not of the repository (see ADR 0010). |
+| A separate `@revue/theme-loader` package | Rejected | Too much. A pure `parseCustomTheme` and a thin loader in the TUI are enough. |
+| Derivation inputs + `extends` + `overrides` | Chosen | It matches the convention of the ecosystem (Helix, bat, delta). No user specifies every slot. The overrides are how a user customises a theme. |
 
 ## Consequences
 
-- The custom theme file format is a public contract; changes must remain backward-compatible once
-  users author files against it.
-- Adding a theme slot means updating derivation once; bundled and custom themes inherit it.
-- WCAG floors mean a custom theme cannot produce unreadable text through derivation — only
-  explicit `overrides` can, and that is the user's deliberate choice.
-- The domain-package-owns-schema / consumer-owns-acquisition split is the template for future
-  config surfaces.
+- The file format of a custom theme is a public contract. After users write files against it, each
+  change must stay backward-compatible.
+- To add a theme slot, update the derivation one time. The bundled themes and the custom themes then
+  inherit the slot.
+- Because of the WCAG floors, the derivation of a custom theme cannot make text that a reader cannot
+  read. Only an explicit `overrides` entry can do that, and the user makes that choice deliberately.
+- The domain package owns the schema, and the consumer owns the acquisition. This split is the
+  template for future configuration surfaces.

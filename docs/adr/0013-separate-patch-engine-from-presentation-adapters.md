@@ -6,79 +6,107 @@
 
 ## Context
 
-The current package split follows an earlier internal need. `@revue/diff-model` keeps patch parsing
-and stable hunk identities available to headless prep without bringing in React or OpenTUI, while
-`@revue/diff-renderer` supplies the TUI with the rendered Patch body. That dependency direction is
-important: prep must remain deterministic and usable without a terminal runtime.
+The present package split comes from an earlier internal need. `@revue/diff-model` gives the
+headless prep the patch parsing and the stable hunk identities, and it does not bring in React or
+OpenTUI. `@revue/diff-renderer` gives the TUI the rendered Patch body. This direction of the
+dependency is important: prep must stay deterministic, and prep must run without a terminal runtime.
 
-The split no longer matches the capability Revue intends to reuse. The Patch engine now spans both
-packages:
+The split no longer agrees with the capability that Revue must reuse. The Patch engine is now in
+both packages:
 
-- `@revue/diff-model` owns parsing, file normalisation, statistics, language inference, changed-line
-  pairing, and intra-line spans;
-- pure modules inside `@revue/diff-renderer` own row planning, split/stack geometry, wrapping,
-  highlighting, decorations, line identities, and terminal sanitisation; and
-- the same renderer package also owns React/OpenTUI components, pointer interaction, React-node
-  attachments, and renderable measurement.
+- `@revue/diff-model` owns the parsing, the file normalisation, the statistics, the language
+  inference, the pairing of changed lines, and the intra-line spans;
+- the pure modules inside `@revue/diff-renderer` own the row plan, the geometry of the split view
+  and the stack view, the wrapping, the highlighting, the decorations, the line identities, and the
+  terminal sanitisation; and
+- the same renderer package also owns the React/OpenTUI components, the pointer interaction, the
+  React-node attachments, and the renderable measurement.
 
-An embeddable OpenTUI view and a future ANSI pager need to share the first two groups without forcing
-headless or non-OpenTUI consumers through the third. The current renderer barrel also re-exports the
-model, obscuring which interface is reusable, while the model's public types expose Pierre's
-`FileDiffMetadata` directly.
+An embeddable OpenTUI view and a future ANSI pager must share the first two groups. They must not
+force a headless consumer or a non-OpenTUI consumer through the third group. The barrel of the
+renderer also exports the model again, thus the reusable interface is not clear. The public types of
+the model also show Pierre's `FileDiffMetadata` directly.
 
 ## Decision
 
-Replace the current model/renderer seam with a Patch-engine/presentation-adapter seam:
+Replace the present seam between the model and the renderer with a seam between the Patch engine and
+the presentation adapters:
 
-1. **`@revue/diff` is the reusable Patch engine.** It owns unified-patch parsing, Revue-owned file
-   and hunk types, statistics, language inference, changed-line pairing, intra-line spans, syntax
-   spans, split/stack row planning, terminal-column geometry, wrapping, terminal sanitisation,
-   declarative ranges, and stable source-line identities. Its own source and manifest have no direct
-   React, OpenTUI, Revue theme, Git, or review-state dependency.
-2. **`@revue/diff-opentui` is the OpenTUI adapter.** It owns `DiffBody`, `DiffFileHeader`, pointer
-   selection, context-menu callbacks, React-node attachments, expansion controls, row-window
-   mounting, renderable measurement, and mapping a Revue theme into the engine's declarative style
-   inputs.
-3. **Headless prep imports `@revue/diff` directly.** It never depends on the OpenTUI adapter.
-4. **Revue's TUI imports the engine for pure planning/types and the adapter for OpenTUI
-   presentation.** The adapter does not re-export the engine as a convenience facade.
-5. **`@revue/diff-ansi` is an ANSI pager adapter over `@revue/diff`.** It reads unified patches and
-   serialises the same planned rows to ANSI without initialising OpenTUI or an alternate screen.
-   ADR 0014 records its stdin-filter and paging contract.
+1. **`@revue/diff` is the reusable Patch engine.** It owns:
+   - the parsing of a unified patch;
+   - the file types and the hunk types that Revue owns;
+   - the statistics;
+   - the language inference;
+   - the pairing of changed lines;
+   - the intra-line spans and the syntax spans;
+   - the row plan for the split view and the stack view;
+   - the geometry of the terminal columns, the wrapping, and the terminal sanitisation;
+   - the declarative ranges;
+   - the stable identities of the source lines.
 
-The engine exposes Revue-owned types rather than making Pierre's metadata shape its external
-contract. Pierre remains the pinned parsing and highlighting implementation behind the engine.
-Pierre 1.2.2 itself declares React and React DOM peers even for consumers using only its headless
-APIs, so this decision guarantees no direct UI dependency in Revue's engine rather than a
-React-free transitive installation. Publication must either accept that upstream peer contract or
-resolve it separately. The initial engine remains Bun-targeted because terminal-width measurement
-currently uses `Bun.stringWidth`; runtime portability is also a separate decision.
+   Its own source and its manifest have no direct dependency on React, on OpenTUI, on a Revue theme,
+   on Git, or on the review state.
+2. **`@revue/diff-opentui` is the OpenTUI adapter.** It owns:
+   - `DiffBody` and `DiffFileHeader`;
+   - the pointer selection and the callbacks of the context menu;
+   - the React-node attachments;
+   - the expansion controls;
+   - the mounting of the row window;
+   - the renderable measurement;
+   - the map of a Revue theme into the declarative style inputs of the engine.
+3. **The headless prep imports `@revue/diff` directly.** It never depends on the OpenTUI adapter.
+4. **The TUI of Revue imports both packages.** It imports the engine for the pure plans and the pure
+   types. It imports the adapter for the OpenTUI presentation. The adapter does not export the
+   engine again as a facade.
+5. **`@revue/diff-ansi` is an ANSI pager adapter above `@revue/diff`.** It reads unified patches and
+   serialises the same planned rows to ANSI. It does not initialise OpenTUI or an alternate screen.
+   ADR 0014 records its contract for the stdin filter and for the paging.
+
+The engine shows the types that Revue owns. It does not make the metadata shape of Pierre its
+external contract. Pierre stays the pinned implementation of the parsing and the highlighting behind
+the engine. Pierre 1.2.2 declares React and React DOM as peers, also for a consumer that uses only
+its headless APIs. Thus this decision guarantees no direct UI dependency in the engine of Revue. It
+does not guarantee a transitive installation without React.
+
+Publication must accept that peer contract of the upstream package, or resolve it separately. The
+first engine stays targeted at Bun, because the measurement of the terminal width now uses
+`Bun.stringWidth`. The portability to another runtime is also a separate decision.
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| Keep `diff-model` and `diff-renderer` unchanged | Rejected | The reusable Patch engine remains split while OpenTUI concerns stay mixed into its apparent public package. |
-| Merge `diff-model` into the current renderer package | Rejected | Prep and future headless consumers would inherit React, OpenTUI, native terminal peers, and theme dependencies. |
-| Keep a model package, add a render-plan package, then add adapter packages | Rejected | Preserves prep isolation but creates a shallow public model seam; parsing, analysis, and row planning together form the useful Patch-engine interface. |
-| One Patch engine plus presentation adapters | Chosen | Gives prep, OpenTUI, and ANSI consumers one shared algorithm without leaking a presentation runtime across the seam. |
+| Keep `diff-model` and `diff-renderer` unchanged | Rejected | The reusable Patch engine stays in two parts, and the OpenTUI concerns stay mixed into its apparent public package. |
+| Merge `diff-model` into the current renderer package | Rejected | Prep and future headless consumers then get React, OpenTUI, native terminal peers, and theme dependencies. |
+| Keep a model package, add a render-plan package, then add adapter packages | Rejected | It keeps prep isolated, but it makes a shallow public seam for the model. The parsing, the analysis, and the row plan together form the useful interface of the Patch engine. |
+| One Patch engine plus presentation adapters | Chosen | It gives prep, OpenTUI, and ANSI consumers one shared algorithm, and no presentation runtime crosses the seam. |
 
 ## Consequences
 
-- `@revue/diff-model` and `@revue/diff-renderer` are replaced rather than published under their
-  current interfaces.
-- Package consumers must import their owning layer directly; the OpenTUI adapter is not a facade for
-  parsing or pure planning helpers. OpenTUI renderable IDs and text-selection encodings remain in
-  the adapter rather than becoming engine identities.
-- Moving pure renderer modules into the engine must preserve the existing Patch output. Current
-  unit, component, and character/style golden tests remain the compatibility contract.
-- Hunk-derived concepts span both resulting packages, so each package must retain accurate
-  third-party provenance and release packaging must copy both local notices into every archive.
-  This is separate from collecting licences for installed runtime dependencies.
-- The Patch-view README moves to the engine. The adapter receives a smaller README covering OpenTUI
-  embedding and host callbacks.
-- Semantic diff, immutable runs, blob-backed context expansion, chapters, threads, and review state
-  remain outside the engine. They may consume its interfaces but do not move into it.
-- A known parser defect currently trims trailing whitespace from the final patch line. Exporting the
-  engine makes preserving patch bytes at that boundary a prerequisite, but its fix follows the
-  repository's test-first bug-fix workflow rather than being hidden inside file moves.
+- Revue replaces `@revue/diff-model` and `@revue/diff-renderer`. Revue does not publish them with
+  their present interfaces.
+- A consumer must import the layer that owns what it needs. The OpenTUI adapter is not a facade for
+  the parsing helpers or the pure plan helpers. The renderable IDs of OpenTUI and the encodings of
+  the text selection stay in the adapter. They do not become identities of the engine.
+- A move of a pure renderer module into the engine must keep the present Patch output. The present
+  unit tests, component tests, and golden tests of the characters and the styles stay the contract
+  for compatibility.
+- Concepts derived from the hunk are in both new packages. Thus each package must keep a correct
+  record of its third-party provenance, and the release packaging must copy both local notices into
+  every archive. This is separate from the collection of the licences of the installed runtime
+  dependencies.
+- The README of the Patch view moves to the engine. The adapter gets a smaller README. That README
+  covers the OpenTUI embedding and the host callbacks.
+- These parts stay outside the engine:
+  - the semantic diff;
+  - the immutable runs;
+  - the context expansion from a blob;
+  - the chapters;
+  - the threads;
+  - the review state.
+
+  They can use the interfaces of the engine, but they do not move into it.
+- A known defect of the parser now removes the trailing whitespace from the last patch line. The
+  export of the engine makes the preservation of the patch bytes at that boundary a prerequisite.
+  But the fix follows the test-first bug-fix workflow of the repository. Do not hide the fix inside
+  a move of files.

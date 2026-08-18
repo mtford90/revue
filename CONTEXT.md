@@ -35,7 +35,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   `@revue/diff-ansi`, and otherwise fails open to full sanitised passthrough. It owns downstream
   pagination and never starts OpenTUI or reads prepared-run, narrative Revue, or `~/.revue` state.
 - **Chapter** — one narrative beat, with a `title`, a narrated `summary`, the `hunkRefs` it covers,
-  any `keyChanges`, and any context `excerpts` it quotes. Usually a coherent group of diff hunks the
+  any `keyChanges`, any context `excerpts` it quotes, and any `threadRefs` — feedback of this review
+  it was written in answer to, cited by thread id the way a key change cites lines and rendered as a
+  link into the conversation. Usually a coherent group of diff hunks the
   reviewer absorbs as a unit; a chapter with no hunks at all is an **interlude**. Fenced `ascii` and
   `mermaid` blocks in the summary leave the prose and draw as **diagrams** beside the excerpts; every
   other fence stays inline as a snippet. Ordered.
@@ -51,6 +53,14 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   no field can contradict the hunk list. An ordinary page otherwise — it navigates, marks read, and
   counts toward chapter progress — but it shows no file list and completes on the mark-read key
   alone, since it has no files to complete it vacuously.
+- **Epilogue** — the last chapter of a run that supersedes a narrated one: *Changes since your
+  review*, the reviewer's designated re-entry point. Unlike an interlude it is *declared*
+  (`role: "epilogue"`), because what makes a chapter the epilogue is editorial rather than
+  structural. For a localised fix it narrates the fix hunks and cites the **threads** that prompted
+  them; after a structural rework it shrinks to an orientation note naming the chapters to re-read,
+  which needs no hunks at all. `revue show --check` requires exactly one, ending the narration, of
+  every run that inherited narration, and holds its thread citations to feedback the run has. It is
+  new by definition, so it always presents unread.
 - **Hunk reference (`hunkRef`)** — `(filePath, oldStart)`. The stable identity of a review unit; the
   agent copies these from `hunks.txt` rather than inventing them. Textual hunks use their pre-image
   start. A file with no textual hunk (pure rename, mode-only change, or empty file) receives one
@@ -73,6 +83,16 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   pruned, because re-narrating at another depth legitimately drops a citation. A thread has ordered
   messages and a thread-level `open` or reversible `dealt-with` status; multiple threads may share
   an anchor.
+- **Carried thread** — a thread prep moved onto a run from the run it **supersedes**, open and
+  dealt-with alike, so the conversation and its history stay with the code rather than stranding on
+  a dead run. Threads move rather than copy — the superseded run is left with none — and keep their
+  identity, status, and every message, gaining only a note of the run they came from. Hunk anchors
+  are re-mapped through the run delta's unit matching: a unit that came through with its content
+  intact shifts exactly, one the change rewrote keeps the offset it was commented at, and an anchor
+  no unit of the new run can hold is orphaned rather than fatal, because supersession legitimately
+  deletes code. That leniency is the carried thread's alone; an anchor written against the run it
+  names can only stop resolving through corruption. Excerpt anchors are re-resolved against the new
+  run's frozen context and orphan exactly as they always have.
 - **Thread message** — one independently identified root message or reply containing a terminal-safe
   body, creation time, and `{ kind: "human" | "agent", name }` author. Human TUI names resolve from
   repository-aware `git config user.name`, then the system login. Agent CLI messages require an
@@ -84,7 +104,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Page** — a TUI navigation unit: the prologue (if present) followed by each chapter in order.
 - **Surface** — a top-level tab above pages: **Story** (the narrated page sequence), **Files** (the
   whole run as one flat stream), and **Comments** (every thread with open/dealt-with status,
-  jumping to its owning chapter). Internally Files — and any chapterless run — is one synthetic
+  jumping to its owning chapter; threads **awaiting the reviewer** lead the list, and a thread this
+  run no longer anchors — a dropped quotation or a **carried thread** whose code is gone — is listed
+  and marked rather than hidden). Internally Files — and any chapterless run — is one synthetic
   chapter covering every hunk, so all features work identically there.
 - **Diff view** — Patch (the default, authoritative line-numbered review surface) or Semantic (a
   lazy, read-only Difftastic rendering of the same run's pinned old/new blobs). Chapter/file focus
@@ -146,12 +168,24 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   the immutable run. Unfinished thread drafts are deliberately excluded.
 - **Run** — an immutable directory under `.revue/runs/<runId>/` containing `run.json`, the pinned
   `diff.patch`, agent-facing `hunks.txt`, content-addressed old/new blobs, and — optionally — the
-  agent-written `chapters.json` plus the `context.json` that `revue context freeze` pins the code
-  the narration quotes into. Both of those are narration-side and excluded from the run ID, so
-  narrating or freezing a run can never invalidate the code it describes. `show` consumes this
+  agent-written `chapters.json`, the `context.json` that `revue context freeze` pins the code
+  the narration quotes into, and — when the run supersedes another — the `delta.json` prep records.
+  All three are narration-side and excluded from the run ID, so narrating, freezing, or carrying
+  narration forward can never invalidate the code it describes. `show` consumes this
   directory and never recomputes Git state. A
   run without chapters is fully reviewable as a flat diff; narration is an overlay, not
   scaffolding.
+- **Run delta** — what a run inherits from the narrated run it **supersedes**, recorded once at
+  creation in `delta.json` and printed by `revue delta`. Every review unit of the new run is
+  classified against the predecessor's by content rather than position — **unchanged** however far
+  its lines moved, **modified** where it rewrites the same pre-image lines differently, otherwise
+  **new**. A chapter every one of whose units came through unchanged is **carried forward**:
+  pre-copied with its hunk references and key-change line ranges re-mapped, and with the code it
+  quotes re-frozen against the new run. Any other chapter is **stale**, named with the reason, and
+  re-narrated rather than patched. What no carried chapter covers is the agent's worklist. Like
+  `chapters.json` and `context.json` the delta is narration-side and outside the run ID. The same
+  unit classification re-anchors **carried threads**, so feedback and narration follow the code by
+  one shared rule.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
   hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
   totals. Creation time and narration are deliberately excluded. Content-addressing means
@@ -160,10 +194,13 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Run key** — `sha256(runId + chapters)`, truncated for local persistence; a chapterless run
   hashes `runId` plus a chapterless sentinel so its progress keys on the snapshot alone. Review
   progress belongs to one pinned code snapshot narrated one specific way; changing either starts
-  fresh, except for two seeds into an as-yet unreviewed run: a newly narrated run inherits any
-  chapterless progress for the same snapshot (a one-way migration), and a run opened by reload
+  fresh, except for three seeds into an as-yet unreviewed run: a newly narrated run inherits any
+  chapterless progress for the same snapshot (a one-way migration); a run opened by reload
   inherits the progress of the run it replaced, keeping a file's mark only where that file's frozen
-  snapshots are identical in both runs. Threads use the full immutable **run ID** instead, so
+  snapshots are identical in both runs; and a run **superseding** a narrated one inherits every mark
+  its predecessor carried on a chapter the **run delta** carried through verbatim — files and
+  answered key changes alike, since the code they speak for came through untouched — which is what
+  the reload's file rule cannot know. Threads use the full immutable **run ID** instead, so
   feedback survives chapter regeneration for unchanged frozen code.
 - **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
   revue's, persisted to `.revue/state.json` (a `{ [runKey]: ViewState }` map).
@@ -175,6 +212,24 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   Persistent rules run before session rules; both rename paths are tested, and every effective input
   and omission reason is pinned in the run. Local modes detect
   index/worktree races and fail rather than produce a mixed snapshot.
+- **Status** — `revue status`, the one call that answers "where is this review?" entirely from disk,
+  so a fresh agent session orients without remembering anything. It names the **active run** (the
+  newest narrated run of the lineage) and the prep arguments that reproduce its scope, any newer run
+  that supersedes it and is not narrated yet along with what its delta still owes, the run's open
+  threads split into those **awaiting the agent** (a human spoke last) and those **awaiting the
+  reviewer** (an agent did) plus the anchors it orphaned, and **drift**: whether re-prepping the
+  active run's scope would capture code the run never pinned. Drift is asked of the run ID rather
+  than of Git, because a run ID is a content address. A repository with no runs is reported as such,
+  not as an error.
+- **Watching** — the open TUI notices two things on disk without being asked, through one small
+  debounced filesystem watch. A thread-store write — an agent's reply, or the reviewer's own second
+  terminal — applies silently in place: badges, inline conversations and the Comments surface
+  refresh with no layout shift, and the reviewer keeps the thread they were standing on even when a
+  new reply reorders the list. A run that **supersedes** this one raises a persistent banner naming
+  what changed, but only once that run loads cleanly and narrates itself; a half-written run
+  reports again on its next write rather than offering a broken review. Revue never switches runs
+  on its own — the banner redirects the existing reload key, which then opens the superseding run
+  on its **epilogue** with carried progress intact.
 - **Theme** — the single palette Revue paints with, derived from one bundled editor theme rather
   than hand-picked: neutral surfaces, foregrounds, diff row tints, semantic status colours, and the
   Shiki theme highlighted source uses. Derivation enforces WCAG contrast floors, so a theme stays
@@ -247,7 +302,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   reviewed repository from the supplied run, validates and atomically replaces its
   `.revue/threads.json`, keyed by full `runId`; prepared run directories remain immutable. Mutations
   take a cross-process lock and transform the latest same-run state, preventing TUI/agent writers
-  from replacing one another's feedback. Durable hunk anchors include review-unit `oldStart`;
+  from replacing one another's feedback — including prep, which takes the same lock to move threads
+  onto a run that supersedes the one they were left on. Durable hunk anchors include review-unit
+  `oldStart`;
   excerpt anchors carry none and resolve against the run's frozen context instead
   (see `docs/adr/0014`). The renderer exposes only feedback-neutral gutter
   selection and inline attachment placement. Revue owns thread/message UUIDs, authors, lifecycle,

@@ -5,90 +5,121 @@
 
 ## Context
 
-Review threads are mutable feedback, while a prepared run is an immutable record of pinned code.
-Review progress is narration-sensitive and therefore keyed by `runKey`, but a thread must survive
-regeneration of `chapters.json` for the same frozen patch. A path and line range alone are also
-insufficient because one path can contribute multiple hunks and chapters.
+A review thread is mutable feedback. A prepared run is an immutable record of pinned code. The
+review progress is sensitive to the narration, thus its key is `runKey`. But a thread must survive
+when the agent writes `chapters.json` again for the same frozen patch. A path and a line range alone
+are not enough, because one path can give more than one hunk and more than one chapter.
 
-A conversation needs first-class authorship so human and agent messages are visibly distinct. The
-terminal renderer must still own pointer geometry and inline row placement without adopting Revue's
-thread lifecycle or message model.
+A conversation needs an author on each message. Then a reader sees the difference between a human
+message and an agent message. The terminal renderer must still own the pointer geometry and the
+placement of the inline rows. It must not take the thread lifecycle or the message model of Revue.
 
 ## Decision
 
-Revue stores threads in repository-local `.revue/threads.json`, outside prepared run directories. The
-repository root is located by walking upwards from the supplied run directory, with the invoking
-repository as a fallback for portable runs outside a checkout. The validated, atomically replaced file is keyed by the full immutable `runId`. Each mutation takes
-an exclusive cross-process lock, reloads the latest file inside that lock, transforms the latest
-same-run thread array, validates the complete store, and then renames the replacement into place.
+Revue stores the threads in `.revue/threads.json` in the repository. That file is outside the
+prepared run directories. To find the repository root, Revue goes up from the run directory that you
+supply. For a portable run outside a checkout, Revue uses the repository that calls the command.
+Revue validates the file and replaces it atomically. The key of the file is the full immutable
+`runId`.
 
-A **Thread** is the official feedback aggregate. It records a UUID, creation time, reversible
-open/dealt-with status, ordered messages, and an anchor containing
-`(filePath, oldStart, side, startLine, endLine)`. Multiple independent threads may share an anchor.
-Each message records its own UUID, creation time, terminal-safe body, and terminal-safe
-`{ kind: "human" | "agent", name }` author. Human TUI authors resolve once at message creation from
-the reviewed repository's `git config user.name`, falling back to the system login. Public agent
-create/reply commands require an explicit author name.
+Each mutation does these steps:
 
-All display, export, and agent-readable operations load a verified run and reject thread anchors that
-do not belong to exactly one pinned review unit. Chapter association is derived from
-`(filePath, oldStart)`, so narration can change without moving a thread to another hunk.
+1. It takes an exclusive lock across processes.
+2. It loads the latest file again inside that lock.
+3. It transforms the latest thread array of the same run.
+4. It validates the complete store.
+5. It renames the replacement into place.
 
-`@revue/diff-renderer` exposes feedback-neutral line-range selection and inline-attachment contracts.
-The TUI owns thread/message IDs, authors, persistence, lifecycle controls, and presentation. Semantic
-diff remains read-only and does not create or interpret anchors.
+A **Thread** is the official aggregate for feedback. It records:
 
-The project was still an early scaffold when Thread replaced the flat Comment model. Existing local
-feedback was explicitly declared disposable, so `.revue/comments.json` was reset and no legacy
-migration or dual-schema reader was introduced. `revue comments` remains only a command-name alias;
-Thread is the model and `revue threads` is the official API.
+- a UUID;
+- the creation time;
+- an open status or a dealt-with status, which you can reverse;
+- the messages, in order;
+- an anchor that contains `(filePath, oldStart, side, startLine, endLine)`.
+
+More than one independent thread can use the same anchor. Each message records its own UUID, its
+creation time, a body that is safe for the terminal, and an author
+`{ kind: "human" | "agent", name }` that is also safe for the terminal. For a human author in the
+TUI, Revue resolves the name one time, when the message is created. It reads `git config user.name`
+from the reviewed repository, and it falls back to the system login. The public agent commands that
+create a thread or reply to one need an explicit author name.
+
+Every operation for display, export, and agent reading loads a verified run. Each operation refuses
+a thread anchor that does not belong to exactly one pinned review unit. Revue derives the chapter of
+a thread from `(filePath, oldStart)`. Thus the narration can change, and the thread stays on its
+hunk.
+
+`@revue/diff-renderer` gives contracts for the selection of a line range and for inline attachment.
+These contracts are neutral about feedback. The TUI owns the thread IDs and the message IDs, the
+authors, the persistence, the lifecycle controls, and the presentation. The semantic diff stays
+read-only. It does not create an anchor, and it does not interpret one.
+
+Thread replaced the flat Comment model while the project was still an early scaffold. We declared
+the local feedback of that time disposable. Thus we reset `.revue/comments.json`. We added no
+migration for the legacy data and no reader for two schemas. `revue comments` stays only an alias
+for the command name. Thread is the model, and `revue threads` is the official API.
 
 ## Options considered
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| Write threads inside the run directory | Rejected | Mutates the immutable review input and complicates integrity guarantees. |
-| Key threads by narration-sensitive `runKey` | Rejected | Regenerating chapters would hide feedback for unchanged frozen code. |
-| Anchor only by path and line range | Rejected | Cannot distinguish review units when one path has multiple hunks. |
-| Keep flat comments and attach optional replies | Rejected | Makes Thread an incidental shape instead of the official lifecycle aggregate. |
-| Migrate the disposable version-one comment store | Rejected | Preserves unused compatibility code and ambiguous historical authorship. |
-| Store authored, runId-keyed threads with review-unit anchors | Chosen | Preserves immutable runs, supports human/agent conversations, and validates exact patch identity. |
+| Write threads inside the run directory | Rejected | It changes the immutable review input and makes the integrity guarantees difficult. |
+| Key threads by narration-sensitive `runKey` | Rejected | New chapters would then hide the feedback on frozen code that did not change. |
+| Anchor only by path and line range | Rejected | It cannot tell review units apart when one path has more than one hunk. |
+| Keep flat comments and attach optional replies | Rejected | Thread becomes an incidental shape and not the official aggregate for the lifecycle. |
+| Migrate the disposable version-one comment store | Rejected | It keeps compatibility code that nobody uses, and historical authorship that is not clear. |
+| Store authored, runId-keyed threads with review-unit anchors | Chosen | It keeps the runs immutable, supports conversations between humans and agents, and validates the exact identity of the patch. |
 
 ## Consequences
 
-- Thread identity is independent of its anchor, so duplicate same-range conversations remain valid.
-- Open/dealt-with status applies to the thread; replies do not carry separate resolution state.
-- Root messages are deleted with their thread. Replies may be deleted individually; editing is not
-  supported.
-- Hard deletion is permanent; dealt-with threads remain visible and reversible.
-- Corrupt or stale local thread state blocks display, export, and agent listing rather than silently
-  relocating feedback.
-- Cross-process locking prevents concurrent TUI and agent mutations from replacing same-run feedback.
-- A process that dies while holding the lock leaves an explicit abandoned lock error. Revue does not
-  remove it automatically because deleting a newly acquired lock would risk data loss; the reported
-  `.lock` file must be removed after confirming its recorded process is gone.
-- Semantic anchors and an all-threads explorer require separate product decisions.
+- The identity of a thread is independent of its anchor. Thus two conversations on the same range
+  are both valid.
+- The open status and the dealt-with status apply to the thread. A reply carries no separate
+  resolution state.
+- Revue deletes a root message with its thread. You can delete a reply on its own. You cannot edit a
+  message.
+- A hard deletion is permanent. A dealt-with thread stays visible, and you can make it open again.
+- Corrupt or stale local thread state stops the display, the export, and the agent list. Revue does
+  not move the feedback to another place without a message.
+- The lock across processes stops a mutation from the TUI and a mutation from an agent at the same
+  time. Thus one of them cannot replace the feedback of the same run.
+- If a process stops while it holds the lock, Revue gives an explicit error about an abandoned lock.
+  Revue does not remove the lock automatically, because it could remove a lock that another process
+  just took, and then data could be lost. First make sure that the recorded process of the lock
+  stopped. Then remove the reported `.lock` file.
+- Semantic anchors and an explorer for all threads need their own product decisions.
 
 ## Amendments
 
-- 2026-08-05 — Anchor authority is now formally cross-view: anchors always resolve against the
-  original git hunks whatever view created them, and commenting is refused on synthesised-only
-  lines ([ADR 0007](0007-synthesised-patches-and-anchor-authority.md)). The exactly-one-chapter
-  ownership check is conditional on narration existing ([ADR 0006](0006-chapterless-runs.md)).
-  GitHub permalinks derived from an anchor are offered per side only when that side's `RunScope`
-  endpoint is `kind: "commit"` — index-tree and worktree endpoints are unpinned, so their copy-link
-  action is disabled with a stated reason rather than emitting a link that could resolve to
-  different content. Known gap: the threads CLI authors messages only as `agent`; human authorship
-  exists solely through the TUI.
-- 2026-08-07 — Extended, not superseded, by
-  [ADR 0014](0014-narrative-depth-and-frozen-context.md). The anchor tuple above is now one of two
-  kinds: it describes the `hunk` anchor, while a thread on narration-cited quoted code takes an
-  `excerpt` anchor of `(filePath, startLine, endLine)`, resolved against the run's frozen context.
-  An excerpt anchor deliberately carries no `oldStart` and no `side`, since `oldStart: 0` is already
-  the metadata review unit's sentinel. An excerpt anchor the frozen context no longer covers is
-  surfaced as orphaned rather than failing the load; a hunk anchor that does not resolve remains
-  fatal.
+- 2026-08-05 — The authority of an anchor is now formally the same in every view. An anchor always
+  resolves against the original git hunks, whatever view created it. Revue refuses a comment on a
+  line that exists only in a synthesised patch
+  ([ADR 0007](0007-synthesised-patches-and-anchor-authority.md)). The check for exactly one chapter
+  owner applies only when narration exists ([ADR 0006](0006-chapterless-runs.md)).
+
+  Revue offers a GitHub permalink from an anchor for one side only when the `RunScope` endpoint of
+  that side is `kind: "commit"`. An index-tree endpoint and a worktree endpoint are not pinned. Thus
+  Revue disables their copy-link action and gives the reason. Revue does not emit a link that could
+  resolve to different content.
+
+  Known gap: the threads CLI writes messages only with the author kind `agent`. Human authorship
+  exists only through the TUI.
+- 2026-08-07 — [ADR 0014](0014-narrative-depth-and-frozen-context.md) extends this ADR. It does not
+  supersede it. There are now two kinds of anchor. The tuple above describes the `hunk` anchor. A
+  thread on quoted code that the narration cites takes an `excerpt` anchor of
+  `(filePath, startLine, endLine)`, which resolves against the frozen context of the run. An excerpt
+  anchor carries no `oldStart` and no `side`, on purpose, because `oldStart: 0` is already the
+  sentinel of the metadata review unit.
+
+  If the frozen context no longer covers an excerpt anchor, Revue shows that anchor as orphaned and
+  the load continues. A hunk anchor that does not resolve is still fatal.
+- 2026-08-18 — [ADR 0018](0018-feedback-conversation-across-supersession.md) adds one exception to
+  the fatal-anchor rule above. Prep moves threads to the run that supersedes their own, and it
+  records the old run id in `migratedFrom`. A migrated hunk anchor that does not resolve becomes
+  orphaned, not fatal, because supersession deletes code as a normal action. A hunk anchor without
+  `migratedFrom` that does not resolve remains fatal.
 
 ## Amendment
 
-ADR 0013 replaces the active package boundary with `@revue/diff` plus `@revue/diff-opentui`; the historical names above describe the implementation at the time of this decision.
+ADR 0013 replaces the active package boundary with `@revue/diff` and `@revue/diff-opentui`. The names above are historical. They describe the implementation at the time of this decision.

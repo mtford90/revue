@@ -11,6 +11,12 @@ export type PullRequestScope = {
 	label: string;
 };
 
+/** How the new run's lineage to an earlier narrated run is chosen. */
+export type CarryRequest =
+	| { kind: "auto" }
+	| { kind: "none" }
+	| { kind: "explicit"; runId: string };
+
 export type ScopeRequest = {
 	mode: RunScope["mode"] | "auto";
 	comparison: typeof RUN_COMPARISON.DIRECT | typeof RUN_COMPARISON.MERGE_BASE;
@@ -19,6 +25,7 @@ export type ScopeRequest = {
 	pullRequest?: PullRequestScope;
 	explicitRefs: boolean;
 	ignorePatterns: string[];
+	carry: CarryRequest;
 };
 
 type ParsedArguments = {
@@ -28,6 +35,28 @@ type ParsedArguments = {
 	pullRequest?: PullRequestScope;
 	mode: ScopeRequest["mode"];
 	ignorePatterns: string[];
+	carryFrom?: string;
+	noCarry: boolean;
+};
+
+const RUN_ID_PATTERN = /^[0-9a-f]{64}$/;
+
+const parseCarryFrom = (value: string): string => {
+	if (!RUN_ID_PATTERN.test(value)) {
+		throw new PrepArgumentError(
+			`--carry-from needs a full run id, received ${JSON.stringify(value)}`,
+		);
+	}
+	return value;
+};
+
+const carryFor = (parsed: ParsedArguments): CarryRequest => {
+	if (parsed.carryFrom && parsed.noCarry) {
+		throw new PrepArgumentError("Use --carry-from or --no-carry, not both");
+	}
+	if (parsed.noCarry) return { kind: "none" };
+	if (parsed.carryFrom) return { kind: "explicit", runId: parsed.carryFrom };
+	return { kind: "auto" };
 };
 
 const parsePullRequest = (value: string): PullRequestScope => {
@@ -63,11 +92,17 @@ const parseArguments = (args: string[]): ParsedArguments => {
 	let pullRequest: PullRequestScope | undefined;
 	let mode: ScopeRequest["mode"] = "auto";
 	const ignorePatterns: string[] = [];
+	let carryFrom: string | undefined;
+	let noCarry = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index] ?? "";
 		const [parsedFlag, inlineValue] = argument.split("=", 2);
 		const flag = parsedFlag ?? argument;
-		if (!["--base", "--compare", "--ref", "--ignore", "--pr"].includes(flag)) {
+		if (flag === "--no-carry") {
+			noCarry = true;
+		} else if (
+			!["--base", "--compare", "--ref", "--ignore", "--pr", "--carry-from"].includes(flag)
+		) {
 			if (argument.startsWith("-")) throw new PrepArgumentError(`Unknown prep option: ${argument}`);
 			positionals.push(argument);
 		} else {
@@ -78,6 +113,7 @@ const parseArguments = (args: string[]): ParsedArguments => {
 			if (flag === "--compare") compareRef = value;
 			if (flag === "--pr") pullRequest = parsePullRequest(value);
 			if (flag === "--ref") mode = parseMode(value);
+			if (flag === "--carry-from") carryFrom = parseCarryFrom(value);
 			if (flag === "--ignore") {
 				if (/[\r\n]/.test(value)) {
 					throw new PrepArgumentError("--ignore accepts one pattern per option");
@@ -86,7 +122,16 @@ const parseArguments = (args: string[]): ParsedArguments => {
 			}
 		}
 	}
-	return { positionals, baseRef, compareRef, pullRequest, mode, ignorePatterns };
+	return {
+		positionals,
+		baseRef,
+		compareRef,
+		pullRequest,
+		mode,
+		ignorePatterns,
+		carryFrom,
+		noCarry,
+	};
 };
 
 const splitRange = (value: string): Pick<ScopeRequest, "baseRef" | "headRef" | "comparison"> => {
@@ -124,6 +169,7 @@ export function parseScopeRequest(args: string[]): ScopeRequest {
 			pullRequest: parsed.pullRequest,
 			explicitRefs: true,
 			ignorePatterns: parsed.ignorePatterns,
+			carry: carryFor(parsed),
 		};
 	}
 
@@ -148,6 +194,7 @@ export function parseScopeRequest(args: string[]): ScopeRequest {
 		headRef,
 		explicitRefs,
 		ignorePatterns: parsed.ignorePatterns,
+		carry: carryFor(parsed),
 	};
 }
 

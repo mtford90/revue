@@ -5,26 +5,31 @@
 
 ## Context
 
-Git and Lazygit can send a unified diff through a command-specific stdin filter. Revue already owns
-Patch parsing and geometry, but its interactive adapter must not be started for this use: a pager
-must emit only printable text and SGR sequences, never OpenTUI modes or screen control.
+Git and Lazygit can send a unified diff through a stdin filter for one command. Revue already owns
+the Patch parsing and the Patch geometry. But Revue must not start its interactive adapter for this
+use. A pager must emit only printable text and SGR sequences. A pager must never emit OpenTUI modes
+or screen control.
 
 ## Decision
 
-`revue pager` buffers stdin, sanitises it before parsing, and classifies the **complete** stream.
-Ordinary Git/plain unified patches are rendered through `@revue/diff` and the React/OpenTUI-free
-`@revue/diff-ansi` adapter. Unsupported or ambiguous input is emitted in full as sanitised direct
-output, never partially rendered. The buffered input/output trade latency and memory for this safe
-whole-stream fallback, syntax preparation, and exact auto-paging decisions.
+`revue pager` buffers stdin. It sanitises the input before it parses the input. It then classifies
+the **complete** stream. Revue renders an ordinary Git patch or plain unified patch through
+`@revue/diff` and the `@revue/diff-ansi` adapter, which has no React and no OpenTUI. Revue emits
+unsupported input or ambiguous input in full, as sanitised direct output, and never renders such
+input in part. The buffer of the input and the output costs latency and memory. In exchange the
+buffer gives this safe fallback for the whole stream, the syntax preparation, and exact decisions
+about automatic paging.
 
-The command is documented only for `pager.diff` and Lazygit's current stdin `diffRenderers` API; it
-is not a `core.pager` replacement. It owns downstream paging, resolving `--pager`, `REVUE_PAGER`,
-`PAGER`, then `less`, explicitly never `GIT_PAGER` to avoid recursion. Neutral surfaces are
-transparent so the terminal owns its background while changed rows retain semantic tints.
+The documentation covers the command only for `pager.diff` and for the present stdin `diffRenderers`
+API of Lazygit. The command is not a replacement for `core.pager`. The command owns the downstream
+paging. It resolves the pager in this order: `--pager`, `REVUE_PAGER`, `PAGER`, then `less`. It
+never reads `GIT_PAGER`, to prevent recursion. The neutral surfaces are transparent, thus the
+terminal owns its background, and the changed rows keep their semantic tints.
 
 ## Consequences
 
-- `less` improves interactive paging but is optional: direct output remains usable.
-- The pager has no prepared-run, Git scope, chapter, state, thread, semantic-view, React, or OpenTUI
-  dependency.
-- Large input is intentionally retained until both classification and rendering finish.
+- `less` improves the interactive paging, but `less` is optional: the direct output stays usable.
+- The pager has no dependency on a prepared run, on a Git scope, on a chapter, on the state, on a
+  thread, on the semantic view, on React, or on OpenTUI.
+- The pager keeps a large input in memory until the classification and the rendering are complete.
+  This is deliberate.

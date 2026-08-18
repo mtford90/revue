@@ -8,9 +8,11 @@ import {
 	type MarkdownExportSelection,
 } from "@revue/markdown-export";
 import {
+	defaultRunsDirectory,
 	freezeRunContext,
 	GitError,
 	loadPreparedRun,
+	loadRunDelta,
 	PrepArgumentError,
 	type PreparedRun,
 	PrepError,
@@ -28,23 +30,27 @@ import {
 } from "@revue/theme";
 import {
 	excerptRangeLabel,
+	isEpilogue,
 	type ReviewThread,
 	RUN_EXCLUSION_REASON,
+	type RunDeltaFile,
 	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	type ThreadAnchor,
 	type ThreadAuthor,
 	type ViewState,
 } from "@revue/types";
+import type { ReviewUpdate } from "./app.tsx";
 import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
 import { KEYMAP } from "./keymap.ts";
-import { ChaptersFileError, loadChaptersFile, loadReviewRun } from "./load.ts";
+import { ChaptersFileError, loadChaptersFile, loadReviewRun, type ReviewRun } from "./load.ts";
 import { defaultPreferencesPath, loadPreferences, savePreferences } from "./preferences.ts";
 import { installSkill, resolveSkillRunner, stampedSkill } from "./skill.ts";
 import { permalinkContextFor } from "./sourceLink.ts";
+import { formatStatus, readStatus } from "./status.ts";
 import type { StatusNotice } from "./statusBar.tsx";
 import { formatChapterlessSummary, formatSummary, omissionNotice } from "./summary.ts";
 import {
@@ -69,10 +75,13 @@ import { REVUE_VERSION } from "./version.ts";
 import {
 	carryReviewProgress,
 	defaultStatePath,
+	epilogueSession,
 	loadViewState,
 	type ReviewSessionState,
 	runKey,
+	supersededProgress,
 } from "./viewState.ts";
+import { watchRun } from "./watch.ts";
 
 const HELP = `revue — narrative code review in your terminal
 
@@ -81,8 +90,11 @@ Usage:
   revue diff [refs] [prep options]     same, with an explicit review scope
   revue prep [refs] [--base <ref>] [--compare <ref>] [--ref <mode>]
              [--ignore <pattern>]... [--show-ignored]
+             [--carry-from <run-id> | --no-carry]
+  revue status [--json]                report the active run, its threads, and working-tree drift
   revue show <run-directory>           open a prepared run in the interactive TUI
   revue show <run-directory> --check   validate a prepared run and print a summary
+  revue delta <run-directory>          print what a superseding run carried forward and still owes
   revue context freeze <run-directory> pin the code the narration quotes into context.json
   revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
@@ -139,7 +151,44 @@ const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main
                   [--base <ref>] [--compare <ref>]
                   [--pr <number | github-pull-request-url>]
                   [--ref committed|staged|unstaged|work]
-                  [--ignore <gitignore-pattern>]... [--show-ignored]`;
+                  [--ignore <gitignore-pattern>]... [--show-ignored]
+                  [--carry-from <run-id> | --no-carry]
+
+A new run records the most recent narrated run of the same scope in supersedes,
+carries forward every chapter the change did not touch, and writes the worklist
+for the rest to delta.json. --carry-from names that predecessor explicitly;
+--no-carry starts a fresh review.`;
+
+const DELTA_HELP = `usage: revue delta <run-directory>
+
+Prints, as JSON, the worklist prep recorded when this run superseded a narrated one:
+
+carried     chapters the change left alone, hunk references and key-change line
+            ranges already re-mapped to this run — copy them into chapters.json
+            verbatim and narrate around them
+stale       chapters whose narration no longer describes the code, each with the
+            reason it went stale; re-narrate them from this run's hunks.txt
+unnarrated  every review unit no carried chapter covers, marked unchanged,
+            modified, or new relative to the superseded run
+
+Narration is complete once every unnarrated unit sits in a chapter; run
+revue context freeze and then revue show <run-directory> --check to confirm it.`;
+
+const STATUS_HELP = `usage: revue status [--json]
+
+Reads the repository's own review state off disk — nothing depends on an earlier session:
+
+activeRun   the newest narrated run of the lineage, its directory, and the prep
+            arguments that reproduce its scope
+pendingRun  a newer run that supersedes it and is not narrated yet, with a count
+            of what its delta carried, marked stale, and left to narrate
+threads     the run's threads, open ones split into those awaiting the agent (a
+            human spoke last) and those awaiting the reviewer (an agent did),
+            plus the carried anchors this run orphaned
+drift       whether re-prepping the active run's scope would capture different
+            code than the run pinned
+
+A repository with no prepared runs reports that and exits 0.`;
 
 const prepSummary = (run: PreparedRun): string => {
 	const { manifest } = run;
@@ -152,6 +201,16 @@ const prepSummary = (run: PreparedRun): string => {
 		`${manifest.totals.files} files, ${manifest.totals.reviewUnits} review units, +${manifest.totals.additions} -${manifest.totals.deletions}, ${manifest.totals.excluded} omitted`,
 	].join("\n");
 };
+
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/** What a superseding run inherited, so a prep that continues a review says so on the spot. */
+const deltaSummary = (directory: string, delta: RunDeltaFile): string =>
+	[
+		`supersedes ${delta.supersedes.slice(0, 12)}`,
+		`${plural(delta.carried.length, "chapter")} carried, ${plural(delta.stale.length, "chapter")} stale`,
+		`${plural(delta.unnarrated.length, "review unit")} to narrate — revue delta ${directory}`,
+	].join("\n");
 
 const exclusionSource = (reason: string): string => {
 	if (reason === RUN_EXCLUSION_REASON.REVUE_IGNORE) return ".revueignore";
@@ -191,6 +250,8 @@ async function cmdPrep(args: string[]): Promise<number> {
 		const prepArgs = args.filter((argument) => argument !== "--show-ignored");
 		const run = await prepareRun(prepArgs);
 		process.stderr.write(`${prepSummary(run)}\n`);
+		const delta = await loadRunDelta(run);
+		if (delta) process.stderr.write(`${deltaSummary(run.directory, delta)}\n`);
 		if (showIgnored) process.stderr.write(`${ignoredDetails(run)}\n`);
 		process.stdout.write(`${run.directory}\n`);
 		return 0;
@@ -418,6 +479,84 @@ async function freezeContext(directory: string): Promise<number> {
 	);
 	process.stdout.write(`${path}\n`);
 	return 0;
+}
+
+const missingDeltaReason = (run: PreparedRun): string =>
+	run.manifest.supersedes
+		? `This run supersedes ${run.manifest.supersedes.slice(0, 12)} but no delta was recorded for it.`
+		: "This run starts a fresh review — it supersedes nothing, so there is nothing to carry forward.";
+
+async function cmdDelta(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${DELTA_HELP}\n`);
+		return 0;
+	}
+	let directory: string | undefined;
+	try {
+		const options = parseCommandOptions(args, []);
+		directory = options.positionals[0];
+		if (!directory || options.positionals.length !== 1) {
+			throw new Error("delta requires one run directory");
+		}
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${DELTA_HELP}\n`,
+		);
+		return 1;
+	}
+	try {
+		const run = await loadPreparedRun(directory);
+		const delta = await loadRunDelta(run);
+		if (!delta) {
+			process.stderr.write(`${missingDeltaReason(run)}\n`);
+			return 1;
+		}
+		process.stdout.write(`${JSON.stringify(delta, null, 2)}\n`);
+		return 0;
+	} catch (error) {
+		if (error instanceof RunArtifactError) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
+}
+
+async function cmdStatus(args: string[]): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(`${STATUS_HELP}\n`);
+		return 0;
+	}
+	let json = false;
+	try {
+		const options = parseCommandOptions(args, [], ["--json"]);
+		if (options.positionals.length) throw new Error("status takes no positional arguments");
+		json = options.booleans.has("--json");
+	} catch (error) {
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n${STATUS_HELP}\n`,
+		);
+		return 1;
+	}
+	try {
+		const report = await readStatus();
+		process.stdout.write(
+			json ? `${JSON.stringify(report, null, 2)}\n` : `${formatStatus(report)}\n`,
+		);
+		return 0;
+	} catch (error) {
+		if (
+			error instanceof ChaptersFileError ||
+			error instanceof RunArtifactError ||
+			error instanceof ReviewCoverageError ||
+			error instanceof ThreadStoreError ||
+			error instanceof GitError
+		) {
+			process.stderr.write(`${error.message}\n`);
+			return 1;
+		}
+		throw error;
+	}
 }
 
 const entityIdPattern =
@@ -781,6 +920,93 @@ async function reprepForReload(
 	}
 }
 
+/**
+ * The marks the reviewer keeps when they open the run that continues their review. The delta names
+ * what came through the change untouched, so it decides this in place of the reload's file-snapshot
+ * rule, which knows what code moved but not which narration was read.
+ */
+const supersededSeed = async (
+	directory: string,
+	run: Awaited<ReturnType<typeof loadReviewRun>>,
+): Promise<ViewState | undefined> => {
+	const root = repositoryRootForRun(directory);
+	if (!run.delta || !run.chapters || !root) return undefined;
+	return supersededProgress({
+		statePath: defaultStatePath(),
+		runsDirectory: defaultRunsDirectory(root),
+		delta: run.delta,
+		chapters: run.chapters,
+	});
+};
+
+/** What the banner says the agent did: the chapters it had to re-narrate, and the account of why. */
+const supersedeSummary = (run: ReviewRun): string => {
+	const revised = run.delta?.stale.length ?? 0;
+	return [
+		`${revised} ${revised === 1 ? "chapter" : "chapters"} revised`,
+		...(run.chapters?.chapters.some(isEpilogue) ? ["epilogue added"] : []),
+	].join(", ");
+};
+
+/**
+ * The bridge between the filesystem watcher and the open review: the watcher reports what changed,
+ * this reads what it means. A superseding run is offered only once it loads cleanly — reload must
+ * never land on a half-written run, and one still being written simply reports again on its next
+ * event. Nothing here switches runs; that stays the reviewer's keypress.
+ */
+const watchForUpdates = (run: ReviewRun, directory: string) => {
+	const threadsPath = defaultThreadsPath(directory);
+	let listener: ((update: ReviewUpdate) => void) | null = null;
+	let announced: ReviewUpdate | null = null;
+	let superseding: { directory: string; run: ReviewRun } | null = null;
+
+	const publish = (update: ReviewUpdate) => {
+		if (listener) listener(update);
+		else if (update.kind === "superseded") announced = update;
+	};
+
+	const publishThreads = () => {
+		try {
+			const { threads, orphaned } = loadValidatedThreads(threadsPath, run);
+			publish({ kind: "threads", threads, orphaned: orphaned.map((entry) => entry.thread.id) });
+		} catch {
+			// A store caught mid-write, or one this run cannot answer for, leaves the review as it is.
+		}
+	};
+
+	const adopt = async (candidate: string) => {
+		if (superseding) return;
+		const next = await loadReviewRun(candidate).catch(() => null);
+		if (!next?.chapters) return;
+		superseding = { directory: candidate, run: next };
+		publish({ kind: "superseded", summary: supersedeSummary(next) });
+	};
+
+	const dispose = watchRun({
+		threadsPath,
+		runsDirectory: defaultRunsDirectory(repositoryRootForRun(directory) ?? process.cwd()),
+		runId: run.manifest.runId,
+		onEvent: (event) => {
+			if (event.kind === "threads-changed") publishThreads();
+			else void adopt(event.directory);
+		},
+	});
+
+	return {
+		dispose,
+		superseding: () => superseding,
+		subscribe: (next: (update: ReviewUpdate) => void) => {
+			listener = next;
+			// The watcher's opening sweep can beat the render, so a banner raised then still lands.
+			if (announced) next(announced);
+			announced = null;
+			return () => {
+				listener = null;
+			};
+		},
+	};
+};
+
 const reloadNotice = (
 	previous: Awaited<ReturnType<typeof loadReviewRun>>,
 	next: Awaited<ReturnType<typeof loadReviewRun>>,
@@ -861,8 +1087,11 @@ async function showRun(
 
 	for (;;) {
 		let threads: ReviewThread[];
+		let orphaned: string[];
 		try {
-			threads = loadValidatedThreads(defaultThreadsPath(currentDirectory), run).threads;
+			const loaded = loadValidatedThreads(defaultThreadsPath(currentDirectory), run);
+			threads = loaded.threads;
+			orphaned = loaded.orphaned.map((entry) => entry.thread.id);
 		} catch (error) {
 			if (error instanceof ThreadStoreError) {
 				process.stderr.write(`${error.message}\n`);
@@ -880,7 +1109,7 @@ async function showRun(
 			defaultStatePath(),
 			run.manifest.runId,
 			run.chapters,
-			carriedProgress,
+			(await supersededSeed(currentDirectory, run)) ?? carriedProgress,
 		);
 		carriedProgress = undefined;
 		const threadStore = openThreadStore(defaultThreadsPath(currentDirectory), run.manifest.runId);
@@ -902,6 +1131,7 @@ async function showRun(
 		};
 		const storedSession = store.getSession();
 		const hasSavedPosition = Object.keys(storedSession.pages).length > 0;
+		const watched = watchForUpdates(run, currentDirectory);
 
 		const outcome = await runApp(run.chapters, {
 			context: run.context,
@@ -923,6 +1153,8 @@ async function showRun(
 			transparentSurfaces,
 			onPreferencesChange: (next) => savePreferences(preferencesPath, next),
 			initialThreads: threads,
+			initialOrphanedThreads: orphaned,
+			subscribeUpdates: watched.subscribe,
 			threadActions: threadStore,
 			humanAuthor,
 			permalinks: permalinkContextFor({
@@ -936,7 +1168,20 @@ async function showRun(
 			},
 		});
 
+		watched.dispose();
 		if (outcome === "quit") return 0;
+
+		// Reload follows the banner when one is up: the reviewer asked for the run that continues
+		// their review, not for another prep of the scope it already replaced.
+		const superseding = watched.superseding();
+		if (superseding) {
+			const supersededRun = run;
+			currentDirectory = superseding.directory;
+			run = superseding.run;
+			carriedSessionState = epilogueSession(run.chapters) ?? carriedSessionState;
+			notice = reloadNotice(supersededRun, run);
+			continue;
+		}
 
 		const previous = { files: run.manifest.files, chapters: run.chapters, state: store.get() };
 		const repreped = await reprepForReload(run, currentDirectory, options.prepArgs);
@@ -1203,6 +1448,8 @@ async function main(): Promise<number> {
 	if (command === "prep") return cmdPrep(args);
 	if (command === "export") return cmdExport(args);
 	if (command === "context") return cmdContext(args);
+	if (command === "delta") return cmdDelta(args);
+	if (command === "status") return cmdStatus(args);
 	if (command === "threads") return cmdThreads(args);
 	if (command === "comments") return cmdThreads(args, "comments");
 	if (command === "skill") return cmdSkill(args);

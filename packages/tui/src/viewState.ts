@@ -5,7 +5,10 @@ import { dirname, join } from "node:path";
 import {
 	type Chapter,
 	emptyViewState,
+	isEpilogue,
 	type RevueChaptersFile,
+	RevueChaptersFileSchema,
+	type RunDeltaFile,
 	type RunFile,
 	type ViewState,
 	ViewStateSchema,
@@ -163,6 +166,93 @@ export function carryReviewProgress(args: {
 	);
 }
 
+// ── Supersession carry-over ──────────────────────────────────────────────────
+
+/**
+ * Whether the reviewer would be reading exactly what they already read. The delta pre-copies a
+ * carried chapter with its references re-mapped, so what proves nothing was re-narrated is the
+ * chapter the agent published matching that copy field for field — both come off the one schema,
+ * which is what makes comparing their JSON meaningful.
+ */
+const carriedVerbatim = (carried: Chapter | undefined, published: Chapter): boolean =>
+	carried !== undefined && JSON.stringify(carried) === JSON.stringify(published);
+
+const keepChapterMarks = (state: ViewState, previous: ViewState, chapter: Chapter): ViewState => ({
+	chapters: isChapterReviewed(previous, chapter.id)
+		? [...state.chapters, chapter.id]
+		: state.chapters,
+	files: [
+		...state.files,
+		...chapterFilePaths(chapter)
+			.filter((path) => isFileReviewed(previous, chapter.id, path))
+			.map((path) => viewStateFileId(chapter.id, path)),
+	],
+	keyChanges: [
+		...state.keyChanges,
+		...chapter.keyChanges.flatMap((_, index) =>
+			isKeyChangeChecked(previous, chapter.id, index)
+				? [viewStateKeyChangeId(chapter.id, index)]
+				: [],
+		),
+	],
+});
+
+/**
+ * Review progress for a run that supersedes another. A chapter carried through the change verbatim
+ * keeps every mark it had — including its answered questions, which are about code that came
+ * through unchanged — while a stale, re-narrated or newly written chapter presents unread. The
+ * epilogue is new by definition, so it is always the reviewer's next unread page.
+ */
+export function carrySupersededProgress(args: {
+	previous: ViewState;
+	carried: readonly Chapter[];
+	chapters: RevueChaptersFile;
+}): ViewState {
+	const carried = new Map(args.carried.map((chapter) => [chapter.id, chapter]));
+	return args.chapters.chapters
+		.filter((chapter) => carriedVerbatim(carried.get(chapter.id), chapter))
+		.reduce((state, chapter) => keepChapterMarks(state, args.previous, chapter), emptyViewState());
+}
+
+/**
+ * The narration of the run this one supersedes, or null when it is not on disk. Progress keys on
+ * the exact chapters a run was reviewed under, so only the predecessor's own file can name it.
+ */
+const supersededNarration = async (
+	runsDirectory: string,
+	runId: string,
+): Promise<RevueChaptersFile | null> => {
+	try {
+		const raw = await readFile(join(runsDirectory, runId, "chapters.json"), "utf8");
+		const parsed = RevueChaptersFileSchema.safeParse(JSON.parse(raw));
+		return parsed.success ? parsed.data : null;
+	} catch {
+		return null;
+	}
+};
+
+/**
+ * What the reviewer keeps when they move onto the run that continues their review, or undefined
+ * when there is nothing to carry and the run should seed itself however it otherwise would.
+ */
+export async function supersededProgress(args: {
+	statePath: string;
+	runsDirectory: string;
+	delta: RunDeltaFile;
+	chapters: RevueChaptersFile;
+}): Promise<ViewState | undefined> {
+	if (!args.delta.carried.length) return undefined;
+	const narration = await supersededNarration(args.runsDirectory, args.delta.supersedes);
+	if (!narration) return undefined;
+	const previous = await loadViewState(args.statePath, runKey(args.delta.supersedes, narration));
+	const carried = carrySupersededProgress({
+		previous,
+		carried: args.delta.carried,
+		chapters: args.chapters,
+	});
+	return hasProgress(carried) ? carried : undefined;
+}
+
 // ── Persistence ──────────────────────────────────────────────────────────────
 /**
  * Review progress belongs to one pinned code snapshot narrated one specific way;
@@ -204,6 +294,18 @@ const ReviewSessionStateSchema = z.object({
 export type ReviewSessionState = z.infer<typeof ReviewSessionStateSchema>;
 
 export const emptyReviewSessionState = (): ReviewSessionState => ({ pages: {} });
+
+/**
+ * Where the reviewer lands when they follow the banner onto the run that continues their review.
+ * The epilogue is the account of what changed since their last pass, so it is the re-entry point
+ * rather than wherever they happened to be standing in the run it replaces.
+ */
+export const epilogueSession = (
+	chapters: RevueChaptersFile | null,
+): ReviewSessionState | undefined => {
+	const epilogue = chapters?.chapters.find(isEpilogue);
+	return epilogue ? { pageId: epilogue.id, pages: {} } : undefined;
+};
 
 export interface ViewStateStore {
 	get(): ViewState;

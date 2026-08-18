@@ -166,14 +166,13 @@ const writeRunContext = async (directory: string, file: RunContextFile): Promise
 };
 
 /**
- * Resolve every excerpt citation in a run's narration against the run's own recorded new endpoint
- * and pin the quoted lines into `context.json`. Deterministic: freezing an unchanged run twice
- * produces the same bytes.
+ * Resolve every excerpt citation in a run's narration against the run's own recorded new endpoint,
+ * without writing anything. Deterministic: resolving an unchanged run twice produces the same bytes.
  */
-export async function freezeRunContext(
+export async function resolveRunContext(
 	run: PreparedRun,
 	chapters: RevueChaptersFile,
-): Promise<FreezeContextResult> {
+): Promise<Omit<FreezeContextResult, "path">> {
 	const context = await findGitContext(run.directory);
 	const cited = citations(chapters);
 	const unverifiable = await verifyCitedSnapshots(context, run.manifest, cited);
@@ -191,7 +190,16 @@ export async function freezeRunContext(
 			entry.kind === "unresolved" ? [entry.excerpt] : [],
 		),
 	});
-	return { path: await writeRunContext(run.directory, file), context: file, unverifiable };
+	return { context: file, unverifiable };
+}
+
+/** Resolve a run's citations and pin the quoted lines into `context.json` beside its narration. */
+export async function freezeRunContext(
+	run: PreparedRun,
+	chapters: RevueChaptersFile,
+): Promise<FreezeContextResult> {
+	const resolved = await resolveRunContext(run, chapters);
+	return { ...resolved, path: await writeRunContext(run.directory, resolved.context) };
 }
 
 /** Read a run's frozen context, or null when nothing has been frozen for it yet. */

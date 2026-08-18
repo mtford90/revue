@@ -233,6 +233,12 @@ Re-narrating at a different depth can legitimately stop quoting a range someone 
 threads are never pruned: they are listed as orphaned in the Comments surface, dimmed and marked,
 so feedback survives a narrative it no longer has a home in.
 
+When a prep supersedes an earlier run, it moves that run's threads onto the new one — open and
+dealt-with alike — so the conversation follows the code instead of stranding on a superseded run.
+Each anchor is re-mapped through the same unit comparison `revue delta` reports, so a comment on
+code that merely moved comes back pointing at it, and a comment on code the change rewrote lands on
+the rewrite. Feedback whose code the change deleted is orphaned rather than dropped.
+
 Agents create and reply through the verified public interface:
 
 ```bash

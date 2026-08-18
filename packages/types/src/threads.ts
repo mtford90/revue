@@ -101,6 +101,12 @@ export const reviewThreadSchema = z
 		id: z.uuid(),
 		runId: runIdSchema,
 		anchor: threadAnchorSchema,
+		/**
+		 * The superseded run this thread was carried from, absent while it sits on the run it was
+		 * written against. A carried anchor was re-mapped by machine rather than placed by its author,
+		 * so a hunk anchor the new run no longer holds is orphaned instead of treated as corruption.
+		 */
+		migratedFrom: runIdSchema.optional(),
 		status: z.enum(THREAD_STATUS),
 		createdAt: z.iso.datetime(),
 		messages: z.array(threadMessageSchema).min(1),

@@ -56,3 +56,10 @@ If difftastic is absent, Revue shows the patch view.
 - The key decisions in CONTEXT.md record the policy for skill distribution, and this release train
   gives that policy its version. The policy is: embed the skill in the binary; let the skills CLI do
   the installs; never install a binary from the skill.
+
+## Amendments
+
+- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes the Semantic view.
+  Revue no longer looks for difftastic at run time, the patch-view fallback in the Decision section
+  no longer applies because Patch is the only view, the formula caveat advising difftastic at install
+  time is removed, and the "`depends_on \"difftastic\"`" row in Options considered is historical.

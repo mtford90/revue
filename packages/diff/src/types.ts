@@ -141,13 +141,6 @@ export interface RenderSpan {
 /** A 0-based, end-exclusive char range within one line's raw text. */
 export type EmphasisRange = { start: number; end: number };
 
-/** Char-exact restyling of novel tokens inside changed lines, keyed by side and 1-based line. */
-export type SpanEmphasis = {
-	rangesFor: (side: DiffSide, lineNumber: number) => readonly EmphasisRange[] | undefined;
-	deletionsFg: string;
-	additionsFg: string;
-};
-
 export interface DiffCell {
 	kind: "context" | "addition" | "deletion" | "empty";
 	/** Sanitized, tab-expanded source text used for terminal geometry. */

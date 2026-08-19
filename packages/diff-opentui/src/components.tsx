@@ -20,7 +20,6 @@ import {
 	planDiff,
 	type RangeDecoration,
 	type RenderSpan,
-	type SpanEmphasis,
 	sanitizeTerminalLine,
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
@@ -497,7 +496,6 @@ interface DiffBodyPaintProps {
 	focusedDecorationId?: string;
 	selectedRange?: DiffLineRange;
 	inlineAttachments?: readonly DiffInlineAttachment[];
-	emphasis?: SpanEmphasis;
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
 	expanders?: {
 		actionsFor: (boundary: number) => readonly ExpandDirection[];
@@ -596,7 +594,6 @@ export function DiffBody(props: DiffBodyProps) {
 		focusedDecorationId,
 		selectedRange,
 		inlineAttachments = EMPTY_ATTACHMENTS,
-		emphasis,
 		resolveRange,
 		expanders,
 		window: rowWindow,
@@ -659,18 +656,9 @@ export function DiffBody(props: DiffBodyProps) {
 				window: rowWindow,
 				decorations: renderedDecorations,
 				focusedDecorationId,
-				emphasis,
 				selectedHunkIndex,
 			}),
-		[
-			geometry,
-			styles,
-			rowWindow,
-			renderedDecorations,
-			focusedDecorationId,
-			emphasis,
-			selectedHunkIndex,
-		],
+		[geometry, styles, rowWindow, renderedDecorations, focusedDecorationId, selectedHunkIndex],
 	);
 	const anchor = useMemo(
 		() =>

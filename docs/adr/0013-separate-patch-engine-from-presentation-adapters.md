@@ -110,3 +110,10 @@ first engine stays targeted at Bun, because the measurement of the terminal widt
   export of the engine makes the preservation of the patch bytes at that boundary a prerequisite.
   But the fix follows the test-first bug-fix workflow of the repository. Do not hide the fix inside
   a move of files.
+
+## Amendments
+
+- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes the Semantic view.
+  "The semantic diff" in the Consequences list of concepts that stay outside the engine is
+  historical: there is no longer a semantic diff anywhere in Revue, not merely one kept outside this
+  boundary.

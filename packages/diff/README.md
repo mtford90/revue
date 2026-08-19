@@ -28,7 +28,7 @@ identity, continuation index, sign, first-row gutters and wrapped spans; split c
 padded to the same height.
 
 `paintDiff` has no width input and cannot reconstruct wrapping. It applies theme slots, range focus,
-pointer selection, selected-hunk backgrounds and optional span emphasis only to a caller-selected
+pointer selection, selected-hunk backgrounds and intra-line emphasis only to a caller-selected
 logical-row window. Presentation adapters therefore mount or serialise planned rows without wrapping,
 aligning or inventing continuation rows, while TUI navigation can reuse the unchanged plan during
 interactive paint updates.

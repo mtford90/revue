@@ -119,6 +119,8 @@ for the command name. Thread is the model, and `revue threads` is the official A
   records the old run id in `migratedFrom`. A migrated hunk anchor that does not resolve becomes
   orphaned, not fatal, because supersession deletes code as a normal action. A hunk anchor without
   `migratedFrom` that does not resolve remains fatal.
+- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes Markdown export, so
+  "display, export, and agent reading" above names only display and agent reading now.
 
 ## Amendment
 

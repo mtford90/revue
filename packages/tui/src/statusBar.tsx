@@ -77,7 +77,6 @@ export function StatusBar({
 	totalFiles,
 	coverage,
 	openThreads,
-	viewMode,
 	notice,
 	hints: hintList = [],
 	helpKey = "?",
@@ -89,7 +88,6 @@ export function StatusBar({
 	totalFiles: number;
 	coverage: NarrativeCoverage | null;
 	openThreads: number;
-	viewMode: "patch" | "semantic";
 	notice: StatusNotice | null;
 	hints?: StatusHints;
 	helpKey?: string;
@@ -111,7 +109,6 @@ export function StatusBar({
 		!narrow && openThreads > 0
 			? ` ${openThreads} ${openThreads === 1 ? "thread" : "threads"} │`
 			: "";
-	const viewText = narrow ? "" : ` ${viewMode === "patch" ? "Patch" : "Semantic"} │`;
 	const tailText = tiny ? ` ${helpKey} · ${quitKey} ` : ` ${helpKey} help · ${quitKey} quit `;
 	const spent =
 		" revue ".length +
@@ -120,7 +117,6 @@ export function StatusBar({
 		filesText.length +
 		(coverageText?.length ?? 0) +
 		threadsText.length +
-		viewText.length +
 		tailText.length +
 		(arrows ? 4 : 0);
 	const hints = hintText(hintList, { narrow, budget: terminalWidth - spent });
@@ -202,11 +198,6 @@ export function StatusBar({
 			{threadsText ? (
 				<text flexShrink={0} fg={theme.badgeModified} bg={theme.panelAlt}>
 					{threadsText}
-				</text>
-			) : null}
-			{viewText ? (
-				<text flexShrink={0} fg={theme.muted} bg={theme.panelAlt}>
-					{viewText}
 				</text>
 			) : null}
 			<text flexShrink={0} fg={theme.muted} bg={theme.panelAlt}>

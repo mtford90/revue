@@ -1306,6 +1306,9 @@ test("doctor reports dependency and skill state and exits by git availability", 
 		expect(before.exitCode).toBe(0);
 		expect(before.stdout).toContain("git: ok");
 		expect(before.stdout).toContain("skill project: not installed");
+		// Patch is the only code representation, so no external differ is probed.
+		expect(before.stdout).not.toContain("difft");
+		expect(before.stdout).not.toContain("Semantic");
 
 		const { executable } = await fakeSkillsRunner(root);
 		await run(root, ["skill", "install"], { REVUE_SKILL_RUNNER: executable });

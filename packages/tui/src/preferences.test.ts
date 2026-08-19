@@ -28,7 +28,6 @@ test("reviewer preferences round-trip theme, layout, and view choices", async ()
 		changeMarkers: true,
 		fileDisplay: "focused" as const,
 		pathDisplay: "tree" as const,
-		viewMode: "semantic" as const,
 		panelWidth: 42,
 	};
 

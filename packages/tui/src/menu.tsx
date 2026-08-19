@@ -100,8 +100,6 @@ export const buildAppMenus = ({
 	commentsSurface,
 	toggleComments,
 	showHelp,
-	viewMode,
-	semanticLoading,
 	fileDisplay,
 	pathDisplay,
 	sidebarPreference,
@@ -123,8 +121,6 @@ export const buildAppMenus = ({
 	collapseFiles,
 	expandFiles,
 	toggleHelp,
-	showPatch,
-	showSemantic,
 	chooseTheme,
 	themeLabel,
 	keymap = KEYMAP,
@@ -139,8 +135,6 @@ export const buildAppMenus = ({
 	commentsSurface: boolean;
 	toggleComments: () => void;
 	showHelp: boolean;
-	viewMode: "patch" | "semantic";
-	semanticLoading: boolean;
 	fileDisplay: FileDisplayPreference;
 	pathDisplay: PathDisplayMode;
 	sidebarPreference: SidebarPreference;
@@ -162,8 +156,6 @@ export const buildAppMenus = ({
 	collapseFiles: () => void;
 	expandFiles: () => void;
 	toggleHelp: () => void;
-	showPatch: () => void;
-	showSemantic: () => void;
 	chooseTheme: () => void;
 	themeLabel: string;
 	keymap?: readonly KeymapAction[];
@@ -218,20 +210,6 @@ export const buildAppMenus = ({
 		},
 	],
 	view: [
-		{
-			kind: "item",
-			label: "Patch view",
-			checked: viewMode === "patch",
-			action: showPatch,
-		},
-		{
-			kind: "item",
-			label: semanticLoading ? "Semantic diff (loading...)" : "Semantic diff",
-			checked: viewMode === "semantic",
-			disabled: semanticLoading,
-			action: showSemantic,
-		},
-		{ kind: "separator", id: "view-mode" },
 		{
 			kind: "item",
 			label: "Line numbers",

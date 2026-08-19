@@ -3,7 +3,7 @@
 `@revue/diff` is Revue's Bun-targeted, presentation-neutral Patch engine. It parses unified patches
 into Revue-owned structural types, analyses changed lines, prepares safe styled spans, and produces a
 stable width-aware visual plan. It does not choose responsive layout or viewport policy and does not
-import React, OpenTUI, Revue themes, Git, chapters, threads, review state, or semantic-diff generation.
+import React, OpenTUI, Revue themes, Git, chapters, threads, or review state.
 
 Pierre 1.2.2 supplies the public parser and highlighter APIs behind this boundary. Pierre declares
 React and React DOM peers itself, so installing the engine is not transitively React-free; the engine
@@ -57,8 +57,8 @@ request zero chrome.
 
 The OpenTUI components, pointer behaviour, React-valued attachments, renderable IDs, measurement and
 theme mapping live in [`@revue/diff-opentui`](../diff-opentui/README.md). Prep depends only on this
-engine. TUI-owned semantic generation, context expansion, viewport window selection, source links,
-threads and review state remain outside both packages.
+engine. TUI-owned context expansion, viewport window selection, source links, threads and review
+state remain outside both packages.
 
 `@revue/diff-ansi` is an implemented ANSI pager adapter consuming the same plan and paint stages;
 it owns ANSI bytes and file envelopes while this engine remains presentation-neutral.

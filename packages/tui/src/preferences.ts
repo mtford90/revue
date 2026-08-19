@@ -20,7 +20,6 @@ const PreferencesSchema = z.object({
 	changeMarkers: z.boolean().optional(),
 	fileDisplay: z.enum(["all", "focused"]).optional(),
 	pathDisplay: z.enum(PATH_DISPLAY_MODES).optional(),
-	viewMode: z.enum(["patch", "semantic"]).optional(),
 	panelWidth: z.number().int().positive().optional(),
 });
 

@@ -128,10 +128,8 @@ export const SCROLL_STEP_ROWS = 40;
 /** Height assumed for an inline thread until its renderable is measured. */
 export const ESTIMATED_ATTACHMENT_HEIGHT = 6;
 
-export const padSegmentId = (path: string) => `pad:${path}`;
 export const separatorSegmentId = (path: string) => `sep:${path}`;
 export const headerSegmentId = (path: string) => `head:${path}`;
-export const notesSegmentId = (path: string) => `notes:${path}`;
 export const bodySegmentId = (path: string) => `body:${path}`;
 export const excerptPadSegmentId = (key: string) => `excpad:${key}`;
 export const excerptSegmentId = (key: string) => `exc:${key}`;
@@ -142,14 +140,9 @@ export const segmentPath = (id: string) => id.slice(id.indexOf(":") + 1);
 
 export type ViewportFile = {
 	path: string;
-	/** Absent for a semantic file with notes but no renderable diff. */
-	displayed?: DiffFileInput;
+	displayed: DiffFileInput;
 	collapsed: boolean;
 	separator: boolean;
-	/** A blank spacing row above the file, standing in for a flex gap. */
-	leadingBlank?: boolean;
-	/** One-row-each note lines shown above the body while expanded. */
-	noteCount?: number;
 	showHunkHeaders?: boolean;
 	/** Mirrors the body's own props because visible chrome narrows the wrap budget. */
 	showLineNumbers?: boolean;
@@ -222,7 +215,7 @@ export const planViewportFiles = ({
 	syntaxTheme?: string;
 }): PlannedViewportFile[] =>
 	files.map((file) => {
-		if (!file.displayed || file.collapsed) return file;
+		if (file.collapsed) return file;
 		const cache = geometryFor(file.displayed);
 		const key = geometryKey({ file, width, chrome, syntaxTheme });
 		let measurement = cache.measurements.get(key);
@@ -402,22 +395,13 @@ export const viewportSegments = ({
 	};
 	placeAfter(null);
 	for (const file of files) {
-		if (file.leadingBlank) segments.push({ id: padSegmentId(file.path), heights: [1] });
 		if (file.separator) segments.push({ id: separatorSegmentId(file.path), heights: [1] });
 		segments.push({ id: headerSegmentId(file.path), heights: [1] });
-		if (!file.collapsed) {
-			if (file.noteCount) {
-				segments.push({
-					id: notesSegmentId(file.path),
-					heights: Array.from({ length: file.noteCount }, () => 1),
-				});
-			}
-			if (file.measurement) {
-				segments.push({
-					id: bodySegmentId(file.path),
-					heights: bodyHeights({ file, attachments, attachmentHeight }),
-				});
-			}
+		if (!file.collapsed && file.measurement) {
+			segments.push({
+				id: bodySegmentId(file.path),
+				heights: bodyHeights({ file, attachments, attachmentHeight }),
+			});
 		}
 		placeAfter(file.path);
 	}

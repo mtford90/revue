@@ -37,31 +37,6 @@ async function press(t: Awaited<ReturnType<typeof testRender>>, key: string) {
 	});
 }
 
-async function arrow(
-	t: Awaited<ReturnType<typeof testRender>>,
-	direction: "up" | "down" | "left" | "right",
-) {
-	await act(async () => {
-		t.mockInput.pressArrow(direction);
-	});
-	await act(async () => {
-		await t.renderOnce();
-	});
-}
-
-/** The View menu owns the semantic toggle; there is no direct key. */
-async function openSemanticView(t: Awaited<ReturnType<typeof testRender>>) {
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await arrow(t, "down");
-	await press(t, "RETURN");
-	await act(async () => Promise.resolve());
-	await act(async () => {
-		await t.renderOnce();
-	});
-}
-
 /** Waits out the scroll poll (33ms) so the window replans, then repaints. */
 async function settleWindow(t: Awaited<ReturnType<typeof testRender>>) {
 	for (let i = 0; i < 3; i += 1) {
@@ -114,50 +89,6 @@ test("the bottom of a huge diff paints correctly after a jump across unmounted g
 	await press(t, "g"); // and back to the top
 	await settleWindow(t);
 	expect(t.captureCharFrame()).toContain("line 1 of f0");
-});
-
-test("the semantic view stays navigable across unmounted gaps", async () => {
-	const diffFiles = await preparePatch(bigPatch(), theme.syntaxTheme);
-	const semanticPatch = (fileIndex: number) => {
-		const added = Array.from(
-			{ length: LINES_PER_FILE },
-			(_, line) => `+meaning ${line + 1} of f${fileIndex}`,
-		).join("\n");
-		return `--- a/src/f${fileIndex}.txt\n+++ b/src/f${fileIndex}.txt\n@@ -1,1 +1,${LINES_PER_FILE} @@\n-old line of f${fileIndex}\n${added}\n`;
-	};
-	const t = await testRender(
-		<App
-			file={null}
-			diffFiles={diffFiles}
-			loadSemanticDiff={async () => ({
-				version: "Difftastic 0.67.0",
-				files: Array.from({ length: FILE_COUNT }, (_, fileIndex) => ({
-					path: `src/f${fileIndex}.txt`,
-					patch: semanticPatch(fileIndex),
-					notes: [`note for f${fileIndex}`],
-					emphasis: {
-						deletions: new Map<number, { start: number; end: number }[]>(),
-						additions: new Map<number, { start: number; end: number }[]>(),
-					},
-				})),
-			})}
-		/>,
-		{ width: 120, height: 40 },
-	);
-	await t.renderOnce();
-
-	await openSemanticView(t);
-	await settleWindow(t);
-	const top = t.captureCharFrame();
-	expect(top).toContain("note for f0");
-	expect(top).toContain("meaning 1 of f0");
-	expect(top).not.toContain(`meaning ${LINES_PER_FILE} of f${FILE_COUNT - 1}`);
-
-	await press(t, "G"); // the bottom sits far beyond the mounted window
-	await settleWindow(t);
-	const bottom = t.captureCharFrame();
-	expect(bottom).toContain(`meaning ${LINES_PER_FILE} of f${FILE_COUNT - 1}`);
-	expect(bottom).not.toContain("meaning 1 of f0");
 });
 
 test("wrapped lines keep the scroll geometry honest across unmounted gaps", async () => {

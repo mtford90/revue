@@ -2,7 +2,7 @@ import { applicableDecorations, decorationsAtLine } from "./decorations.ts";
 import type { CodeWidths, DiffChromeWidths } from "./layout.ts";
 import { diffCodeWidths, lineNumberDigits, splitPaneWidths, stackGutterSides } from "./layout.ts";
 import { drawMermaid } from "./mermaidAscii.ts";
-import { buildDiffRows, tabAdjustedRanges } from "./rows.ts";
+import { buildDiffRows } from "./rows.ts";
 import { plainTerminalLine, sanitizeTerminalSpans } from "./terminalText.ts";
 import type {
 	DiffCell,
@@ -15,7 +15,6 @@ import type {
 	EmphasisRange,
 	RangeDecoration,
 	RenderSpan,
-	SpanEmphasis,
 } from "./types.ts";
 import { wrappedRowCount, wrapSpans } from "./wrap.ts";
 
@@ -208,7 +207,6 @@ export type PaintDiffInput = {
 	window?: { start: number; end: number };
 	decorations?: readonly RangeDecoration[];
 	focusedDecorationId?: string;
-	emphasis?: SpanEmphasis;
 	selectedHunkIndex?: number;
 };
 
@@ -823,15 +821,11 @@ export function planDiagram({
 	};
 }
 
-type OverlayStyle = { kind: "novel"; fg: string } | { kind: "background"; bg: string };
+type OverlayStyle = { bg: string };
 
-const inRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
-	style.kind === "novel"
-		? { text: span.text, fg: style.fg, bold: true }
-		: { ...span, bg: style.bg };
+const inRange = (span: RenderSpan, style: OverlayStyle): RenderSpan => ({ ...span, bg: style.bg });
 
-const outOfRange = (span: RenderSpan, style: OverlayStyle): RenderSpan =>
-	style.kind === "novel" ? { ...span, dim: true } : span;
+const outOfRange = (span: RenderSpan): RenderSpan => span;
 
 /** Cut one already-wrapped visual fragment at paint boundaries without changing its geometry. */
 const overlaySpans = (
@@ -852,44 +846,30 @@ const overlaySpans = (
 			const from = Math.max(range.start, cursor);
 			const to = Math.min(range.end, end);
 			if (to <= from) continue;
-			if (from > cursor) result.push(outOfRange(piece(cursor, from), style));
+			if (from > cursor) result.push(outOfRange(piece(cursor, from)));
 			result.push(inRange(piece(from, to), style));
 			cursor = to;
 		}
-		if (cursor < end) result.push(outOfRange(piece(cursor), style));
+		if (cursor < end) result.push(outOfRange(piece(cursor)));
 		offset = end;
 	}
 	return result;
 };
 
-const emphasisOverlay = ({
+const intralineOverlay = ({
 	cell,
-	emphasis,
 	styles,
 }: {
 	cell: PlannedVisualCell;
-	emphasis?: SpanEmphasis;
 	styles: DiffPlanStyles;
 }): { ranges: readonly EmphasisRange[]; style: OverlayStyle } | undefined => {
 	const side: DiffSide | null =
 		cell.kind === "deletion" ? "deletions" : cell.kind === "addition" ? "additions" : null;
 	if (!side) return undefined;
-	const line = cell.identities[side]?.lineNumber;
-	const novel = emphasis && line !== undefined ? emphasis.rangesFor(side, line) : undefined;
-	if (novel?.length && emphasis) {
-		return {
-			ranges: tabAdjustedRanges(cell.paintSource.rawText, novel),
-			style: {
-				kind: "novel",
-				fg: side === "deletions" ? emphasis.deletionsFg : emphasis.additionsFg,
-			},
-		};
-	}
 	if (!cell.paintSource.intralineRanges.length) return undefined;
 	return {
 		ranges: cell.paintSource.intralineRanges,
 		style: {
-			kind: "background",
 			bg:
 				side === "deletions"
 					? styles.intralineDeletionBackground
@@ -934,13 +914,11 @@ const paintCell = ({
 	styles,
 	decorations,
 	focusedDecorationId,
-	emphasis,
 }: {
 	cell: PlannedVisualCell;
 	styles: DiffPlanStyles;
 	decorations: readonly RangeDecoration[];
 	focusedDecorationId?: string;
-	emphasis?: SpanEmphasis;
 }): PaintedVisualCell => {
 	const deletionFocus = focusFor({
 		cell,
@@ -963,7 +941,7 @@ const paintCell = ({
 				: cell.kind === "deletion"
 					? styles.deletionBackground
 					: styles.contextBackground;
-	const overlay = emphasisOverlay({ cell, emphasis, styles });
+	const overlay = intralineOverlay({ cell, styles });
 	const length = cell.spans.reduce((total, span) => total + span.text.length, 0);
 	const spans = (
 		overlay
@@ -1001,7 +979,6 @@ export function paintDiff({
 	window,
 	decorations = [],
 	focusedDecorationId,
-	emphasis,
 	selectedHunkIndex,
 }: PaintDiffInput): PaintedDiffSlice {
 	const start = Math.max(0, Math.min(plan.rows.length, window?.start ?? 0));
@@ -1022,7 +999,6 @@ export function paintDiff({
 						styles,
 						decorations: applicable,
 						focusedDecorationId,
-						emphasis,
 					}),
 				})),
 			};
@@ -1037,14 +1013,12 @@ export function paintDiff({
 					styles,
 					decorations: applicable,
 					focusedDecorationId,
-					emphasis,
 				}),
 				new: paintCell({
 					cell: addition,
 					styles,
 					decorations: applicable,
 					focusedDecorationId,
-					emphasis,
 				}),
 			})),
 		};

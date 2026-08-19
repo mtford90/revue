@@ -2,15 +2,7 @@ import { expect, test } from "bun:test";
 import { parsePatch } from "./index.ts";
 import { type DiffPlanStyles, type PaintedDiffRow, paintDiff, planDiff } from "./plan.ts";
 import { intralineRangesFor } from "./rows.ts";
-import type { DiffFile, DiffLayout, SpanEmphasis } from "./types.ts";
-
-const patch = `diff --git a/x.ts b/x.ts
---- a/x.ts
-+++ b/x.ts
-@@ -1,1 +1,1 @@
--const value = 1;
-+const value = 42;
-`;
+import type { DiffFile, DiffLayout } from "./types.ts";
 
 const styles: DiffPlanStyles = {
 	text: "#ffffff",
@@ -32,11 +24,7 @@ const chrome = {
 	minimumCode: 1,
 };
 
-const paintedRows = (
-	file: DiffFile,
-	layout: DiffLayout,
-	emphasis?: SpanEmphasis,
-): PaintedDiffRow[] =>
+const paintedRows = (file: DiffFile, layout: DiffLayout): PaintedDiffRow[] =>
 	paintDiff({
 		plan: planDiff({
 			file,
@@ -46,7 +34,6 @@ const paintedRows = (
 			chrome,
 		}),
 		styles,
-		emphasis,
 	}).rows;
 
 const cellsOfKind = (rows: readonly PaintedDiffRow[], kind: string) =>
@@ -64,12 +51,10 @@ const wrappedStackSpans = ({
 	file,
 	width,
 	kind,
-	emphasis,
 }: {
 	file: DiffFile;
 	width: number;
 	kind: "addition" | "deletion";
-	emphasis?: SpanEmphasis;
 }) => {
 	const rows = paintDiff({
 		plan: planDiff({
@@ -80,7 +65,6 @@ const wrappedStackSpans = ({
 			chrome,
 		}),
 		styles,
-		emphasis,
 	}).rows;
 	const row = rows.find(
 		(candidate) => candidate.type === "stack-line" && candidate.visualRows[0]?.cell.kind === kind,
@@ -88,28 +72,6 @@ const wrappedStackSpans = ({
 	if (row?.type !== "stack-line") throw new Error(`missing ${kind} row`);
 	return row.visualRows.map(({ cell }) => cell.spans);
 };
-
-test("paint emphasis splits a stable planned line into dim base and glowing novel tokens", () => {
-	const [file] = parsePatch(patch);
-	if (!file) throw new Error("patch must parse");
-	const rows = paintedRows(file, "stack", {
-		rangesFor: (side, line) =>
-			side === "additions" && line === 1 ? [{ start: 14, end: 16 }] : undefined,
-		deletionsFg: "#ff0000",
-		additionsFg: "#00ff00",
-	});
-
-	expect(cellsOfKind(rows, "addition")[0]?.spans).toEqual([
-		{ text: "const value = ", dim: true, fg: "#ffffff" },
-		{ text: "42", fg: "#00ff00", bold: true },
-		{ text: ";", dim: true, fg: "#ffffff" },
-	]);
-	expect(cellsOfKind(rows, "deletion")[0]?.spans).toEqual([
-		{ text: "const value = ", fg: "#ffffff" },
-		{ text: "1", bg: "#3d0a0a", fg: "#ffffff" },
-		{ text: ";", fg: "#ffffff" },
-	]);
-});
 
 const pairingPatch = `diff --git a/x.ts b/x.ts
 --- a/x.ts
@@ -150,21 +112,6 @@ test.each([
 	]);
 });
 
-test("novel emphasis replaces the intra-line background on its line", () => {
-	const rows = paintedRows(parseOne(pairingPatch), "stack", {
-		rangesFor: (side, line) =>
-			side === "additions" && line === 2 ? [{ start: 6, end: 11 }] : undefined,
-		deletionsFg: "#ff0000",
-		additionsFg: "#00ff00",
-	});
-
-	expect(cellsOfKind(rows, "addition")[0]?.spans).toEqual([
-		{ text: "const ", dim: true, fg: "#ffffff" },
-		{ text: "value", fg: "#00ff00", bold: true },
-		{ text: " = 42;", dim: true, fg: "#ffffff" },
-	]);
-});
-
 test("a parsed change block is paired once however often geometry is planned", () => {
 	const block = parseOne(pairingPatch).metadata.hunks[0]?.hunkContent.find(
 		(content) => content.type === "change",
@@ -193,39 +140,6 @@ test("intra-line backgrounds line up with tab-expanded columns", () => {
 		{ text: "  const value = ", fg: "#ffffff" },
 		{ text: "42", bg: "#0a3d0a", fg: "#ffffff" },
 		{ text: ";", fg: "#ffffff" },
-	]);
-});
-
-test("novel paint spans every wrapped continuation at exact local offsets", () => {
-	const file = parseOne(`diff --git a/novel-wrap.ts b/novel-wrap.ts
---- a/novel-wrap.ts
-+++ b/novel-wrap.ts
-@@ -1 +1 @@
--0123456789abcdef
-+0123456789ABCDEF
-`);
-
-	expect(
-		wrappedStackSpans({
-			file,
-			width: 8,
-			kind: "addition",
-			emphasis: {
-				rangesFor: (side, line) =>
-					side === "additions" && line === 1 ? [{ start: 6, end: 11 }] : undefined,
-				deletionsFg: "#ff0000",
-				additionsFg: "#00ff00",
-			},
-		}),
-	).toEqual([
-		[
-			{ text: "012345", dim: true, fg: "#ffffff" },
-			{ text: "67", fg: "#00ff00", bold: true },
-		],
-		[
-			{ text: "89A", fg: "#00ff00", bold: true },
-			{ text: "BCDEF", dim: true, fg: "#ffffff" },
-		],
 	]);
 });
 

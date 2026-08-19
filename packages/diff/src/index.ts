@@ -84,5 +84,4 @@ export type {
 	EmphasisRange,
 	RangeDecoration,
 	RenderSpan,
-	SpanEmphasis,
 } from "./types.ts";

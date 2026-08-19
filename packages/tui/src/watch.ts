@@ -25,6 +25,11 @@ export const WATCH_DEBOUNCE_MS = 120;
 
 const CHAPTERS_FILE = "chapters.json";
 
+const isThreadStoreChange = (filename: string | null, threadsName: string) =>
+	filename === null ||
+	filename === threadsName ||
+	(filename.startsWith(`${threadsName}.`) && filename.endsWith(".tmp"));
+
 type Debounced = { trigger: () => void; cancel: () => void };
 
 const debounce = (delay: number, action: () => void): Debounced => {
@@ -106,7 +111,7 @@ export const watchRun = ({
 
 	track(
 		watchDirectory(dirname(threadsPath), (filename) => {
-			if (filename === null || filename === basename(threadsPath)) threads.trigger();
+			if (isThreadStoreChange(filename, basename(threadsPath))) threads.trigger();
 		}),
 	);
 	track(watchDirectory(runsDirectory, () => runs.trigger()));

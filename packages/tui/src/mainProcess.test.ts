@@ -26,3 +26,13 @@ test("narrative Revue no longer exposes the pager command", async () => {
 	expect(pager).toMatchObject({ exitCode: 1, stdout: "" });
 	expect(pager.stderr).toContain("unknown command: pager");
 });
+
+test("narrative Revue no longer exposes the export command", async () => {
+	const help = await run(["--help"]);
+	expect(help).toMatchObject({ exitCode: 0, stderr: "" });
+	expect(help.stdout).not.toContain("revue export");
+
+	const exported = await run(["export"]);
+	expect(exported).toMatchObject({ exitCode: 1, stdout: "" });
+	expect(exported.stderr).toContain("unknown command: export");
+});

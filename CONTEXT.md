@@ -299,7 +299,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Chapters are an optional overlay, not required scaffolding.** See `docs/adr/0006`. A run
   without `chapters.json` opens as a flat diff through the same immutable-run pipeline, modelled
   internally as one synthetic chapter so every feature works in both modes by construction.
-  Chapterless progress seeds narrated progress one way; markdown export refuses a chapterless run.
+  Chapterless progress seeds narrated progress one way.
 - **Context expansion synthesises patches; anchors stay on the git hunks.** See `docs/adr/0007`.
   Revealing unchanged lines rewrites a unified patch replayed through the one canonical pipeline
   rather than owning a renderer. Displayed geometry varies with what is revealed; hunk anchors

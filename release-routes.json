@@ -50,7 +50,6 @@
 		"docs/plans/narrative-depth.md",
 		"docs/proposals/",
 		"packages/diff-opentui/",
-		"packages/markdown-export/",
 		"packages/prep/",
 		"packages/tui/",
 		"packages/types/",

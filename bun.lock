@@ -45,13 +45,6 @@
         "react-dom": "^19.2.4",
       },
     },
-    "packages/markdown-export": {
-      "name": "@revue/markdown-export",
-      "version": "0.0.0",
-      "dependencies": {
-        "@revue/types": "workspace:*",
-      },
-    },
     "packages/prep": {
       "name": "@revue/prep",
       "version": "0.0.0",
@@ -64,7 +57,7 @@
     },
     "packages/revuediff": {
       "name": "@revue/revuediff",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "revuediff": "./src/main.ts",
       },
@@ -83,7 +76,7 @@
     },
     "packages/tui": {
       "name": "@revue/tui",
-      "version": "0.5.0",
+      "version": "0.9.0",
       "bin": {
         "revue": "./src/main.tsx",
       },
@@ -92,7 +85,6 @@
         "@opentui/react": "^0.1.89",
         "@revue/diff": "workspace:*",
         "@revue/diff-opentui": "workspace:*",
-        "@revue/markdown-export": "workspace:*",
         "@revue/prep": "workspace:*",
         "@revue/theme": "workspace:*",
         "@revue/types": "workspace:*",
@@ -213,8 +205,6 @@
     "@revue/diff-ansi": ["@revue/diff-ansi@workspace:packages/diff-ansi"],
 
     "@revue/diff-opentui": ["@revue/diff-opentui@workspace:packages/diff-opentui"],
-
-    "@revue/markdown-export": ["@revue/markdown-export@workspace:packages/markdown-export"],
 
     "@revue/prep": ["@revue/prep@workspace:packages/prep"],
 

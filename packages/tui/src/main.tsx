@@ -1,12 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-	formatMarkdownReview,
-	MarkdownExportError,
-	type MarkdownExportSelection,
-} from "@revue/markdown-export";
 import {
 	defaultRunsDirectory,
 	freezeRunContext,
@@ -76,9 +71,7 @@ import {
 	carryReviewProgress,
 	defaultStatePath,
 	epilogueSession,
-	loadViewState,
 	type ReviewSessionState,
-	runKey,
 	supersededProgress,
 } from "./viewState.ts";
 import { watchRun } from "./watch.ts";
@@ -96,7 +89,6 @@ Usage:
   revue show <run-directory> --check   validate a prepared run and print a summary
   revue delta <run-directory>          print what a superseding run carried forward and still owes
   revue context freeze <run-directory> pin the code the narration quotes into context.json
-  revue export <run-directory>         export the full ordered review as Markdown
   revue threads <operation>            create, reply to, list, or update review threads
   revue comments <operation>           compatibility alias for revue threads
   revue skill install [--user]         install the bundled revue skill via the skills CLI
@@ -131,9 +123,6 @@ const DIFF_HELP = `usage: revue diff [main | main feature | main..feature | main
 
 Preps the requested scope and opens it immediately as a flat diff — no chapters required.
 The run directory is printed to stderr so agents can target it with revue threads.`;
-const EXPORT_HELP = `usage: revue export <run-directory>
-                     [--prologue | --chapter-id <id> | --chapter-order <number>]
-                     [--output <path>]`;
 const THREADS_HELP = `usage: revue threads list <run-directory> --json [--all]
        revue threads create <run-directory> [--kind hunk] --file <path> --old-start <number>
                             --side additions|deletions --start-line <number> --end-line <number>
@@ -267,141 +256,6 @@ async function cmdPrep(args: string[]): Promise<number> {
 		}
 		throw error;
 	}
-}
-
-type ExportArguments = {
-	directory: string;
-	selection: MarkdownExportSelection;
-	output?: string;
-};
-
-function parseExportArguments(args: string[]): ExportArguments {
-	const positionals: string[] = [];
-	const selections: MarkdownExportSelection[] = [];
-	let output: string | undefined;
-
-	for (let index = 0; index < args.length; index++) {
-		const argument = args[index];
-		if (argument === "--prologue") {
-			selections.push({ kind: "prologue" });
-			continue;
-		}
-		if (argument === "--chapter-id") {
-			const id = args[++index];
-			if (!id || id.startsWith("--")) {
-				throw new Error("--chapter-id requires a non-empty id");
-			}
-			selections.push({ kind: "chapter-id", id });
-			continue;
-		}
-		if (argument === "--chapter-order") {
-			const raw = args[++index];
-			const order = raw && /^[1-9]\d*$/.test(raw) ? Number(raw) : Number.NaN;
-			if (!Number.isSafeInteger(order)) {
-				throw new Error("--chapter-order requires a positive integer");
-			}
-			selections.push({ kind: "chapter-order", order });
-			continue;
-		}
-		if (argument === "--output") {
-			const path = args[++index];
-			if (!path || path.startsWith("--")) throw new Error("--output requires a path");
-			if (output !== undefined) throw new Error("--output may only be specified once");
-			output = path;
-			continue;
-		}
-		if (argument?.startsWith("-")) throw new Error(`unknown export option: ${argument}`);
-		if (argument) positionals.push(argument);
-	}
-
-	if (selections.length > 1) {
-		throw new Error("choose only one of --prologue, --chapter-id, or --chapter-order");
-	}
-	const directory = positionals[0];
-	if (positionals.length !== 1 || !directory) throw new Error("export requires one run directory");
-	return { directory, selection: selections[0] ?? { kind: "full" }, output };
-}
-
-async function cmdExport(args: string[]): Promise<number> {
-	if (args.includes("--help") || args.includes("-h")) {
-		process.stdout.write(`${EXPORT_HELP}\n`);
-		return 0;
-	}
-
-	let parsed: ExportArguments;
-	try {
-		parsed = parseExportArguments(args);
-	} catch (error) {
-		process.stderr.write(
-			`${error instanceof Error ? error.message : String(error)}\n${EXPORT_HELP}\n`,
-		);
-		return 1;
-	}
-
-	let run: Awaited<ReturnType<typeof loadReviewRun>>;
-	try {
-		run = await loadReviewRun(parsed.directory);
-	} catch (error) {
-		if (
-			error instanceof ChaptersFileError ||
-			error instanceof RunArtifactError ||
-			error instanceof ReviewCoverageError
-		) {
-			process.stderr.write(`${error.message}\n`);
-			return 1;
-		}
-		throw error;
-	}
-
-	if (!run.chapters) {
-		process.stderr.write(
-			"revue export needs a narrated run — generate chapters.json with the revue skill first.\n",
-		);
-		return 1;
-	}
-
-	let threads: ReviewThread[];
-	try {
-		threads = loadValidatedThreads(defaultThreadsPath(parsed.directory), run).threads;
-	} catch (error) {
-		if (error instanceof ThreadStoreError) {
-			process.stderr.write(`${error.message}\n`);
-			return 1;
-		}
-		throw error;
-	}
-	const state = await loadViewState(defaultStatePath(), runKey(run.manifest.runId, run.chapters));
-	let markdown: string;
-	try {
-		markdown = formatMarkdownReview(
-			{
-				runId: run.manifest.runId,
-				files: run.manifest.files,
-				chapters: run.chapters,
-			},
-			{ selection: parsed.selection, viewState: state, threads },
-		);
-	} catch (error) {
-		if (error instanceof MarkdownExportError) {
-			process.stderr.write(`${error.message}\n`);
-			return 1;
-		}
-		throw error;
-	}
-
-	if (!parsed.output) {
-		process.stdout.write(markdown);
-		return 0;
-	}
-	try {
-		await writeFile(parsed.output, markdown, "utf8");
-	} catch (error) {
-		const detail = error instanceof Error ? error.message : String(error);
-		process.stderr.write(`Could not write Markdown export to ${parsed.output}: ${detail}\n`);
-		return 1;
-	}
-	process.stderr.write(`Wrote Markdown export to ${parsed.output}\n`);
-	return 0;
 }
 
 const CONTEXT_HELP = `usage: revue context freeze <run-directory>
@@ -1436,7 +1290,6 @@ async function main(): Promise<number> {
 	if (command === "show") return cmdShow(args);
 	if (command === "diff") return cmdDiff(args);
 	if (command === "prep") return cmdPrep(args);
-	if (command === "export") return cmdExport(args);
 	if (command === "context") return cmdContext(args);
 	if (command === "delta") return cmdDelta(args);
 	if (command === "status") return cmdStatus(args);

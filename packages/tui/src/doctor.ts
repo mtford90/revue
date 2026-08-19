@@ -28,13 +28,9 @@ const skillLine = (scope: SkillScope): string => {
 
 export const runDoctor = (): DoctorReport => {
 	const git = commandVersion("git");
-	const difft = commandVersion("difft");
 	const lines = [
 		`revue ${REVUE_VERSION}`,
 		git ? `git: ok (${git})` : "git: MISSING — required by `revue prep`",
-		difft
-			? `difft: ok (${difft}) — Semantic view available`
-			: "difft: not found — optional; Semantic view disabled",
 		skillLine("project"),
 		skillLine("user"),
 	];

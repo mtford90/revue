@@ -54,9 +54,6 @@ class Revue < Formula
 
   def caveats
     <<~EOS
-      The optional Semantic diff view uses difftastic:
-        brew install difftastic
-
       Install the bundled revue-chapters agent skill with:
         revue skill install
 

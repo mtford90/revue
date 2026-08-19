@@ -29,7 +29,6 @@ import {
 	prepareSyntaxHighlighting,
 	quotedLineSpans,
 	type RangeDecoration,
-	type SpanEmphasis,
 } from "@revue/diff";
 import {
 	DiagramBlock,
@@ -145,7 +144,6 @@ import {
 } from "./pathDisplay.ts";
 import type { FileDisplayPreference, Preferences } from "./preferences.ts";
 import { useScrollWindow } from "./scrollWindow.ts";
-import { type SemanticDiffResult, type SemanticEmphasis, terminalSafe } from "./semantic.ts";
 import {
 	formatSourceLocation,
 	type PermalinkContext,
@@ -1299,49 +1297,6 @@ const findFocusAreaTarget = (pages: Page[], locations: string[]): FocusAreaTarge
 	);
 };
 
-const semanticViewportFiles = ({
-	chapter,
-	semantic,
-	fileDisplay,
-	selectedFile,
-	collapsedFiles,
-	diffPreference,
-	splitFits,
-	diffFiles,
-}: {
-	chapter: Chapter | null;
-	semantic: PreparedSemantic | null;
-	fileDisplay: FileDisplayPreference;
-	selectedFile: number;
-	collapsedFiles: Set<string>;
-	diffPreference: DiffLayoutPreference;
-	splitFits: boolean;
-	diffFiles: DiffFile[] | null;
-}): ViewportFile[] => {
-	if (!chapter || !semantic) return [];
-	const paths = chapterFilePaths(chapter);
-	const visible = fileDisplay === "focused" ? paths.slice(selectedFile, selectedFile + 1) : paths;
-	return visible.flatMap((path, index) => {
-		const semanticFile = semantic.files.find((candidate) => candidate.path === path);
-		if (!semanticFile) return [];
-		return [
-			{
-				path,
-				displayed: semanticFile.file ?? undefined,
-				collapsed: collapsedFiles.has(path),
-				separator: index > 0,
-				leadingBlank: true,
-				noteCount: semanticFile.notes.length,
-				showHunkHeaders: false,
-				layout: semanticFile.file
-					? layoutForFile({ file: semanticFile.file, preference: diffPreference, splitFits })
-					: ("stack" as const),
-				resolveRange: diffFiles ? gitRangeResolver(diffFiles, path) : undefined,
-			},
-		];
-	});
-};
-
 /**
  * The display range an anchor acts on. Quoted code has no old side and belongs to no git hunk,
  * so it borrows the excerpt sentinel the renderer already uses for a quoted line's own range.
@@ -2173,30 +2128,7 @@ function ChapterView({
 	);
 }
 
-// ── Semantic view ──────────────────────────────────────────────────────────
-type SemanticPreparedFile = {
-	path: string;
-	file: DiffFile | null;
-	notes: string[];
-	emphasis: SemanticEmphasis;
-};
-
-type PreparedSemantic = { version: string; files: SemanticPreparedFile[] };
-
-const prepareSemantic = (result: SemanticDiffResult): PreparedSemantic => ({
-	version: result.version,
-	files: result.files.map((file) => ({
-		path: file.path,
-		file: file.patch ? (parsePatch(file.patch, `semantic:${file.path}`)[0] ?? null) : null,
-		notes: file.notes,
-		emphasis: file.emphasis,
-	})),
-});
-
-const semanticDiffFiles = (semantic: PreparedSemantic | null): DiffFile[] =>
-	semantic?.files.flatMap((file) => (file.file ? [file.file] : [])) ?? [];
-
-/** Anchors emitted from semantic rows resolve against the authoritative patch hunks. */
+/** Anchors emitted from revealed context rows resolve against the authoritative patch hunks. */
 const gitRangeResolver =
 	(diffFiles: DiffFile[] | null, path: string) =>
 	(side: DiffSide, line: number): DiffLineRange | null => {
@@ -2215,225 +2147,6 @@ const gitRangeResolver =
 			endLine: line,
 		};
 	};
-
-function SemanticChapterView({
-	chapter,
-	semantic,
-	diffTheme,
-	diffFiles,
-	bodyPlans,
-	windowPlan,
-	width,
-	vs,
-	pathDisplay,
-	selectedFile,
-	selectedKeyChange,
-	collapsedFiles,
-	threads,
-	selectedThreadRange,
-	threadDraft,
-	replyDraft,
-	onAttachmentNode,
-	onSelectFile,
-	onToggleCollapse,
-	onToggleFileReview,
-	onSelectThreadRange,
-	onRangeContextMenu,
-	onReplyThread,
-	onDeleteThread,
-	onDeleteThreadMessage,
-	onToggleThreadStatus,
-}: {
-	chapter: Chapter;
-	semantic: PreparedSemantic;
-	diffTheme: Theme;
-	diffFiles: DiffFile[] | null;
-	bodyPlans: ReadonlyMap<string, DiffVisualPlan>;
-	windowPlan: WindowPlanItem[];
-	width: number;
-	vs: ViewState;
-	pathDisplay: PathDisplayMode;
-	selectedFile: number;
-	selectedKeyChange: number;
-	collapsedFiles: Set<string>;
-	threads: ReviewThread[];
-	selectedThreadRange: DiffLineRange | undefined;
-	threadDraft: DiffInlineAttachment | undefined;
-	replyDraft: { threadId: string; content: ReactNode } | undefined;
-	onAttachmentNode: (id: string, node: { height: number } | null) => void;
-	onSelectFile: (index: number) => void;
-	onToggleCollapse: (path: string) => void;
-	onToggleFileReview: (path: string) => void;
-	onSelectThreadRange: (range: DiffLineRange) => void;
-	onRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
-	onReplyThread: (thread: ReviewThread) => void;
-	onDeleteThread: (id: string) => void;
-	onDeleteThreadMessage: (threadId: string, messageId: string) => void;
-	onToggleThreadStatus: (thread: ReviewThread) => void;
-}) {
-	const theme = useTheme();
-	const paths = chapterFilePaths(chapter);
-	const focusedDecorationId = `key-change:${chapter.id}:${selectedKeyChange}`;
-	// Stable identity keeps DiffBody's row memo intact across unrelated renders.
-	const decorations: RangeDecoration[] = useMemo(() => {
-		const keyChange = chapter.keyChanges[selectedKeyChange];
-		return (keyChange?.lineRefs ?? []).map((ref, refIndex) => ({
-			...ref,
-			id: `${focusedDecorationId}:${refIndex}`,
-			focusId: focusedDecorationId,
-			backgroundColor: severityBackgroundColor(theme, keyChange?.severity),
-			showGutterMarker: false,
-		}));
-	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
-	const emphasisByPath = useMemo(() => {
-		const emphasis = new Map<string, SpanEmphasis>();
-		for (const file of semantic.files) {
-			if (!file.file) continue;
-			emphasis.set(file.path, {
-				rangesFor: (side, line) =>
-					(side === "deletions" ? file.emphasis.deletions : file.emphasis.additions).get(line),
-				deletionsFg: theme.badgeRemoved,
-				additionsFg: theme.badgeAdded,
-			});
-		}
-		return emphasis;
-	}, [semantic, theme.badgeRemoved, theme.badgeAdded]);
-	// Semantic view renders no excerpts, so threads on quoted code have nowhere to sit here.
-	const chapterThreads = threads.filter(
-		(thread) => !isExcerptAnchor(thread.anchor) && paths.includes(thread.anchor.filePath),
-	);
-	const inlineAttachments: DiffInlineAttachment[] = [
-		...chapterThreads.map((thread) => ({
-			id: thread.id,
-			anchor: diffRangeForAnchor(thread.anchor),
-			content: (
-				<InlineThread
-					thread={thread}
-					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
-					onReply={onReplyThread}
-					onDeleteThread={onDeleteThread}
-					onDeleteMessage={onDeleteThreadMessage}
-					onToggleStatus={onToggleThreadStatus}
-				/>
-			),
-		})),
-		...(threadDraft ? [threadDraft] : []),
-	];
-
-	return (
-		<box flexDirection="column" width="100%">
-			{windowPlan.map((item, planIndex) => {
-				if (item.kind === "gap") {
-					// biome-ignore lint/suspicious/noArrayIndexKey: gaps are positional and stateless.
-					return <box key={`gap:${planIndex}`} height={item.height} flexShrink={0} width="100%" />;
-				}
-				const path = segmentPath(item.id);
-				const semanticFile = semantic.files.find((candidate) => candidate.path === path);
-				if (!semanticFile) return null;
-				const kind = segmentKind(item.id);
-				const fileIndex = paths.indexOf(path);
-				const focused = fileIndex === selectedFile;
-				if (kind === "pad") {
-					return <box key={item.id} height={1} flexShrink={0} width="100%" />;
-				}
-				if (kind === "sep") {
-					return (
-						<text key={item.id} fg={theme.border}>
-							{"─".repeat(Math.max(1, width - 2))}
-						</text>
-					);
-				}
-				if (kind === "notes") {
-					return (
-						<box key={item.id} flexDirection="column" width="100%">
-							{semanticFile.notes.slice(item.window.start, item.window.end).map((note) => (
-								<text key={note} fg={theme.muted} wrapMode="none" truncate>
-									{note}
-								</text>
-							))}
-						</box>
-					);
-				}
-				if (kind === "head") {
-					const collapsed = collapsedFiles.has(path);
-					const reviewed = isFileReviewed(vs, chapter.id, path);
-					return (
-						<box
-							key={item.id}
-							id={fileHeaderId(chapter.id, fileIndex)}
-							flexDirection="row"
-							height={1}
-							width="100%"
-						>
-							<text flexShrink={0} fg={focused ? theme.accent : theme.panelAlt}>
-								{focused ? "▸" : " "}
-							</text>
-							<text
-								flexShrink={0}
-								fg={reviewed ? theme.badgeAdded : theme.muted}
-								onMouseDown={() => onToggleFileReview(path)}
-							>
-								[{reviewed ? "x" : " "}]
-							</text>
-							<text
-								flexShrink={0}
-								fg={focused ? theme.accent : theme.muted}
-								onMouseDown={() => onToggleCollapse(path)}
-							>
-								{collapsed ? "▶" : "▼"}
-							</text>
-							{semanticFile.file ? (
-								<box flexGrow={1} minWidth={0}>
-									<DiffFileHeader
-										file={semanticFile.file}
-										theme={diffTheme}
-										width={Math.max(1, width - 7)}
-										formatPath={headerPathFormatter(pathDisplay)}
-										onSelect={() => onSelectFile(fileIndex)}
-									/>
-								</box>
-							) : (
-								<text
-									flexShrink={1}
-									minWidth={0}
-									wrapMode="none"
-									truncate
-									fg={focused ? theme.accent : theme.muted}
-									onMouseDown={() => onSelectFile(fileIndex)}
-								>
-									{" "}
-									{path}
-								</text>
-							)}
-						</box>
-					);
-				}
-				if (!semanticFile.file) return null;
-				const emphasis = emphasisByPath.get(path);
-				const plan = bodyPlans.get(path);
-				if (!emphasis || !plan) return null;
-				return (
-					<DiffBody
-						key={item.id}
-						plan={plan}
-						theme={diffTheme}
-						selectedHunkIndex={-1}
-						decorations={decorations}
-						focusedDecorationId={focusedDecorationId}
-						selectedRange={selectedThreadRange}
-						inlineAttachments={inlineAttachments}
-						emphasis={emphasis}
-						resolveRange={gitRangeResolver(diffFiles, path)}
-						window={item.window}
-						onAttachmentNode={onAttachmentNode}
-						onRangeSelect={onSelectThreadRange}
-						onRangeContextMenu={onRangeContextMenu}
-					/>
-				);
-			})}
-		</box>
-	);
-}
 
 function ConfirmDialog({
 	message,
@@ -2627,7 +2340,6 @@ export function App({
 	context = null,
 	omittedNotice = null,
 	diffFiles = null,
-	loadSemanticDiff,
 	loadFileLines,
 	initialViewState = emptyViewState(),
 	initialSessionState = { pages: {} },
@@ -2667,7 +2379,6 @@ export function App({
 	 */
 	omittedNotice?: string | null;
 	diffFiles?: DiffFile[] | null;
-	loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 	/** The pinned new-side blob for a path, split into lines; null when unavailable. */
 	loadFileLines?: (path: string) => Promise<string[] | null>;
 	initialViewState?: ViewState;
@@ -2825,10 +2536,6 @@ export function App({
 	const [pathDisplay, setPathDisplayState] = useState<PathDisplayMode>(
 		initialPreferences.pathDisplay ?? "smart",
 	);
-	const [viewMode, setViewModeState] = useState<"patch" | "semantic">("patch");
-	const [semantic, setSemantic] = useState<PreparedSemantic | null>(null);
-	const [semanticLoading, setSemanticLoading] = useState(false);
-	const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
 	const [vs, setVs] = useState(initialViewState);
 	const [threads, setThreads] = useState(() => sortThreads(initialThreads));
 	const [carriedOrphans, setCarriedOrphans] = useState<ReadonlySet<string>>(
@@ -2851,12 +2558,10 @@ export function App({
 	const selectionFlashCleanup = useRef<(() => void) | null>(null);
 	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
-	const pendingViewProgress = useRef<{ mode: "patch" | "semantic"; progress: number } | null>(null);
 	const panelScroll = useRef<ScrollBoxRenderable>(null);
 	const indexScroll = useRef<ScrollBoxRenderable>(null);
 	const helpScroll = useRef<ScrollBoxRenderable>(null);
 	const resizingPanel = useRef(false);
-	const startupViewRestored = useRef(false);
 	const [requestedPanelWidth, setRequestedPanelWidthState] = useState(
 		initialPreferences.panelWidth ?? defaultPanelWidth(width),
 	);
@@ -2878,11 +2583,6 @@ export function App({
 	const keymapSurface: KeymapSurface = page?.kind === "comments" ? "comments" : "page";
 	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	const interlude = chapter ? isInterlude(chapter) : false;
-	/**
-	 * Whether the page's body is the planned content column. An interlude has no diff to swap,
-	 * so its figures and quotations are planned in either view rather than only in Patch.
-	 */
-	const plannedBody = Boolean(chapter) && (viewMode === "patch" || interlude);
 	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
@@ -2918,50 +2618,32 @@ export function App({
 	}, [chapterDiffFiles, chapter, fileDisplay, selectedFile]);
 	const viewportFiles: ViewportFile[] = useMemo(
 		() =>
-			viewMode === "semantic"
-				? semanticViewportFiles({
-						chapter,
-						semantic,
-						fileDisplay,
-						selectedFile,
-						collapsedFiles,
-						diffPreference,
-						splitFits,
-						diffFiles,
-					})
-				: visibleChapterFiles.map((diffFile, index) => {
-						const path = diffFile.chapterPath;
-						const displayed = expandedVariants.get(path) ?? diffFile;
-						const lines = fileLines.get(path);
-						return {
-							path,
-							displayed,
-							collapsed: collapsedFiles.has(path),
-							separator: index > 0,
-							showLineNumbers: lineNumbers,
-							showChangeMarkers: changeMarkers,
-							layout: layoutForFile({ file: displayed, preference: diffPreference, splitFits }),
-							expanderActions: lines
-								? (boundary: number) =>
-										boundaryActions(
-											diffFile.metadata.hunks,
-											expansions.get(path),
-											lines.length,
-											boundary,
-										)
-								: undefined,
-							resolveRange:
-								displayed === diffFile || !diffFiles
-									? undefined
-									: gitRangeResolver(diffFiles, path),
-						};
-					}),
+			visibleChapterFiles.map((diffFile, index) => {
+				const path = diffFile.chapterPath;
+				const displayed = expandedVariants.get(path) ?? diffFile;
+				const lines = fileLines.get(path);
+				return {
+					path,
+					displayed,
+					collapsed: collapsedFiles.has(path),
+					separator: index > 0,
+					showLineNumbers: lineNumbers,
+					showChangeMarkers: changeMarkers,
+					layout: layoutForFile({ file: displayed, preference: diffPreference, splitFits }),
+					expanderActions: lines
+						? (boundary: number) =>
+								boundaryActions(
+									diffFile.metadata.hunks,
+									expansions.get(path),
+									lines.length,
+									boundary,
+								)
+						: undefined,
+					resolveRange:
+						displayed === diffFile || !diffFiles ? undefined : gitRangeResolver(diffFiles, path),
+				};
+			}),
 		[
-			viewMode,
-			chapter,
-			semantic,
-			fileDisplay,
-			selectedFile,
 			visibleChapterFiles,
 			expandedVariants,
 			fileLines,
@@ -2977,9 +2659,9 @@ export function App({
 	// Quoted code comes from the frozen context, never re-resolved from Git; a citation nothing
 	// was frozen for simply does not appear.
 	const chapterExcerpts = useMemo<ViewportExcerpt[]>(() => {
-		if (!chapter || !plannedBody) return [];
+		if (!chapter) return [];
 		// Anchored against the chapter's own file order, not the viewport's: Focused display shows
-		// one file, and placing every citation against that would move quotations between modes.
+		// one file, and placing every citation against that would move quotations about.
 		const paths = chapterFilePaths(chapter);
 		const onScreen = new Set(viewportFiles.map((entry) => entry.path));
 		return distinctExcerpts(chapter).flatMap(({ key, excerpt }, index) => {
@@ -3006,22 +2688,14 @@ export function App({
 				},
 			];
 		});
-	}, [
-		chapter,
-		context,
-		plannedBody,
-		viewportFiles,
-		openExcerpts,
-		contentWidth,
-		diffTheme.syntaxTheme,
-	]);
+	}, [chapter, context, viewportFiles, openExcerpts, contentWidth, diffTheme.syntaxTheme]);
 	/**
 	 * Figures the chapter draws, taken from fenced blocks in its own summary rather than a
 	 * schema field of their own. Unlike an excerpt, a figure is usually the point of the prose
 	 * beside it — an interlude often has nothing else — so it draws open and folds on request.
 	 */
 	const chapterDiagrams = useMemo<ViewportDiagram[]>(() => {
-		if (!chapter || !plannedBody) return [];
+		if (!chapter) return [];
 		return splitNarration(chapter.summary).diagrams.map((diagram, index) => {
 			const key = diagramFoldKey(chapter.id, index);
 			return {
@@ -3035,7 +2709,7 @@ export function App({
 				}),
 			};
 		});
-	}, [chapter, plannedBody, foldedDiagrams, contentWidth]);
+	}, [chapter, foldedDiagrams, contentWidth]);
 	/** The threads this chapter cites, in citation order, minus any the run no longer holds. */
 	const citedThreads = useMemo(() => {
 		const byId = new Map(threads.map((thread) => [thread.id, thread]));
@@ -3076,19 +2750,13 @@ export function App({
 		onFocus: setFocusedThreadRef,
 		onOpen: openReferencedThread,
 	};
-	const chapterThreadList = useMemo(() => {
-		if (!chapter) return [];
-		if (viewMode === "semantic") {
-			const paths = chapterFilePaths(chapter);
-			return threads.filter(
-				(thread) => !isExcerptAnchor(thread.anchor) && paths.includes(thread.anchor.filePath),
-			);
-		}
-		return chapterHunkThreads(chapter, threads);
-	}, [chapter, threads, viewMode]);
+	const chapterThreadList = useMemo(
+		() => (chapter ? chapterHunkThreads(chapter, threads) : []),
+		[chapter, threads],
+	);
 	const chapterQuotedThreads = useMemo(
-		() => (chapter && viewMode === "patch" ? chapterExcerptThreads(chapter, threads) : []),
-		[chapter, threads, viewMode],
+		() => (chapter ? chapterExcerptThreads(chapter, threads) : []),
+		[chapter, threads],
 	);
 	/**
 	 * Threads whose anchored code this run no longer holds. Re-narrating at another depth can
@@ -3340,11 +3008,7 @@ export function App({
 	}, [chapter, loadFileLines, fileLines]);
 
 	useEffect(() => {
-		const highlightable = [
-			...(diffFiles ?? []),
-			...semanticDiffFiles(semantic),
-			...expandedVariants.values(),
-		];
+		const highlightable = [...(diffFiles ?? []), ...expandedVariants.values()];
 		// Quotations were coloured at startup, so this is the theme-change path for them too.
 		const quotations = contextQuotations(context);
 		if ((!highlightable.length && !quotations.length) || preparedSyntaxTheme === theme.syntaxTheme)
@@ -3360,16 +3024,7 @@ export function App({
 		return () => {
 			current = false;
 		};
-	}, [diffFiles, semantic, expandedVariants, context, preparedSyntaxTheme, theme.syntaxTheme]);
-
-	useEffect(() => {
-		const scroll = pageScroll.current;
-		const pending = pendingViewProgress.current;
-		if (!scroll || pending?.mode !== viewMode) return;
-		const maximum = Math.max(0, scroll.scrollHeight - scroll.viewport.height);
-		scroll.scrollTo(Math.round(maximum * pending.progress));
-		pendingViewProgress.current = null;
-	}, [viewMode]);
+	}, [diffFiles, expandedVariants, context, preparedSyntaxTheme, theme.syntaxTheme]);
 
 	useEffect(() => {
 		const restored = sessionRef.current.pages[pageId(pages[current])];
@@ -3793,7 +3448,6 @@ export function App({
 		const restored = sessionRef.current.pages[nextPageId] ?? emptyReviewPageState();
 		pageScroll.current?.scrollTo(restored.scrollTop);
 		panelScroll.current?.scrollTo(restored.panelScrollTop);
-		pendingViewProgress.current = null;
 		setSelectedFile(restored.selectedFile);
 		setSelectedHunkIndex(restored.selectedHunk);
 		setSelectedKeyChange(restored.selectedKeyChange);
@@ -4049,9 +3703,8 @@ export function App({
 		if (index < 0 || index >= targetChapter.keyChanges.length) return;
 		setSelectedKeyChange(index);
 		requestKeyFocus();
-		const activeFiles = viewMode === "semantic" ? semanticDiffFiles(semantic) : diffFiles;
-		const target = activeFiles
-			? findKeyChangeTarget({ chapter: targetChapter, diffFiles: activeFiles, index })
+		const target = diffFiles
+			? findKeyChangeTarget({ chapter: targetChapter, diffFiles, index })
 			: null;
 		const fallbackPath = targetChapter.keyChanges[index]?.lineRefs[0]?.filePath;
 		const fallbackIndex = fallbackPath ? chapterFilePaths(targetChapter).indexOf(fallbackPath) : -1;
@@ -4161,20 +3814,6 @@ export function App({
 		setCollapsedFiles(new Set());
 		requestFileFocus();
 	}
-	function changeViewMode(next: "patch" | "semantic") {
-		if (next === viewMode) return;
-		const scroll = pageScroll.current;
-		const maximum = scroll ? Math.max(0, scroll.scrollHeight - scroll.viewport.height) : 0;
-		pendingViewProgress.current = {
-			mode: next,
-			progress: maximum > 0 && scroll ? scroll.scrollTop / maximum : 0,
-		};
-		setViewModeState(next);
-		updatePreferences({ viewMode: next });
-	}
-	function showPatch() {
-		changeViewMode("patch");
-	}
 	function openThemePicker() {
 		const selected = Math.max(
 			0,
@@ -4227,63 +3866,6 @@ export function App({
 		setThemePicker(null);
 		setPreviewTheme(null);
 	}
-	async function showSemantic() {
-		cancelThreadDraft();
-		if (semantic) {
-			setSemanticNotice(null);
-			changeViewMode("semantic");
-			return;
-		}
-		if (semanticLoading) return;
-		if (!loadSemanticDiff) {
-			setSemanticNotice(
-				"Semantic diff unavailable: no Difftastic loader was supplied. Patch view remains active.",
-			);
-			return;
-		}
-		setSemanticLoading(true);
-		setSemanticNotice("Loading semantic diff from pinned run snapshots...");
-		try {
-			const result = prepareSemantic(await loadSemanticDiff());
-			await prepareSyntaxHighlighting(semanticDiffFiles(result), theme.syntaxTheme);
-			setSemantic(result);
-			setSemanticNotice(null);
-			changeViewMode("semantic");
-		} catch (error) {
-			const detail = error instanceof Error ? error.message : String(error);
-			setSemanticNotice(terminalSafe(detail));
-			setViewModeState("patch");
-			updatePreferences({ viewMode: "patch" });
-		} finally {
-			setSemanticLoading(false);
-		}
-	}
-
-	useEffect(() => {
-		if (startupViewRestored.current || initialPreferences.viewMode !== "semantic") return;
-		startupViewRestored.current = true;
-		if (!loadSemanticDiff) {
-			setSemanticNotice(
-				"Semantic diff unavailable: no Difftastic loader was supplied. Patch view remains active.",
-			);
-			return;
-		}
-		setSemanticLoading(true);
-		setSemanticNotice("Loading semantic diff from pinned run snapshots...");
-		loadSemanticDiff()
-			.then(prepareSemantic)
-			.then(async (result) => {
-				await prepareSyntaxHighlighting(semanticDiffFiles(result), theme.syntaxTheme);
-				setSemantic(result);
-				setSemanticNotice(null);
-				setViewModeState("semantic");
-			})
-			.catch((error) => {
-				const detail = error instanceof Error ? error.message : String(error);
-				setSemanticNotice(terminalSafe(detail));
-			})
-			.finally(() => setSemanticLoading(false));
-	}, [initialPreferences.viewMode, loadSemanticDiff, theme.syntaxTheme]);
 
 	const menus = buildAppMenus({
 		canMovePrevious: current > 0,
@@ -4297,8 +3879,6 @@ export function App({
 		commentsSurface,
 		toggleComments,
 		showHelp,
-		viewMode,
-		semanticLoading,
 		fileDisplay,
 		pathDisplay,
 		sidebarPreference,
@@ -4320,8 +3900,6 @@ export function App({
 		collapseFiles,
 		expandFiles,
 		toggleHelp: toggleShortcutHelp,
-		showPatch,
-		showSemantic: () => void showSemantic(),
 		chooseTheme: openThemePicker,
 		themeLabel: chosenTheme.label,
 		keymap,
@@ -4810,10 +4388,6 @@ export function App({
 									leadingContent.current = node;
 								}}
 							>
-								{semanticNotice ? <text fg={theme.badgeModified}>{semanticNotice}</text> : null}
-								{chapter && !interlude && viewMode === "semantic" && semantic ? (
-									<text fg={theme.muted}>{semantic.version} · semantic view</text>
-								) : null}
 								{chapter && !showChapterPanel ? (
 									<box flexDirection="column" width="100%" paddingBottom={1}>
 										<ChapterBrief
@@ -4853,7 +4427,7 @@ export function App({
 									onJump={jumpToThread}
 								/>
 							) : null}
-							{chapter && plannedBody ? (
+							{chapter ? (
 								<ChapterView
 									chapter={chapter}
 									diffTheme={diffTheme}
@@ -4887,41 +4461,6 @@ export function App({
 									}
 									threadDraft={newThreadDraft}
 									excerptDraft={newExcerptDraft}
-									replyDraft={replyDraft}
-									onSelectFile={selectFile}
-									onToggleCollapse={toggleCollapsedFile}
-									onToggleFileReview={toggleFileReview}
-									onSelectThreadRange={selectThreadRange}
-									onRangeContextMenu={openRangeContextMenu}
-									onReplyThread={startThreadReply}
-									onDeleteThread={requestDeleteThread}
-									onDeleteThreadMessage={requestDeleteThreadMessage}
-									onToggleThreadStatus={toggleInlineThreadStatus}
-								/>
-							) : null}
-							{chapter && !interlude && viewMode === "semantic" && semantic ? (
-								<SemanticChapterView
-									chapter={chapter}
-									semantic={semantic}
-									diffTheme={diffTheme}
-									diffFiles={diffFiles ?? null}
-									bodyPlans={bodyPlans}
-									windowPlan={windowPlan}
-									width={contentWidth}
-									onAttachmentNode={noteAttachmentNode}
-									vs={vs}
-									pathDisplay={pathDisplay}
-									selectedFile={selectedFile}
-									selectedKeyChange={selectedKeyChange}
-									collapsedFiles={collapsedFiles}
-									threads={threads}
-									selectedThreadRange={
-										(contextMenu?.kind === "range" &&
-										contextMenu.anchorKind === THREAD_ANCHOR_KIND.HUNK
-											? contextMenu.range
-											: undefined) ?? newThreadDraft?.anchor
-									}
-									threadDraft={newThreadDraft}
 									replyDraft={replyDraft}
 									onSelectFile={selectFile}
 									onToggleCollapse={toggleCollapsedFile}
@@ -5013,7 +4552,6 @@ export function App({
 					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
 					coverage={coverage}
 					openThreads={openThreadCount}
-					viewMode={viewMode}
 					notice={statusNotice}
 					hints={statusHints}
 					helpKey={helpKeyLabel}
@@ -5036,7 +4574,6 @@ export async function runApp(
 		/** What an ignore rule kept out of the prepared run, if anything. */
 		omittedNotice?: string | null;
 		diffFiles?: DiffFile[] | null;
-		loadSemanticDiff?: () => Promise<SemanticDiffResult>;
 		loadFileLines?: (path: string) => Promise<string[] | null>;
 		initialViewState?: ViewState;
 		initialSessionState?: ReviewSessionState;
@@ -5089,7 +4626,6 @@ export async function runApp(
 				file={file}
 				context={options.context ?? null}
 				diffFiles={options.diffFiles ?? null}
-				loadSemanticDiff={options.loadSemanticDiff}
 				loadFileLines={options.loadFileLines}
 				initialViewState={options.initialViewState}
 				initialSessionState={options.initialSessionState}

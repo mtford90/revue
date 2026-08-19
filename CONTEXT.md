@@ -108,16 +108,12 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   run no longer anchors — a dropped quotation or a **carried thread** whose code is gone — is listed
   and marked rather than hidden). Internally Files — and any chapterless run — is one synthetic
   chapter covering every hunk, so all features work identically there.
-- **Diff view** — Patch (the default, authoritative line-numbered review surface) or Semantic (a
-  lazy, read-only Difftastic rendering of the same run's pinned old/new blobs). Chapter/file focus
-  survives switching and the reviewer’s relative chapter position transfers between modes. Semantic
-  uses coloured side-by-side output when wide and coloured inline output when narrow; styling is
-  translated into safe OpenTUI spans. Key-change anchors navigate and carry severity-tinted exact
-  ranges in both views by source line number; Difftastic output is never parsed into durable anchors.
-  Cited context excerpts render in Patch only.
+- **Patch** — the one authoritative code representation: a line-numbered review surface over the
+  run's pinned patch. Key-change anchors navigate and carry severity-tinted exact ranges by source
+  line number.
 - **File display** — All (the default chapter stream) or Focused (only the selected file). The
-  reviewer moves the focused surface through the chapter with file navigation. It applies to both
-  diff views and persists machine-wide as a reviewer preference rather than per-run state.
+  reviewer moves the focused surface through the chapter with file navigation. It persists
+  machine-wide as a reviewer preference rather than per-run state.
 - **Path display** — how file lists render paths: **smart** (common-prefix elision plus directory
   abbreviation, the default), **tree** (a collapsed directory tree), or **full**. A reviewer
   preference, computed by a pure module rather than generic truncation.
@@ -133,8 +129,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   disk. A cited file need not appear in the diff — quoting the untouched caller is the point. Folded
   to a single band by default, opens in place, reads as scenery rather than work, contributes
   nothing to review progress, and accepts comments on its lines, because a citation is pinned
-  narration rather than an ad-hoc reveal. Patch view only; the semantic view quotes nothing.
-  Quoted lines are currently rendered unhighlighted.
+  narration rather than an ad-hoc reveal. Quoted lines are currently rendered unhighlighted.
 - **Narrative depth** — the chapters file's own declaration of how much of the prepared diff it sets
   out to cover: `full`, or `partial` carrying the label the reviewer sees (the `10,000ft` preset, or
   freeform words for a bespoke request). An absent declaration means full, so every chapters file
@@ -247,9 +242,6 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   removed/added line: a stronger diff-tinted background behind the changed spans, syntax
   foregrounds untouched. Only lines the differ pairs as revisions of each other carry it;
   unpaired lines keep the plain row tint.
-- **Novel emphasis** — semantic-view bold/dim marking of the tokens Difftastic reports as novel.
-  A distinct concept from intra-line emphasis: novelty is structural, computed by Difftastic;
-  intra-line emphasis is textual, computed by revue's own patch differ.
 - **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
   chapters, pinned file metadata, review questions, authored threads, and optional local review
   progress. Full review is the default; prologue and one chapter by stable id/order are explicit
@@ -286,7 +278,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Immutable local run, not (yet) a live session.** Prep writes a finished run directory and the
   agent adds narration before `show`; whether Revue later drives the agent live remains open.
 - **Prep owns scope; show never touches Git.** See `docs/adr/0003`. Old/new blobs and Git modes are
-  stored with the patch so semantic diff and full-file context can consume the same frozen input.
+  stored with the patch so full-file context can consume the same frozen input.
   How strictly show checks coverage keys on the narrative's declared depth (see `docs/adr/0014`):
   at full depth — which is also what an absent declaration means — it still requires every prepared
   review unit exactly once, so the default case is unchanged. Only an explicitly partial depth may
@@ -311,19 +303,18 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   presentation, CLI operations, and chapter association. The disposable pre-thread comment store
   was reset rather than introducing a legacy migration.
 - **Intra-line emphasis is owned, textual, and patch-only.** See `docs/adr/0005`. `@revue/diff` pairs changed lines (by position for equal-count blocks, similarity-gated otherwise) and computes
-  token-level spans; emphasis is background-only and never appears in semantic view, where novelty
-  is Difftastic's structural concept.
+  token-level spans; emphasis is background-only.
 - **Chapters are an optional overlay, not required scaffolding.** See `docs/adr/0006`. A run
   without `chapters.json` opens as a flat diff through the same immutable-run pipeline, modelled
   internally as one synthetic chapter so every feature works in both modes by construction.
   Chapterless progress seeds narrated progress one way; markdown export refuses a chapterless run.
-- **Alternate views synthesise patches; anchors stay on the git hunks.** See `docs/adr/0007`.
-  Semantic view and context expansion synthesise unified patches replayed through the one
-  canonical pipeline rather than owning renderers. Displayed geometry varies per view; hunk anchors
-  always resolve against the original git hunks, so every such thread renders in every view and
-  synthesised-only lines refuse comments. Narration-cited excerpts are a second anchor authority
-  resolving against the frozen context (see `docs/adr/0014`); *ad hoc* context expansion still
-  refuses comments, because revealed lines are not pinned narration.
+- **Context expansion synthesises patches; anchors stay on the git hunks.** See `docs/adr/0007`.
+  Revealing unchanged lines rewrites a unified patch replayed through the one canonical pipeline
+  rather than owning a renderer. Displayed geometry varies with what is revealed; hunk anchors
+  always resolve against the original git hunks, so synthesised-only lines refuse comments.
+  Narration-cited excerpts are a second anchor authority resolving against the frozen context
+  (see `docs/adr/0014`); *ad hoc* context expansion still refuses comments, because revealed lines
+  are not pinned narration.
 - **One keymap registry; user-owned overrides.** See `docs/adr/0009`. Shortcuts exist once, in the
   typed registry; `~/.revue/keybindings.json` overrides action-to-keys with reserved keys,
   fixed-point merging, and per-entry lenient validation.
@@ -337,8 +328,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   only `packages/revuediff`, and runs a separate stdin-formatting smoke test with the same native
   platform matrix but no OpenTUI alternate-screen requirement. Release Please uses path-specific
   outputs to dispatch only the matching build workflow; Homebrew formulae, installers, assets, and
-  checksums are product-specific. Neither product is distributed through npm, and difftastic remains
-  an optional Revue-only runtime probe.
+  checksums are product-specific. Neither product is distributed through npm.
 - **The TUI owns viewport windowing.** See `docs/adr/0012`. OpenTUI culling still pays full layout
   cost, so Revue mounts only near-window row segments and preserves scroll geometry with
   fixed-height gaps; reveals are offset-based, and diff-body components need measurable heights.
@@ -355,12 +345,6 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Agents never launch the TUI.** An agent validates with `revue show "$RUN" --check` and hands
   the human the exact `revue show` command for their own terminal; the TUI cannot run inside an
   agent harness, and the skill forbids suggesting otherwise.
-- **Semantic diff is a read-only external view.** The TUI invokes a compatible `difft` lazily and
-  passes only verified blob paths from the supplied run (using an empty temporary side for an absent
-  added/deleted snapshot). It parses only Difftastic’s presentation styling into terminal-safe spans,
-  not unstable JSON or durable line identities. Binary, symlink, mode-only, and content-identical
-  metadata states receive explicit descriptions rather than fabricated semantic output;
-  availability or process failures return the reviewer to Patch.
 
 ## Open questions
 

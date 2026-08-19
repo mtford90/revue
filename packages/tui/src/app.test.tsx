@@ -33,23 +33,6 @@ const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
 const theme = resolveTheme("catppuccin-mocha");
 const loadPatch = async (path: string) =>
 	preparePatch(await readFile(path, "utf8"), theme.syntaxTheme);
-const semanticFile = (
-	path: string,
-	patch: string | null,
-	{
-		notes = [],
-		additions = new Map<number, { start: number; end: number }[]>(),
-	}: {
-		notes?: string[];
-		additions?: Map<number, { start: number; end: number }[]>;
-	} = {},
-) => ({
-	path,
-	patch,
-	notes,
-	emphasis: { deletions: new Map<number, { start: number; end: number }[]>(), additions },
-});
-
 // React's act() needs this flag to flush state updates from mocked key presses.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -546,14 +529,14 @@ test("ctrl+r saves the session position and invokes onReload", async () => {
 	expect(sessions.at(-1)).toMatchObject({ pageId: "chapter-1" });
 });
 
-test("the status bar carries progress, the view mode, and the help hints", async () => {
+test("the status bar carries progress and the help hints", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
 	await t.renderOnce();
 	const bar = statusLine(t);
 
 	expect(bar).toContain("revue");
 	expect(bar).toContain("0/3 files");
-	expect(bar).toContain("Patch │");
+	expect(bar).not.toContain("Semantic"); // Patch is the only code representation
 	expect(bar.trimEnd().endsWith("? help · q quit")).toBe(true);
 });
 
@@ -563,7 +546,6 @@ test("a narrow status bar sheds detail rather than crowding the hints", async ()
 	const bar = statusLine(t);
 
 	expect(bar).toContain("? · q");
-	expect(bar).not.toContain("Patch");
 	expect(bar).not.toContain("files");
 });
 
@@ -653,9 +635,9 @@ test("the keyboard menu reuses navigation and keeps Escape from quitting", async
 	await arrow(t, "right");
 	await arrow(t, "right");
 	const menuFrame = t.captureCharFrame();
-	expect(menuFrame).toContain("[x] Patch view");
-	expect(menuFrame).toContain("Semantic diff");
+	expect(menuFrame).toContain("[x] Line numbers");
 	expect(menuFrame).toContain("Theme: ayu-dark");
+	expect(menuFrame).not.toContain("Semantic"); // Patch is the only code representation
 	expect(menuFrame).not.toContain("Next page"); // navigation lives in its own menu
 
 	await arrow(t, "right");
@@ -726,8 +708,6 @@ test("View menu shows only the focused file and file navigation replaces it", as
 	await arrow(t, "down");
 	await arrow(t, "down");
 	await arrow(t, "down");
-	await arrow(t, "down");
-	await arrow(t, "down");
 	await press(t, "RETURN");
 
 	expect(t.captureCharFrame()).toContain("MAX_RETRIES = 4");
@@ -737,166 +717,6 @@ test("View menu shows only the focused file and file navigation replaces it", as
 	await press(t, "TAB");
 	expect(t.captureCharFrame()).toContain("return fetch");
 	expect(t.captureCharFrame()).not.toContain("MAX_RETRIES = 4");
-});
-
-test("View menu toggles the semantic diff without losing the focused file", async () => {
-	const combined = RevueChaptersFileSchema.parse({
-		chapters: [
-			{
-				...file.chapters[0],
-				hunkRefs: [
-					{ filePath: "src/lib/backoff.ts", oldStart: 0 },
-					{ filePath: "src/lib/apiClient.ts", oldStart: 41 },
-				],
-			},
-		],
-	});
-	const diffFiles = await loadPatch(PATCH);
-	let loads = 0;
-	const t = await testRender(
-		<App
-			file={combined}
-			diffFiles={diffFiles}
-			initialPreferences={{ fileDisplay: "focused" }}
-			loadSemanticDiff={async () => {
-				loads += 1;
-				return {
-					version: "Difftastic 0.67.0",
-					files: [
-						semanticFile(
-							"src/lib/backoff.ts",
-							`--- /dev/null
-+++ b/src/lib/backoff.ts
-@@ -0,0 +1,1 @@
-+semantic backoff
-`,
-							{ notes: ["added: src/lib/backoff.ts"] },
-						),
-						semanticFile(
-							"src/lib/apiClient.ts",
-							`--- a/src/lib/apiClient.ts
-+++ b/src/lib/apiClient.ts
-@@ -41,1 +41,1 @@
--old retry loop
-+semantic retry loop
-`,
-							{
-								notes: ["modified: src/lib/apiClient.ts"],
-								additions: new Map([[41, [{ start: 0, end: 8 }]]]),
-							},
-						),
-					],
-				};
-			}}
-		/>,
-		{ width: 120, height: 44, kittyKeyboard: true },
-	);
-	await t.renderOnce();
-	await press(t, "TAB");
-	expect(t.captureCharFrame()).toContain("▸[ ]▼ src/lib/apiClient.ts");
-
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await arrow(t, "down");
-	await press(t, "RETURN");
-	await act(async () => Promise.resolve());
-	await t.renderOnce();
-	const semanticFrame = t.captureCharFrame();
-	expect(semanticFrame).toContain("Semantic │");
-	expect(semanticFrame).toContain("semantic retry loop");
-	expect(semanticFrame).not.toContain("semantic backoff");
-	expect(semanticFrame).toContain("modified: src/lib/apiClient.ts");
-	expect(semanticFrame).toContain("src/lib/apiClient.ts");
-	// The emphasis range covers chars 0-8, so "semantic" renders as its own restyled span.
-	const emphasised = t
-		.captureSpans()
-		.lines.flatMap((line) => line.spans)
-		.find((span) => span.text === "semantic");
-	expect(emphasised).toBeDefined();
-
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await press(t, "RETURN");
-	const patchFrame = t.captureCharFrame();
-	expect(patchFrame).toContain("Patch │");
-	expect(patchFrame).toContain("return fetch");
-	expect(patchFrame).not.toContain("MAX_RETRIES = 4");
-	expect(patchFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
-	expect(loads).toBe(1);
-});
-
-test("switching views preserves relative progress through the chapter", async () => {
-	const scrollFile = RevueChaptersFileSchema.parse({
-		chapters: [
-			{
-				id: "scroll-chapter",
-				order: 1,
-				title: "Keep view positions",
-				summary: "Both renderings are longer than the viewport.",
-				hunkRefs: [{ filePath: "scroll.ts", oldStart: 1 }],
-				keyChanges: [],
-			},
-		],
-	});
-	const additions = Array.from({ length: 30 }, (_, index) => `+patch row ${index + 1}`).join("\n");
-	const diffFiles = parsePatch(`diff --git a/scroll.ts b/scroll.ts
---- a/scroll.ts
-+++ b/scroll.ts
-@@ -1 +1,30 @@
--old row
-${additions}
-`);
-	const semanticAdditions = Array.from(
-		{ length: 30 },
-		(_, index) => `+semantic row ${index + 1}`,
-	).join("\n");
-	const t = await testRender(
-		<App
-			file={scrollFile}
-			diffFiles={diffFiles}
-			loadSemanticDiff={async () => ({
-				version: "Difftastic 0.67.0",
-				files: [
-					semanticFile(
-						"scroll.ts",
-						`--- a/scroll.ts\n+++ b/scroll.ts\n@@ -1,1 +1,30 @@\n-old row\n${semanticAdditions}\n`,
-					),
-				],
-			})}
-		/>,
-		{ width: 100, height: 14, kittyKeyboard: true },
-	);
-	await t.renderOnce();
-	for (let index = 0; index < 16; index += 1) await press(t, "j");
-	expect(t.captureCharFrame()).not.toContain("patch row 1 ");
-
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await arrow(t, "down");
-	await press(t, "RETURN");
-	await act(async () => Promise.resolve());
-	await t.renderOnce();
-	const semanticFrame = t.captureCharFrame();
-	expect(semanticFrame).toContain("Semantic │");
-	expect(semanticFrame).toContain("semantic row");
-	expect(semanticFrame).not.toContain("semantic row 1 ");
-	for (let index = 0; index < 4; index += 1) await press(t, "j");
-
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await press(t, "RETURN");
-	expect(t.captureCharFrame()).not.toContain("patch row 1 ");
-
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await arrow(t, "down");
-	await press(t, "RETURN");
-	expect(t.captureCharFrame()).not.toContain("semantic row 1 ");
 });
 
 test("reopening restores the exact scroll offset", async () => {
@@ -956,34 +776,6 @@ ${additions}
 	expect(t.captureCharFrame()).toContain("restored row");
 	await press(t, "q");
 	expect(sessions.at(-1)?.pages["restored-scroll"]?.scrollTop).toBe(16);
-});
-
-test("an unavailable semantic diff stays in Patch with a safe explanation", async () => {
-	const diffFiles = await loadPatch(PATCH);
-	const t = await testRender(
-		<App
-			file={file}
-			diffFiles={diffFiles}
-			loadSemanticDiff={async () => {
-				throw new Error("Semantic diff unavailable: incompatible difft.\u001b[31m");
-			}}
-		/>,
-		{ width: 120, height: 44, kittyKeyboard: true },
-	);
-	await t.renderOnce();
-	await nextChapter(t);
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await arrow(t, "down");
-	await press(t, "RETURN");
-	await act(async () => Promise.resolve());
-	await t.renderOnce();
-	const frame = t.captureCharFrame();
-	expect(frame).toContain("Patch │");
-	expect(frame).toContain("Semantic diff unavailable: incompatible difft.");
-	expect(frame).toContain("MAX_RETRIES");
-	expect(frame).not.toContain("[31m");
 });
 
 test("the bracket keys stay unbound now the chapter chord is retired", async () => {
@@ -1427,77 +1219,6 @@ ${additions}
 	expect(targetY).toBeGreaterThanOrEqual(4);
 	expect(targetY).toBeLessThanOrEqual(9);
 	expect(visibleLines.some((line) => line.includes("exact row 1 "))).toBe(false);
-});
-
-test("clicking a key change centres its matching semantic row", async () => {
-	const semanticChapters = RevueChaptersFileSchema.parse({
-		chapters: [
-			{
-				id: "semantic-anchor",
-				order: 1,
-				title: "Anchor semantic rows",
-				summary: "The semantic diff is longer than the viewport.",
-				hunkRefs: [{ filePath: "semantic.ts", oldStart: 1 }],
-				keyChanges: [
-					{
-						content: "Review the semantic target",
-						lineRefs: [
-							{
-								filePath: "semantic.ts",
-								side: "additions",
-								startLine: 25,
-								endLine: 25,
-							},
-						],
-					},
-				],
-			},
-		],
-	});
-	const patchRows = Array.from({ length: 30 }, (_, index) => `+patch row ${index + 1}`).join("\n");
-	const semanticRows = Array.from({ length: 30 }, (_, index) => `+semantic row ${index + 1}`).join(
-		"\n",
-	);
-	const diffFiles = parsePatch(`diff --git a/semantic.ts b/semantic.ts
---- a/semantic.ts
-+++ b/semantic.ts
-@@ -1 +1,30 @@
--old row
-${patchRows}
-`);
-	const t = await testRender(
-		<App
-			file={semanticChapters}
-			diffFiles={diffFiles}
-			loadSemanticDiff={async () => ({
-				version: "Difftastic 0.67.0",
-				files: [
-					semanticFile(
-						"semantic.ts",
-						`--- a/semantic.ts\n+++ b/semantic.ts\n@@ -1,1 +1,30 @@\n-old row\n${semanticRows}\n`,
-					),
-				],
-			})}
-		/>,
-		{ width: 100, height: 14, kittyKeyboard: true },
-	);
-	await t.renderOnce();
-	await press(t, "F10");
-	await arrow(t, "right");
-	await arrow(t, "right");
-	await arrow(t, "down");
-	await press(t, "RETURN");
-	await act(async () => Promise.resolve());
-	await t.renderOnce();
-	expect(t.captureCharFrame()).not.toContain("semantic row 25");
-	const hintLines = t.captureCharFrame().split("\n");
-	const hintY = hintLines.findIndex((line) => line.includes("Review the semantic target"));
-	await click(t, (hintLines[hintY]?.indexOf("Review the semantic target") ?? -1) + 1, hintY);
-
-	const visibleLines = t.captureCharFrame().split("\n");
-	const targetY = visibleLines.findIndex((line) => line.includes("semantic row 25"));
-	expect(targetY).toBeGreaterThanOrEqual(4);
-	expect(targetY).toBeLessThanOrEqual(9);
 });
 
 test("inline threads show authors and compose new roots and replies", async () => {

@@ -1068,17 +1068,8 @@ async function showRun(
 	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
 	const startupTheme = resolveThemeChoice(themeChoice, null, customThemes);
 
-	const [
-		{ runApp },
-		{ preparePatch, prepareContextQuotations },
-		{ generateSemanticDiff },
-		{ openRunStateStore },
-	] = await Promise.all([
-		import("./app.tsx"),
-		import("./diff.ts"),
-		import("./semantic.ts"),
-		import("./viewState.ts"),
-	]);
+	const [{ runApp }, { preparePatch, prepareContextQuotations }, { openRunStateStore }] =
+		await Promise.all([import("./app.tsx"), import("./diff.ts"), import("./viewState.ts")]);
 
 	let currentDirectory = directory;
 	let carriedSessionState: ReviewSessionState | undefined;
@@ -1139,7 +1130,6 @@ async function showRun(
 			diffFiles,
 			syntaxWarning,
 			initialNotice: notice,
-			loadSemanticDiff: () => generateSemanticDiff(run),
 			loadFileLines,
 			initialViewState: store.get(),
 			initialSessionState: hasSavedPosition ? storedSession : carriedSessionState,

@@ -467,16 +467,10 @@ const KEYMAP_NOTES: readonly { section: KeymapSection; context: KeymapContext; t
 		text: "ctrl-y path:line · ctrl-g GitHub link, while a thread is open",
 	},
 	{ section: "Copying", context: "page", text: "links need a GitHub remote and a committed side" },
-	{ section: "Views", context: "global", text: "F10 → View toggles Patch / read-only Semantic" },
 	{
 		section: "Views",
 		context: "global",
 		text: "F10 → View sets diff layout: auto, split or stacked",
-	},
-	{
-		section: "Views",
-		context: "global",
-		text: "key-change anchors work in both views; Semantic remains read-only",
 	},
 	{
 		section: "Menus",

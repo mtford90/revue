@@ -54,8 +54,8 @@ version. `revue skill install` hands that stamped copy to the open skills CLI
 the skill into each one's directory, so new harnesses are supported without changes to revue.
 `--user` installs at user scope. Without a package runner, `revue skill print` emits the stamped
 skill for manual placement. Re-run install after upgrading revue; `revue doctor` reports a stale
-or missing skill alongside the required Git and optional Difftastic dependencies. The skill
-itself only ever advises how to install the CLI — it never downloads or installs binaries.
+or missing skill alongside the required Git dependency. The skill itself only ever advises how to
+install the CLI — it never downloads or installs binaries.
 
 ## Markdown export
 
@@ -290,17 +290,17 @@ with a local pipe alongside it for terminals that quietly drop the sequence.
 
 The top File/Navigate/View/Help menu makes the main actions discoverable with a mouse or keyboard.
 Press `F10` to open it, use arrow keys and `Enter`, and press `Escape` or click outside to close.
-Navigate walks pages and unreviewed chapters, View switches rendering, file display, and file
-collapse, and Help opens the keymap in a modal over the review.
+Navigate walks pages and unreviewed chapters, View switches diff chrome, file and path display,
+layout, and file collapse, and Help opens the keymap in a modal over the review.
 
 A review has three **surfaces**, switched from the strip under the menu bar: **Narrative** (the
 narrated chapter pages), **Diff** (`w`, the whole diff without the narrative), and **Comments** (`o`, every
 thread in one list). The Comments tab shows its open-thread count while any remain.
 
-The bottom row is a powerline-style **status bar**: the review context, a reviewed-files gauge, the
-open-thread count, and the active Patch/Semantic view, with transient success/error notices in
-place. Terminals known to ship the powerline glyphs (Ghostty, WezTerm, iTerm, kitty) get arrow
-separators; everyone else gets flush segments, and narrow terminals drop segments rather than wrap.
+The bottom row is a powerline-style **status bar**: the review context, a reviewed-files gauge, and
+the open-thread count, with transient success/error notices in place. Terminals known to ship the
+powerline glyphs (Ghostty, WezTerm, iTerm, kitty) get arrow separators; everyone else gets flush
+segments, and narrow terminals drop segments rather than wrap.
 
 File lists render paths in one of three **path display modes**, cycled with `p` and listed in the
 View menu. **Smart** (the default) hoists the common directory prefix into the Files header and
@@ -308,10 +308,9 @@ abbreviates the remaining directories fish-style, always keeping the filename in
 nests directories with single-child chains collapsed; **full** keeps raw paths. The choice persists
 alongside the other display preferences.
 
-In Patch view, a `⋯` band between hunks (and above the first, below the last) reveals the
-unchanged lines around them, GitHub-style: click **▲ expand up**, **▼ expand down** (20 lines a
-step), or **↕ expand all** to close the gap. The lines come from the run's pinned blobs, so
-expansion never touches Git state.
+A `⋯` band between hunks (and above the first, below the last) reveals the unchanged lines around
+them, GitHub-style: click **▲ expand up**, **▼ expand down** (20 lines a step), or **↕ expand all**
+to close the gap. The lines come from the run's pinned blobs, so expansion never touches Git state.
 
 The sidebar and a side-by-side diff compete for the same columns, so View settles both together.
 Diff layout is `auto`, `split` or `stacked`, and the sidebar is `auto`, `shown` or `hidden`. Under
@@ -322,11 +321,10 @@ so dragging the divider never makes it disappear under the pointer. Asking for `
 `auto` sidebar, which matters once the divider has been dragged wide, but an explicit sidebar
 preference is never overridden.
 
-Patch view shows line numbers and `+`/`-` change markers by default. **View → Line numbers** and
+The diff shows line numbers and `+`/`-` change markers by default. **View → Line numbers** and
 **View → Change markers (+/-)** toggle them independently. Hidden line numbers remove the selectable
 gutter and return its columns to code; comments and selections already anchored to source lines
-remain valid. These toggles deliberately do not reinterpret Semantic view's Difftastic output.
-Both choices, along with the panel width, chosen diff view, layout, and file display, are remembered
+remain valid. Both choices, along with the panel width, layout, and file display, are remembered
 across repositories in `~/.revue/preferences.json`; existing preference files without the new keys
 retain the on/on defaults. They do not belong to one run's view state.
 
@@ -337,14 +335,7 @@ the panel are unaffected: they keep the two-column layout exactly as before.
 
 File display is **all** by default, stacking every chapter file in narrative order. **Focused**
 shows only the selected file; `Tab` / `Shift+Tab` and the sidebar file list replace it with the next
-selection. This choice applies equally to Patch and Semantic views.
-
-Patch is the default view. The View menu can lazily generate a read-only Semantic diff when a compatible
-[`difft`](https://difftastic.wilfred.me.uk/) executable is available; it compares only the verified
-old/new blobs in the prepared run. Semantic uses Difftastic's coloured side-by-side presentation at
-wide content widths and coloured inline output when narrow, translating its styling into safe
-OpenTUI spans rather than emitting terminal escapes. A missing or incompatible executable leaves
-Patch active and shows a terminal-safe explanation.
+selection.
 
 ## Themes
 
@@ -442,9 +433,8 @@ does not fire there dimmed under **Elsewhere** with the key that gets you to it.
 key, description or action id; `Esc` clears the filter, then closes. `revue keybindings` lists every
 alias, including the ones the surface holds back.
 
-Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when views
-or file display change, and switching Patch/Semantic carries the reviewer's relative position through
-the chapter.
+Mouse-wheel and trackpad scrolling are supported. The selected chapter/file is retained when the
+layout or file display changes.
 
 Reload re-preps the same scope and reopens the resulting run in place, without quitting revue — the
 way to pick up a `chapters.json` an agent just wrote, or new changes to the diff it's reviewing.
@@ -458,10 +448,7 @@ holding it. Key-change ticks don't carry, since they answer questions about the 
 status bar's notice says which happened. A
 re-prep that fails (for example outside a Git repository, or against a scope Git can no longer
 resolve) leaves the current review untouched and reports the error in the same notice.
-Semantic mode is intentionally read-only. Key-change anchors and severity-tinted exact ranges work
-in both views by source line number; Difftastic rows never become durable review anchors. Binary,
-symlink, mode-only, and content-identical metadata changes are described rather than passed off as
-semantic source diffs. Progress and the reviewer's location persist to `.revue/state.json`, keyed by both the pinned run and
+Progress and the reviewer's location persist to `.revue/state.json`, keyed by both the pinned run and
 its chapter narration. Reopening the same run restores the current page, focused file/hunk/question,
 collapsed files, and the main and chapter-panel scroll offsets. Saved threads load independently from
 `.revue/threads.json`; an unfinished composer draft is deliberately not restored.
@@ -552,7 +539,6 @@ bundled themes.
 - [x] Scroll long diffs; choose split/stack layout by terminal width
 - [x] File/View application menu with pointer and keyboard operation
 - [x] Deterministic **Markdown export** for the full review, prologue, or one chapter
-- [x] Read-only **Difftastic semantic diff** view over the pinned old/new snapshots
 - [x] Authored inline **review threads** with replies and Revue-owned persistence/lifecycle
 - [x] **Themes** derived from bundled editor themes, with a live picker, `--theme`, and transparency
 - [x] **Mermaid flowcharts drawn as ASCII** in prologue and chapter diagram blocks, with source as

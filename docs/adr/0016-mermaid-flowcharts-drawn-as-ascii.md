@@ -87,3 +87,9 @@ become different.
   from the plan.
 - The Markdown export does not change. It emits the Mermaid fence, because a Markdown reader draws
   it.
+
+## Amendments
+
+- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes Markdown export. The
+  consequence above is historical; the drawn/source decision for a diagram block now applies only
+  to the TUI's own rendering.

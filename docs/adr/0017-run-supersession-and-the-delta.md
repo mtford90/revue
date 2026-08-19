@@ -71,3 +71,8 @@ The run key hashes the parsed chapters. Reviewer progress is keyed by the run ke
 - A prep with no narration afterwards leaves a pending run. The next prep supersedes the last narrated run, not the pending one. Threads on the pending run strand there. This is a known gap.
 - A renamed file yields new units and stale chapters. The delta matches files by path only.
 - Superseded runs accumulate in `.revue/runs/`. Garbage collection is a separate product decision.
+
+## Amendments
+
+- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes `revue export`, so the
+  coverage validation named above now runs only in `revue show` and `revue threads`.

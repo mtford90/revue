@@ -242,11 +242,6 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   removed/added line: a stronger diff-tinted background behind the changed spans, syntax
   foregrounds untouched. Only lines the differ pairs as revisions of each other carry it;
   unpaired lines keep the plain row tint.
-- **Markdown export** — a deterministic, read-only rendering of a validated run's prologue, ordered
-  chapters, pinned file metadata, review questions, authored threads, and optional local review
-  progress. Full review is the default; prologue and one chapter by stable id/order are explicit
-  selections. Prologue-only output omits threads. Export never recomputes Git state or writes state.
-
 ## Key decisions
 
 - **The CLI owns the skill text; the skills CLI owns distribution.** The `revue` skill
@@ -287,9 +282,6 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
-- **Export formats verified runs, not repositories.** Markdown export calls the same public run
-  loading and coverage validation path as `show`, reads persisted state under the same run key, and
-  delegates to a pure formatter package with no OpenTUI dependency.
 - **Threads are mutable state keyed by immutable code.** See `docs/adr/0004`. Revue locates the
   reviewed repository from the supplied run, validates and atomically replaces its
   `.revue/threads.json`, keyed by full `runId`; prepared run directories remain immutable. Mutations

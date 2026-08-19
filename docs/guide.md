@@ -27,7 +27,6 @@ packages/
   diff-ansi/       Deterministic ANSI file envelopes shared with Revuediff
   revuediff/       Standalone `revuediff` stdin formatter and downstream-pager CLI
   prep/            Git scope resolution, immutable snapshots, filtering, and hunk formatting
-  markdown-export/ Pure deterministic Markdown formatting with no OpenTUI dependency
   theme/           Contrast-aware palettes derived from bundled editor themes
   types/           zod schemas for chapters, review state, and run manifests
   tui/             The CLI and OpenTUI chapter-navigation shell
@@ -57,41 +56,6 @@ skill for manual placement. Re-run install after upgrading revue; `revue doctor`
 or missing skill alongside the required Git dependency. The skill itself only ever advises how to
 install the CLI — it never downloads or installs binaries.
 
-## Markdown export
-
-`revue export` consumes only a complete run directory and uses the same integrity and chapter-
-coverage validation as `show`. A full review in chapter order is the default:
-
-```bash
-bun run revue export examples/sample-run > review.md
-```
-
-Select one portable slice explicitly by stable chapter identity, numeric chapter order, or the
-prologue:
-
-```bash
-bun run revue export examples/sample-run --chapter-id chapter-2
-bun run revue export examples/sample-run --chapter-order 2
-bun run revue export examples/sample-run --prologue
-```
-
-Use `--output <path>` to write the Markdown directly. With no `--output`, stdout contains only the
-Markdown; errors and the output-file confirmation go to stderr. Export reads review progress for the
-pinned run from the same `.revue/state.json` used by `show` and reads inline feedback from
-`.revue/threads.json`; it never writes either store. When local review state is absent, all chapter,
-file, and review-question checkboxes are deterministically unchecked.
-
-The document includes the prologue overview, key changes, focus areas and optional Mermaid diagram;
-ordered chapter titles and summaries; pinned file paths, statuses and whole-file line counts; review
-questions and line anchors; chapter/file/question review state; and threads for the selected chapters.
-A partial narrative states its depth and coverage in a line of its own; a full-depth export says
-nothing and stays byte-identical to what it produced before depth existed. Interludes render as
-ordinary chapters with no files, threads on quoted code are attributed to the chapter that cites
-them, and threads the narration no longer has a home for appear under an "Orphaned threads"
-heading. Quoted excerpt bodies themselves are not printed. It does not recompute Git state. Full and chapter exports preserve each thread and message ID, thread
-status, exact review-unit anchor, author kind/name, creation time, and multi-line body; prologue-only
-exports contain no threads.
-
 ## Flat review without chapters
 
 Chapters are optional. `revue show` opens a run with no `chapters.json` as a flat file-by-file
@@ -113,8 +77,7 @@ revue diff --ref unstaged  # unstaged only: worktree vs index
 a dirty branch the bare command shows uncommitted work, not the branch against its base.
 
 It prints the run directory to stderr, so agents can still target the run with `revue threads`.
-Generating chapters for that same run later upgrades it to the full narrated review; `revue export`
-still requires a narrated run.
+Generating chapters for that same run later upgrades it to the full narrated review.
 
 ## Narrative depth
 
@@ -538,7 +501,6 @@ bundled themes.
 - [x] `revue prep` — pin Git scope, old/new blobs, patch, exclusions, and stable `(filePath, oldStart)` review identities
 - [x] Scroll long diffs; choose split/stack layout by terminal width
 - [x] File/View application menu with pointer and keyboard operation
-- [x] Deterministic **Markdown export** for the full review, prologue, or one chapter
 - [x] Authored inline **review threads** with replies and Revue-owned persistence/lifecycle
 - [x] **Themes** derived from bundled editor themes, with a live picker, `--theme`, and transparency
 - [x] **Mermaid flowcharts drawn as ASCII** in prologue and chapter diagram blocks, with source as

@@ -2,6 +2,21 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.10.0](https://github.com/mtford90/revue/compare/v0.9.0...v0.10.0) (2026-08-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove narrative depth and the 10,000ft partial review
+* remove the Markdown export
+* remove the semantic (difftastic) product surface
+
+### Features
+
+* remove narrative depth and the 10,000ft partial review ([73de666](https://github.com/mtford90/revue/commit/73de666a865b15b93c5834a7e5e043e0d64e15ec))
+* remove the Markdown export ([77f111d](https://github.com/mtford90/revue/commit/77f111d7d733eafee9441b045205985238f90c58))
+* remove the semantic (difftastic) product surface ([cf0acd1](https://github.com/mtford90/revue/commit/cf0acd1ea470bd7b19227ff20d7a23b21850e6e2))
+
 ## [0.9.0](https://github.com/mtford90/revue/compare/v0.8.0...v0.9.0) (2026-08-18)
 
 

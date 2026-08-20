@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/mtford90/revue/compare/revuediff-v0.2.0...revuediff-v0.3.0) (2026-08-20)
+
+
+### Features
+
+* draw mermaid flowcharts as ascii instead of showing their source ([3ed73ed](https://github.com/mtford90/revue/commit/3ed73ed601a75f74ed6628fb2ad99c2f9b44186e))
+* rename the Story and Files surfaces to Narrative and Diff ([50f8220](https://github.com/mtford90/revue/commit/50f8220e60da028ee53ce1a65bc528adc26e9723))
+
+
+### Bug Fixes
+
+* ignore the untracked .scratch planning tree and refresh release route markers ([f34d036](https://github.com/mtford90/revue/commit/f34d036fa423c7fac450383a4c114e4479ccdb86))
+* make chapter index height responsive ([e05a2ee](https://github.com/mtford90/revue/commit/e05a2eee9b4bb59a5649a80e5bea8b3789ef3cf5))
+* widen the drawn mermaid subset and stop a stale label winning ([2416ad6](https://github.com/mtford90/revue/commit/2416ad6e50074d1fac0476bdbe664809984e5c6e))
+
 ## [0.2.0](https://github.com/mtford90/revue/compare/revuediff-v0.1.2...revuediff-v0.2.0) (2026-08-08)
 
 

@@ -61,9 +61,7 @@ import {
 	frozenExcerptContaining,
 	frozenExcerptFor,
 	isExcerptAnchor,
-	narratedUnitCount,
 	type Prologue,
-	partialDepthLabel,
 	type ReviewThread,
 	type RevueChaptersFile,
 	type RunContextFile,
@@ -151,7 +149,7 @@ import {
 	permalinkFor,
 	sourceRangeFor,
 } from "./sourceLink.ts";
-import { type NarrativeCoverage, StatusBar, type StatusNotice } from "./statusBar.tsx";
+import { StatusBar, type StatusNotice } from "./statusBar.tsx";
 import {
 	complexityColor,
 	severityBackgroundColor,
@@ -677,7 +675,6 @@ function ChapterPanel({
 	pages,
 	current,
 	chapterCount,
-	coverage,
 	omittedNotice,
 	width,
 	terminalHeight,
@@ -704,7 +701,6 @@ function ChapterPanel({
 	pages: Page[];
 	current: number;
 	chapterCount: number;
-	coverage: NarrativeCoverage | null;
 	omittedNotice: string | null;
 	width: number;
 	terminalHeight: number;
@@ -758,18 +754,9 @@ function ChapterPanel({
 				>
 					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.heading}>
 						{indexExpanded ? "▾" : "▸"} Chapters ({chapterCount})
-						{coverage ? ` · ${coverage.label}` : ""}
 					</text>
 				</box>
 			) : null}
-			{chapterCount > 0 && !filesSurface && coverage ? (
-				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
-					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
-						{`${coverage.narrated} of ${coverage.total} hunks · rest in Diff`}
-					</text>
-				</box>
-			) : null}
-			{/* Unlike coverage, an omission applies at every depth: the run itself is short. */}
 			{omittedNotice ? (
 				<box flexDirection="row" height={1} flexShrink={0} paddingLeft={4} paddingRight={1}>
 					<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
@@ -2457,17 +2444,6 @@ export function App({
 		(): Page => ({ kind: "files", label: ALL_FILES_LABEL, chapter: filesChapter }),
 		[filesChapter],
 	);
-	// Coverage is derived, never stored, and exists only for a narrative that declared itself
-	// partial — at full depth the reviewer is told nothing, because nothing was left out.
-	const coverage = useMemo((): NarrativeCoverage | null => {
-		const label = file ? partialDepthLabel(file) : null;
-		if (!file || !label) return null;
-		return {
-			label,
-			narrated: narratedUnitCount(file),
-			total: filesChapter.hunkRefs.length,
-		};
-	}, [file, filesChapter]);
 	const pages = useMemo(() => (file ? buildPages(file) : [filesPage]), [file, filesPage]);
 	const chapters = pages.flatMap((candidate) =>
 		candidate.kind === "chapter" ? [candidate.chapter] : [],
@@ -2759,7 +2735,7 @@ export function App({
 		[chapter, threads],
 	);
 	/**
-	 * Threads whose anchored code this run no longer holds. Re-narrating at another depth can
+	 * Threads whose anchored code this run no longer holds. A re-narrated run can
 	 * legitimately drop an excerpt, and supersession legitimately deletes code a carried thread was
 	 * written against, so these stay in the store and stay listed rather than being pruned; they
 	 * simply have no line to render against. The caller reports the carried ones, which only a
@@ -4342,7 +4318,6 @@ export function App({
 							pages={pages}
 							current={current}
 							chapterCount={chapters.length}
-							coverage={coverage}
 							omittedNotice={omittedNotice}
 							width={panelWidth}
 							terminalHeight={height}
@@ -4550,7 +4525,6 @@ export function App({
 					context={statusContext}
 					reviewedFiles={filesSurface ? reviewedFiles : storyProgress.reviewed}
 					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
-					coverage={coverage}
 					openThreads={openThreadCount}
 					notice={statusNotice}
 					hints={statusHints}

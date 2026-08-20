@@ -80,7 +80,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   borrowing it would be indistinguishable from a thread on a file with no textual hunk. The two
   kinds fail differently: a hunk anchor that no longer resolves is corruption and blocks the load,
   while an excerpt anchor the frozen context no longer covers is surfaced as **orphaned** and never
-  pruned, because re-narrating at another depth legitimately drops a citation. A thread has ordered
+  pruned, because a re-narrated run legitimately drops a citation. A thread has ordered
   messages and a thread-level `open` or reversible `dealt-with` status; multiple threads may share
   an anchor.
 - **Carried thread** — a thread prep moved onto a run from the run it **supersedes**, open and
@@ -130,16 +130,8 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   to a single band by default, opens in place, reads as scenery rather than work, contributes
   nothing to review progress, and accepts comments on its lines, because a citation is pinned
   narration rather than an ad-hoc reveal. Quoted lines are currently rendered unhighlighted.
-- **Narrative depth** — the chapters file's own declaration of how much of the prepared diff it sets
-  out to cover: `full`, or `partial` carrying the label the reviewer sees (the `10,000ft` preset, or
-  freeform words for a bespoke request). An absent declaration means full, so every chapters file
-  written before depth existed keeps its meaning. It is the only thing that permits a narrative to
-  leave review units out.
-- **Coverage** — how many prepared review units the narration actually cites, against how many exist.
-  `revue show --check` reports it for every run; the TUI states it in exactly two places — a
-  status-bar segment after the file count, and the chapter-index header plus one line beneath it —
-  and in neither at full depth, because full is the baseline rather than a mode. Whatever the
-  narrative omits stays reachable through the Files surface.
+- **Coverage** — every prepared review unit must appear in exactly one chapter: no omissions, no
+  duplicates. `revue show --check` reports the narrated count for every run.
 - **Selection** — the gutter-drag line range that says what the reviewer is acting on. Comment,
   copy-text, copy-location, and copy-GitHub-link are verbs hung off the one selection, reachable
   from the composer footer keys and the right-click menu alike. A GitHub permalink is offered per
@@ -274,11 +266,8 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   agent adds narration before `show`; whether Revue later drives the agent live remains open.
 - **Prep owns scope; show never touches Git.** See `docs/adr/0003`. Old/new blobs and Git modes are
   stored with the patch so full-file context can consume the same frozen input.
-  How strictly show checks coverage keys on the narrative's declared depth (see `docs/adr/0014`):
-  at full depth — which is also what an absent declaration means — it still requires every prepared
-  review unit exactly once, so the default case is unchanged. Only an explicitly partial depth may
-  omit units. Duplicate units, unknown units, and key-change line ranges outside their chapter’s
-  pinned hunks are rejected at every depth.
+  Show requires every prepared review unit exactly once; duplicate units, unknown units, and
+  key-change line ranges outside their chapter’s pinned hunks are rejected.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
@@ -324,9 +313,8 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **The TUI owns viewport windowing.** See `docs/adr/0012`. OpenTUI culling still pays full layout
   cost, so Revue mounts only near-window row segments and preserves scroll geometry with
   fixed-height gaps; reveals are offset-based, and diff-body components need measurable heights.
-- **A narrative declares its depth; Revue freezes the code it quotes.** See `docs/adr/0014`, which
-  extends ADRs 0003, 0004 and 0007 rather than superseding them. Coverage strictness keys on the
-  declared depth so nothing loosens by default; excerpt citations are frozen off disk by
+- **Revue freezes the code the narrative quotes.** See `docs/adr/0014`, which
+  extends ADRs 0003, 0004 and 0007 rather than superseding them. Excerpt citations are frozen off disk by
   `revue context freeze` rather than transcribed by the agent, and may name files outside the diff;
   and quoted code carries its own anchor kind, whose failure to resolve is orphaning rather than
   corruption.

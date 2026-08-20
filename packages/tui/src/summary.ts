@@ -1,10 +1,5 @@
 import { exclusionSource } from "@revue/prep";
-import {
-	narratedUnitCount,
-	partialDepthLabel,
-	type RevueChaptersFile,
-	type RunManifest,
-} from "@revue/types";
+import { narratedUnitCount, type RevueChaptersFile, type RunManifest } from "@revue/types";
 
 /**
  * What an ignore rule kept out of the run. The narrated count is measured against the run, so a
@@ -19,7 +14,7 @@ export const omissionNotice = (manifest: RunManifest): string | null => {
 	return `${files} omitted · ${sources.join(" and ")}`;
 };
 
-/** Plain-text summary after a validated run, whatever depth it was narrated at. */
+/** Plain-text summary after a validated run. */
 export function formatSummary(file: RevueChaptersFile, manifest: RunManifest): string {
 	const preparedUnits = manifest.totals.reviewUnits;
 	const lines: string[] = [];
@@ -41,9 +36,8 @@ export function formatSummary(file: RevueChaptersFile, manifest: RunManifest): s
 		lines.push("");
 	}
 
-	const depth = partialDepthLabel(file);
 	lines.push(
-		`  ${narratedUnitCount(file)} of ${preparedUnits} review unit${preparedUnits === 1 ? "" : "s"} narrated${depth ? ` (${depth})` : ""}`,
+		`  ${narratedUnitCount(file)} of ${preparedUnits} review unit${preparedUnits === 1 ? "" : "s"} narrated`,
 	);
 	const omitted = omissionNotice(manifest);
 	if (omitted) lines.push(`  ${omitted}`);

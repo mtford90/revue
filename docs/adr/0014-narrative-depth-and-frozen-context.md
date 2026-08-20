@@ -118,3 +118,9 @@ comments, because its revealed lines are not pinned narration.
 - Extension is now a recorded convention here, with supersession. An ADR that qualifies another ADR,
   and does not reverse it, writes `Extends:` in its header. It also adds a pointer with a date under
   the `## Amendments` heading of the amended ADR.
+
+## Amendments
+
+- 2026-08-20 — Narrative depth is removed from the product. A chapters file declares no `depth`,
+  and every narration owes every prepared review unit exactly once again. The frozen context
+  excerpts and excerpt anchors this ADR also introduced are unaffected and remain current.

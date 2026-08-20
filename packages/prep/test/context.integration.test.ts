@@ -65,7 +65,6 @@ const narration = (excerpts: ContextExcerpt[]) =>
 				excerpts,
 			},
 		],
-		depth: { kind: "partial", label: "10,000ft" },
 	});
 
 const artifactBytes = async (run: PreparedRun): Promise<Record<string, string>> =>

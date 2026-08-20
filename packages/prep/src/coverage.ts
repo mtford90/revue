@@ -5,7 +5,6 @@ import {
 	excerptRangeLabel,
 	isEpilogue,
 	type LineRef,
-	partialDepthLabel,
 	type ReviewThread,
 	type RevueChaptersFile,
 	type RunContextFile,
@@ -103,9 +102,6 @@ const omittedPathExplanation = (
 };
 
 const reviewUnitIssues = (run: PreparedRun, file: RevueChaptersFile): string[] => {
-	// Only a narrative that says out loud it is partial may leave units out; everything else,
-	// including a chapters file written before depth existed, still owes every one of them.
-	const everyUnitRequired = partialDepthLabel(file) === null;
 	const expected = new Map(manifestUnitEntries(run));
 	const occurrences = new Map<string, string[]>();
 	for (const chapter of file.chapters) {
@@ -117,7 +113,7 @@ const reviewUnitIssues = (run: PreparedRun, file: RevueChaptersFile): string[] =
 	const issues: string[] = [];
 	for (const [key, label] of expected) {
 		const owners = occurrences.get(key) ?? [];
-		if (!owners.length && everyUnitRequired) issues.push(`missing review unit ${label}`);
+		if (!owners.length) issues.push(`missing review unit ${label}`);
 		if (owners.length > 1) issues.push(`review unit ${label} appears ${owners.length} times`);
 	}
 	for (const [key, owners] of occurrences) {

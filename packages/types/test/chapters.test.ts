@@ -7,7 +7,7 @@ import {
 	keyChangeSchema,
 	threadReferences,
 } from "../src/chapters.ts";
-import { partialDepthLabel, RevueChaptersFileSchema } from "../src/file.ts";
+import { RevueChaptersFileSchema } from "../src/file.ts";
 
 const keyChange = {
 	content: "Should this retry budget be shared?",
@@ -87,32 +87,11 @@ test("an epilogue says what it is and cites the threads it answers", () => {
 	expect(chapterSchema.safeParse({ ...chapter, threadRefs: ["thread-1"] }).success).toBe(false);
 });
 
-test("a narrative declares its depth, and an undeclared one is full", () => {
+test("a chapters file declares no narrative depth", () => {
 	const chapters = { chapters: [] };
 
-	expect(partialDepthLabel(RevueChaptersFileSchema.parse(chapters))).toBeNull();
-	expect(
-		partialDepthLabel(RevueChaptersFileSchema.parse({ ...chapters, depth: { kind: "full" } })),
-	).toBeNull();
-	expect(
-		partialDepthLabel(
-			RevueChaptersFileSchema.parse({
-				...chapters,
-				depth: { kind: "partial", label: "10,000ft" },
-			}),
-		),
-	).toBe("10,000ft");
-	expect(
-		partialDepthLabel(
-			RevueChaptersFileSchema.parse({
-				...chapters,
-				depth: { kind: "partial", label: "just the API changes" },
-			}),
-		),
-	).toBe("just the API changes");
-	// A partial narrative that will not say what it left out is not a declaration.
-	expect(
-		RevueChaptersFileSchema.safeParse({ ...chapters, depth: { kind: "partial" } }).success,
-	).toBe(false);
-	expect(RevueChaptersFileSchema.safeParse({ ...chapters, depth: "10,000ft" }).success).toBe(false);
+	expect(RevueChaptersFileSchema.safeParse(chapters).success).toBe(true);
+	expect(RevueChaptersFileSchema.safeParse({ ...chapters, depth: { kind: "full" } }).success).toBe(
+		false,
+	);
 });

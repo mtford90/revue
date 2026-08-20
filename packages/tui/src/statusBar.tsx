@@ -50,24 +50,6 @@ export const hintText = (
 	return kept.length === 0 ? "" : ` ${kept.join(" · ")}`;
 };
 
-/** How much of the diff a partial narrative covers. Null at full depth: full is the baseline. */
-export type NarrativeCoverage = { label: string; narrated: number; total: number };
-
-/**
- * A zoomed-out run says so permanently, so the segment only sheds under real pressure: the
- * word `hunks` once the thread count has already gone, then the segment once the files count
- * and the context have gone too.
- */
-export function coverageSegment(
-	coverage: NarrativeCoverage | null,
-	terminalWidth: number,
-): string | null {
-	if (!coverage || terminalWidth < TINY_BAR_WIDTH) return null;
-	const counts = `${coverage.narrated}/${coverage.total}`;
-	const hunks = terminalWidth < NARROW_BAR_WIDTH ? "" : " hunks";
-	return ` ${coverage.label} · ${counts}${hunks} `;
-}
-
 /** What the bar names for the current surface: a few keys, and the pair that never leaves. */
 export type StatusHints = { keys: string; label: string }[];
 
@@ -75,7 +57,6 @@ export function StatusBar({
 	context,
 	reviewedFiles,
 	totalFiles,
-	coverage,
 	openThreads,
 	notice,
 	hints: hintList = [],
@@ -86,7 +67,6 @@ export function StatusBar({
 	context: string;
 	reviewedFiles: number;
 	totalFiles: number;
-	coverage: NarrativeCoverage | null;
 	openThreads: number;
 	notice: StatusNotice | null;
 	hints?: StatusHints;
@@ -100,7 +80,6 @@ export function StatusBar({
 	const narrow = terminalWidth < NARROW_BAR_WIDTH;
 	const tiny = terminalWidth < TINY_BAR_WIDTH;
 	const bar = gauge(reviewedFiles, totalFiles, GAUGE_WIDTH);
-	const coverageText = coverageSegment(coverage, terminalWidth);
 	const boundary = bar.indexOf("▱");
 	const filled = boundary === -1 ? bar : bar.slice(0, boundary);
 	const empty = boundary === -1 ? "" : bar.slice(boundary);
@@ -115,7 +94,6 @@ export function StatusBar({
 		(tiny ? 0 : context.length + 2) +
 		(wide ? bar.length + 1 : 0) +
 		filesText.length +
-		(coverageText?.length ?? 0) +
 		threadsText.length +
 		tailText.length +
 		(arrows ? 4 : 0);
@@ -160,11 +138,6 @@ export function StatusBar({
 			{filesText ? (
 				<text flexShrink={0} fg={theme.text} bg={theme.panel}>
 					{filesText}
-				</text>
-			) : null}
-			{coverageText ? (
-				<text flexShrink={0} fg={theme.muted} bg={theme.panel}>
-					{coverageText}
 				</text>
 			) : null}
 			{arrows && !tiny ? (

@@ -3,459 +3,55 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>revue — narrative code review in your terminal</title>
-<meta name="description" content="revue organises a branch's diff into ordered, narrated chapters — an interactive, guided tour of the change rather than a wall of files — rendered entirely in your terminal." />
+<title>revue</title>
+<meta name="description" content="revue — narrative code review in your terminal. Coming soon." />
+<meta name="robots" content="noindex" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-<script>
-  const savedTheme = localStorage.getItem("revue-site-theme");
-  if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
-</script>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..600&display=swap" rel="stylesheet" />
 <style>
   :root {
     color-scheme: dark;
     --stage: #10141c;
-    --panel: #171b24;
-    --panel-edge: #2d3542;
     --curtain: #ffb454;
-    --brass: #59c2ff;
     --ink: #bfbdb6;
     --muted: #77808c;
-    --button-ink: #10141c;
-    --shadow: rgba(0, 0, 0, 0.5);
-    --display: "Fraunces", serif;
-    --body: "Instrument Sans", system-ui, sans-serif;
-    --mono: "IBM Plex Mono", ui-monospace, monospace;
   }
   @media (prefers-color-scheme: light) {
-    :root:not([data-theme]) {
+    :root {
       color-scheme: light;
       --stage: #fcfcfc;
-      --panel: #f3f4f5;
-      --panel-edge: #d8d9da;
       --curtain: #a65d00;
-      --brass: #1471ad;
       --ink: #5c6166;
       --muted: #828c99;
-      --button-ink: #fcfcfc;
-      --shadow: rgba(92, 97, 102, 0.2);
     }
   }
-  :root[data-theme="light"] {
-    color-scheme: light;
-    --stage: #fcfcfc;
-    --panel: #f3f4f5;
-    --panel-edge: #d8d9da;
-    --curtain: #a65d00;
-    --brass: #1471ad;
-    --ink: #5c6166;
-    --muted: #828c99;
-    --button-ink: #fcfcfc;
-    --shadow: rgba(92, 97, 102, 0.2);
-  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-  }
   body {
+    min-height: 100dvh;
+    display: grid;
+    place-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    text-align: center;
     background: var(--stage);
     color: var(--ink);
-    font-family: var(--body);
-    font-size: 1.0625rem;
-    line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
+    font-family: system-ui, sans-serif;
   }
-  a { color: var(--brass); text-decoration: none; }
-  a:hover { text-decoration: underline; text-underline-offset: 3px; }
-  a:focus-visible, button:focus-visible {
-    outline: 2px solid var(--brass);
-    outline-offset: 3px;
-    border-radius: 2px;
-  }
-  code, pre { font-family: var(--mono); }
-  .wrap { max-width: 60rem; margin: 0 auto; padding: 0 1.25rem; }
-  .theme-switcher {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    display: flex;
-    gap: 0.2rem;
-    padding: 0.25rem;
-    border: 1px solid var(--panel-edge);
-    border-radius: 6px;
-    background: var(--panel);
-  }
-  .theme-switcher button {
-    border: 0;
-    border-radius: 4px;
-    padding: 0.35rem 0.55rem;
-    color: var(--muted);
-    background: transparent;
-    font: 0.75rem var(--mono);
-    cursor: pointer;
-  }
-  .theme-switcher button[aria-pressed="true"] {
-    color: var(--ink);
-    background: var(--panel-edge);
-  }
-
-  /* ── Masthead ──────────────────────────────────────────── */
-  header { text-align: center; padding: 4.5rem 0 0; }
-  .eyebrow {
-    font-family: var(--mono);
-    font-size: 0.8125rem;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--curtain);
-  }
-  .rule {
-    display: flex; align-items: center; gap: 0.75rem;
-    justify-content: center;
-    color: var(--panel-edge);
-    margin: 1.1rem auto;
-    max-width: 22rem;
-  }
-  .rule::before, .rule::after {
-    content: ""; flex: 1; border-top: 1px solid var(--panel-edge);
-  }
-  .rule span { color: var(--brass); font-size: 0.8rem; letter-spacing: 0.3em; }
   h1 {
-    font-family: var(--display);
-    font-weight: 340;
-    font-size: clamp(4rem, 13vw, 7.5rem);
+    font-family: "Fraunces", serif;
+    font-size: clamp(3rem, 14vw, 5.5rem);
+    font-weight: 500;
     line-height: 1;
-    letter-spacing: -0.015em;
-  }
-  h1 .accent { color: var(--curtain); font-style: italic; }
-  .tagline {
-    font-family: var(--display);
-    font-style: italic;
-    font-weight: 300;
-    font-size: clamp(1.25rem, 3vw, 1.6rem);
-    color: var(--brass);
-    margin-top: 0.9rem;
-  }
-  .lede {
-    max-width: 38rem;
-    margin: 1.4rem auto 0;
-    color: var(--muted);
-  }
-  .lede strong { color: var(--ink); font-weight: 500; }
-  .cta {
-    display: flex; gap: 0.9rem; justify-content: center; flex-wrap: wrap;
-    margin-top: 2.1rem;
-  }
-  .cta a {
-    font-family: var(--mono);
-    font-size: 0.9375rem;
-    padding: 0.65rem 1.3rem;
-    border: 1px solid var(--panel-edge);
-    border-radius: 4px;
-    color: var(--ink);
-  }
-  .cta a.primary {
-    border-color: var(--curtain);
-    background: var(--curtain);
-    color: var(--button-ink);
-  }
-  .cta a:hover { text-decoration: none; border-color: var(--brass); }
-
-  /* ── Stage ─────────────────────────────────────────────── */
-  .stage { padding: 3.2rem 0 1rem; }
-  .proscenium {
-    border: 1px solid var(--panel-edge);
-    border-top: 3px solid var(--curtain);
-    border-radius: 8px;
-    overflow: hidden;
-    background: var(--panel);
-    box-shadow: 0 30px 80px -30px color-mix(in srgb, var(--curtain) 25%, transparent), 0 20px 60px var(--shadow);
-  }
-  .proscenium img { display: block; width: 100%; height: auto; }
-  .stage figcaption {
-    text-align: center;
-    font-family: var(--mono);
-    font-size: 0.8125rem;
-    color: var(--muted);
-    margin-top: 0.9rem;
-  }
-
-  /* ── Sections ──────────────────────────────────────────── */
-  section { padding: 4.5rem 0 0; }
-  .section-title {
-    font-family: var(--display);
-    font-weight: 340;
-    font-size: clamp(1.9rem, 4.5vw, 2.6rem);
-    text-align: center;
-  }
-  .section-note {
-    text-align: center; color: var(--muted);
-    max-width: 34rem; margin: 0.8rem auto 0;
-  }
-
-  /* ── Programme (acts) ──────────────────────────────────── */
-  .acts { margin-top: 2.8rem; display: grid; gap: 1px; background: var(--panel-edge); border: 1px solid var(--panel-edge); border-radius: 8px; overflow: hidden; }
-  .act {
-    display: grid;
-    grid-template-columns: 8.5rem 1fr;
-    gap: 1.4rem;
-    padding: 1.7rem 1.8rem;
-    background: var(--stage);
-  }
-  .act:nth-child(even) { background: color-mix(in srgb, var(--stage) 60%, var(--panel)); }
-  .act .no {
-    font-family: var(--display);
-    font-style: italic;
     color: var(--curtain);
-    font-size: 1.15rem;
-    padding-top: 0.15rem;
   }
-  .act h3 { font-size: 1.05rem; font-weight: 600; }
-  .act h3 code {
-    background: var(--panel);
-    border: 1px solid var(--panel-edge);
-    border-radius: 4px;
-    padding: 0.1rem 0.45rem;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--brass);
-  }
-  .act p { color: var(--muted); margin-top: 0.45rem; font-size: 0.9875rem; }
-  .act p code { color: var(--ink); font-size: 0.875rem; }
-
-  /* ── Features ──────────────────────────────────────────── */
-  .features {
-    margin-top: 2.6rem;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2rem 2.4rem;
-  }
-  .feature h3 {
-    font-family: var(--mono);
-    font-size: 0.8125rem;
-    font-weight: 500;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--brass);
-  }
-  .feature p { color: var(--muted); font-size: 0.9375rem; margin-top: 0.5rem; }
-
-  /* ── Quickstart ────────────────────────────────────────── */
-  .quickstart pre {
-    margin-top: 2.2rem;
-    background: var(--panel);
-    border: 1px solid var(--panel-edge);
-    border-radius: 8px;
-    padding: 1.5rem 1.7rem;
-    overflow-x: auto;
-    font-size: 0.875rem;
-    line-height: 1.9;
-  }
-  .quickstart .cmt { color: var(--muted); }
-  .quickstart .kw { color: var(--brass); }
-
-  /* ── Credits ───────────────────────────────────────────── */
-  .credits dl {
-    margin-top: 2.4rem;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2rem;
-    text-align: center;
-  }
-  .credits dt {
-    font-family: var(--display);
-    font-style: italic;
-    font-size: 1.3rem;
-    color: var(--ink);
-  }
-  .credits dt a { color: inherit; }
-  .credits dd { color: var(--muted); font-size: 0.9375rem; margin-top: 0.45rem; }
-
-  footer {
-    margin-top: 5rem;
-    padding: 2.2rem 0 2.8rem;
-    border-top: 1px solid var(--panel-edge);
-    text-align: center;
-    color: var(--muted);
-    font-family: var(--mono);
-    font-size: 0.8125rem;
-  }
-
-  @media (max-width: 44rem) {
-    .act { grid-template-columns: 1fr; gap: 0.4rem; padding: 1.4rem 1.2rem; }
-    .features, .credits dl { grid-template-columns: 1fr; }
-    header { padding-top: 3rem; }
-  }
+  p { color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.8rem; }
+  a { color: inherit; }
 </style>
 </head>
 <body>
-
-<nav class="theme-switcher" aria-label="Colour theme">
-  <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
-  <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
-  <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
-</nav>
-
-<header class="wrap">
-  <p class="eyebrow">A branch, staged in chapters</p>
-  <div class="rule" aria-hidden="true"><span>❦</span></div>
-  <h1>rev<span class="accent">u</span>e</h1>
-  <p class="tagline">Narrative code review in your terminal.</p>
-  <p class="lede">
-    <strong>revue</strong> organises a branch&rsquo;s diff into ordered, narrated
-    <strong>chapters</strong> — an interactive, guided tour of the change rather than a
-    wall of files — rendered entirely in your terminal. No server, no browser, no database.
-  </p>
-  <div class="cta">
-    <a class="primary" href="#quickstart">Get started</a>
-    <a href="https://github.com/mtford90/revue">GitHub&thinsp;↗</a>
-  </div>
-</header>
-
-<figure class="stage wrap">
-  <div class="proscenium">
-    <img src="assets/hero.png" width="1800" height="1000"
-         alt="The revue terminal reviewer: a sidebar listing six chapters, a narrated chapter about GitHub permalinks, and a diff with two review threads — a human question and an agent's reply" />
-  </div>
-  <figcaption>revue show — reviewing one of revue&rsquo;s own commits, chapter by chapter</figcaption>
-</figure>
-
-<section class="wrap" aria-labelledby="programme">
-  <h2 class="section-title" id="programme">The programme</h2>
-  <p class="section-note">Four acts, in order. Each one reads the last one&rsquo;s output — a review is a
-  pipeline, not a session. In a hurry, <code>revue diff</code> plays any of the same scopes
-  straight through as a flat diff, no narration.</p>
-  <div class="acts">
-    <div class="act">
-      <div class="no">Act I</div>
-      <div>
-        <h3><code>revue prep</code> — freeze the scope</h3>
-        <p>Prep pins any diff into an immutable run — your branch against main, a GitHub PR
-        (<code>--pr 123</code>), staged, unstaged, or the working tree. Nothing shifts underneath
-        the review — not even a rebase.</p>
-      </div>
-    </div>
-    <div class="act">
-      <div class="no">Act II</div>
-      <div>
-        <h3>the <code>revue</code> skill — the agent writes the programme</h3>
-        <p>The bundled skill has your coding agent read the run&rsquo;s hunks, cluster them into
-        narrated chapters, and flag the judgment calls only a human can make.</p>
-      </div>
-    </div>
-    <div class="act">
-      <div class="no">Act III</div>
-      <div>
-        <h3><code>revue show</code> — take your seat</h3>
-        <p>The interactive reviewer: chapters in order, threads anchored to exact lines,
-        copy <code>path:line</code> or a GitHub permalink — all from the keyboard.</p>
-      </div>
-    </div>
-    <div class="act">
-      <div class="no">Act IV</div>
-      <div>
-        <h3><code>revue threads</code> — the notes reach the cast</h3>
-        <p>Every comment you leave anchors to exact lines and round-trips through a public JSON
-        interface, so your agent picks each one up, makes the fix, and replies inline against the
-        same frozen scope.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="wrap" aria-labelledby="stage-directions">
-  <h2 class="section-title" id="stage-directions">Stage directions</h2>
-  <div class="features">
-    <div class="feature">
-      <h3>Keyboard-first</h3>
-      <p>Vim/less conventions throughout: <code>]c</code> between chapters, <code>tab</code> between
-      files, <code>y</code> to copy a selection, <code>?</code> for the full map.</p>
-    </div>
-    <div class="feature">
-      <h3>One authoritative diff</h3>
-      <p>Pierre-powered patch view with side-aware highlights, and GitHub-style expansion into the
-      unchanged lines around each hunk.</p>
-    </div>
-    <div class="feature">
-      <h3>Every colour from one theme</h3>
-      <p>Contrast-aware palettes derived from bundled editor themes — switch with
-      <code>t</code>, previewed live.</p>
-    </div>
-    <div class="feature">
-      <h3>One directory of files</h3>
-      <p>A run is a folder you can inspect, diff, and delete. State and threads are plain JSON
-      beside the pinned patch.</p>
-    </div>
-    <div class="feature">
-      <h3>Local by design</h3>
-      <p>Runs never leave your machine. The only network access is the GitHub permalink you
-      choose to copy.</p>
-    </div>
-  </div>
-</section>
-
-<section class="wrap quickstart" aria-labelledby="quickstart">
-  <h2 class="section-title" id="quickstart">Interval — try it</h2>
-  <p class="section-note">Prebuilt for macOS and Linux; or run from a
-  <a href="https://github.com/mtford90/revue#install">checkout</a> with Bun.</p>
-  <pre><code><span class="cmt"># install — brew, or the script if you don't have it</span>
-<span class="kw">brew</span> install mtford90/tap/revue
-<span class="kw">curl</span> -fsSL https://revue.mtford.co.uk/install.sh | sh
-<span class="kw">revue</span> skill install               <span class="cmt"># give your coding agent the revue skill</span>
-
-<span class="cmt"># in Claude Code, Codex, or any agent with the skill:</span>
-<span class="kw">&gt;</span> /revue this branch against main
-<span class="cmt">  ⏺ prep · chapters · check ✓ — the agent hands you back:</span>
-<span class="kw">revue</span> show .revue/runs/a1b2c3d4e5f6   <span class="cmt"># run in your own terminal — it's a full-screen TUI</span>
-
-<span class="cmt"># no agent handy? flat diff, threads and all</span>
-<span class="kw">revue</span> diff main</code></pre>
-</section>
-
-<section class="wrap credits" aria-labelledby="credits">
-  <h2 class="section-title" id="credits">Credits</h2>
-  <p class="section-note">revue combines ideas from MIT projects without taking on their
-  application shells.</p>
-  <dl>
-    <div>
-      <dt><a href="https://github.com/ReviewStage/stage-cli">Stage</a></dt>
-      <dd>The brain — the chapter model and the clustering skill.</dd>
-    </div>
-    <div>
-      <dt><a href="https://github.com/pierrecomputer/diffs">Pierre</a></dt>
-      <dd>The parser — diff parsing and syntax highlighting.</dd>
-    </div>
-    <div>
-      <dt><a href="https://www.hunk.dev/">Hunk</a></dt>
-      <dd>The surfaces — bounded terminal rendering concepts.</dd>
-    </div>
-  </dl>
-</section>
-
-<footer>
-  <div class="wrap">MIT · <a href="https://github.com/mtford90/revue">mtford90/revue</a></div>
-</footer>
-
-<script>
-  const themeButtons = [...document.querySelectorAll("[data-theme-choice]")];
-  const setTheme = (choice) => {
-    if (choice === "system") {
-      delete document.documentElement.dataset.theme;
-      localStorage.removeItem("revue-site-theme");
-    } else {
-      document.documentElement.dataset.theme = choice;
-      localStorage.setItem("revue-site-theme", choice);
-    }
-    themeButtons.forEach((button) => {
-      button.setAttribute("aria-pressed", String(button.dataset.themeChoice === choice));
-    });
-  };
-  const initialTheme = document.documentElement.dataset.theme ?? "system";
-  setTheme(initialTheme);
-  themeButtons.forEach((button) => {
-    button.addEventListener("click", () => setTheme(button.dataset.themeChoice));
-  });
-</script>
+  <h1>revue</h1>
+  <p>Coming soon</p>
+  <p><a href="https://github.com/mtford90/revue">github.com/mtford90/revue</a></p>
 </body>
 </html>

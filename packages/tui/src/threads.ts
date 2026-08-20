@@ -17,7 +17,6 @@ import {
 	frozenExcerptContaining,
 	type HunkThreadAnchor,
 	isExcerptAnchor,
-	partialDepthLabel,
 	type ReviewThread,
 	reviewThreadSchema,
 	THREAD_AUTHOR_KIND,
@@ -327,11 +326,7 @@ const chapterOwnershipIssue = (run: ReviewRun, anchor: HunkThreadAnchor): string
 				reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
 		),
 	);
-	// A partial narrative leaves units out of the story on purpose and Files still reaches them, so
-	// feedback on an unnarrated unit is a narration choice rather than corruption. Two owners is a
-	// broken narrative at any depth.
-	const leftOutDeliberately = owners.length === 0 && partialDepthLabel(run.chapters) !== null;
-	if (owners.length === 1 || leftOutDeliberately) return null;
+	if (owners.length === 1) return null;
 	return `review unit has ${owners.length} chapter owners instead of one`;
 };
 

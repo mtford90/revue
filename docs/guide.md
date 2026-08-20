@@ -79,43 +79,17 @@ a dirty branch the bare command shows uncommitted work, not the branch against i
 It prints the run directory to stderr, so agents can still target the run with `revue threads`.
 Generating chapters for that same run later upgrades it to the full narrated review.
 
-## Narrative depth
+## Coverage
 
-A flat diff is the whole change with no narration; a full narrative is the whole change with all of
-it. Depth is the middle: the whole change prepared, deliberately less of it narrated.
-
-A chapters file declares the depth it was written at:
-
-```json
-"depth": { "kind": "partial", "label": "10,000ft" }
-```
-
-An absent `depth` means `{ "kind": "full" }`, so every narrative written before this existed still
-reads as full. The label is freeform and is shown to the reviewer verbatim — `10,000ft` is the
-preset for "just the overview", but `"just the API changes"` or `"migrations only"` are equally
-valid, and describing honestly what was left out is the point.
-
-### What relaxes, and what does not
-
-At full depth every review unit in `hunks.txt` must appear in exactly one chapter. A partial depth
-relaxes exactly one rule: units may be left out. A narrative still may not cite a unit twice, still
-may not cite a reference `hunks.txt` never printed, and key-change ranges must still fall inside the
-chapter's own units. Omitting units *without* declaring a partial depth remains a validation
-failure — the relaxation is keyed to the declaration, so nothing loosens silently.
-
-`revue show --check` reports coverage at every depth, including full:
+Every review unit in `hunks.txt` must appear in exactly one chapter: no omissions, no duplicates.
+A narrative may not cite a reference `hunks.txt` never printed, and key-change ranges must fall
+inside the chapter's own units. `revue show --check` reports the narrated count:
 
 ```text
-  22 of 249 review units narrated (10,000ft)
+  249 of 249 review units narrated
 ```
 
-Inside the reviewer, a partial narrative says so twice: the depth label sits beside the
-`Chapters (N)` header with `22 of 249 hunks · rest in Diff` under it, and the status bar carries a
-`10,000ft · 22/249 hunks` segment, which sheds the word `hunks` and then the whole segment as the
-terminal narrows. Both are absent entirely at full depth, because nothing was left out. Omitted
-hunks are not hidden — they are on the Diff surface with the rest, reviewable as usual.
-
-### Freezing quoted code
+## Freezing quoted code
 
 A chapter can cite a range of code it did not change. The agent never transcribes it; a separate
 step pins it from the run's own recorded endpoint:
@@ -192,7 +166,7 @@ lock and re-reads the latest same-run threads before replacing the file, so conc
 writers preserve each other's feedback. Regenerating chapters for the same frozen code preserves
 feedback without modifying the run directory.
 
-Re-narrating at a different depth can legitimately stop quoting a range someone commented on. Those
+A re-narrated run can legitimately stop quoting a range someone commented on. Those
 threads are never pruned: they are listed as orphaned in the Comments surface, dimmed and marked,
 so feedback survives a narrative it no longer has a home in.
 

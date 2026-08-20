@@ -64,24 +64,6 @@ export const contextExcerptSchema = z
 export type ContextExcerpt = z.infer<typeof contextExcerptSchema>;
 
 /**
- * How much of the prepared diff the narrative sets out to cover. A partial depth carries the
- * words the reviewer sees — the `10,000ft` preset or whatever the agent was asked for — and is
- * the only thing that lets a narrative leave review units out.
- */
-export const narrativeDepthSchema = z.discriminatedUnion("kind", [
-	z.strictObject({ kind: z.literal("full") }),
-	z.strictObject({
-		kind: z.literal("partial"),
-		// A blank label would relax coverage while telling the reviewer nothing about why.
-		label: z
-			.string()
-			.transform((value) => value.trim())
-			.refine((value) => value.length > 0, "A partial depth must say what it covers"),
-	}),
-]);
-export type NarrativeDepth = z.infer<typeof narrativeDepthSchema>;
-
-/**
  * The part a chapter plays in the narrative, absent on an ordinary one. A run that supersedes a
  * narrated one ends with the **epilogue**: what changed since the reviewer's last pass, and the
  * threads that prompted it. The role is a convention rather than a shape — an epilogue is an

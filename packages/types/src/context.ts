@@ -61,7 +61,7 @@ export const frozenExcerptFor = (
 /**
  * The frozen excerpt whose quoted lines contain this range. Thread anchors on quoted code
  * resolve through here: a range is only anchorable while some pinned excerpt still covers it,
- * and re-narrating at another depth can legitimately stop covering it.
+ * and a re-narrated run can legitimately stop covering it.
  */
 export const frozenExcerptContaining = (
 	context: RunContextFile | null,

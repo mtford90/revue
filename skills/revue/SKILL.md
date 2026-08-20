@@ -148,35 +148,10 @@ then integration (wiring, config, tests). A chapter introducing a symbol another
 **Hunk ordering within a chapter:** group all hunks from the same file together; within a file, list
 them in ascending `oldStart` order.
 
-### Narrative depth
-
-A chapters file may declare the `depth` it was written at. **Full depth is the default and is
-almost always right** — omit `depth` entirely, or write `{ "kind": "full" }`, and narrate the whole
-diff. A large diff is not a reason to go partial; it is a reason to write more chapters.
-
-Declare a partial depth only when the user asked for less than the whole change:
-
-```json
-"depth": { "kind": "partial", "label": "10,000ft" }
-```
-
-- `10,000ft` is the preset label for "just give me the overview" — a handful of chapters covering
-  the shape of the change, leaving routine units out.
-- Any other request gets a freeform label in the user's own words: `"just the API changes"`,
-  `"migrations only"`.
-
-The label is shown to the reviewer verbatim, next to how many of the prepared review units the
-narration actually cites, so it has to describe honestly what was left out. Never declare a partial
-depth the user did not ask for.
-
 ### Coverage rule
 
-At **full depth** — the default — every review unit in `hunks.txt` must appear in **exactly one**
-chapter: no omissions, no duplicates.
-
-A narrative that declares a **partial** depth may leave review units out. Nothing else relaxes: it
-still may not cite a unit twice, and still may not cite a reference `hunks.txt` does not print.
-Omitting units without declaring a partial depth is a validation failure, not a shortcut.
+Every review unit in `hunks.txt` must appear in **exactly one** chapter: no omissions, no
+duplicates, and no citing a reference `hunks.txt` does not print.
 
 ### Voice
 
@@ -336,7 +311,6 @@ Write the JSON to `$RUN/chapters.json` via a heredoc:
 ```bash
 cat > "$RUN/chapters.json" << 'EOF'
 {
-  "depth": { "kind": "full" },
   "chapters": [
     {
       "id": "chapter-1",
@@ -372,8 +346,7 @@ integer copied from `hunks.txt`, and the array is empty only for an interlude; e
 `keyChanges[].severity` is `critical`, `high`, `medium`, or `info`; every `keyChanges[].lineRefs`
 has ≥ 1 entry with positive `startLine ≤ endLine`. `excerpts` is optional and defaults to empty —
 each entry needs a `filePath` and positive new-side `startLine ≤ endLine`, with an optional
-non-empty `caption` and no code of its own. `depth` is optional and means `{ "kind": "full" }` when
-absent; a partial depth is `{ "kind": "partial", "label": "…" }` with a non-empty label. `role` is
+non-empty `caption` and no code of its own. `role` is
 optional, is only ever `"epilogue"`, and belongs to the last chapter of a run that supersedes a
 narrated one; `threadRefs` is optional and holds ids of threads this run has. `prologue`
 is optional, so the minimal skeleton omits it. When included, obey
@@ -405,7 +378,7 @@ revue show "$RUN" --check
 ```
 
 `--check` verifies the run hashes, validates `chapters.json`, requires every prepared review unit
-exactly once at full depth (once or not at all when a partial depth is declared), checks key-change
+exactly once, checks key-change
 ranges against their chapter hunks, confirms every excerpt was frozen in Step 6, requires exactly
 one epilogue ending the narration of a run that carried chapters forward, holds that epilogue's
 thread citations to threads the run has, and prints a plain-text summary without launching the UI.
@@ -590,7 +563,7 @@ and say so in the epilogue.
 
 **5. Narrate what is left.** Every unit in `unnarrated` belongs in exactly one chapter: the
 re-narrated chapter that owns its file where there is one, and the epilogue otherwise. The coverage
-rule in Step 3 is unchanged — at full depth every review unit of the new run appears exactly once,
+rule in Step 3 is unchanged — every review unit of the new run appears exactly once,
 carried chapters counting towards it.
 
 **6. Write the epilogue last.** A run that carried narration forward ends with exactly one chapter

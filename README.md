@@ -75,14 +75,6 @@ Review's ready - run this in your terminal:
 revue show .revue/runs/a1b2c3d4e5f6
 ```
 
-### 10000 ft review
-
-Not every change needs a line-by-line tour. Ask for **10,000ft** and the agent writes fewer acts over the shape of the change.
-
-```text
-> /revue this branch against main at 10,000ft
-```
-
 ### Just the diff (`revue diff`)
 
 No narration. You still get the nice diffs, inline comments, review progress etc.

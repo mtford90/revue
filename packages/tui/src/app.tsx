@@ -414,11 +414,13 @@ function PageIndexRows({
 	current,
 	vs,
 	onSelect,
+	onToggleReview,
 }: {
 	pages: Page[];
 	current: number;
 	vs: ViewState;
 	onSelect: (index: number) => void;
+	onToggleReview: (chapter: Chapter) => void;
 }) {
 	const theme = useTheme();
 	return pages.map((page, index) => {
@@ -440,7 +442,18 @@ function PageIndexRows({
 				<text flexShrink={0} fg={active ? theme.accent : theme.panelAlt}>
 					{active ? "▸" : " "}
 				</text>
-				<text flexShrink={0} fg={done ? theme.badgeAdded : theme.muted}>
+				<text
+					flexShrink={0}
+					fg={done ? theme.badgeAdded : theme.muted}
+					onMouseDown={
+						page.kind === "chapter"
+							? (event) => {
+									event.stopPropagation();
+									onToggleReview(page.chapter);
+								}
+							: undefined
+					}
+				>
 					{page.kind !== "prologue" ? `[${done ? "x" : " "}] ` : "    "}
 				</text>
 				<text
@@ -464,6 +477,7 @@ function PageIndex({
 	vs,
 	maxRows,
 	onSelect,
+	onToggleReview,
 	scrollRef,
 }: {
 	pages: Page[];
@@ -471,10 +485,19 @@ function PageIndex({
 	vs: ViewState;
 	maxRows: number;
 	onSelect: (index: number) => void;
+	onToggleReview: (chapter: Chapter) => void;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
 }) {
 	const theme = useTheme();
-	const rows = <PageIndexRows pages={pages} current={current} vs={vs} onSelect={onSelect} />;
+	const rows = (
+		<PageIndexRows
+			pages={pages}
+			current={current}
+			vs={vs}
+			onSelect={onSelect}
+			onToggleReview={onToggleReview}
+		/>
+	);
 	if (pages.length <= maxRows) {
 		return (
 			<box flexDirection="column" flexShrink={0} width="100%" paddingLeft={1}>
@@ -693,6 +716,7 @@ function ChapterPanel({
 	indexScrollRef,
 	scrollRef,
 	onToggleChapterReview,
+	onToggleIndexedChapterReview,
 	onToggleFileReview,
 	onToggleKeyChange,
 	onProseContextMenu,
@@ -719,6 +743,7 @@ function ChapterPanel({
 	indexScrollRef: RefObject<ScrollBoxRenderable | null>;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
 	onToggleChapterReview: () => void;
+	onToggleIndexedChapterReview: (chapter: Chapter) => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
 	onProseContextMenu: (reference: ChapterReference, position: { x: number; y: number }) => void;
@@ -771,6 +796,7 @@ function ChapterPanel({
 					vs={vs}
 					maxRows={chapterIndexMaxRows(terminalHeight)}
 					onSelect={onNavigatePage}
+					onToggleReview={onToggleIndexedChapterReview}
 					scrollRef={indexScrollRef}
 				/>
 			) : null}
@@ -3632,6 +3658,9 @@ export function App({
 			if (target) gotoChapter(target);
 		}
 	}
+	function toggleIndexedChapterReview(targetChapter: Chapter) {
+		commit(toggleChapter(vs, targetChapter));
+	}
 	function toggleFileReview(path: string) {
 		if (!chapter) return;
 		const paths = chapterFilePaths(chapter);
@@ -4336,6 +4365,7 @@ export function App({
 							indexScrollRef={indexScroll}
 							scrollRef={panelScroll}
 							onToggleChapterReview={toggleChapterReview}
+							onToggleIndexedChapterReview={toggleIndexedChapterReview}
 							onToggleFileReview={toggleFileReview}
 							onToggleKeyChange={toggleSelectedKeyChange}
 							onProseContextMenu={openProseContextMenu}

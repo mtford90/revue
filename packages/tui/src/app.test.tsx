@@ -273,6 +273,28 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("0/3 files"); // none reviewed yet
 });
 
+test("the chapter index checkbox toggles review while the title only navigates", async () => {
+	const seen: ViewState[] = [];
+	const t = await testRender(<App file={file} onViewStateChange={(next) => seen.push(next)} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const chapterY = lines.findIndex((line) => line.includes("1. Add a re"));
+	const chapterLine = lines[chapterY] ?? "";
+
+	await click(t, chapterLine.indexOf("[ ]") + 1, chapterY);
+	await settle(t);
+	expect(seen.at(-1)?.chapters).toContain("chapter-1");
+	expect(statusLine(t)).toContain("Prologue");
+
+	await click(t, chapterLine.indexOf("1. Add a re"), chapterY);
+	await settle(t);
+	expect(seen).toHaveLength(1);
+	expect(statusLine(t)).toContain("Ch 1/3");
+});
+
 const twelveChapters: RevueChaptersFile = {
 	...file,
 	chapters: Array.from({ length: 12 }, (_, index) => ({

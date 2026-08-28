@@ -5,6 +5,7 @@ import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff";
 import { resolveTheme, THEME_IDS, THEMES } from "@revue/theme";
 import {
+	isPatchAnchor,
 	type ReviewThread,
 	type RevueChaptersFile,
 	RevueChaptersFileSchema,
@@ -387,6 +388,9 @@ test("an interlude is an ordinary page marked as carrying no diff", async () => 
 	expect(frame).toContain("── end of chapter ──");
 	expect(frame).toContain("x mark this chapter read · ] next page");
 	expect(statusLine(t)).toContain("Ch 4/4");
+	expect(statusLine(t)).not.toContain("j/k move");
+	expect(statusLine(t)).not.toContain("Enter comment");
+	expect(statusLine(t)).not.toContain("e edit");
 
 	await press(t, "x");
 	expect(seen.at(-1)?.chapters).toContain("interlude");
@@ -946,7 +950,9 @@ test("the status bar hints follow the surface and name the keys that are actuall
 	// A long chapter title eats the width the hints were using, so they shed whole from the right
 	// rather than truncating into half a hint.
 	await nextChapter(t);
-	expect(statusLine(t)).toContain("j/k move");
+	// This fixture supplies narration without a patch, so source-review actions are unavailable.
+	expect(statusLine(t)).not.toContain("j/k move");
+	expect(statusLine(t)).toContain("Enter expand");
 	expect(statusLine(t)).not.toContain("o comments");
 
 	await press(t, "o");
@@ -2503,6 +2509,8 @@ test("the file cursor steps onto an excerpt so the existing toggle key opens it"
 	const t = await renderExcerptChapter();
 
 	await press(t, "TAB"); // off the chapter's only file, onto the excerpt that follows it
+	expect(statusLine(t)).not.toContain("j/k move");
+	expect(statusLine(t)).not.toContain("Enter comment");
 	await press(t, "RETURN");
 
 	expect(t.captureCharFrame()).toContain("export class Transport {");
@@ -2916,6 +2924,8 @@ diff --git a/retry.ts b/retry.ts
 	// The citation is the first stop on the chapter walk, and Enter opens the conversation.
 	await press(t, "J");
 	expect(t.captureCharFrame()).toContain("▸ retry.ts:1");
+	expect(statusLine(t)).not.toContain("j/k move");
+	expect(statusLine(t)).not.toContain("Enter comment");
 	await act(async () => {
 		t.mockInput.pressEnter();
 	});
@@ -3678,6 +3688,232 @@ test("one file-scoped selection spans diff sides and separate hunks before comme
 		},
 	]);
 	expect(t.captureCharFrame()).toContain("Treat these changes as one concern");
+});
+
+const recordingThreadActions = (created: ThreadAnchor[]) => ({
+	create: (anchor: ThreadAnchor, author: ThreadAuthor, body: string) => {
+		created.push(anchor);
+		return createThread(WATCHED_RUN, anchor, author, body);
+	},
+	reply: () => {
+		throw new Error("unused");
+	},
+	delete: () => {
+		throw new Error("unused");
+	},
+	deleteMessage: () => {
+		throw new Error("unused");
+	},
+	markDealt: () => {
+		throw new Error("unused");
+	},
+	reopen: () => {
+		throw new Error("unused");
+	},
+});
+
+for (const scenario of [
+	{
+		layout: "split" as const,
+		expected: [
+			{ oldStart: 1, side: "additions" as const, startLine: 1, endLine: 1 },
+			{ oldStart: 1, side: "deletions" as const, startLine: 2, endLine: 2 },
+		],
+	},
+	{
+		layout: "stacked" as const,
+		expected: [{ oldStart: 1, side: "additions" as const, startLine: 1, endLine: 2 }],
+	},
+]) {
+	test(`keyboard selection follows ${scenario.layout} replacement order`, async () => {
+		const created: ThreadAnchor[] = [];
+		const t = await testRender(
+			<App
+				file={watchedChapters}
+				diffFiles={watchedDiff}
+				initialPreferences={{ sidebarPreference: "hidden", diffPreference: scenario.layout }}
+				threadActions={recordingThreadActions(created)}
+			/>,
+			{ width: 120, height: 34, kittyKeyboard: true },
+		);
+		await t.renderOnce();
+		await settle(t);
+		if (scenario.layout === "stacked") {
+			expect(rowOf(t, "retry(three)")).toBeLessThan(rowOf(t, "retry(alpha)"));
+		}
+		await press(t, "v");
+		await press(t, "j");
+		await press(t, "RETURN");
+		await act(async () => t.mockInput.typeText(`Review ${scenario.layout}`));
+		await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+		await t.renderOnce();
+
+		expect(created[0]).toMatchObject({
+			kind: THREAD_ANCHOR_KIND.PATCH,
+			filePath: "retry.ts",
+		});
+		if (!created[0] || !isPatchAnchor(created[0])) throw new Error("missing patch anchor");
+		expect([...created[0].ranges]).toEqual([...scenario.expected]);
+	});
+}
+
+test("Focused file changes discard a pointer selection before Enter, e, and f act", async () => {
+	const chapters = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "two-files",
+				order: 1,
+				title: "Review both files",
+				summary: "Pointer focus must stay file local.",
+				hunkRefs: [
+					{ filePath: "a.ts", oldStart: 0 },
+					{ filePath: "b.ts", oldStart: 0 },
+				],
+				keyChanges: [],
+			},
+		],
+	});
+	const files = parsePatch(`diff --git a/a.ts b/a.ts
+new file mode 100644
+--- /dev/null
++++ b/a.ts
+@@ -0,0 +1,2 @@
++a-one
++a-two
+diff --git a/b.ts b/b.ts
+new file mode 100644
+--- /dev/null
++++ b/b.ts
+@@ -0,0 +1,2 @@
++b-one
++b-two
+`);
+	const created: ThreadAnchor[] = [];
+	const opened: string[] = [];
+	const states: ViewState[] = [];
+	const t = await testRender(
+		<App
+			file={chapters}
+			diffFiles={files}
+			initialPreferences={{ fileDisplay: "focused", sidebarPreference: "hidden" }}
+			threadActions={recordingThreadActions(created)}
+			onOpenEditor={async (range) => {
+				opened.push(range.filePath);
+				return { text: "Editor returned", tone: "success" };
+			}}
+			onViewStateChange={(state) => states.push(state)}
+		/>,
+		{ width: 100, height: 24, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+	const first = gutterFor(t, "a-one", "1");
+	const second = gutterFor(t, "a-two", "2");
+	await act(async () => t.mockMouse.drag(first.x, first.y, second.x, second.y));
+	await t.renderOnce();
+	await press(t, "TAB");
+	expect(t.captureCharFrame()).toContain("b-one");
+	expect(t.captureCharFrame()).not.toContain("a-one");
+
+	await press(t, "e");
+	await press(t, "RETURN");
+	await act(async () => t.mockInput.typeText("Comment on B"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+	await press(t, "f");
+
+	expect(opened).toEqual(["b.ts"]);
+	expect(created[0]).toMatchObject({ kind: THREAD_ANCHOR_KIND.PATCH, filePath: "b.ts" });
+	expect(states.at(-1)?.files).toContain("two-files::b.ts");
+});
+
+test("a validated migration orphan never decorates or mounts at coincidental coordinates", async () => {
+	const base = watchedThread({ line: 1, body: "Coincidental orphan" });
+	const orphan: ReviewThread = {
+		...base,
+		migratedFrom: "b".repeat(64),
+		migrationOrphaned: true,
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.PATCH,
+			filePath: "retry.ts",
+			ranges: [{ oldStart: 1, side: "additions", startLine: 1, endLine: 1 }],
+		},
+	};
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[orphan]}
+			initialOrphanedThreads={[orphan.id]}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+	const ordinaryBackground = rowBackground(t, "retry(alpha)");
+	const selectedTint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
+	expect(ordinaryBackground).not.toBe(selectedTint);
+	expect(t.captureCharFrame()).not.toContain("Coincidental orphan");
+
+	await press(t, "o");
+	expect(t.captureCharFrame()).toContain("Coincidental orphan");
+	expect(t.captureCharFrame()).toContain("no longer quoted");
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).not.toContain("Coincidental orphan");
+});
+
+test("a standing pointer selection reports selected actions, not keyboard extension", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 180,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await settle(t);
+	const first = gutterFor(t, "retry(alpha)", "1");
+	const second = gutterFor(t, "retry(beta)", "2");
+	await act(async () => t.mockMouse.drag(first.x, first.y, second.x, second.y));
+	await t.renderOnce();
+
+	for (const hint of ["j/k move", "Enter comment", "e edit", "Esc cancel"]) {
+		expect(statusLine(t)).toContain(hint);
+	}
+	expect(statusLine(t)).not.toContain("j/k extend");
+});
+
+test("collapsed source does not advertise source-review actions", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 180,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await press(t, "-");
+	for (const hint of ["j/k move", "v select", "Enter comment", "e edit"]) {
+		expect(statusLine(t)).not.toContain(hint);
+	}
+});
+
+test("double-clicking a quoted gutter uses excerpt authority", async () => {
+	const created: ThreadAnchor[] = [];
+	const t = await renderExcerptChapter({ threadActions: recordingThreadActions(created) });
+	await clickAction(t, "[▼ show");
+	const gutter = excerptGutter(t, "dispatch(request)", "13");
+	await act(async () => t.mockMouse.doubleClick(gutter.x, gutter.y));
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("New review thread");
+	await act(async () => t.mockInput.typeText("Keep excerpt authority"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+
+	expect(created).toEqual([
+		{
+			kind: THREAD_ANCHOR_KIND.EXCERPT,
+			filePath: "src/lib/transport.ts",
+			startLine: 13,
+			endLine: 13,
+		},
+	]);
 });
 
 test("status hints describe cursor, selecting, and composer actions", async () => {

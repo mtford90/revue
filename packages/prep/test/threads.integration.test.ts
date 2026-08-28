@@ -148,6 +148,103 @@ const seedThreads = (root: string, runId: string, threads: ReviewThread[]): void
 const storedThreads = (root: string, runId: string): ReviewThread[] =>
 	readThreadStoreFile(threadStorePath(root)).runs[runId] ?? [];
 
+test("historical v1 hunk and excerpt stores migrate without reinterpretation", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-thread-v1-"));
+	repositories.push(root);
+	const path = threadStorePath(root);
+	const runId = "a".repeat(64);
+	await mkdir(join(root, ".revue"), { recursive: true });
+	const message = {
+		id: identifier(90),
+		author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada Reviewer" },
+		body: "Historical feedback",
+		createdAt: "2026-08-02T10:00:00.000Z",
+	};
+	await writeFile(
+		path,
+		`${JSON.stringify({
+			schemaVersion: 1,
+			runs: {
+				[runId]: [
+					{
+						id: identifier(91),
+						runId,
+						anchor: {
+							filePath: "src/value.ts",
+							oldStart: 4,
+							side: "additions",
+							startLine: 8,
+							endLine: 8,
+						},
+						status: THREAD_STATUS.OPEN,
+						createdAt: message.createdAt,
+						messages: [message],
+					},
+					{
+						id: identifier(92),
+						runId,
+						anchor: {
+							kind: THREAD_ANCHOR_KIND.EXCERPT,
+							filePath: "src/caller.ts",
+							startLine: 12,
+							endLine: 13,
+						},
+						status: THREAD_STATUS.OPEN,
+						createdAt: message.createdAt,
+						messages: [{ ...message, id: identifier(93) }],
+					},
+				],
+			},
+		})}\n`,
+	);
+
+	const migrated = readThreadStoreFile(path);
+	expect(migrated.schemaVersion).toBe(2);
+	expect(migrated.runs[runId]?.map((thread) => thread.anchor.kind)).toEqual([
+		THREAD_ANCHOR_KIND.HUNK,
+		THREAD_ANCHOR_KIND.EXCERPT,
+	]);
+});
+
+test("the v1 reader rejects patch-era fields instead of reinterpreting them", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-thread-v1-strict-"));
+	repositories.push(root);
+	const path = threadStorePath(root);
+	const runId = "a".repeat(64);
+	await mkdir(join(root, ".revue"), { recursive: true });
+	await writeFile(
+		path,
+		`${JSON.stringify({
+			schemaVersion: 1,
+			runs: {
+				[runId]: [
+					{
+						id: identifier(94),
+						runId,
+						anchor: {
+							kind: THREAD_ANCHOR_KIND.PATCH,
+							filePath: "src/value.ts",
+							ranges: [{ oldStart: 4, side: "additions", startLine: 8, endLine: 8 }],
+						},
+						status: THREAD_STATUS.OPEN,
+						createdAt: "2026-08-02T10:00:00.000Z",
+						messages: [
+							{
+								id: identifier(95),
+								author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada Reviewer" },
+								body: "Not historical",
+								createdAt: "2026-08-02T10:00:00.000Z",
+							},
+						],
+					},
+				],
+			},
+		})}\n`,
+	);
+
+	expect(() => readThreadStoreFile(path)).toThrow("threads schema");
+});
+
 /** The new-side line an anchor points at, read from the code the run pinned. */
 const anchoredLine = async (
 	run: PreparedRun,
@@ -373,13 +470,31 @@ test("patch ranges remap atomically and orphan when any segment disappears", asy
 			anchor,
 			body: "These two changes form one concern",
 		}),
+		feedback({
+			index: 2,
+			runId: first.manifest.runId,
+			anchor: {
+				kind: THREAD_ANCHOR_KIND.PATCH,
+				filePath: "src/app.ts",
+				ranges: [
+					{ oldStart: 2, side: "additions", startLine: 5, endLine: 5 },
+					{ oldStart: 2, side: "additions", startLine: 6, endLine: 6 },
+				],
+			},
+			body: "These adjacent lines are one range",
+		}),
 	]);
 
 	await write(root, "src/app.ts", replaceLine(baseline, 5, "app line 5, fixed"));
 	await commit(root, "Address part of the review");
 	const second = await prepareRun(["main", "HEAD"], root);
-	const [carried] = storedThreads(root, second.manifest.runId);
+	const [carried, canonical] = storedThreads(root, second.manifest.runId);
 
 	expect(carried?.migrationOrphaned).toBe(true);
 	expect(carried?.anchor).toEqual(anchor);
+	expect(canonical?.anchor).toEqual({
+		kind: THREAD_ANCHOR_KIND.PATCH,
+		filePath: "src/app.ts",
+		ranges: [{ oldStart: 2, side: "additions", startLine: 5, endLine: 6 }],
+	});
 });

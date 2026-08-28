@@ -59,7 +59,7 @@ If difftastic is absent, Revue shows the patch view.
 
 ## Amendments
 
-- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes the Semantic view.
+- 2026-08-19 — The withdrawn agent-directed review granularity record removes the Semantic view.
   Revue no longer looks for difftastic at run time, the patch-view fallback in the Decision section
   no longer applies because Patch is the only view, the formula caveat advising difftastic at install
   time is removed, and the "`depends_on \"difftastic\"`" row in Options considered is historical.

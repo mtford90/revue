@@ -113,7 +113,7 @@ first engine stays targeted at Bun, because the measurement of the terminal widt
 
 ## Amendments
 
-- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes the Semantic view.
+- 2026-08-19 — The withdrawn agent-directed review granularity record removes the Semantic view.
   "The semantic diff" in the Consequences list of concepts that stay outside the engine is
   historical: there is no longer a semantic diff anywhere in Revue, not merely one kept outside this
   boundary.

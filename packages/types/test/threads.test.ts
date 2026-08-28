@@ -4,7 +4,9 @@ import {
 	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
+	THREAD_STORE_SCHEMA_VERSION,
 	threadAnchorSchema,
+	threadStoreFileSchema,
 } from "@revue/types/threads";
 
 const thread = {
@@ -81,6 +83,37 @@ test("an anchor states its kind, and a stored hunk anchor keeps parsing without 
 	expect(() => threadAnchorSchema.parse({ ...excerpt, endLine: 117 })).toThrow();
 	expect(() => threadAnchorSchema.parse({ ...excerpt, startLine: 0, endLine: 0 })).toThrow();
 	expect(() => threadAnchorSchema.parse({ ...thread.anchor, kind: "narration" })).toThrow();
+});
+
+test("migrationOrphaned is a patch-migration marker, never a general corruption escape hatch", () => {
+	const patchAnchor = {
+		kind: THREAD_ANCHOR_KIND.PATCH,
+		filePath: "src/value.ts",
+		ranges: [{ oldStart: 4, side: "additions", startLine: 8, endLine: 8 }],
+	};
+	const migrated = { ...thread, anchor: patchAnchor, migratedFrom: "b".repeat(64) };
+	expect(reviewThreadSchema.parse({ ...migrated, migrationOrphaned: true }).migrationOrphaned).toBe(
+		true,
+	);
+	for (const invalid of [
+		{ ...migrated, migrationOrphaned: false },
+		{ ...thread, migratedFrom: "b".repeat(64), migrationOrphaned: true },
+		{ ...thread, anchor: patchAnchor, migrationOrphaned: true },
+	]) {
+		expect(() => reviewThreadSchema.parse(invalid)).toThrow();
+	}
+});
+
+test("version two is strict and does not admit patch anchors into historical stores", () => {
+	expect(THREAD_STORE_SCHEMA_VERSION).toBe(2);
+	const runId = "a".repeat(64);
+	const current = {
+		schemaVersion: 2,
+		runs: { [runId]: [reviewThreadSchema.parse(thread)] },
+	};
+	expect(threadStoreFileSchema.parse(current)).toEqual(current);
+	expect(() => threadStoreFileSchema.parse({ ...current, schemaVersion: 1 })).toThrow();
+	expect(() => threadStoreFileSchema.parse({ ...current, futureField: true })).toThrow();
 });
 
 test("patch anchors are non-empty, file-scoped multi-ranges without changing old anchors", () => {

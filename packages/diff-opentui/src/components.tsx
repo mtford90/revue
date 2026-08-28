@@ -126,6 +126,7 @@ type RangeSelectionInput = {
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
 	onSelectionContextMenu?: (selection: DiffSelection, position: { x: number; y: number }) => void;
 	selectionStops?: readonly DiffSelectionStop[];
+	selectionLayout?: DiffLayout;
 };
 
 const stopForRange = (range: DiffLineRange): DiffSelectionStop => ({
@@ -168,6 +169,7 @@ const useRangeSelection = ({
 	onRangeContextMenu,
 	onSelectionContextMenu,
 	selectionStops = [],
+	selectionLayout = "stack",
 }: RangeSelectionInput) => {
 	const activeStart = useRef<DiffSelectionStop | null>(null);
 	const activeSelection = useRef<DiffSelection | null>(null);
@@ -180,20 +182,19 @@ const useRangeSelection = ({
 		dragSelection ??
 		selectedSelection ??
 		(selectedRange ? selectionForRange(selectedRange) : undefined);
-	const updateSelection = (target: DiffLineRange) => {
+	const updateSelection = (target: DiffLineRange, dragGesture = false) => {
 		const start = activeStart.current;
 		if (!start) return;
 		const targetStop = stopForRange(target);
-		if (
-			targetStop.filePath === start.filePath &&
-			targetStop.oldStart === start.oldStart &&
-			targetStop.side === start.side &&
-			targetStop.lineNumber === start.lineNumber
-		)
-			return;
-		const next = selectionBetween(selectionStops, start, targetStop);
+		if (dragGesture) dragged.current = true;
+		// Split gutters are two visible vertical lanes. Staying in one lane must not select the
+		// opposite side merely because it occupies the next row-major stop.
+		const orderedStops =
+			selectionLayout === "split" && start.side === targetStop.side
+				? selectionStops.filter((stop) => stop.side === start.side)
+				: selectionStops;
+		const next = selectionBetween(orderedStops, start, targetStop);
 		if (!next) return;
-		dragged.current = true;
 		activeSelection.current = next;
 		setDragSelection(next);
 		onSelectionChange?.(next);
@@ -232,26 +233,29 @@ const useRangeSelection = ({
 					start.side !== targetStop.side ||
 					start.lineNumber !== targetStop.lineNumber),
 		);
-		if (target && moved) updateSelection(target);
+		if (target && (moved || dragged.current)) updateSelection(target, dragged.current);
 		finishSelection();
 	};
 	const finishSelection = () => {
-		if (!activeStart.current) return;
-		const activated = !dragged.current && doubleClickCandidate.current;
+		const start = activeStart.current;
+		if (!start) return;
+		const wasDragged = dragged.current;
+		const activated = !wasDragged && doubleClickCandidate.current;
 		const legacyClick =
 			!dragged.current &&
 			!activated &&
 			Boolean(onRangeSelect) &&
 			!onSelectionChange &&
-			!onSelectionActivate &&
 			!onRangeStart;
-		const completed = dragged.current || legacyClick ? activeSelection.current : null;
+		const completed = wasDragged || legacyClick ? activeSelection.current : null;
 		const activation = activated ? activeSelection.current : null;
+		const clickKey = `${start.filePath}:${start.oldStart}:${start.side}:${start.lineNumber}`;
 		activeStart.current = null;
 		activeSelection.current = null;
 		dragged.current = false;
 		doubleClickCandidate.current = false;
 		setDragSelection(null);
+		lastClick.current = wasDragged || activated ? null : { key: clickKey, at: Date.now() };
 		if (activation) onSelectionActivate?.(activation);
 		if (!completed) return;
 		onSelectionChange?.(completed);
@@ -317,7 +321,6 @@ const useRangeSelection = ({
 						const now = Date.now();
 						doubleClickCandidate.current =
 							lastClick.current?.key === key && now - lastClick.current.at <= DOUBLE_CLICK_MS;
-						lastClick.current = doubleClickCandidate.current ? null : { key, at: now };
 						activeStart.current = stop;
 						activeSelection.current = selectionForRange(target);
 						dragged.current = false;
@@ -325,13 +328,13 @@ const useRangeSelection = ({
 					onMouseDrag: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						updateSelection(target);
+						updateSelection(target, true);
 					},
 					onMouseOver: (event) => {
 						if (!activeStart.current) return;
 						event.preventDefault();
 						event.stopPropagation();
-						updateSelection(target);
+						updateSelection(target, true);
 					},
 					onMouseDragEnd: (event) => {
 						event.preventDefault();
@@ -797,7 +800,7 @@ export function DiffBody(props: DiffBodyProps) {
 	const normalized = geometry.file;
 	const selectableStops = useMemo(() => {
 		const seen = new Set<string>();
-		return diffSelectionStops(normalized).flatMap((stop) => {
+		return diffSelectionStops(normalized, geometry.layout).flatMap((stop) => {
 			const resolved = resolveRange
 				? resolveRange(stop.side, stop.lineNumber)
 				: {
@@ -814,7 +817,7 @@ export function DiffBody(props: DiffBodyProps) {
 			seen.add(key);
 			return [authoritative];
 		});
-	}, [normalized, resolveRange]);
+	}, [normalized, resolveRange, geometry.layout]);
 	const { displayedSelection, gutterHandlers, contextHandler, cancelActiveRange } =
 		useRangeSelection({
 			selectedRange,
@@ -826,6 +829,7 @@ export function DiffBody(props: DiffBodyProps) {
 			onRangeContextMenu,
 			onSelectionContextMenu,
 			selectionStops: selectableStops,
+			selectionLayout: geometry.layout,
 		});
 	const selectionDecorations = useMemo<RangeDecoration[]>(
 		() =>
@@ -1151,6 +1155,7 @@ export function ExcerptBlock({
 	onAttachmentNode,
 	selectedRange,
 	onRangeSelect,
+	onSelectionActivate,
 	onRangeContextMenu,
 }: RangeSelectionInput & {
 	plan: ExcerptVisualPlan;
@@ -1184,8 +1189,10 @@ export function ExcerptBlock({
 		useRangeSelection({
 			selectedRange,
 			onRangeSelect,
+			onSelectionActivate,
 			onRangeContextMenu,
 			selectionStops: excerptStops,
+			selectionLayout: "stack",
 		});
 	const start = Math.max(0, Math.min(plan.rows.length, rowWindow?.start ?? 0));
 	const end = Math.max(start, Math.min(plan.rows.length, rowWindow?.end ?? plan.rows.length));

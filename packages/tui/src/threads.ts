@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { type DiffFile, parsePatch } from "@revue/diff";
+import { canonicalizeDiffSelection, type DiffFile, parsePatch } from "@revue/diff";
 import {
 	persistThreadStoreFile,
 	readThreadStoreFile,
@@ -369,6 +369,9 @@ export function validateThreadsForRun(
 			continue;
 		}
 		if (thread.migrationOrphaned) {
+			if (!isPatchAnchor(thread.anchor) || !thread.migratedFrom) {
+				throw staleAnchor(thread, "migrationOrphaned requires a migrated patch anchor");
+			}
 			orphaned.push({
 				thread,
 				reason: "this atomic patch selection could not be fully remapped from a superseded run",
@@ -391,6 +394,23 @@ export function validateThreadsForRun(
 				reason: `this thread was carried from a superseded run and ${detail}`,
 			});
 			continue;
+		}
+		if (isPatchAnchor(thread.anchor)) {
+			const authoritative = files.find(
+				(file) =>
+					file.path === thread.anchor.filePath || file.metadata.name === thread.anchor.filePath,
+			);
+			if (!authoritative) throw staleAnchor(thread, "patch file authority is absent");
+			const canonical = canonicalizeDiffSelection(
+				{ filePath: thread.anchor.filePath, ranges: thread.anchor.ranges },
+				authoritative,
+			);
+			if (JSON.stringify(canonical.ranges) !== JSON.stringify(thread.anchor.ranges)) {
+				throw staleAnchor(
+					thread,
+					"patch ranges are not canonical (ordered, non-overlapping, and adjacent-merged)",
+				);
+			}
 		}
 		for (const anchor of anchors) {
 			const ownership = chapterRangeOwnershipIssue(run, anchor.filePath, anchor.oldStart);

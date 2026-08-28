@@ -63,6 +63,7 @@ export {
 } from "./plan.ts";
 export { anchorRowIndex, plannedRowIdentity } from "./ranges.ts";
 export {
+	canonicalizeDiffSelection,
 	type DiffSelection,
 	type DiffSelectionRange,
 	type DiffSelectionStop,

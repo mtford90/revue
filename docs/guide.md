@@ -148,7 +148,11 @@ changing the focused file and revealing the cursor at boundaries. `v` enters sel
 `j`/`k` then extend through both sides and separate original hunks, but never into another file.
 `Enter` comments on either the ordinary one-line cursor or the selection, and `Escape` cancels a
 selection. A gutter click moves the cursor, an actual drag leaves a selection, and a double-click
-opens a one-line comment. Dragging source code instead highlights text for copying.
+opens a one-line comment. Split and stacked selection follow their visible row order; a drag kept in
+the additions gutter of a split diff does not collect deletion-side rows. Quoted excerpts preserve
+their separate anchor authority while using coherent gestures: click selects one quoted line, drag
+extends the quoted range, and double-click comments on that excerpt line. Dragging source code
+instead highlights text for copying.
 The composer opens beneath the range; use `Ctrl+Enter` or its pointer control to save and `Escape` to
 cancel. Any number of independent threads may share an exact anchor.
 
@@ -166,10 +170,14 @@ one place; `Enter` jumps to the thread's chapter and anchor. While open threads 
 tab carries their count, so triage state reads from anywhere in the review.
 
 Threads are stored atomically under `.revue/threads.json` at the reviewed repository root, located
-from the supplied run directory and keyed by immutable `runId`. Every mutation takes a cross-process
-lock and re-reads the latest same-run threads before replacing the file, so concurrent TUI and agent
-writers preserve each other's feedback. Regenerating chapters for the same frozen code preserves
-feedback without modifying the run directory.
+from the supplied run directory and keyed by immutable `runId`. The current store format is version
+2. Revue strictly reads and migrates historical version-1 stores containing only hunk and excerpt
+anchors without reinterpreting them, and every write emits version 2. Once new feedback has been
+stored, older binaries that understand only version 1 cannot read that repository's version-2
+thread store. Every mutation takes a cross-process lock and re-reads the latest same-run threads
+before replacing the file, so concurrent TUI and agent writers preserve each other's feedback.
+Regenerating chapters for the same frozen code preserves feedback without modifying the run
+directory.
 
 A re-narrated run can legitimately stop quoting a range someone commented on. Those
 threads are never pruned: they are listed as orphaned in the Comments surface, dimmed and marked,

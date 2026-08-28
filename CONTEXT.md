@@ -136,12 +136,14 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   duplicates. `revue show --check` reports the narrated count for every run.
 - **Selection** — a feedback-neutral, non-empty list of side-aware ranges in one file. Normal
   `j`/`k` walks reviewable lines continuously across expanded text files in the current chapter;
-  `v` enters selection mode and `j`/`k` then use the complete original-hunk display stream, crossing
-  sides and hunks but stopping at the file. A click moves the cursor, a drag selects, and a
-  double-click activates a one-line comment. Selection order and membership belong to
-  `@revue/diff`, independent of wrapping, mounting, and threads. Editor-open uses the first
-  additions-side range or refuses; location copy emits every range; a GitHub link requires exactly
-  one normalised range.
+  `v` enters selection mode and `j`/`k` then use the complete original-hunk stream in the active
+  split or stacked presentation order, crossing sides and hunks but stopping at the file. A click
+  moves the cursor, a drag selects, and a double-click activates a one-line comment. Excerpts keep
+  their own anchor authority: a click leaves a quoted-line selection, a drag extends it, and a
+  double-click comments on that excerpt line. Interaction order and canonical persisted order are
+  separate `@revue/diff` contracts, independent of wrapping, mounting, and threads. Editor-open
+  uses the first additions-side range or refuses; location copy emits every range; a GitHub link
+  requires exactly one normalised range.
 - **Keybindings** — every shortcut derives from one typed keymap registry (handler, keys surface,
   status and menu hints, and CLI all read it). Reviewers override actions via hand-edited JSONC at
   `~/.revue/keybindings.json`; escape and digits are reserved, and validation drops just the broken
@@ -276,10 +278,12 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
-- **File-scoped patch selections preserve old anchors.** See `docs/adr/0020`, which extends ADRs
+- **File-scoped patch selections preserve old anchors.** See `docs/adr/0019`, which extends ADRs
   0004, 0007 and 0018. New TUI diff feedback uses a non-empty multi-range `patch` anchor; old `hunk`
   and `excerpt` data and CLI creation syntax retain their meaning. Patch ranges validate
-  independently, render one box at the terminal range, and remap atomically across supersession.
+  independently, must already be canonically ordered/merged in the version-2 thread store, render
+  one box at the terminal range, and remap atomically across supersession. Strict version-1 reads
+  migrate historical hunk/excerpt stores without reinterpreting them; writes always emit version 2.
 - **Threads are mutable state keyed by immutable code.** See `docs/adr/0004`. Revue locates the
   reviewed repository from the supplied run, validates and atomically replaces its
   `.revue/threads.json`, keyed by full `runId`; prepared run directories remain immutable. Mutations

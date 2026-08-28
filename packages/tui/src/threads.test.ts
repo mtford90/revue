@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import { parsePatch } from "@revue/diff";
 import {
 	type ContextExcerpt,
+	emptyThreadStoreFile,
+	type PatchThreadRange,
 	type RevueChaptersFile,
 	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
@@ -294,6 +296,91 @@ test("every patch range validates independently against original hunk authority"
 			"One concern, one invalid segment",
 		);
 		expect(() => loadValidatedThreads(threadsPath, run)).toThrow("patch range 2");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("persisted patch anchors must already be canonical against the pinned patch", async () => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-canonical-anchor-"));
+	try {
+		const { directory, runId, threadsPath } = await narratedRun(root, [CITED]);
+		const run = await loadReviewRun(directory);
+		const parsed = parsePatch(run.patch);
+		const file = parsed.find((candidate) =>
+			candidate.metadata.hunks.some((hunk) => hunk.additionCount >= 3),
+		);
+		const hunk = file?.metadata.hunks.find((candidate) => candidate.additionCount >= 3);
+		if (!file || !hunk) throw new Error("sample run has no three-line addition authority");
+		const start = hunk.additionStart;
+		const cases: Array<[PatchThreadRange, ...PatchThreadRange[]]> = [
+			[
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start + 1,
+					endLine: start + 1,
+				},
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start,
+					endLine: start,
+				},
+			],
+			[
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start,
+					endLine: start,
+				},
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start + 1,
+					endLine: start + 1,
+				},
+			],
+			[
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start,
+					endLine: start + 1,
+				},
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start + 1,
+					endLine: start + 2,
+				},
+			],
+			[
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start,
+					endLine: start,
+				},
+				{
+					oldStart: hunk.deletionStart,
+					side: "additions" as const,
+					startLine: start,
+					endLine: start,
+				},
+			],
+		];
+
+		for (const [index, ranges] of cases.entries()) {
+			persistThreadStoreFile(threadsPath, emptyThreadStoreFile());
+			openThreadStore(threadsPath, runId).create(
+				{ kind: THREAD_ANCHOR_KIND.PATCH, filePath: file.path, ranges },
+				agent,
+				`Non-canonical case ${index}`,
+			);
+			expect(() => loadValidatedThreads(threadsPath, run)).toThrow("canonical");
+		}
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

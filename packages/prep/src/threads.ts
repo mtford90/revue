@@ -1,12 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-	type DiffSelectionStop,
-	diffSelectionStops,
-	normalizeDiffSelection,
-	parsePatch,
-} from "@revue/diff";
+import { canonicalizeDiffSelection, type DiffFile, parsePatch } from "@revue/diff";
 import {
 	emptyThreadStoreFile,
 	isExcerptAnchor,
@@ -15,6 +10,7 @@ import {
 	type ReviewThread,
 	type ThreadAnchor,
 	type ThreadStoreFile,
+	threadStoreFileReaderSchema,
 	threadStoreFileSchema,
 } from "@revue/types";
 import { z } from "zod";
@@ -56,7 +52,7 @@ export function readThreadStoreFile(path: string): ThreadStoreFile {
 	} catch (error) {
 		throw new ThreadStoreError(`Thread store at ${path} is not valid JSON: ${describe(error)}`);
 	}
-	const parsed = threadStoreFileSchema.safeParse(value);
+	const parsed = threadStoreFileReaderSchema.safeParse(value);
 	if (!parsed.success) {
 		throw new ThreadStoreError(
 			`Thread store at ${path} does not match the threads schema:\n${z.prettifyError(parsed.error)}`,
@@ -171,7 +167,7 @@ type CarriedAnchor = { anchor: ThreadAnchor; migrationOrphaned: boolean };
 const carriedAnchor = (
 	anchor: ThreadAnchor,
 	matches: Map<string, ReviewUnitMatch>,
-	stopsByPath: ReadonlyMap<string, readonly DiffSelectionStop[]>,
+	filesByPath: ReadonlyMap<string, DiffFile>,
 ): CarriedAnchor => {
 	if (isExcerptAnchor(anchor)) return { anchor, migrationOrphaned: false };
 	if (isPatchAnchor(anchor)) {
@@ -186,9 +182,11 @@ const carriedAnchor = (
 			},
 			[first],
 		);
-		const normalized = normalizeDiffSelection(
+		const authoritative = filesByPath.get(anchor.filePath);
+		if (!authoritative) return { anchor, migrationOrphaned: true };
+		const normalized = canonicalizeDiffSelection(
 			{ filePath: anchor.filePath, ranges },
-			stopsByPath.get(anchor.filePath) ?? [],
+			authoritative,
 		);
 		return {
 			anchor: { ...anchor, ranges: normalized.ranges },
@@ -203,9 +201,9 @@ const carriedThread = (
 	thread: ReviewThread,
 	runId: string,
 	matches: Map<string, ReviewUnitMatch>,
-	stopsByPath: ReadonlyMap<string, readonly DiffSelectionStop[]>,
+	filesByPath: ReadonlyMap<string, DiffFile>,
 ): ReviewThread => {
-	const carried = carriedAnchor(thread.anchor, matches, stopsByPath);
+	const carried = carriedAnchor(thread.anchor, matches, filesByPath);
 	return {
 		...thread,
 		runId,
@@ -249,9 +247,11 @@ export async function migrateSupersededThreads({
 	if (!supersedes) return null;
 	const predecessor = await loadPreparedRun(join(runsDirectory, supersedes));
 	const matches = matchReviewUnits(predecessor, run);
-	const stopsByPath = new Map(
-		parsePatch(run.patch).map((file) => [file.path, diffSelectionStops(file)] as const),
-	);
+	const filesByPath = new Map<string, DiffFile>();
+	for (const file of parsePatch(run.patch)) {
+		filesByPath.set(file.path, file);
+		filesByPath.set(file.metadata.name, file);
+	}
 	return withThreadStoreLock(threadsPath, () => {
 		const store = readThreadStoreFile(threadsPath);
 		const pending = store.runs[supersedes] ?? [];
@@ -260,7 +260,7 @@ export async function migrateSupersededThreads({
 		const known = new Set(settled.map((thread) => thread.id));
 		const carried = pending
 			.filter((thread) => !known.has(thread.id))
-			.map((thread) => carriedThread(thread, runId, matches, stopsByPath));
+			.map((thread) => carriedThread(thread, runId, matches, filesByPath));
 		persistThreadStoreFile(threadsPath, {
 			...store,
 			runs: {

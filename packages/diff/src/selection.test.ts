@@ -23,7 +23,7 @@ const [file] = parsePatch(`diff --git a/multi.ts b/multi.ts
 `);
 if (!file) throw new Error("missing selection fixture");
 
-const stops = diffSelectionStops(file);
+const stops = diffSelectionStops(file, "split");
 
 test("display stops retain both sides and only rows backed by original hunks", () => {
 	expect(stops.map(({ oldStart, side, lineNumber }) => [oldStart, side, lineNumber])).toEqual([
@@ -35,6 +35,34 @@ test("display stops retain both sides and only rows backed by original hunks", (
 		[10, "additions", 10],
 		[10, "deletions", 11],
 		[10, "additions", 11],
+	]);
+});
+
+test("interaction stops follow each presentation layout for a two-line replacement", () => {
+	const [replacement] = parsePatch(`diff --git a/replacement.ts b/replacement.ts
+--- a/replacement.ts
++++ b/replacement.ts
+@@ -1,2 +1,2 @@
+-old one
+-old two
++new one
++new two
+`);
+	if (!replacement) throw new Error("missing replacement fixture");
+	const identities = (layout: "split" | "stack") =>
+		diffSelectionStops(replacement, layout).map(({ side, lineNumber }) => [side, lineNumber]);
+
+	expect(identities("split")).toEqual([
+		["deletions", 1],
+		["additions", 1],
+		["deletions", 2],
+		["additions", 2],
+	]);
+	expect(identities("stack")).toEqual([
+		["deletions", 1],
+		["deletions", 2],
+		["additions", 1],
+		["additions", 2],
 	]);
 });
 
@@ -85,4 +113,19 @@ test("normalisation sorts by authoritative display order and merges only contigu
 			{ oldStart: 10, side: "additions", startLine: 10, endLine: 11 },
 		],
 	});
+});
+
+test("normalisation preserves ranges with distinct hunk or side authority", () => {
+	const normalized = normalizeDiffSelection(
+		{
+			filePath: "multi.ts",
+			ranges: [
+				{ oldStart: 1, side: "deletions", startLine: 1, endLine: 2 },
+				{ oldStart: 1, side: "additions", startLine: 1, endLine: 2 },
+				{ oldStart: 10, side: "deletions", startLine: 10, endLine: 11 },
+			],
+		},
+		stops,
+	);
+	expect(normalized.ranges).toHaveLength(3);
 });

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const THREAD_STORE_SCHEMA_VERSION = 1 as const;
+export const THREAD_STORE_SCHEMA_VERSION = 2 as const;
+export const HISTORICAL_THREAD_STORE_SCHEMA_VERSION = 1 as const;
 export const THREAD_STATUS = {
 	OPEN: "open",
 	DEALT_WITH: "dealt-with",
@@ -136,12 +137,22 @@ export const reviewThreadSchema = z
 		 */
 		migratedFrom: runIdSchema.optional(),
 		/** Prep could not remap every segment of an atomic patch selection. */
-		migrationOrphaned: z.boolean().optional(),
+		migrationOrphaned: z.literal(true).optional(),
 		status: z.enum(THREAD_STATUS),
 		createdAt: z.iso.datetime(),
 		messages: z.array(threadMessageSchema).min(1),
 	})
 	.superRefine((thread, context) => {
+		if (
+			thread.migrationOrphaned &&
+			(thread.anchor.kind !== THREAD_ANCHOR_KIND.PATCH || !thread.migratedFrom)
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["migrationOrphaned"],
+				message: "migrationOrphaned requires a migrated patch anchor",
+			});
+		}
 		if (thread.messages[0]?.createdAt !== thread.createdAt) {
 			context.addIssue({
 				code: "custom",
@@ -196,3 +207,76 @@ export const emptyThreadStoreFile = (): ThreadStoreFile => ({
 	schemaVersion: THREAD_STORE_SCHEMA_VERSION,
 	runs: {},
 });
+
+/** Strict historical schema: v1 predates patch anchors and their migration marker. */
+const historicalReviewThreadSchema = z
+	.strictObject({
+		id: z.uuid(),
+		runId: runIdSchema,
+		anchor: z.union([hunkThreadAnchorSchema, excerptThreadAnchorSchema]),
+		migratedFrom: runIdSchema.optional(),
+		status: z.enum(THREAD_STATUS),
+		createdAt: z.iso.datetime(),
+		messages: z.array(threadMessageSchema).min(1),
+	})
+	.superRefine((thread, context) => {
+		if (thread.messages[0]?.createdAt !== thread.createdAt) {
+			context.addIssue({
+				code: "custom",
+				path: ["createdAt"],
+				message: "Thread creation time must match its root message",
+			});
+		}
+		const ids = new Set<string>();
+		for (const [index, message] of thread.messages.entries()) {
+			if (ids.has(message.id)) {
+				context.addIssue({
+					code: "custom",
+					path: ["messages", index, "id"],
+					message: "Message IDs must be unique within a thread",
+				});
+			}
+			ids.add(message.id);
+		}
+	});
+
+export const historicalThreadStoreFileSchema = z
+	.strictObject({
+		schemaVersion: z.literal(HISTORICAL_THREAD_STORE_SCHEMA_VERSION),
+		runs: z.record(runIdSchema, z.array(historicalReviewThreadSchema)),
+	})
+	.superRefine((store, context) => {
+		for (const [runId, threads] of Object.entries(store.runs)) {
+			const ids = new Set<string>();
+			for (const [index, thread] of threads.entries()) {
+				if (thread.runId !== runId) {
+					context.addIssue({
+						code: "custom",
+						path: ["runs", runId, index, "runId"],
+						message: "Thread runId does not match its store key",
+					});
+				}
+				if (ids.has(thread.id)) {
+					context.addIssue({
+						code: "custom",
+						path: ["runs", runId, index, "id"],
+						message: "Thread IDs must be unique within a run",
+					});
+				}
+				ids.add(thread.id);
+			}
+		}
+	});
+
+/** Read either format, preserving historical anchor kinds and upgrading only the envelope. */
+export const threadStoreFileReaderSchema = z
+	.union([threadStoreFileSchema, historicalThreadStoreFileSchema])
+	.transform(
+		(store): ThreadStoreFile =>
+			store.schemaVersion === THREAD_STORE_SCHEMA_VERSION
+				? store
+				: threadStoreFileSchema.parse({
+						schemaVersion: THREAD_STORE_SCHEMA_VERSION,
+						runs: store.runs,
+					}),
+	);

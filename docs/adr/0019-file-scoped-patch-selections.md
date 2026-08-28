@@ -1,4 +1,4 @@
-# ADR 0020 — File-scoped patch selections
+# ADR 0019 — File-scoped patch selections
 
 - Status: accepted
 - Date: 2026-08-21
@@ -35,13 +35,18 @@ A thread anchor has a third kind, `patch`:
 
 Historical `hunk` and `excerpt` anchors retain their schemas and meaning. The public threads CLI
 continues to create them with its existing syntax. New comments created on the TUI diff surface use
-`patch`, including one-line comments.
+`patch`, including one-line comments. Because patch anchors make the persisted format incompatible,
+the store is version 2. Readers migrate strict historical version-1 hunk/excerpt stores without
+reinterpreting their anchors; every subsequent write emits version 2.
 
-`@revue/diff` owns the feedback-neutral `DiffSelection`: canonical display order, file locality,
-non-emptiness, adjacent same-hunk/side normalisation, stop-to-stop selection, membership, and first
-and terminal ranges. Selection stops come from original parsed hunks and never from synthesised-only
-context. Normal cursor movement may retain additions-first replacement pairing; selecting uses the
-complete file-local stream with both sides.
+`@revue/diff` owns the feedback-neutral `DiffSelection`: file locality, non-emptiness, stop-to-stop
+selection, membership, and first and terminal ranges. Interaction stops follow the active split or
+stacked presentation; a drag confined to one split gutter remains in that side's visible lane.
+Persisted selections cross a separate seam: they use one layout-neutral canonical order and merge
+adjacent or overlapping ranges only when hunk and side authority also match. Selection stops come
+from original parsed hunks and never from synthesised-only context. Normal cursor movement may
+retain additions-first replacement pairing; selecting uses the complete file-local stream with both
+sides.
 
 A click moves the cursor, an actual drag leaves a selection, and a double-click activates a one-line
 comment. Fast drags resolve their endpoints through plan order. Wrapped selection edges are paint,
@@ -76,3 +81,5 @@ refuses. Excerpt verbs do not change.
 - Windowing and wrapping do not define semantic selection.
 - Cross-chapter feedback remains discoverable in Comments and has one unambiguous home on Diff.
 - A carried multi-range thread is either wholly remapped or wholly orphaned.
+- After version-2 feedback is written, older binaries that understand only version 1 cannot read the
+  thread store.

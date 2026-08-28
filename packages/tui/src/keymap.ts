@@ -642,7 +642,7 @@ const FOOTER_HINTS: readonly {
 	{ context: "comments", ids: ["comments-select-files"], label: "files" },
 ];
 
-export type ReviewHintState = "cursor" | "selecting" | "composer";
+export type ReviewHintState = "cursor" | "selecting" | "selected" | "composer";
 
 const actionKeys = (ids: readonly KeymapActionId[], keymap: readonly KeymapAction[]): string =>
 	ids
@@ -666,9 +666,9 @@ export const reviewFooterHints = (
 	const movement = actionKeys(["next-source-line", "previous-source-line"], keymap);
 	const comment = actionKeys(["toggle-file-diff"], keymap);
 	const edit = actionKeys(["open-editor"], keymap);
-	if (state === "selecting") {
+	if (state === "selecting" || state === "selected") {
 		return [
-			{ keys: movement, label: "extend" },
+			{ keys: movement, label: state === "selecting" ? "extend" : "move" },
 			{ keys: comment, label: "comment" },
 			{ keys: edit, label: "edit" },
 			{ keys: "Esc", label: "cancel" },

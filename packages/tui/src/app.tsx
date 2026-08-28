@@ -11,6 +11,7 @@ import {
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
 	anchorRowIndex,
+	canonicalizeDiffSelection,
 	createDiffFile,
 	type DecorationAnchor,
 	type DiffFile,
@@ -2005,6 +2006,7 @@ function ChapterView({
 	onToggleDiagram,
 	onToggleExcerpt,
 	onSelectExcerptRange,
+	onActivateExcerptRange,
 	onExcerptRangeContextMenu,
 	onToggleCollapse,
 	onToggleFileReview,
@@ -2048,6 +2050,7 @@ function ChapterView({
 	onToggleDiagram: (key: string) => void;
 	onToggleExcerpt: (key: string) => void;
 	onSelectExcerptRange: (range: DiffLineRange) => void;
+	onActivateExcerptRange: (range: DiffLineRange) => void;
 	onExcerptRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
@@ -2170,6 +2173,11 @@ function ChapterView({
 							inlineAttachments={excerptAttachments}
 							onAttachmentNode={onAttachmentNode}
 							onRangeSelect={onSelectExcerptRange}
+							onSelectionActivate={(selection) =>
+								onActivateExcerptRange(
+									diffRangeForSelectionRange(selection.filePath, terminalSelectionRange(selection)),
+								)
+							}
 							onRangeContextMenu={onExcerptRangeContextMenu}
 						/>
 					);
@@ -2871,21 +2879,7 @@ export function App({
 		onFocus: setFocusedThreadRef,
 		onOpen: openReferencedThread,
 	};
-	const chapterThreadList = useMemo(
-		() => (chapter ? chapterHunkThreads(chapter, threads) : []),
-		[chapter, threads],
-	);
-	const chapterQuotedThreads = useMemo(
-		() => (chapter ? chapterExcerptThreads(chapter, threads) : []),
-		[chapter, threads],
-	);
-	/**
-	 * Threads whose anchored code this run no longer holds. A re-narrated run can
-	 * legitimately drop an excerpt, and supersession legitimately deletes code a carried thread was
-	 * written against, so these stay in the store and stay listed rather than being pruned; they
-	 * simply have no line to render against. The caller reports the carried ones, which only a
-	 * validated load can tell apart from corruption.
-	 */
+	/** Validated orphans stay in Comments but have no inline source presence, even by coincidence. */
 	const orphanedThreads = useMemo(
 		() =>
 			new Set([
@@ -2898,6 +2892,18 @@ export function App({
 					.map((thread) => thread.id),
 			]),
 		[threads, context, carriedOrphans],
+	);
+	const inlineThreads = useMemo(
+		() => threads.filter((thread) => !orphanedThreads.has(thread.id)),
+		[threads, orphanedThreads],
+	);
+	const chapterThreadList = useMemo(
+		() => (chapter ? chapterHunkThreads(chapter, inlineThreads) : []),
+		[chapter, inlineThreads],
+	);
+	const chapterQuotedThreads = useMemo(
+		() => (chapter ? chapterExcerptThreads(chapter, inlineThreads) : []),
+		[chapter, inlineThreads],
 	);
 	// Threads the agent has already answered lead the list: the reviewer owes them a verdict, and
 	// everything below is ordered by where in the code it sits, as it always was.
@@ -2995,9 +3001,15 @@ export function App({
 		[navigationViewportFiles],
 	);
 	const focusedSelectionStops = useMemo(() => {
-		const focused = chapterDiffFiles.find((entry) => entry.chapterPath === focusedReviewPath);
-		return focused ? diffSelectionStops(createDiffFile(focused)) : [];
-	}, [chapterDiffFiles, focusedReviewPath]);
+		const focused =
+			chapterDiffFiles.find((entry) => entry.chapterPath === focusedReviewPath) ??
+			chapterDiffFiles[selectedFile] ??
+			chapterDiffFiles[0];
+		const layout = focused
+			? layoutForFile({ file: focused, preference: diffPreference, splitFits })
+			: "split";
+		return focused ? diffSelectionStops(createDiffFile(focused), layout) : [];
+	}, [chapterDiffFiles, focusedReviewPath, selectedFile, diffPreference, splitFits]);
 	const lineSelection = useMemo(
 		() =>
 			lineSelectionAnchor && lineCursor
@@ -3657,13 +3669,20 @@ export function App({
 		setPointerSelection(selection);
 	}
 	function commentOnPatchSelection(selection: DiffSelection) {
-		setPointerSelection(selection);
+		const authoritative = chapterDiffFiles.find(
+			(file) =>
+				file.chapterPath === selection.filePath || file.metadata.name === selection.filePath,
+		);
+		const canonical = authoritative
+			? canonicalizeDiffSelection(selection, createDiffFile(authoritative))
+			: selection;
+		setPointerSelection(canonical);
 		const anchor: PatchThreadAnchor = {
 			kind: THREAD_ANCHOR_KIND.PATCH,
-			filePath: selection.filePath,
-			ranges: selection.ranges,
+			filePath: canonical.filePath,
+			ranges: canonical.ranges,
 		};
-		startThread(anchor, selection);
+		startThread(anchor, canonical);
 	}
 	/**
 	 * Quoted code takes its own anchor kind: it belongs to no review unit, so it is keyed to the
@@ -3786,7 +3805,13 @@ export function App({
 			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
 	}
+	function clearReviewSelection() {
+		setLineSelectionAnchor(null);
+		setPointerSelection(null);
+		setExcerptSelection(null);
+	}
 	function restorePageFocus(nextPageId: string) {
+		clearReviewSelection();
 		const restored = sessionRef.current.pages[nextPageId] ?? emptyReviewPageState();
 		pageScroll.current?.scrollTo(restored.scrollTop);
 		panelScroll.current?.scrollTo(restored.panelScrollTop);
@@ -3836,6 +3861,7 @@ export function App({
 		if (target === "story" && !file) return;
 		if (target === surface) return;
 		if (target === "comments") {
+			clearReviewSelection();
 			saveCurrentSession(COMMENTS_PAGE_ID);
 			setCommentsSurface(true);
 			setSelectedThread(0);
@@ -3854,9 +3880,12 @@ export function App({
 		pageScroll.current?.scrollChildIntoView(commentRowId(next));
 	}
 	function jumpToThread(thread: ReviewThread) {
-		const chapterIndex = pages.findIndex(
-			(candidate) => candidate.kind === "chapter" && chapterOwnsThread(candidate.chapter, thread),
-		);
+		const chapterIndex = orphanedThreads.has(thread.id)
+			? -1
+			: pages.findIndex(
+					(candidate) =>
+						candidate.kind === "chapter" && chapterOwnsThread(candidate.chapter, thread),
+				);
 		const nextPage = chapterIndex >= 0 ? pages[chapterIndex] : filesPage;
 		const nextPageId = pageId(nextPage);
 		saveCurrentSession(nextPageId);
@@ -3959,6 +3988,7 @@ export function App({
 		if (!chapter) return;
 		const paths = chapterFilePaths(chapter);
 		if (index >= 0 && index < paths.length) {
+			clearReviewSelection();
 			setFocusedExcerpt(null);
 			setSelectedFile(index);
 			setSelectedHunkIndex(0);
@@ -4006,6 +4036,7 @@ export function App({
 		const paths = chapterFilePaths(chapter);
 		const fileIndex = paths.indexOf(path);
 		if (fileIndex < 0) return;
+		clearReviewSelection();
 
 		const wasReviewed = isFileReviewed(vs, chapter.id, path);
 		const next = toggleFile(vs, chapter, path);
@@ -4046,6 +4077,7 @@ export function App({
 	}
 	function focusChapterKeyChange(targetChapter: Chapter, index: number) {
 		if (index < 0 || index >= targetChapter.keyChanges.length) return;
+		clearReviewSelection();
 		setSelectedKeyChange(index);
 		requestKeyFocus();
 		const target = diffFiles
@@ -4074,6 +4106,7 @@ export function App({
 		if (chapter) focusChapterKeyChange(chapter, index);
 	}
 	function focusPrologueArea(locations: string[]) {
+		clearReviewSelection();
 		const target = findFocusAreaTarget(pages, locations);
 		if (!target) return;
 		goto(target.pageIndex);
@@ -4098,6 +4131,7 @@ export function App({
 	}
 	function moveFileFocus(delta: number) {
 		if (!focusTargets.length) return;
+		clearReviewSelection();
 		const at = currentFocusTarget();
 		const next =
 			focusTargets[(Math.max(0, at) + delta + focusTargets.length) % focusTargets.length];
@@ -4641,14 +4675,44 @@ export function App({
 			: (page?.label ?? "revue");
 	const reviewHintState = threadDraft
 		? "composer"
-		: lineSelectionAnchor || pointerSelection
+		: lineSelectionAnchor
 			? "selecting"
-			: "cursor";
+			: pointerSelection
+				? "selected"
+				: "cursor";
+	const sourceReviewActionable = Boolean(
+		chapter &&
+			!interlude &&
+			!focusedExcerpt &&
+			!focusedThreadRef &&
+			focusedNavigationFile &&
+			focusedReviewLines.length,
+	);
+	const actionHint = (id: Parameters<typeof keymapHint>[0], label: string) => {
+		const key = keymapHint(id, keymap);
+		return key ? [{ keys: formatKeymapKey(key), label }] : [];
+	};
+	const contextualPageHints = focusedThreadRef
+		? actionHint("toggle-file-diff", "open comment")
+		: focusedExcerpt
+			? actionHint("toggle-file-diff", "toggle excerpt")
+			: interlude
+				? actionHint("toggle-chapter-review", "mark read")
+				: chapter
+					? [
+							...actionHint("toggle-file-diff", "expand"),
+							...actionHint("toggle-file-review", "reviewed"),
+						]
+					: footerHints(keymapSurface, keymap);
 	const statusHints = showHelp
 		? []
-		: keymapSurface === "page" && chapter
-			? reviewFooterHints(reviewHintState, keymap)
-			: footerHints(keymapSurface, keymap);
+		: threadDraft
+			? reviewFooterHints("composer", keymap)
+			: keymapSurface === "page" && sourceReviewActionable
+				? reviewFooterHints(reviewHintState, keymap)
+				: keymapSurface === "page"
+					? contextualPageHints
+					: footerHints(keymapSurface, keymap);
 	const helpKeyLabel = formatKeymapKey(keymapHint("toggle-shortcut-help", keymap) ?? "?");
 	const quitKeyLabel = formatKeymapKey(keymapHint("quit", keymap) ?? "q");
 	const reloadKeyLabel = formatKeymapKey(keymapHint("reload", keymap) ?? "ctrl+r");
@@ -4828,6 +4892,7 @@ export function App({
 									onToggleDiagram={toggleDiagram}
 									onToggleExcerpt={toggleExcerpt}
 									onSelectExcerptRange={selectExcerptRange}
+									onActivateExcerptRange={commentOnExcerptRange}
 									onExcerptRangeContextMenu={openExcerptContextMenu}
 									vs={vs}
 									pathDisplay={pathDisplay}
@@ -4835,7 +4900,7 @@ export function App({
 									selectedHunkIndex={selectedHunkIndex}
 									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}
-									threads={threads}
+									threads={inlineThreads}
 									keyboardCursor={lineSelectionAnchor ? undefined : (lineCursor ?? undefined)}
 									selectedThreadSelection={
 										(contextMenu?.kind === "range" &&

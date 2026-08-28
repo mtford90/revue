@@ -431,6 +431,145 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 	});
 });
 
+test("gutter drags follow stacked rows while a split-side drag stays in its visible gutter", async () => {
+	const [file] = parsePatch(`diff --git a/replacement.ts b/replacement.ts
+--- a/replacement.ts
++++ b/replacement.ts
+@@ -1,2 +1,2 @@
+-old one
+-old two
++new one
++new two
+`);
+	if (!file) throw new Error("missing replacement fixture");
+
+	for (const layout of ["stack", "split"] as const) {
+		const selected: DiffSelection[] = [];
+		const t = await testRender(
+			<DiffBody
+				file={file}
+				theme={theme}
+				layout={layout}
+				width={60}
+				onSelectionChange={(selection) => selected.push(selection)}
+			/>,
+			{ width: 60, height: 10 },
+		);
+		await t.renderOnce();
+		const rows = t.captureCharFrame().split("\n");
+		const gutter = (text: string, number: string) => {
+			const y = rows.findIndex((row) => row.includes(text));
+			const source = rows[y]?.indexOf(text) ?? -1;
+			return { x: rows[y]?.lastIndexOf(number, source) ?? -1, y };
+		};
+		const start = layout === "stack" ? gutter("old one", "1") : gutter("new one", "1");
+		const end = gutter("new two", "2");
+		await act(async () => t.mockMouse.drag(start.x, start.y, end.x, end.y));
+		await t.renderOnce();
+
+		expect(selected.at(-1)?.ranges).toEqual(
+			layout === "stack"
+				? [
+						{ oldStart: 1, side: "deletions", startLine: 1, endLine: 2 },
+						{ oldStart: 1, side: "additions", startLine: 1, endLine: 2 },
+					]
+				: [{ oldStart: 1, side: "additions", startLine: 1, endLine: 2 }],
+		);
+	}
+});
+
+test("a same-line horizontal gutter drag leaves a one-line selection", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const selected: DiffSelection[] = [];
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			onSelectionChange={(selection) => selected.push(selection)}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const y = rows.findIndex((row) => row.includes("new one"));
+	const source = rows[y]?.indexOf("new one") ?? -1;
+	const x = rows[y]?.lastIndexOf("1", source) ?? -1;
+
+	await act(async () => t.mockMouse.drag(x, y, x + 1, y));
+	await t.renderOnce();
+	expect(selected.at(-1)).toEqual({
+		filePath: "a.ts",
+		ranges: [{ oldStart: 1, side: "additions", startLine: 1, endLine: 1 }],
+	});
+});
+
+test("dragging away and back collapses the range to its anchor", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const selected: DiffSelection[] = [];
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			onSelectionChange={(selection) => selected.push(selection)}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const gutter = (text: string, number: string) => {
+		const y = rows.findIndex((row) => row.includes(text));
+		const source = rows[y]?.indexOf(text) ?? -1;
+		return { x: rows[y]?.lastIndexOf(number, source) ?? -1, y };
+	};
+	const first = gutter("new one", "1");
+	const second = gutter("new two", "2");
+
+	await act(async () => t.mockMouse.moveTo(first.x, first.y));
+	await act(async () => t.mockMouse.pressDown(first.x, first.y));
+	await act(async () => t.mockMouse.moveTo(second.x, second.y));
+	await act(async () => t.renderOnce());
+	await act(async () => t.mockMouse.moveTo(first.x, first.y));
+	await act(async () => t.renderOnce());
+	await act(async () => t.mockMouse.release(first.x, first.y));
+	await t.renderOnce();
+	expect(selected.at(-1)?.ranges).toEqual([
+		{ oldStart: 1, side: "additions", startLine: 1, endLine: 1 },
+	]);
+});
+
+test("a completed drag cannot seed a false double-click activation", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const activated: DiffSelection[] = [];
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			onSelectionChange={() => undefined}
+			onSelectionActivate={(selection) => activated.push(selection)}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const y = rows.findIndex((row) => row.includes("new one"));
+	const source = rows[y]?.indexOf("new one") ?? -1;
+	const x = rows[y]?.lastIndexOf("1", source) ?? -1;
+
+	await act(async () => t.mockMouse.drag(x, y, x + 1, y));
+	await act(async () => t.mockMouse.click(x, y));
+	await t.renderOnce();
+	expect(activated).toEqual([]);
+});
+
 test("dragging source text remains terminal text selection instead of range selection", async () => {
 	const file = parsePatch(patch)[0];
 	if (!file) throw new Error("missing fixture");

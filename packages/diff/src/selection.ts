@@ -1,5 +1,5 @@
 import { diffStructure, structureRowIdentity } from "./plan.ts";
-import type { DiffFile, DiffSide } from "./types.ts";
+import type { DiffFile, DiffLayout, DiffSide } from "./types.ts";
 
 export type NonEmptyArray<Value> = [Value, ...Value[]];
 
@@ -47,12 +47,15 @@ const stopForIdentity = (
 		: null;
 
 /**
- * Every side-backed row from the original parsed hunks, in split display order (old then current).
- * Calling this on the authoritative parsed file, rather than an expanded display variant, keeps
- * synthesised-only context out by construction.
+ * Every side-backed row from the parsed hunks in the active presentation layout's visible order.
+ * Callers choose the authoritative or expanded file according to their interaction surface;
+ * `resolveRange` remains responsible for excluding synthesised-only context.
  */
-export const diffSelectionStops = (file: DiffFile): DiffSelectionStop[] => {
-	const structure = diffStructure({ file, layout: "split" });
+export const diffSelectionStops = (
+	file: DiffFile,
+	layout: DiffLayout = "split",
+): DiffSelectionStop[] => {
+	const structure = diffStructure({ file, layout });
 	const seen = new Set<string>();
 	const stops: DiffSelectionStop[] = [];
 	for (const row of structure.rows) {
@@ -106,6 +109,16 @@ export const normalizeDiffSelection = (
 	}
 	return { filePath: selection.filePath, ranges };
 };
+
+/**
+ * Canonical persisted order is intentionally independent of the active layout. Split structure is
+ * only the stable storage ordering rule; interaction callers use `diffSelectionStops(file, layout)`.
+ */
+export const canonicalizeDiffSelection = (
+	selection: DiffSelection,
+	authoritativeFile: DiffFile,
+): DiffSelection =>
+	normalizeDiffSelection(selection, diffSelectionStops(authoritativeFile, "split"));
 
 const sameStop = (left: DiffSelectionStop, right: DiffSelectionStop): boolean =>
 	stopKey(left) === stopKey(right);

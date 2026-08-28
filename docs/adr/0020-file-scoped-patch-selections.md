@@ -1,4 +1,4 @@
-# ADR 0019 — File-scoped patch selections
+# ADR 0020 — File-scoped patch selections
 
 - Status: accepted
 - Date: 2026-08-21
@@ -55,7 +55,9 @@ not selectable continuation gutters.
 Every patch range validates independently against original hunk authority. Narration ownership is
 also evaluated per range. A patch thread whose ranges share one chapter renders inline there; one
 whose ranges cross chapters renders only on the Diff surface. Exactly one thread box mounts at the
-canonical terminal range while all ranges receive the selection tint.
+canonical terminal range. Persisted threads do not tint their ranges: attachment placement and count
+carry their history without obscuring key-change or intra-line styling. A live selection or composer
+continues to highlight every selected range.
 
 Supersession remaps every patch range as one transaction and normalises only after every segment
 succeeds. If one segment cannot remap, prep marks the whole carried thread orphaned; no partial

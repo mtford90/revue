@@ -497,4 +497,20 @@ test("patch ranges remap atomically and orphan when any segment disappears", asy
 		filePath: "src/app.ts",
 		ranges: [{ oldStart: 2, side: "additions", startLine: 5, endLine: 6 }],
 	});
+
+	// Once the atomic anchor is orphaned, a later run must not reinterpret its old coordinates even
+	// when the missing hunk returns and would make those coordinates remappable again.
+	await narrate(second, [
+		chapter({ id: "app-fix", order: 1, hunkRefs: [{ filePath: "src/app.ts", oldStart: 2 }] }),
+	]);
+	let thirdChange = replaceLine(baseline, 5, "app line 5, fixed");
+	thirdChange = replaceLine(thirdChange, 25, "app line 25, fixed later");
+	await write(root, "src/app.ts", thirdChange);
+	await commit(root, "Address the rest of the review");
+	const third = await prepareRun(["main", "HEAD"], root);
+	const [stillOrphaned] = storedThreads(root, third.manifest.runId);
+
+	expect(stillOrphaned?.migrationOrphaned).toBe(true);
+	expect(stillOrphaned?.migratedFrom).toBe(second.manifest.runId);
+	expect(stillOrphaned?.anchor).toEqual(anchor);
 });

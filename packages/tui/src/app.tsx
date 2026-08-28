@@ -2081,22 +2081,8 @@ function ChapterView({
 					},
 				]
 			: [];
-		const patchDecorations = chapterHunkThreads(chapter, threads).flatMap((thread) =>
-			isPatchAnchor(thread.anchor)
-				? thread.anchor.ranges.map((range, index) => ({
-						...range,
-						filePath: thread.anchor.filePath,
-						hunkOldStart: range.oldStart,
-						id: `patch-thread:${thread.id}:${index}`,
-						active: true,
-						backgroundColor: theme.selectedHunk,
-						showGutterMarker: false,
-					}))
-				: [],
-		);
 		return [
 			...cursorDecoration,
-			...patchDecorations,
 			...(keyChange?.lineRefs ?? []).map((ref, refIndex) => ({
 				...ref,
 				id: `${focusedDecorationId}:${refIndex}`,
@@ -2105,7 +2091,7 @@ function ChapterView({
 				showGutterMarker: false,
 			})),
 		];
-	}, [chapter, selectedKeyChange, focusedDecorationId, keyboardCursor, theme, threads]);
+	}, [chapter, selectedKeyChange, focusedDecorationId, keyboardCursor, theme]);
 	const mountThread = (thread: ReviewThread): DiffInlineAttachment => ({
 		id: thread.id,
 		anchor: diffRangeForAnchor(thread.anchor),
@@ -3480,15 +3466,19 @@ export function App({
 		return copied;
 	}
 	function copySelectionLocation(selection: DiffSelection) {
+		const qualifySide = selection.ranges.length > 1;
 		const text = selection.ranges
-			.map((range) =>
-				formatSourceLocation(
+			.map((range) => {
+				const location = formatSourceLocation(
 					sourceRangeFor(
 						diffRangeForSelectionRange(selection.filePath, range),
 						previousPathFor(selection.filePath),
 					),
-				),
-			)
+				);
+				return qualifySide
+					? `${location} (${range.side === "deletions" ? "old" : "new"})`
+					: location;
+			})
 			.join("\n");
 		copy({ text, notice: `Copied location: ${text.replaceAll("\n", " · ")}` });
 	}
@@ -3557,11 +3547,13 @@ export function App({
 	}
 	function selectExcerptRange(range: DiffLineRange) {
 		setCopyNotice(null);
+		clearReviewSelection();
 		setExcerptSelection(range);
 	}
 	function openExcerptContextMenu(range: DiffLineRange, position: { x: number; y: number }) {
 		setCopyNotice(null);
 		const resolved = highlightedRange(range) ?? range;
+		clearReviewSelection();
 		setExcerptSelection(resolved);
 		setContextMenu({
 			kind: "range",
@@ -3636,10 +3628,6 @@ export function App({
 			setLineSelectionAnchor(lineCursor);
 		}
 	}
-	function cancelLineSelection() {
-		setLineSelectionAnchor(null);
-		setPointerSelection(null);
-	}
 	async function openLineInEditor() {
 		const selected = lineSelection ?? pointerSelection;
 		const selectedAddition = selected?.ranges.find((range) => range.side === "additions");
@@ -3689,6 +3677,7 @@ export function App({
 	 * run and answers to the frozen context instead. The selection stays tinted under the composer.
 	 */
 	function commentOnExcerptRange(range: DiffLineRange) {
+		clearReviewSelection();
 		setExcerptSelection(range);
 		startThread(
 			{
@@ -4469,8 +4458,8 @@ export function App({
 		if (copyNotice) setCopyNotice(null);
 
 		if (name === "escape") {
-			if (lineSelectionAnchor || pointerSelection) {
-				cancelLineSelection();
+			if (lineSelectionAnchor || pointerSelection || excerptSelection) {
+				clearReviewSelection();
 				return;
 			}
 			quit();
@@ -4692,18 +4681,25 @@ export function App({
 		const key = keymapHint(id, keymap);
 		return key ? [{ keys: formatKeymapKey(key), label }] : [];
 	};
-	const contextualPageHints = focusedThreadRef
-		? actionHint("toggle-file-diff", "open comment")
-		: focusedExcerpt
-			? actionHint("toggle-file-diff", "toggle excerpt")
-			: interlude
-				? actionHint("toggle-chapter-review", "mark read")
-				: chapter
-					? [
-							...actionHint("toggle-file-diff", "expand"),
-							...actionHint("toggle-file-review", "reviewed"),
-						]
-					: footerHints(keymapSurface, keymap);
+	const contextualPageHints =
+		page?.kind === "prologue"
+			? [
+					...actionHint("next-page", "next chapter"),
+					...actionHint("next-unreviewed", "unreviewed"),
+					...actionHint("toggle-comments", "comments"),
+				]
+			: focusedThreadRef
+				? actionHint("toggle-file-diff", "open comment")
+				: focusedExcerpt
+					? actionHint("toggle-file-diff", "toggle excerpt")
+					: interlude
+						? actionHint("toggle-chapter-review", "mark read")
+						: chapter
+							? [
+									...actionHint("toggle-file-diff", "expand"),
+									...actionHint("toggle-file-review", "reviewed"),
+								]
+							: footerHints(keymapSurface, keymap);
 	const statusHints = showHelp
 		? []
 		: threadDraft

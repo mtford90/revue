@@ -944,8 +944,12 @@ test("typing into the filter narrows the list without firing the actions it spel
 test("the status bar hints follow the surface and name the keys that are actually bound", async () => {
 	const t = await testRender(<App file={file} />, { width: 130, height: 44 });
 	await t.renderOnce();
-	expect(statusLine(t)).toContain("j/k line");
+	expect(statusLine(t)).toContain("] next chapter");
+	expect(statusLine(t)).toContain("a unreviewed");
 	expect(statusLine(t)).toContain("o comments");
+	for (const sourceHint of ["j/k", "v select", "e edit", "Enter comment"]) {
+		expect(statusLine(t)).not.toContain(sourceHint);
+	}
 
 	// A long chapter title eats the width the hints were using, so they shed whole from the right
 	// rather than truncating into half a hint.
@@ -2289,6 +2293,7 @@ const clickAction = async (t: Awaited<ReturnType<typeof testRender>>, marker: st
 const renderExcerptChapter = async ({
 	onViewStateChange,
 	onCopy,
+	onQuit,
 	permalinkContext,
 	initialThreads,
 	threadActions,
@@ -2296,6 +2301,7 @@ const renderExcerptChapter = async ({
 }: {
 	onViewStateChange?: (next: ViewState) => void;
 	onCopy?: (text: string) => boolean;
+	onQuit?: () => void;
 	permalinkContext?: PermalinkContext;
 	initialThreads?: ReviewThread[];
 	threadActions?: Parameters<typeof App>[0]["threadActions"];
@@ -2309,6 +2315,7 @@ const renderExcerptChapter = async ({
 			diffFiles={diffFiles}
 			permalinks={permalinkContext}
 			onCopy={onCopy}
+			onQuit={onQuit}
 			onViewStateChange={onViewStateChange}
 			initialThreads={initialThreads}
 			threadActions={threadActions}
@@ -2418,6 +2425,36 @@ test("clicking the band opens the excerpt in place, caption above its header", a
 	await clickAction(t, "[▲ hide]");
 
 	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+});
+
+test("excerpt clicks and drags replace patch selection, and Escape cancels before quitting", async () => {
+	let quits = 0;
+	const t = await renderExcerptChapter({ onQuit: () => (quits += 1) });
+	await clickAction(t, "[▼ show");
+	const patch = backoffGutter(t);
+	const first = excerptGutter(t, "export class Transport {", "12");
+	const second = excerptGutter(t, "dispatch(request)", "13");
+	const selectedTint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
+
+	await click(t, patch.x, patch.y);
+	await press(t, "v");
+	expect(rowBackground(t, "Exponential backoff with a ceiling")).toBe(selectedTint);
+	await click(t, first.x, first.y);
+	expect(rowBackground(t, "Exponential backoff with a ceiling")).not.toBe(selectedTint);
+	expect(rowBackground(t, "export class Transport {")).toBe(selectedTint);
+	await press(t, "ESCAPE");
+	expect(quits).toBe(0);
+	expect(rowBackground(t, "export class Transport {")).not.toBe(selectedTint);
+
+	await press(t, "v");
+	await act(async () => t.mockMouse.drag(first.x, first.y, second.x, second.y));
+	await t.renderOnce();
+	expect(rowBackground(t, "Exponential backoff with a ceiling")).not.toBe(selectedTint);
+	expect(rowBackground(t, "dispatch(request)")).toBe(selectedTint);
+	await press(t, "ESCAPE");
+	expect(quits).toBe(0);
+	await press(t, "ESCAPE");
+	expect(quits).toBe(1);
 });
 
 test("dragging a quoted line's gutter tints the range and y yanks the quotation", async () => {
@@ -3325,7 +3362,7 @@ test("v selects and extends an exact keyboard range for the inline composer", as
 	expect(t.captureCharFrame()).toContain("New review thread");
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
-	expect(copied).toEqual(["retry.ts:2\nretry.ts:2"]);
+	expect(copied).toEqual(["retry.ts:2 (old)\nretry.ts:2 (new)"]);
 });
 
 test("shift-equals expands files when the terminal reports the unshifted punctuation", async () => {
@@ -3611,10 +3648,15 @@ const multiRangeDiff = parsePatch(`diff --git a/multi.ts b/multi.ts
 
 test("one file-scoped selection spans diff sides and separate hunks before commenting", async () => {
 	const createdAnchors: ThreadAnchor[] = [];
+	const copied: string[] = [];
 	const t = await testRender(
 		<App
 			file={multiRangeChapters}
 			diffFiles={multiRangeDiff}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
 			threadActions={{
 				create: (anchor, author, body) => {
 					createdAnchors.push(anchor);
@@ -3670,6 +3712,18 @@ test("one file-scoped selection spans diff sides and separate hunks before comme
 
 	await press(t, "RETURN");
 	expect(t.captureCharFrame()).toContain("New review thread");
+	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
+	await t.renderOnce();
+	expect(copied).toEqual([
+		[
+			"multi.ts:1 (old)",
+			"multi.ts:1 (new)",
+			"multi.ts:2 (old)",
+			"multi.ts:2 (new)",
+			"multi.ts:10 (old)",
+			"multi.ts:10 (new)",
+		].join("\n"),
+	]);
 	await act(async () => t.mockInput.typeText("Treat these changes as one concern"));
 	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
 	await act(async () => t.renderOnce());
@@ -3879,6 +3933,57 @@ test("a standing pointer selection reports selected actions, not keyboard extens
 		expect(statusLine(t)).toContain(hint);
 	}
 	expect(statusLine(t)).not.toContain("j/k extend");
+});
+
+test("saved patch threads preserve key-change severity and intraline styling", async () => {
+	const chapters = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				...watchedChapters.chapters[0],
+				keyChanges: [
+					{
+						content: "Should beta remain?",
+						severity: "high",
+						lineRefs: [{ filePath: "retry.ts", side: "additions", startLine: 2, endLine: 2 }],
+					},
+				],
+			},
+		],
+	});
+	const patchThread = (status: ReviewThread["status"], suffix: string): ReviewThread => ({
+		...watchedThread({ line: 2, body: `${status} patch thread` }),
+		id: `00000000-0000-4000-8000-00000000008${suffix}`,
+		status,
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.PATCH,
+			filePath: "retry.ts",
+			ranges: [{ oldStart: 1, side: "additions", startLine: 2, endLine: 2 }],
+		},
+	});
+	const t = await testRender(
+		<App
+			file={chapters}
+			diffFiles={watchedDiff}
+			initialThreads={[
+				patchThread(THREAD_STATUS.OPEN, "1"),
+				patchThread(THREAD_STATUS.DEALT_WITH, "2"),
+			]}
+		/>,
+		{ width: 120, height: 40, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+
+	const resolved = resolveTheme(undefined);
+	const betaRow = rowOf(t, "retry(beta)");
+	const betaSpans = t.captureSpans().lines[betaRow]?.spans ?? [];
+	const betaSpan = betaSpans.find((span) => span.text.includes("beta"));
+	expect(
+		betaSpans.some(
+			(span) => span.bg?.toString() === RGBA.fromHex(resolved.removedContentBg).toString(),
+		),
+	).toBe(true);
+	expect(betaSpan?.bg?.toString()).toBe(RGBA.fromHex(resolved.addedEmphasisBg).toString());
 });
 
 test("collapsed source does not advertise source-review actions", async () => {

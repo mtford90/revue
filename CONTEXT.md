@@ -278,7 +278,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
-- **File-scoped patch selections preserve old anchors.** See `docs/adr/0019`, which extends ADRs
+- **File-scoped patch selections preserve old anchors.** See `docs/adr/0020`, which extends ADRs
   0004, 0007 and 0018. New TUI diff feedback uses a non-empty multi-range `patch` anchor; old `hunk`
   and `excerpt` data and CLI creation syntax retain their meaning. Patch ranges validate
   independently, must already be canonically ordered/merged in the version-2 thread store, render

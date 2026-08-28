@@ -203,15 +203,18 @@ const carriedThread = (
 	matches: Map<string, ReviewUnitMatch>,
 	filesByPath: ReadonlyMap<string, DiffFile>,
 ): ReviewThread => {
-	const carried = carriedAnchor(thread.anchor, matches, filesByPath);
+	// An atomic patch anchor that failed once is historical evidence, not a candidate for another
+	// mapping attempt. Later runs may coincidentally regain matching coordinates; preserving the
+	// original bytes prevents that coincidence from silently changing what the thread was about.
+	const carried = thread.migrationOrphaned
+		? { anchor: thread.anchor, migrationOrphaned: true }
+		: carriedAnchor(thread.anchor, matches, filesByPath);
 	return {
 		...thread,
 		runId,
 		migratedFrom: thread.runId,
 		anchor: carried.anchor,
-		...(thread.migrationOrphaned || carried.migrationOrphaned
-			? { migrationOrphaned: true }
-			: { migrationOrphaned: undefined }),
+		...(carried.migrationOrphaned ? { migrationOrphaned: true } : { migrationOrphaned: undefined }),
 	};
 };
 

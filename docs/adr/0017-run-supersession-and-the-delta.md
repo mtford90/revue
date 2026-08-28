@@ -74,5 +74,5 @@ The run key hashes the parsed chapters. Reviewer progress is keyed by the run ke
 
 ## Amendments
 
-- 2026-08-19 — The withdrawn agent-directed review granularity record removes `revue export`, so the
+- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes `revue export`, so the
   coverage validation named above now runs only in `revue show` and `revue threads`.

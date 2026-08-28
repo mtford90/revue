@@ -385,10 +385,11 @@ export function validateThreadsForRun(
 			.map((anchor, index) => ({ index, issue: hunkAnchorIssue(files, anchor) }))
 			.find((entry) => entry.issue !== null);
 		if (issue?.issue) {
-			const detail = isPatchAnchor(thread.anchor)
-				? `patch range ${issue.index + 1}: ${issue.issue}`
-				: issue.issue;
-			if (!thread.migratedFrom) throw staleAnchor(thread, detail);
+			const patch = isPatchAnchor(thread.anchor);
+			const detail = patch ? `patch range ${issue.index + 1}: ${issue.issue}` : issue.issue;
+			// Prep marks a failed atomic patch migration explicitly. A merely migrated patch that no
+			// longer resolves is corrupt; generic migratedFrom leniency remains only for historical hunks.
+			if (patch || !thread.migratedFrom) throw staleAnchor(thread, detail);
 			orphaned.push({
 				thread,
 				reason: `this thread was carried from a superseded run and ${detail}`,

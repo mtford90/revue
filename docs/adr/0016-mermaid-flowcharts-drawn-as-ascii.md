@@ -90,6 +90,6 @@ become different.
 
 ## Amendments
 
-- 2026-08-19 — The withdrawn agent-directed review granularity record removes Markdown export. The
+- 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes Markdown export. The
   consequence above is historical; the drawn/source decision for a diagram block now applies only
   to the TUI's own rendering.

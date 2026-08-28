@@ -216,7 +216,7 @@ scope. `revue comments` remains a command-name compatibility alias, but `threads
 The lines a thread anchors to are also the lines you want to quote elsewhere, so the same selection
 answers to more than one verb. Right-clicking anywhere on a line — its gutter or its code — opens a
 menu at the pointer offering copy `path:line`, copy GitHub link, and comment. Inside a live selection
-it acts on that whole selection. A multi-range location copy emits one location per line range; a
+it acts on that whole selection. A multi-range location copy emits one location per line range, qualified `(old)` or `(new)`; a
 GitHub link is available only when the normalised selection has exactly one range. While a composer is open the same two copies are on `Ctrl+Y`
 and `Ctrl+G` and in its footer, and neither disturbs the draft.
 

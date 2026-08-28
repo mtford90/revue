@@ -283,7 +283,7 @@ test("every patch range validates independently against original hunk authority"
 		if (!file || !hunk) throw new Error("sample run has no textual hunk");
 		const side = hunk.additionCount > 0 ? "additions" : "deletions";
 		const start = side === "additions" ? hunk.additionStart : hunk.deletionStart;
-		openThreadStore(threadsPath, runId).create(
+		const thread = openThreadStore(threadsPath, runId).create(
 			{
 				kind: THREAD_ANCHOR_KIND.PATCH,
 				filePath: file.path,
@@ -296,6 +296,25 @@ test("every patch range validates independently against original hunk authority"
 			"One concern, one invalid segment",
 		);
 		expect(() => loadValidatedThreads(threadsPath, run)).toThrow("patch range 2");
+
+		const store = readThreadStoreFile(threadsPath);
+		const migrated = (store.runs[runId] ?? []).map((entry) => ({
+			...entry,
+			migratedFrom: "b".repeat(64),
+		}));
+		persistThreadStoreFile(threadsPath, { ...store, runs: { [runId]: migrated } });
+		// Generic carried-anchor leniency is historical hunk behaviour only. Patch migrations must
+		// carry prep's explicit atomic-orphan marker or the unresolved anchor is corrupt.
+		expect(() => loadValidatedThreads(threadsPath, run)).toThrow("patch range 2");
+
+		persistThreadStoreFile(threadsPath, {
+			...store,
+			runs: {
+				[runId]: migrated.map((entry) => ({ ...entry, migrationOrphaned: true })),
+			},
+		});
+		const marked = loadValidatedThreads(threadsPath, run);
+		expect(marked.orphaned.map((entry) => entry.thread.id)).toEqual([thread.id]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

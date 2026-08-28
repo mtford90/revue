@@ -72,9 +72,11 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Line ref** — `(filePath, side, startLine, endLine)`. `side` is `additions` (new-side line
   numbers) or `deletions` (old-side).
 - **Thread** — the official mutable feedback aggregate, independently identified and anchored by one
-  of two anchor kinds. A `hunk` anchor is `(filePath, oldStart, side, startLine, endLine)`; the
-  review-unit `oldStart` keeps it tied to exactly one pinned hunk even when a path appears in
-  multiple chapters. An `excerpt` anchor is `(filePath, startLine, endLine)` over quoted code and
+  of three anchor kinds. A `hunk` anchor is `(filePath, oldStart, side, startLine, endLine)` and
+  retains its historical one-hunk meaning. A `patch` anchor is one file path plus a non-empty,
+  canonically ordered list of `(oldStart, side, startLine, endLine)` ranges; TUI diff comments use it
+  even for one line, and it may cross sides and hunks but never files. An `excerpt` anchor is
+  `(filePath, startLine, endLine)` over quoted code and
   resolves against the frozen context rather than the patch; it deliberately carries no `oldStart`
   and no `side`, because `oldStart: 0` is already the metadata review unit's sentinel and an excerpt
   borrowing it would be indistinguishable from a thread on a file with no textual hunk. The two
@@ -132,14 +134,14 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   narration rather than an ad-hoc reveal. Quoted lines are currently rendered unhighlighted.
 - **Coverage** — every prepared review unit must appear in exactly one chapter: no omissions, no
   duplicates. `revue show --check` reports the narrated count for every run.
-- **Selection** — the side-aware line range that says what the reviewer is acting on, created by a
-  gutter drag or from the explicit keyboard source-line cursor. The cursor starts on additions in a
-  focused file, falling back to deletions; `j`/`k` move it, `v` begins a one-line range, and movement
-  extends only within one file, hunk, and side. Comment, editor-open, copy-text, copy-location, and
-  copy-GitHub-link are verbs hung off the selection. Editor-open uses the range's first current-side
-  line and refuses deleted-side locations rather than guessing. A GitHub permalink is offered per
-  side only when that side's endpoint is a pinned commit; unpinned sides are greyed out with the
-  reason.
+- **Selection** — a feedback-neutral, non-empty list of side-aware ranges in one file. Normal
+  `j`/`k` walks reviewable lines continuously across expanded text files in the current chapter;
+  `v` enters selection mode and `j`/`k` then use the complete original-hunk display stream, crossing
+  sides and hunks but stopping at the file. A click moves the cursor, a drag selects, and a
+  double-click activates a one-line comment. Selection order and membership belong to
+  `@revue/diff`, independent of wrapping, mounting, and threads. Editor-open uses the first
+  additions-side range or refuses; location copy emits every range; a GitHub link requires exactly
+  one normalised range.
 - **Keybindings** — every shortcut derives from one typed keymap registry (handler, keys surface,
   status and menu hints, and CLI all read it). Reviewers override actions via hand-edited JSONC at
   `~/.revue/keybindings.json`; escape and digits are reserved, and validation drops just the broken
@@ -274,6 +276,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
+- **File-scoped patch selections preserve old anchors.** See `docs/adr/0020`, which extends ADRs
+  0004, 0007 and 0018. New TUI diff feedback uses a non-empty multi-range `patch` anchor; old `hunk`
+  and `excerpt` data and CLI creation syntax retain their meaning. Patch ranges validate
+  independently, render one box at the terminal range, and remap atomically across supersession.
 - **Threads are mutable state keyed by immutable code.** See `docs/adr/0004`. Revue locates the
   reviewed repository from the supplied run, validates and atomically replaces its
   `.revue/threads.json`, keyed by full `runId`; prepared run directories remain immutable. Mutations

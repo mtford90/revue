@@ -62,6 +62,18 @@ export {
 	structureRowIdentity,
 } from "./plan.ts";
 export { anchorRowIndex, plannedRowIdentity } from "./ranges.ts";
+export {
+	type DiffSelection,
+	type DiffSelectionRange,
+	type DiffSelectionStop,
+	diffSelectionStops,
+	firstSelectionRange,
+	type NonEmptyArray,
+	normalizeDiffSelection,
+	selectionBetween,
+	selectionContains,
+	terminalSelectionRange,
+} from "./selection.ts";
 export { compositeTerminalForeground } from "./syntectTheme.ts";
 export { plainTerminalLine, sanitizeTerminalLine } from "./terminalText.ts";
 export type {

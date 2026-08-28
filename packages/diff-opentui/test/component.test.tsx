@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
-import { parsePatch, planDiff, prepareSyntaxHighlighting } from "@revue/diff";
+import { type DiffSelection, parsePatch, planDiff, prepareSyntaxHighlighting } from "@revue/diff";
 import { resolveTheme } from "@revue/theme";
 import { act } from "react";
 import { DiffBody, DiffFileHeader, diffLineId, OPENTUI_DIFF_CHROME } from "../src/index.ts";
@@ -384,6 +384,8 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 `);
 	if (!file) throw new Error("missing fixture");
 	const selections: unknown[] = [];
+	const cursors: unknown[] = [];
+	const patchSelections: DiffSelection[] = [];
 	const t = await testRender(
 		<DiffBody
 			file={file}
@@ -391,6 +393,8 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 			layout="stack"
 			width={60}
 			onRangeSelect={(range) => selections.push(range)}
+			onRangeStart={(range) => cursors.push(range)}
+			onSelectionChange={(selection) => patchSelections.push(selection)}
 		/>,
 		{ width: 60, height: 8 },
 	);
@@ -405,11 +409,13 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 
 	await act(async () => t.mockMouse.click(oldTwoX, oldTwoY));
 	await t.renderOnce();
-	expect(selections.at(-1)).toMatchObject({ side: "deletions", startLine: 2, endLine: 2 });
+	expect(selections).toEqual([]);
+	expect(cursors.at(-1)).toMatchObject({ side: "deletions", startLine: 2, endLine: 2 });
 
 	await act(async () => t.mockMouse.click(newTwoX, newTwoY));
 	await t.renderOnce();
-	expect(selections.at(-1)).toEqual({
+	expect(selections).toEqual([]);
+	expect(cursors.at(-1)).toEqual({
 		filePath: "select.ts",
 		hunkOldStart: 1,
 		side: "additions",
@@ -419,12 +425,9 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 
 	await act(async () => t.mockMouse.drag(newTwoX, newTwoY, keepFiveX, keepFiveY));
 	await t.renderOnce();
-	expect(selections.at(-1)).toEqual({
+	expect(patchSelections.at(-1)).toMatchObject({
 		filePath: "select.ts",
-		hunkOldStart: 1,
-		side: "additions",
-		startLine: 2,
-		endLine: 5,
+		ranges: expect.arrayContaining([{ oldStart: 1, side: "additions", startLine: 5, endLine: 5 }]),
 	});
 });
 
@@ -626,6 +629,37 @@ test("continuation rows leave the gutter and the change sign blank", async () =>
 	expect(rows[first]?.slice(0, start)).toContain("+");
 	expect(rows[first + 1]?.slice(0, start).trim()).toBe("");
 	expect(rows[first + 1]?.slice(start).trim()).not.toBe("");
+});
+
+test("a selected wrapped line carries one border through every visual row", async () => {
+	const [file] = parsePatch(wrapPatch(wrappedLine));
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={40}
+			selectedRange={{
+				filePath: "wrap.ts",
+				hunkOldStart: 1,
+				side: "additions",
+				startLine: 1,
+				endLine: 1,
+			}}
+		/>,
+		{ width: 40, height: 20 },
+	);
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const first = rows.findIndex((row) => row.includes("wrapped-"));
+	const last = rows.findIndex((row) => row.includes(WRAPPED_TAIL));
+	const borderColumn = rows[first]?.indexOf("▌") ?? -1;
+	const selectedRows = rows.slice(first, last + 1);
+
+	expect(last).toBeGreaterThan(first);
+	expect(borderColumn).toBeGreaterThanOrEqual(0);
+	expect(selectedRows.map((row) => row[borderColumn])).toEqual(selectedRows.map(() => "▌"));
 });
 
 test("a continuation row's blank gutter does not select the line", async () => {

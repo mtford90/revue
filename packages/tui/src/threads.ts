@@ -17,6 +17,8 @@ import {
 	frozenExcerptContaining,
 	type HunkThreadAnchor,
 	isExcerptAnchor,
+	isPatchAnchor,
+	type PatchThreadRange,
 	type ReviewThread,
 	reviewThreadSchema,
 	THREAD_AUTHOR_KIND,
@@ -317,18 +319,30 @@ const hunkAnchorIssue = (files: readonly DiffFile[], anchor: HunkThreadAnchor): 
 	return `${anchor.side} range ${anchor.startLine}-${anchor.endLine} is outside that review unit`;
 };
 
-/** Why the narration does not own this anchor's review unit exactly once, if it does not. */
-const chapterOwnershipIssue = (run: ReviewRun, anchor: HunkThreadAnchor): string | null => {
+/** Why the narration does not own one review unit exactly once, if it does not. */
+const chapterRangeOwnershipIssue = (
+	run: ReviewRun,
+	filePath: string,
+	oldStart: number,
+): string | null => {
 	if (!run.chapters) return null;
 	const owners = run.chapters.chapters.filter((chapter) =>
 		chapter.hunkRefs.some(
-			(reference) =>
-				reference.filePath === anchor.filePath && reference.oldStart === anchor.oldStart,
+			(reference) => reference.filePath === filePath && reference.oldStart === oldStart,
 		),
 	);
 	if (owners.length === 1) return null;
 	return `review unit has ${owners.length} chapter owners instead of one`;
 };
+
+const patchRangeAsHunk = (filePath: string, range: PatchThreadRange): HunkThreadAnchor => ({
+	kind: "hunk",
+	filePath,
+	oldStart: range.oldStart,
+	side: range.side,
+	startLine: range.startLine,
+	endLine: range.endLine,
+});
 
 /**
  * Reject every anchor that does not belong to exactly one pinned review unit, and report — rather
@@ -354,18 +368,34 @@ export function validateThreadsForRun(
 			if (orphan) orphaned.push(orphan);
 			continue;
 		}
-		const anchor = thread.anchor;
-		const issue = hunkAnchorIssue(files, anchor);
-		if (issue) {
-			if (!thread.migratedFrom) throw staleAnchor(thread, issue);
+		if (thread.migrationOrphaned) {
 			orphaned.push({
 				thread,
-				reason: `this thread was carried from a superseded run and ${issue}`,
+				reason: "this atomic patch selection could not be fully remapped from a superseded run",
 			});
 			continue;
 		}
-		const ownership = chapterOwnershipIssue(run, anchor);
-		if (ownership) throw staleAnchor(thread, ownership);
+		const anchors = isPatchAnchor(thread.anchor)
+			? thread.anchor.ranges.map((range) => patchRangeAsHunk(thread.anchor.filePath, range))
+			: [thread.anchor];
+		const issue = anchors
+			.map((anchor, index) => ({ index, issue: hunkAnchorIssue(files, anchor) }))
+			.find((entry) => entry.issue !== null);
+		if (issue?.issue) {
+			const detail = isPatchAnchor(thread.anchor)
+				? `patch range ${issue.index + 1}: ${issue.issue}`
+				: issue.issue;
+			if (!thread.migratedFrom) throw staleAnchor(thread, detail);
+			orphaned.push({
+				thread,
+				reason: `this thread was carried from a superseded run and ${detail}`,
+			});
+			continue;
+		}
+		for (const anchor of anchors) {
+			const ownership = chapterRangeOwnershipIssue(run, anchor.filePath, anchor.oldStart);
+			if (ownership) throw staleAnchor(thread, ownership);
+		}
 	}
 	return orphaned;
 }

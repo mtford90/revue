@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
+import { parsePatch } from "@revue/diff";
 import {
 	type ContextExcerpt,
 	type RevueChaptersFile,
@@ -264,6 +265,35 @@ test("excerpt anchors resolve against the frozen context, and orphans neither th
 
 		expect(afterRezoom.threads.map((thread) => thread.id)).toEqual([quoted.id, outside.id]);
 		expect(afterRezoom.orphaned.map((entry) => entry.thread.id)).toEqual([quoted.id, outside.id]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("every patch range validates independently against original hunk authority", async () => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-patch-anchor-"));
+	try {
+		const { directory, runId, threadsPath } = await narratedRun(root, [CITED]);
+		const run = await loadReviewRun(directory);
+		const parsed = parsePatch(run.patch);
+		const file = parsed.find((candidate) => candidate.metadata.hunks.length > 0);
+		const hunk = file?.metadata.hunks[0];
+		if (!file || !hunk) throw new Error("sample run has no textual hunk");
+		const side = hunk.additionCount > 0 ? "additions" : "deletions";
+		const start = side === "additions" ? hunk.additionStart : hunk.deletionStart;
+		openThreadStore(threadsPath, runId).create(
+			{
+				kind: THREAD_ANCHOR_KIND.PATCH,
+				filePath: file.path,
+				ranges: [
+					{ oldStart: hunk.deletionStart, side, startLine: start, endLine: start },
+					{ oldStart: hunk.deletionStart, side, startLine: start + 999, endLine: start + 999 },
+				],
+			},
+			agent,
+			"One concern, one invalid segment",
+		);
+		expect(() => loadValidatedThreads(threadsPath, run)).toThrow("patch range 2");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

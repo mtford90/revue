@@ -946,7 +946,7 @@ test("the status bar hints follow the surface and name the keys that are actuall
 	// A long chapter title eats the width the hints were using, so they shed whole from the right
 	// rather than truncating into half a hint.
 	await nextChapter(t);
-	expect(statusLine(t)).toContain("j/k line");
+	expect(statusLine(t)).toContain("j/k move");
 	expect(statusLine(t)).not.toContain("o comments");
 
 	await press(t, "o");
@@ -1337,6 +1337,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 	const sourceX = lines[lineY]?.indexOf("new value") ?? -1;
 	const gutterX = lines[lineY]?.lastIndexOf("1", sourceX) ?? -1;
 	await click(t, gutterX, lineY);
+	await press(t, "RETURN");
 	const composerFrame = t.captureCharFrame();
 	expect(composerFrame).toContain("New review thread");
 	expect(composerFrame).not.toContain("review unit oldStart");
@@ -1899,6 +1900,7 @@ test("an open thread copies the range it is anchored to without losing the draft
 
 	const gutter = backoffGutter(t);
 	await click(t, gutter.x, gutter.y);
+	await press(t, "RETURN");
 	expect(t.captureCharFrame()).toContain("New review thread");
 
 	await act(async () => t.mockInput.typeText("Needs a cap"));
@@ -2099,11 +2101,10 @@ test("commenting on a highlight anchors the thread to every line it covers", asy
 	await act(async () => t.mockInput.typeText("Review this range"));
 	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
 	await t.renderOnce();
-	expect(anchors[0]).toMatchObject({
+	expect(anchors[0]).toEqual({
+		kind: THREAD_ANCHOR_KIND.PATCH,
 		filePath: "src/lib/backoff.ts",
-		side: "additions",
-		startLine: 1,
-		endLine: 3,
+		ranges: [{ oldStart: 0, side: "additions", startLine: 1, endLine: 3 }],
 	});
 });
 
@@ -3314,7 +3315,7 @@ test("v selects and extends an exact keyboard range for the inline composer", as
 	expect(t.captureCharFrame()).toContain("New review thread");
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
-	expect(copied).toEqual(["retry.ts:2-3"]);
+	expect(copied).toEqual(["retry.ts:2\nretry.ts:2"]);
 });
 
 test("shift-equals expands files when the terminal reports the unshifted punctuation", async () => {
@@ -3417,6 +3418,288 @@ test("e requests the cursor or selected range from the injected editor boundary"
 	await press(t, "e");
 	expect(requested).toMatchObject([
 		{ startLine: 1, endLine: 1, side: "additions" },
-		{ startLine: 1, endLine: 2, side: "additions" },
+		{ startLine: 1, endLine: 1, side: "additions" },
 	]);
+});
+
+const streamChapters = RevueChaptersFileSchema.parse({
+	chapters: [
+		{
+			id: "continuous-stream",
+			order: 1,
+			title: "Read both files as one stream",
+			summary: "The review cursor crosses the file boundary.",
+			hunkRefs: [
+				{ filePath: "a.ts", oldStart: 0 },
+				{ filePath: "b.ts", oldStart: 0 },
+			],
+			keyChanges: [],
+		},
+	],
+});
+
+const streamDiff = parsePatch(`diff --git a/a.ts b/a.ts
+new file mode 100644
+--- /dev/null
++++ b/a.ts
+@@ -0,0 +1,12 @@
+${Array.from({ length: 12 }, (_, index) => `+a-line-${index + 1}`).join("\n")}
+diff --git a/b.ts b/b.ts
+new file mode 100644
+--- /dev/null
++++ b/b.ts
+@@ -0,0 +1,12 @@
+${Array.from({ length: 12 }, (_, index) => `+b-line-${index + 1}`).join("\n")}
+`);
+
+const visibleRow = (t: Awaited<ReturnType<typeof testRender>>, text: string) =>
+	t
+		.captureCharFrame()
+		.split("\n")
+		.find((line) => line.includes(text)) ?? "";
+
+const gutterFor = (t: Awaited<ReturnType<typeof testRender>>, text: string, lineNumber: string) => {
+	const rows = t.captureCharFrame().split("\n");
+	const y = rows.findIndex((row) => row.includes(text));
+	const sourceX = rows[y]?.indexOf(text) ?? -1;
+	return { x: rows[y]?.lastIndexOf(lineNumber, sourceX) ?? -1, y };
+};
+
+test("j/k forms one revealed review-line stream across expanded files in a chapter", async () => {
+	const editorRanges: Array<{ filePath: string; startLine: number }> = [];
+	const copied: string[] = [];
+	const viewStates: ViewState[] = [];
+	const t = await testRender(
+		<App
+			file={streamChapters}
+			diffFiles={streamDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "stacked" }}
+			onOpenEditor={async (range) => {
+				editorRanges.push(range);
+				return { text: "Editor returned", tone: "success" };
+			}}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+			onViewStateChange={(next) => viewStates.push(next)}
+		/>,
+		{ width: 90, height: 14, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+
+	// Move away and back once so the initially off-screen first row is revealed, then prove k clamps.
+	await press(t, "j");
+	await press(t, "k");
+	await press(t, "k");
+	expect(visibleRow(t, "a-line-1")).toContain("▌");
+	for (let step = 0; step < 12; step += 1) await press(t, "j");
+
+	// Crossing reveals the next file rather than leaving the cursor pinned off-screen in a.ts.
+	expect(visibleRow(t, "b-line-1")).toContain("▌");
+	expect(t.captureCharFrame()).not.toContain("a-line-1");
+
+	for (let step = 0; step < 12; step += 1) await press(t, "j");
+	expect(visibleRow(t, "b-line-12")).toContain("▌");
+	for (let step = 0; step < 12; step += 1) await press(t, "k");
+	expect(visibleRow(t, "a-line-12")).toContain("▌");
+	await press(t, "j");
+	expect(visibleRow(t, "b-line-1")).toContain("▌");
+
+	await press(t, "e");
+	expect(editorRanges.at(-1)).toMatchObject({ filePath: "b.ts", startLine: 1 });
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).toContain("New review thread");
+	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
+	await act(async () => t.renderOnce());
+	expect(copied).toEqual(["b.ts:1"]);
+	await press(t, "ESCAPE");
+	await press(t, "f");
+	expect(viewStates.at(-1)?.files).toContain("continuous-stream::b.ts");
+});
+
+test("Enter comments on the ordinary one-line cursor without first pressing v", async () => {
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).toContain("New review thread");
+	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
+	await act(async () => t.renderOnce());
+	expect(copied).toEqual(["retry.ts:1"]);
+});
+
+test("gutter click, drag, and double-click have distinct pointer semantics", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 110,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await settle(t);
+	const alpha = gutterFor(t, "retry(alpha)", "1");
+	const beta = gutterFor(t, "retry(beta)", "2");
+
+	await click(t, beta.x, beta.y);
+	expect(visibleRow(t, "retry(beta)")).toContain("▌");
+	expect(t.captureCharFrame()).not.toContain("New review thread");
+
+	await act(async () => t.mockMouse.drag(alpha.x, alpha.y, beta.x, beta.y));
+	await act(async () => t.renderOnce());
+	const selectedTint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
+	expect(rowBackground(t, "retry(alpha)")).toBe(selectedTint);
+	expect(rowBackground(t, "retry(beta)")).toBe(selectedTint);
+	expect(t.captureCharFrame()).not.toContain("New review thread");
+
+	await press(t, "ESCAPE");
+	await act(async () => t.mockMouse.doubleClick(alpha.x, alpha.y));
+	await act(async () => t.renderOnce());
+	expect(t.captureCharFrame()).toContain("New review thread");
+});
+
+const multiRangeChapters = RevueChaptersFileSchema.parse({
+	chapters: [
+		{
+			id: "multi-range",
+			order: 1,
+			title: "Review one file-wide concern",
+			summary: "One concern spans both sides and both hunks.",
+			hunkRefs: [
+				{ filePath: "multi.ts", oldStart: 1 },
+				{ filePath: "multi.ts", oldStart: 10 },
+			],
+			keyChanges: [],
+		},
+	],
+});
+
+const multiRangeDiff = parsePatch(`diff --git a/multi.ts b/multi.ts
+--- a/multi.ts
++++ b/multi.ts
+@@ -1,2 +1,2 @@
+-old first
++new first
+ keep first
+@@ -10,2 +10,2 @@
+-old second
++new second
+ keep second
+`);
+
+test("one file-scoped selection spans diff sides and separate hunks before commenting", async () => {
+	const createdAnchors: ThreadAnchor[] = [];
+	const t = await testRender(
+		<App
+			file={multiRangeChapters}
+			diffFiles={multiRangeDiff}
+			threadActions={{
+				create: (anchor, author, body) => {
+					createdAnchors.push(anchor);
+					return createThread(WATCHED_RUN, anchor, author, body, {
+						id: "00000000-0000-4000-8000-000000000071",
+						messageId: "00000000-0000-4000-8000-000000000072",
+						createdAt: "2026-08-21T10:00:00.000Z",
+					});
+				},
+				reply: () => {
+					throw new Error("unused");
+				},
+				delete: () => {
+					throw new Error("unused");
+				},
+				deleteMessage: () => {
+					throw new Error("unused");
+				},
+				markDealt: () => {
+					throw new Error("unused");
+				},
+				reopen: () => {
+					throw new Error("unused");
+				},
+			}}
+		/>,
+		{ width: 120, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+	const first = gutterFor(t, "old first", "1");
+	const last = gutterFor(t, "new second", "10");
+	const sourceTint = (rowText: string, sourceFragment: string) => {
+		const y = rowOf(t, rowText);
+		return t.captureSpans().lines[y]?.spans.find((span) => span.text.includes(sourceFragment))?.bg;
+	};
+	if (first.x < 0 || first.y < 0 || last.x < 0 || last.y < 0) {
+		throw new Error("multi-range fixture gutters are not visible");
+	}
+
+	await act(async () => t.mockMouse.drag(first.x, first.y, last.x, last.y));
+	await act(async () => t.renderOnce());
+	expect(t.captureCharFrame()).not.toContain("New review thread");
+	const selectedTint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
+	for (const [row, fragment] of [
+		["old first", "old"],
+		["new first", "new"],
+		["old second", "old"],
+		["new second", "new"],
+	] as const) {
+		expect(sourceTint(row, fragment)?.toString()).toBe(selectedTint);
+	}
+
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).toContain("New review thread");
+	await act(async () => t.mockInput.typeText("Treat these changes as one concern"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await act(async () => t.renderOnce());
+	expect(createdAnchors).toEqual([
+		{
+			kind: THREAD_ANCHOR_KIND.PATCH,
+			filePath: "multi.ts",
+			ranges: [
+				{ oldStart: 1, side: "deletions", startLine: 1, endLine: 1 },
+				{ oldStart: 1, side: "additions", startLine: 1, endLine: 1 },
+				{ oldStart: 1, side: "deletions", startLine: 2, endLine: 2 },
+				{ oldStart: 1, side: "additions", startLine: 2, endLine: 2 },
+				{ oldStart: 10, side: "deletions", startLine: 10, endLine: 10 },
+				{ oldStart: 10, side: "additions", startLine: 10, endLine: 10 },
+			],
+		},
+	]);
+	expect(t.captureCharFrame()).toContain("Treat these changes as one concern");
+});
+
+test("status hints describe cursor, selecting, and composer actions", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 180,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await settle(t);
+
+	for (const hint of ["j/k move", "v select", "Enter comment", "e edit"]) {
+		expect(statusLine(t)).toContain(hint);
+	}
+
+	await press(t, "v");
+	for (const hint of ["j/k extend", "Enter comment", "e edit", "Esc cancel"]) {
+		expect(statusLine(t)).toContain(hint);
+	}
+
+	await press(t, "RETURN");
+	for (const hint of ["Ctrl-Enter save", "Esc cancel"]) {
+		expect(statusLine(t)).toContain(hint);
+	}
 });

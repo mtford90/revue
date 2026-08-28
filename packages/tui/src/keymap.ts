@@ -642,6 +642,47 @@ const FOOTER_HINTS: readonly {
 	{ context: "comments", ids: ["comments-select-files"], label: "files" },
 ];
 
+export type ReviewHintState = "cursor" | "selecting" | "composer";
+
+const actionKeys = (ids: readonly KeymapActionId[], keymap: readonly KeymapAction[]): string =>
+	ids
+		.flatMap((id) => {
+			const key = keymapHint(id, keymap);
+			return key ? [formatKeymapKey(key)] : [];
+		})
+		.join("/");
+
+/** State-aware review hints; every rebindable key is read through its registry action id. */
+export const reviewFooterHints = (
+	state: ReviewHintState,
+	keymap: readonly KeymapAction[] = KEYMAP,
+): { keys: string; label: string }[] => {
+	if (state === "composer") {
+		return [
+			{ keys: "Ctrl-Enter", label: "save" },
+			{ keys: "Esc", label: "cancel" },
+		];
+	}
+	const movement = actionKeys(["next-source-line", "previous-source-line"], keymap);
+	const comment = actionKeys(["toggle-file-diff"], keymap);
+	const edit = actionKeys(["open-editor"], keymap);
+	if (state === "selecting") {
+		return [
+			{ keys: movement, label: "extend" },
+			{ keys: comment, label: "comment" },
+			{ keys: edit, label: "edit" },
+			{ keys: "Esc", label: "cancel" },
+		].filter((hint) => hint.keys.length > 0);
+	}
+	const select = actionKeys(["select-lines"], keymap);
+	return [
+		{ keys: movement, label: "move" },
+		{ keys: select, label: "select" },
+		{ keys: comment, label: "comment" },
+		{ keys: edit, label: "edit" },
+	].filter((hint) => hint.keys.length > 0);
+};
+
 /** Status-bar hints for a surface, most useful first. Keys come from the keymap so a rebind shows. */
 export const footerHints = (
 	context: KeymapSurface,

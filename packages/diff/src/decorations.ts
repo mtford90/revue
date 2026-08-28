@@ -2,9 +2,10 @@ import type { DecorationAnchor, DiffFileInput, DiffSide, RangeDecoration } from 
 
 export function rangeToHunkIndex(
 	file: DiffFileInput,
-	range: Pick<RangeDecoration, "side" | "startLine" | "endLine">,
+	range: Pick<RangeDecoration, "side" | "startLine" | "endLine" | "hunkOldStart">,
 ): number {
 	return file.metadata.hunks.findIndex((hunk) => {
+		if (range.hunkOldStart !== undefined && hunk.deletionStart !== range.hunkOldStart) return false;
 		const start = range.side === "additions" ? hunk.additionStart : hunk.deletionStart;
 		const count = range.side === "additions" ? hunk.additionCount : hunk.deletionCount;
 		if (count === 0) return false;
@@ -56,9 +57,14 @@ export function decorationsAtLine(
 	decorations: readonly RangeDecoration[],
 	side: DiffSide,
 	lineNumber: number | undefined,
+	hunkOldStart?: number,
 ): RangeDecoration[] {
 	if (lineNumber === undefined) return [];
 	return decorations.filter(
-		(range) => range.side === side && range.startLine <= lineNumber && lineNumber <= range.endLine,
+		(range) =>
+			range.side === side &&
+			(range.hunkOldStart === undefined || range.hunkOldStart === hunkOldStart) &&
+			range.startLine <= lineNumber &&
+			lineNumber <= range.endLine,
 	);
 }

@@ -82,3 +82,28 @@ test("an anchor states its kind, and a stored hunk anchor keeps parsing without 
 	expect(() => threadAnchorSchema.parse({ ...excerpt, startLine: 0, endLine: 0 })).toThrow();
 	expect(() => threadAnchorSchema.parse({ ...thread.anchor, kind: "narration" })).toThrow();
 });
+
+test("patch anchors are non-empty, file-scoped multi-ranges without changing old anchors", () => {
+	const patch = {
+		kind: THREAD_ANCHOR_KIND.PATCH,
+		filePath: "src/value.ts",
+		ranges: [
+			{ oldStart: 4, side: "deletions", startLine: 8, endLine: 9 },
+			{ oldStart: 20, side: "additions", startLine: 24, endLine: 24 },
+		],
+	};
+	expect(threadAnchorSchema.parse(patch)).toEqual(patch);
+	expect(() => threadAnchorSchema.parse({ ...patch, ranges: [] })).toThrow();
+	expect(() =>
+		threadAnchorSchema.parse({
+			...patch,
+			ranges: [{ oldStart: 4, side: "additions", startLine: 10, endLine: 9 }],
+		}),
+	).toThrow("must not exceed");
+
+	// Backward compatibility is parse compatibility, not reinterpretation as a patch selection.
+	expect(reviewThreadSchema.parse(thread).anchor).toMatchObject({
+		kind: THREAD_ANCHOR_KIND.HUNK,
+		oldStart: 4,
+	});
+});

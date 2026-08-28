@@ -339,3 +339,47 @@ test("re-preparing an unchanged scope carries nothing a second time", async () =
 	expect(again.manifest.runId).toBe(second.manifest.runId);
 	expect(readThreadStoreFile(threadStorePath(root))).toEqual(migrated);
 });
+
+test("patch ranges remap atomically and orphan when any segment disappears", async () => {
+	const baseline = numbered("app", 35);
+	const root = await repository({ "src/app.ts": baseline });
+	let changed = replaceLine(baseline, 5, "app line five");
+	changed = replaceLine(changed, 25, "app line twenty-five");
+	await write(root, "src/app.ts", changed);
+	await commit(root, "Feature work");
+	const first = await prepareRun(["main", "HEAD"], root);
+	await narrate(first, [
+		chapter({
+			id: "app",
+			order: 1,
+			hunkRefs: [
+				{ filePath: "src/app.ts", oldStart: 2 },
+				{ filePath: "src/app.ts", oldStart: 22 },
+			],
+		}),
+	]);
+	const anchor: ThreadAnchor = {
+		kind: THREAD_ANCHOR_KIND.PATCH,
+		filePath: "src/app.ts",
+		ranges: [
+			{ oldStart: 2, side: "additions", startLine: 5, endLine: 5 },
+			{ oldStart: 22, side: "additions", startLine: 25, endLine: 25 },
+		],
+	};
+	seedThreads(root, first.manifest.runId, [
+		feedback({
+			index: 1,
+			runId: first.manifest.runId,
+			anchor,
+			body: "These two changes form one concern",
+		}),
+	]);
+
+	await write(root, "src/app.ts", replaceLine(baseline, 5, "app line 5, fixed"));
+	await commit(root, "Address part of the review");
+	const second = await prepareRun(["main", "HEAD"], root);
+	const [carried] = storedThreads(root, second.manifest.runId);
+
+	expect(carried?.migrationOrphaned).toBe(true);
+	expect(carried?.anchor).toEqual(anchor);
+});

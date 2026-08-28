@@ -12,7 +12,10 @@ export const THREAD_AUTHOR_KIND = {
 export const THREAD_ANCHOR_KIND = {
 	HUNK: "hunk",
 	EXCERPT: "excerpt",
+	PATCH: "patch",
 } as const;
+
+export type NonEmptyArray<Value> = [Value, ...Value[]];
 
 const runIdSchema = z.string().regex(/^[0-9a-f]{64}$/, "Expected a run ID");
 
@@ -76,11 +79,36 @@ export const excerptThreadAnchorSchema = z
 	.refine((anchor) => anchor.startLine <= anchor.endLine, orderedRange);
 export type ExcerptThreadAnchor = z.infer<typeof excerptThreadAnchorSchema>;
 
-export const threadAnchorSchema = z.union([hunkThreadAnchorSchema, excerptThreadAnchorSchema]);
+export const patchThreadRangeSchema = z
+	.strictObject({
+		oldStart: z.number().int().nonnegative(),
+		side: z.enum(["additions", "deletions"]),
+		startLine: z.number().int().positive(),
+		endLine: z.number().int().positive(),
+	})
+	.refine((range) => range.startLine <= range.endLine, orderedRange);
+export type PatchThreadRange = z.infer<typeof patchThreadRangeSchema>;
+
+/** A file-scoped selection over one or more independently authoritative original patch ranges. */
+export const patchThreadAnchorSchema = z.strictObject({
+	kind: z.literal(THREAD_ANCHOR_KIND.PATCH),
+	filePath: z.string().min(1),
+	ranges: z.tuple([patchThreadRangeSchema], patchThreadRangeSchema),
+});
+export type PatchThreadAnchor = z.infer<typeof patchThreadAnchorSchema>;
+
+export const threadAnchorSchema = z.union([
+	hunkThreadAnchorSchema,
+	excerptThreadAnchorSchema,
+	patchThreadAnchorSchema,
+]);
 export type ThreadAnchor = z.infer<typeof threadAnchorSchema>;
 
 export const isExcerptAnchor = (anchor: ThreadAnchor): anchor is ExcerptThreadAnchor =>
 	anchor.kind === THREAD_ANCHOR_KIND.EXCERPT;
+
+export const isPatchAnchor = (anchor: ThreadAnchor): anchor is PatchThreadAnchor =>
+	anchor.kind === THREAD_ANCHOR_KIND.PATCH;
 
 export const threadAuthorSchema = z.strictObject({
 	kind: z.enum(THREAD_AUTHOR_KIND),
@@ -107,6 +135,8 @@ export const reviewThreadSchema = z
 		 * so a hunk anchor the new run no longer holds is orphaned instead of treated as corruption.
 		 */
 		migratedFrom: runIdSchema.optional(),
+		/** Prep could not remap every segment of an atomic patch selection. */
+		migrationOrphaned: z.boolean().optional(),
 		status: z.enum(THREAD_STATUS),
 		createdAt: z.iso.datetime(),
 		messages: z.array(threadMessageSchema).min(1),

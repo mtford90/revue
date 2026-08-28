@@ -6,9 +6,9 @@ const TAG = "diff-line";
 export const diffLineId = ({ hunkOldStart, side, startLine, filePath }: DiffLineRange): string =>
 	[TAG, hunkOldStart, side, startLine, filePath].join(":");
 
-const parseDiffLineId = (id: string): DiffLineRange | null => {
+export const parseDiffLineId = (id: string): DiffLineRange | null => {
 	// A path may hold colons of its own, so only the fixed prefix is split off.
-	const parts = id.split(":");
+	const parts = id.replace(/^diff-gutter:/, "").split(":");
 	const filePath = parts.slice(4).join(":");
 	const [tag, hunkOldStart, side, line] = parts;
 	if (tag !== TAG || !filePath) return null;

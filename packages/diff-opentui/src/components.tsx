@@ -7,8 +7,12 @@ import {
 	type DiffFileInput,
 	type DiffLayout,
 	type DiffLineRange,
+	type DiffSelection,
+	type DiffSelectionRange,
+	type DiffSelectionStop,
 	type DiffSide,
 	type DiffVisualPlan,
+	diffSelectionStops,
 	type ExcerptVisualPlan,
 	excerptLineRange,
 	findFocusedDecorationAnchor,
@@ -21,6 +25,9 @@ import {
 	type RangeDecoration,
 	type RenderSpan,
 	sanitizeTerminalLine,
+	selectionBetween,
+	selectionContains,
+	terminalSelectionRange,
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
 import { useMemo, useRef, useState } from "react";
@@ -30,7 +37,7 @@ import {
 	type DiffInlineAttachment,
 } from "./attachments.ts";
 import { decorationAnchorId } from "./ids.ts";
-import { diffLineId } from "./selectionIds.ts";
+import { diffLineId, parseDiffLineId } from "./selectionIds.ts";
 import { diffPlanStyles, OPENTUI_DIFF_CHROME } from "./styles.ts";
 
 const RIGHT_MOUSE_BUTTON = 2;
@@ -93,7 +100,10 @@ function LineContent({
 	);
 }
 
+type GutterNode = { x: number; y: number; width: number; height: number };
+
 type GutterHandlers = {
+	ref?: (node: GutterNode | null) => void;
 	onMouseDown?: (event: OpenTUIMouseEvent) => void;
 	onMouseDrag?: (event: OpenTUIMouseEvent) => void;
 	onMouseDragEnd?: (event: OpenTUIMouseEvent) => void;
@@ -106,79 +116,193 @@ type AttachmentCounts = Partial<Record<DiffSide, number>>;
 
 type RangeSelectionInput = {
 	selectedRange?: DiffLineRange;
+	selectedSelection?: DiffSelection;
+	/** Legacy single-range drag callback retained for standalone embedders. */
 	onRangeSelect?: (range: DiffLineRange) => void;
-	/** Reports the selectable gutter line where a pointer selection begins. */
+	/** A single click moves the cursor and does not create a selection. */
 	onRangeStart?: (range: DiffLineRange) => void;
+	onSelectionChange?: (selection: DiffSelection) => void;
+	onSelectionActivate?: (selection: DiffSelection) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
+	onSelectionContextMenu?: (selection: DiffSelection, position: { x: number; y: number }) => void;
+	selectionStops?: readonly DiffSelectionStop[];
 };
 
-/**
- * Gutter-drag range selection, shared by diff bodies and excerpt blocks so a quoted line
- * answers the pointer exactly as a reviewable one does.
- */
+const stopForRange = (range: DiffLineRange): DiffSelectionStop => ({
+	filePath: range.filePath,
+	oldStart: range.hunkOldStart,
+	side: range.side,
+	lineNumber: range.startLine,
+});
+
+const selectionForRange = (range: DiffLineRange): DiffSelection => ({
+	filePath: range.filePath,
+	ranges: [
+		{
+			oldStart: range.hunkOldStart,
+			side: range.side,
+			startLine: range.startLine,
+			endLine: range.endLine,
+		},
+	],
+});
+
+const lineRangeFor = (filePath: string, range: DiffSelectionRange): DiffLineRange => ({
+	filePath,
+	hunkOldStart: range.oldStart,
+	side: range.side,
+	startLine: range.startLine,
+	endLine: range.endLine,
+});
+
+const DOUBLE_CLICK_MS = 400;
+
+/** Pointer cursor, actual drag selection, activation, and context action are separate gestures. */
 const useRangeSelection = ({
 	selectedRange,
+	selectedSelection,
 	onRangeSelect,
 	onRangeStart,
+	onSelectionChange,
+	onSelectionActivate,
 	onRangeContextMenu,
+	onSelectionContextMenu,
+	selectionStops = [],
 }: RangeSelectionInput) => {
-	const activeStart = useRef<DiffLineRange | null>(null);
-	const activeRange = useRef<DiffLineRange | null>(null);
-	const [dragRange, setDragRange] = useState<DiffLineRange | null>(null);
-	const displayedRange = dragRange ?? selectedRange;
-	const updateRange = (target: DiffLineRange) => {
+	const activeStart = useRef<DiffSelectionStop | null>(null);
+	const activeSelection = useRef<DiffSelection | null>(null);
+	const dragged = useRef(false);
+	const doubleClickCandidate = useRef(false);
+	const lastClick = useRef<{ key: string; at: number } | null>(null);
+	const gutterNodes = useRef(new Map<string, { node: GutterNode; range: DiffLineRange }>());
+	const [dragSelection, setDragSelection] = useState<DiffSelection | null>(null);
+	const displayedSelection =
+		dragSelection ??
+		selectedSelection ??
+		(selectedRange ? selectionForRange(selectedRange) : undefined);
+	const updateSelection = (target: DiffLineRange) => {
 		const start = activeStart.current;
+		if (!start) return;
+		const targetStop = stopForRange(target);
 		if (
-			!start ||
-			start.filePath !== target.filePath ||
-			start.hunkOldStart !== target.hunkOldStart ||
-			start.side !== target.side
+			targetStop.filePath === start.filePath &&
+			targetStop.oldStart === start.oldStart &&
+			targetStop.side === start.side &&
+			targetStop.lineNumber === start.lineNumber
 		)
 			return;
-		const next = {
-			...start,
-			startLine: Math.min(start.startLine, target.startLine),
-			endLine: Math.max(start.endLine, target.endLine),
-		};
-		activeRange.current = next;
-		setDragRange(next);
+		const next = selectionBetween(selectionStops, start, targetStop);
+		if (!next) return;
+		dragged.current = true;
+		activeSelection.current = next;
+		setDragSelection(next);
+		onSelectionChange?.(next);
+		if (onRangeSelect) {
+			const matching = next.ranges.filter(
+				(range) => range.oldStart === start.oldStart && range.side === start.side,
+			);
+			if (matching.length) {
+				onRangeSelect({
+					filePath: start.filePath,
+					hunkOldStart: start.oldStart,
+					side: start.side,
+					startLine: Math.min(...matching.map((range) => range.startLine)),
+					endLine: Math.max(...matching.map((range) => range.endLine)),
+				});
+			}
+		}
 	};
-	const finishRange = () => {
+	const finishAtEventTarget = (event: OpenTUIMouseEvent) => {
+		const eventTarget = event.target?.id ? parseDiffLineId(event.target.id) : null;
+		const coordinateTarget = [...gutterNodes.current.values()].find(
+			({ node }) =>
+				event.x >= node.x &&
+				event.x < node.x + node.width &&
+				event.y >= node.y &&
+				event.y < node.y + node.height,
+		)?.range;
+		const target = coordinateTarget ?? eventTarget;
+		const start = activeStart.current;
+		const targetStop = target ? stopForRange(target) : null;
+		const moved = Boolean(
+			start &&
+				targetStop &&
+				(start.filePath !== targetStop.filePath ||
+					start.oldStart !== targetStop.oldStart ||
+					start.side !== targetStop.side ||
+					start.lineNumber !== targetStop.lineNumber),
+		);
+		if (target && moved) updateSelection(target);
+		finishSelection();
+	};
+	const finishSelection = () => {
 		if (!activeStart.current) return;
-		const completed = activeRange.current;
+		const activated = !dragged.current && doubleClickCandidate.current;
+		const legacyClick =
+			!dragged.current &&
+			!activated &&
+			Boolean(onRangeSelect) &&
+			!onSelectionChange &&
+			!onSelectionActivate &&
+			!onRangeStart;
+		const completed = dragged.current || legacyClick ? activeSelection.current : null;
+		const activation = activated ? activeSelection.current : null;
 		activeStart.current = null;
-		activeRange.current = null;
-		setDragRange(null);
-		if (completed) onRangeSelect?.(completed);
+		activeSelection.current = null;
+		dragged.current = false;
+		doubleClickCandidate.current = false;
+		setDragSelection(null);
+		if (activation) onSelectionActivate?.(activation);
+		if (!completed) return;
+		onSelectionChange?.(completed);
+		if (completed.ranges.length === 1) {
+			onRangeSelect?.(lineRangeFor(completed.filePath, completed.ranges[0]));
+		}
 	};
 	const cancelActiveRange = () => {
 		activeStart.current = null;
-		activeRange.current = null;
-		setDragRange(null);
+		activeSelection.current = null;
+		dragged.current = false;
+		doubleClickCandidate.current = false;
+		setDragSelection(null);
 	};
-	/** A right click inside the live selection acts on all of it, not just the row beneath. */
-	const contextRange = (target: DiffLineRange): DiffLineRange =>
-		displayedRange &&
-		displayedRange.filePath === target.filePath &&
-		displayedRange.side === target.side &&
-		displayedRange.startLine <= target.startLine &&
-		target.endLine <= displayedRange.endLine
-			? displayedRange
-			: target;
+	const contextSelection = (target: DiffLineRange): DiffSelection => {
+		const stop = stopForRange(target);
+		return displayedSelection && selectionContains(displayedSelection, stop)
+			? displayedSelection
+			: selectionForRange(target);
+	};
 	const openContextMenu = (target: DiffLineRange, event: OpenTUIMouseEvent) => {
 		event.preventDefault();
 		event.stopPropagation();
-		onRangeContextMenu?.(contextRange(target), { x: event.x, y: event.y });
+		const selection = contextSelection(target);
+		if (onSelectionContextMenu) {
+			onSelectionContextMenu(selection, { x: event.x, y: event.y });
+			return;
+		}
+		const terminal = terminalSelectionRange(selection);
+		onRangeContextMenu?.(lineRangeFor(selection.filePath, terminal), { x: event.x, y: event.y });
 	};
 	const contextHandler = (target: DiffLineRange | null) =>
-		target && onRangeContextMenu
+		target && (onRangeContextMenu || onSelectionContextMenu)
 			? (event: OpenTUIMouseEvent) => {
 					if (event.button === RIGHT_MOUSE_BUTTON) openContextMenu(target, event);
 				}
 			: undefined;
 	const gutterHandlers = (target: DiffLineRange | null): GutterHandlers | undefined =>
-		target && (onRangeSelect || onRangeContextMenu)
+		target &&
+		(onRangeSelect ||
+			onRangeStart ||
+			onSelectionChange ||
+			onSelectionActivate ||
+			onRangeContextMenu ||
+			onSelectionContextMenu)
 			? {
+					ref: (node) => {
+						const key = `${target.filePath}:${target.hunkOldStart}:${target.side}:${target.startLine}`;
+						if (node) gutterNodes.current.set(key, { node, range: target });
+						else gutterNodes.current.delete(key);
+					},
 					onMouseDown: (event) => {
 						if (event.button === RIGHT_MOUSE_BUTTON) {
 							openContextMenu(target, event);
@@ -188,33 +312,40 @@ const useRangeSelection = ({
 						event.preventDefault();
 						event.stopPropagation();
 						onRangeStart?.(target);
-						activeStart.current = target;
-						activeRange.current = target;
-						setDragRange(target);
+						const stop = stopForRange(target);
+						const key = `${stop.filePath}:${stop.oldStart}:${stop.side}:${stop.lineNumber}`;
+						const now = Date.now();
+						doubleClickCandidate.current =
+							lastClick.current?.key === key && now - lastClick.current.at <= DOUBLE_CLICK_MS;
+						lastClick.current = doubleClickCandidate.current ? null : { key, at: now };
+						activeStart.current = stop;
+						activeSelection.current = selectionForRange(target);
+						dragged.current = false;
 					},
 					onMouseDrag: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
+						updateSelection(target);
 					},
 					onMouseOver: (event) => {
 						if (!activeStart.current) return;
 						event.preventDefault();
 						event.stopPropagation();
-						updateRange(target);
+						updateSelection(target);
 					},
 					onMouseDragEnd: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						finishRange();
+						finishAtEventTarget(event);
 					},
 					onMouseUp: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						finishRange();
+						finishAtEventTarget(event);
 					},
 				}
 			: undefined;
-	return { displayedRange, gutterHandlers, contextHandler, cancelActiveRange };
+	return { displayedSelection, gutterHandlers, contextHandler, cancelActiveRange };
 };
 
 const attachmentMarker = (count: number): string =>
@@ -222,6 +353,8 @@ const attachmentMarker = (count: number): string =>
 
 function Gutter({
 	focused,
+	selectionEdge,
+	id,
 	number,
 	digits,
 	showLineNumbers,
@@ -230,6 +363,8 @@ function Gutter({
 	theme,
 }: {
 	focused: boolean;
+	selectionEdge: boolean;
+	id?: string;
 	number: number | undefined;
 	digits: number;
 	showLineNumbers: boolean;
@@ -238,17 +373,23 @@ function Gutter({
 	theme: Theme;
 }) {
 	return (
-		<text
-			fg={focused ? theme.accent : theme.lineNumberFg}
-			wrapMode="none"
-			flexShrink={0}
-			selectable={false}
-			{...handlers}
-		>
-			{focused ? "▌" : " "}
-			{showLineNumbers ? lineNumber(number, digits) : ""}
-			{attachmentMarker(attachmentCount)}
-		</text>
+		<>
+			{/* Continuation edges are paint only; only the numbered gutter below accepts gestures. */}
+			<text fg={selectionEdge ? theme.accent : theme.lineNumberFg} selectable={false}>
+				{selectionEdge ? "▌" : " "}
+			</text>
+			<text
+				id={id ? `diff-gutter:${id}` : undefined}
+				fg={focused ? theme.accent : theme.lineNumberFg}
+				wrapMode="none"
+				flexShrink={0}
+				selectable={false}
+				{...handlers}
+			>
+				{showLineNumbers ? lineNumber(number, digits) : ""}
+				{attachmentMarker(attachmentCount)}
+			</text>
+		</>
 	);
 }
 
@@ -292,6 +433,8 @@ function SplitCell({
 			{showLineNumbers ? (
 				<Gutter
 					focused={gutter?.focused ?? false}
+					selectionEdge={(cell.selectionEdges[side] ?? false) || (gutter?.focused ?? false)}
+					id={lineId}
 					number={gutter?.lineNumber}
 					digits={digits}
 					showLineNumbers
@@ -349,6 +492,18 @@ function StackCell({
 					<Gutter
 						key={side}
 						focused={gutter?.focused ?? false}
+						selectionEdge={(cell.selectionEdges[side] ?? false) || (gutter?.focused ?? false)}
+						id={
+							cell.identities[side]
+								? diffLineId({
+										filePath: cell.identities[side].filePath,
+										hunkOldStart: cell.identities[side].hunkOldStart,
+										side,
+										startLine: cell.identities[side].lineNumber,
+										endLine: cell.identities[side].lineNumber,
+									})
+								: undefined
+						}
 						number={gutter?.lineNumber}
 						digits={digits}
 						showLineNumbers={showLineNumbers}
@@ -499,6 +654,7 @@ interface DiffBodyPaintProps {
 	decorations?: readonly RangeDecoration[];
 	focusedDecorationId?: string;
 	selectedRange?: DiffLineRange;
+	selectedSelection?: DiffSelection;
 	inlineAttachments?: readonly DiffInlineAttachment[];
 	resolveRange?: (side: DiffSide, lineNumber: number) => DiffLineRange | null;
 	expanders?: {
@@ -509,7 +665,10 @@ interface DiffBodyPaintProps {
 	onAttachmentNode?: (id: string, node: { height: number } | null) => void;
 	onRangeSelect?: (range: DiffLineRange) => void;
 	onRangeStart?: (range: DiffLineRange) => void;
+	onSelectionChange?: (selection: DiffSelection) => void;
+	onSelectionActivate?: (selection: DiffSelection) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
+	onSelectionContextMenu?: (selection: DiffSelection, position: { x: number; y: number }) => void;
 }
 
 /** Host-authoritative geometry: redundant planning inputs are deliberately forbidden. */
@@ -598,6 +757,7 @@ export function DiffBody(props: DiffBodyProps) {
 		decorations = EMPTY_DECORATIONS,
 		focusedDecorationId,
 		selectedRange,
+		selectedSelection,
 		inlineAttachments = EMPTY_ATTACHMENTS,
 		resolveRange,
 		expanders,
@@ -605,7 +765,10 @@ export function DiffBody(props: DiffBodyProps) {
 		onAttachmentNode,
 		onRangeSelect,
 		onRangeStart,
+		onSelectionChange,
+		onSelectionActivate,
 		onRangeContextMenu,
+		onSelectionContextMenu,
 	} = props;
 	const geometry = useMemo(() => {
 		if (props.plan) return props.plan;
@@ -632,27 +795,53 @@ export function DiffBody(props: DiffBodyProps) {
 		theme.syntaxTheme,
 	]);
 	const normalized = geometry.file;
-	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
-		selectedRange,
-		onRangeSelect,
-		onRangeStart,
-		onRangeContextMenu,
-	});
-	const selectionDecoration = useMemo<RangeDecoration | null>(
+	const selectableStops = useMemo(() => {
+		const seen = new Set<string>();
+		return diffSelectionStops(normalized).flatMap((stop) => {
+			const resolved = resolveRange
+				? resolveRange(stop.side, stop.lineNumber)
+				: {
+						filePath: stop.filePath,
+						hunkOldStart: stop.oldStart,
+						side: stop.side,
+						startLine: stop.lineNumber,
+						endLine: stop.lineNumber,
+					};
+			if (!resolved) return [];
+			const authoritative = stopForRange(resolved);
+			const key = `${authoritative.filePath}:${authoritative.oldStart}:${authoritative.side}:${authoritative.lineNumber}`;
+			if (seen.has(key)) return [];
+			seen.add(key);
+			return [authoritative];
+		});
+	}, [normalized, resolveRange]);
+	const { displayedSelection, gutterHandlers, contextHandler, cancelActiveRange } =
+		useRangeSelection({
+			selectedRange,
+			selectedSelection,
+			onRangeSelect,
+			onRangeStart,
+			onSelectionChange,
+			onSelectionActivate,
+			onRangeContextMenu,
+			onSelectionContextMenu,
+			selectionStops: selectableStops,
+		});
+	const selectionDecorations = useMemo<RangeDecoration[]>(
 		() =>
-			displayedRange
-				? {
-						...displayedRange,
-						id: "diff-pointer-selection",
-						active: true,
-						backgroundColor: theme.selectedHunk,
-					}
-				: null,
-		[displayedRange, theme.selectedHunk],
+			displayedSelection?.ranges.map((range, index) => ({
+				...range,
+				filePath: displayedSelection.filePath,
+				hunkOldStart: range.oldStart,
+				id: `diff-pointer-selection:${index}`,
+				active: true,
+				backgroundColor: theme.selectedHunk,
+			})) ?? [],
+		[displayedSelection, theme.selectedHunk],
 	);
 	const renderedDecorations = useMemo(
-		() => (selectionDecoration ? [selectionDecoration, ...decorations] : decorations),
-		[selectionDecoration, decorations],
+		() => [...selectionDecorations, ...decorations],
+		[selectionDecorations, decorations],
 	);
 	const styles = useMemo(() => diffPlanStyles(theme), [theme]);
 	const painted = useMemo(
@@ -975,11 +1164,29 @@ export function ExcerptBlock({
 	onAttachmentNode?: (id: string, node: { height: number } | null) => void;
 }) {
 	const { chrome, digits } = plan;
-	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
-		selectedRange,
-		onRangeSelect,
-		onRangeContextMenu,
-	});
+	const excerptStops = useMemo<DiffSelectionStop[]>(
+		() =>
+			plan.rows.flatMap((row) =>
+				row.type === "excerpt-line"
+					? [
+							{
+								filePath: row.filePath,
+								oldStart: 0,
+								side: "additions",
+								lineNumber: row.lineNumber,
+							},
+						]
+					: [],
+			),
+		[plan],
+	);
+	const { displayedSelection, gutterHandlers, contextHandler, cancelActiveRange } =
+		useRangeSelection({
+			selectedRange,
+			onRangeSelect,
+			onRangeContextMenu,
+			selectionStops: excerptStops,
+		});
 	const start = Math.max(0, Math.min(plan.rows.length, rowWindow?.start ?? 0));
 	const end = Math.max(start, Math.min(plan.rows.length, rowWindow?.end ?? plan.rows.length));
 	const toggle = onToggle
@@ -1033,11 +1240,7 @@ export function ExcerptBlock({
 				}
 				const range = excerptLineRange(row);
 				const selected = Boolean(
-					displayedRange &&
-						displayedRange.filePath === range.filePath &&
-						displayedRange.side === range.side &&
-						displayedRange.startLine <= range.startLine &&
-						range.endLine <= displayedRange.endLine,
+					displayedSelection && selectionContains(displayedSelection, stopForRange(range)),
 				);
 				const attachments = attachmentsForExcerptLine({
 					filePath: row.filePath,
@@ -1065,7 +1268,7 @@ export function ExcerptBlock({
 									fg={theme.lineNumberFg}
 									wrapMode="none"
 									selectable={false}
-									{...gutterHandlers(range)}
+									{...(continuationIndex === 0 ? gutterHandlers(range) : undefined)}
 								>
 									{" ".repeat(chrome.focusMarker)}
 									{continuationIndex === 0

@@ -186,6 +186,8 @@ export type PaintedGutter = PlannedGutter & { focused: boolean };
 export type PaintedVisualCell = Omit<PlannedVisualCell, "spans" | "gutters"> & {
 	spans: RenderSpan[];
 	backgroundColor: string;
+	/** Selection/cursor edge, rendered on every continuation independently of selectable gutters. */
+	selectionEdges: Partial<Record<DiffSide, boolean>>;
 	gutters?: Partial<Record<DiffSide, PaintedGutter>>;
 };
 
@@ -900,8 +902,8 @@ const focusFor = ({
 	decorations: readonly RangeDecoration[];
 	focusedDecorationId?: string;
 }): RangeDecoration | undefined => {
-	const line = cell.identities[side]?.lineNumber;
-	return decorationsAtLine(decorations, side, line).find(
+	const identity = cell.identities[side];
+	return decorationsAtLine(decorations, side, identity?.lineNumber, identity?.hunkOldStart).find(
 		(range) =>
 			range.active === true ||
 			(focusedDecorationId !== undefined &&
@@ -983,7 +985,16 @@ const paintCell = ({
 				}),
 			) as Partial<Record<DiffSide, PaintedGutter>>)
 		: undefined;
-	return { ...cell, spans, backgroundColor, gutters };
+	return {
+		...cell,
+		spans,
+		backgroundColor,
+		selectionEdges: {
+			deletions: Boolean(deletionFocus?.active),
+			additions: Boolean(additionFocus?.active),
+		},
+		gutters,
+	};
 };
 
 /**

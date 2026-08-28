@@ -143,11 +143,12 @@ misinforms and source does not.
 
 A **thread** is the official feedback concept. In Patch view, the explicit source-line cursor starts
 on the first additions-side review line in the focused file (or the first deletion when the file has
-no additions). `j`/`k` move it; `v` selects its line immediately and subsequent `j`/`k` extend the
-inclusive range within that one file, hunk, and side. `Enter` opens the inline composer for the
-selected range and `Escape` cancels the selection. Clicking a visible old/new line-number gutter
-repositions the cursor and starts a thread on that line, while dragging within one gutter selects a
-range under the same anchor restriction. Dragging source code instead highlights text for copying.
+no additions). `j`/`k` walk one continuous stream across expanded text files in the current chapter,
+changing the focused file and revealing the cursor at boundaries. `v` enters selection mode;
+`j`/`k` then extend through both sides and separate original hunks, but never into another file.
+`Enter` comments on either the ordinary one-line cursor or the selection, and `Escape` cancels a
+selection. A gutter click moves the cursor, an actual drag leaves a selection, and a double-click
+opens a one-line comment. Dragging source code instead highlights text for copying.
 The composer opens beneath the range; use `Ctrl+Enter` or its pointer control to save and `Escape` to
 cancel. Any number of independent threads may share an exact anchor.
 
@@ -206,9 +207,9 @@ scope. `revue comments` remains a command-name compatibility alias, but `threads
 
 The lines a thread anchors to are also the lines you want to quote elsewhere, so the same selection
 answers to more than one verb. Right-clicking anywhere on a line — its gutter or its code — opens a
-menu at the pointer offering copy `path:line`, copy GitHub link, and comment. Every verb acts on the
-whole selection rather than the one line under the pointer, whether that selection came from a gutter
-drag or from dragging across the code. While a composer is open the same two copies are on `Ctrl+Y`
+menu at the pointer offering copy `path:line`, copy GitHub link, and comment. Inside a live selection
+it acts on that whole selection. A multi-range location copy emits one location per line range; a
+GitHub link is available only when the normalised selection has exactly one range. While a composer is open the same two copies are on `Ctrl+Y`
 and `Ctrl+G` and in its footer, and neither disturbs the draft.
 
 Dragging across source code highlights the text itself in one theme-matched Visual-mode colour,

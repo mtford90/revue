@@ -111,6 +111,8 @@ export interface RangeDecoration {
 	id: string;
 	focusId?: string;
 	filePath: string;
+	/** Optional original-hunk authority for ranges whose line numbers alone are ambiguous. */
+	hunkOldStart?: number;
 	side: DiffSide;
 	startLine: number;
 	endLine: number;

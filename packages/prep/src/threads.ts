@@ -2,8 +2,16 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+	type DiffSelectionStop,
+	diffSelectionStops,
+	normalizeDiffSelection,
+	parsePatch,
+} from "@revue/diff";
+import {
 	emptyThreadStoreFile,
 	isExcerptAnchor,
+	isPatchAnchor,
+	type PatchThreadRange,
 	type ReviewThread,
 	type ThreadAnchor,
 	type ThreadStoreFile,
@@ -141,33 +149,73 @@ export function persistThreadStoreFile(path: string, file: ThreadStoreFile): voi
  * range it was written against: the run reports it as orphaned rather than moving it somewhere it
  * was never aimed.
  */
+const carriedRange = (
+	filePath: string,
+	range: PatchThreadRange,
+	matches: Map<string, ReviewUnitMatch>,
+): PatchThreadRange | null => {
+	const match = matches.get(unitKey(filePath, range.oldStart));
+	if (!match) return null;
+	const before = unitSide(match.previous, range.side);
+	const after = unitSide(match.current, range.side);
+	const shift = after.start - before.start;
+	const startLine = range.startLine + shift;
+	const endLine = range.endLine + shift;
+	const outside = startLine < after.start || endLine > after.start + after.count - 1;
+	if (after.count === 0 || outside) return null;
+	return { ...range, oldStart: match.current.oldStart, startLine, endLine };
+};
+
+type CarriedAnchor = { anchor: ThreadAnchor; migrationOrphaned: boolean };
+
 const carriedAnchor = (
 	anchor: ThreadAnchor,
 	matches: Map<string, ReviewUnitMatch>,
-): ThreadAnchor => {
-	if (isExcerptAnchor(anchor)) return anchor;
-	const match = matches.get(unitKey(anchor.filePath, anchor.oldStart));
-	if (!match) return anchor;
-	const before = unitSide(match.previous, anchor.side);
-	const after = unitSide(match.current, anchor.side);
-	const shift = after.start - before.start;
-	const startLine = anchor.startLine + shift;
-	const endLine = anchor.endLine + shift;
-	const outside = startLine < after.start || endLine > after.start + after.count - 1;
-	if (after.count === 0 || outside) return anchor;
-	return { ...anchor, oldStart: match.current.oldStart, startLine, endLine };
+	stopsByPath: ReadonlyMap<string, readonly DiffSelectionStop[]>,
+): CarriedAnchor => {
+	if (isExcerptAnchor(anchor)) return { anchor, migrationOrphaned: false };
+	if (isPatchAnchor(anchor)) {
+		const remapped = anchor.ranges.map((range) => carriedRange(anchor.filePath, range, matches));
+		if (remapped.some((range) => range === null)) return { anchor, migrationOrphaned: true };
+		const first = remapped[0];
+		if (!first) return { anchor, migrationOrphaned: true };
+		const ranges = remapped.slice(1).reduce<[PatchThreadRange, ...PatchThreadRange[]]>(
+			(result, range) => {
+				if (range) result.push(range);
+				return result;
+			},
+			[first],
+		);
+		const normalized = normalizeDiffSelection(
+			{ filePath: anchor.filePath, ranges },
+			stopsByPath.get(anchor.filePath) ?? [],
+		);
+		return {
+			anchor: { ...anchor, ranges: normalized.ranges },
+			migrationOrphaned: false,
+		};
+	}
+	const remapped = carriedRange(anchor.filePath, anchor, matches);
+	return { anchor: remapped ? { ...anchor, ...remapped } : anchor, migrationOrphaned: false };
 };
 
 const carriedThread = (
 	thread: ReviewThread,
 	runId: string,
 	matches: Map<string, ReviewUnitMatch>,
-): ReviewThread => ({
-	...thread,
-	runId,
-	migratedFrom: thread.runId,
-	anchor: carriedAnchor(thread.anchor, matches),
-});
+	stopsByPath: ReadonlyMap<string, readonly DiffSelectionStop[]>,
+): ReviewThread => {
+	const carried = carriedAnchor(thread.anchor, matches, stopsByPath);
+	return {
+		...thread,
+		runId,
+		migratedFrom: thread.runId,
+		anchor: carried.anchor,
+		...(thread.migrationOrphaned || carried.migrationOrphaned
+			? { migrationOrphaned: true }
+			: { migrationOrphaned: undefined }),
+	};
+};
 
 const withoutRun = (runs: ThreadStoreFile["runs"], runId: string): ThreadStoreFile["runs"] =>
 	Object.fromEntries(Object.entries(runs).filter(([key]) => key !== runId));
@@ -201,6 +249,9 @@ export async function migrateSupersededThreads({
 	if (!supersedes) return null;
 	const predecessor = await loadPreparedRun(join(runsDirectory, supersedes));
 	const matches = matchReviewUnits(predecessor, run);
+	const stopsByPath = new Map(
+		parsePatch(run.patch).map((file) => [file.path, diffSelectionStops(file)] as const),
+	);
 	return withThreadStoreLock(threadsPath, () => {
 		const store = readThreadStoreFile(threadsPath);
 		const pending = store.runs[supersedes] ?? [];
@@ -209,7 +260,7 @@ export async function migrateSupersededThreads({
 		const known = new Set(settled.map((thread) => thread.id));
 		const carried = pending
 			.filter((thread) => !known.has(thread.id))
-			.map((thread) => carriedThread(thread, runId, matches));
+			.map((thread) => carriedThread(thread, runId, matches, stopsByPath));
 		persistThreadStoreFile(threadsPath, {
 			...store,
 			runs: {

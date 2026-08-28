@@ -2457,6 +2457,21 @@ test("excerpt clicks and drags replace patch selection, and Escape cancels befor
 	expect(quits).toBe(1);
 });
 
+test("folding a selected excerpt clears its action before Enter", async () => {
+	const t = await renderExcerptChapter();
+	await clickAction(t, "[▼ show");
+	const gutter = excerptGutter(t, "dispatch(request)", "13");
+	await click(t, gutter.x, gutter.y);
+
+	await clickAction(t, "[▲ hide]");
+	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
+	await press(t, "RETURN");
+
+	expect(t.captureCharFrame()).toContain("dispatch(request)");
+	expect(t.captureCharFrame()).not.toContain("New review thread");
+	expect(statusLine(t)).not.toContain("Ctrl-Enter save");
+});
+
 test("dragging a quoted line's gutter tints the range and y yanks the quotation", async () => {
 	const copied: string[] = [];
 	const t = await renderExcerptChapter({
@@ -3363,6 +3378,51 @@ test("v selects and extends an exact keyboard range for the inline composer", as
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
 	expect(copied).toEqual(["retry.ts:2 (old)\nretry.ts:2 (new)"]);
+});
+
+test("hiding selected patch source clears its action before Enter", async () => {
+	const renderPatch = async () => {
+		const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+			width: 110,
+			height: 34,
+			kittyKeyboard: true,
+		});
+		await t.renderOnce();
+		return t;
+	};
+	const expectEnterExpandsWithoutComposer = async (t: Awaited<ReturnType<typeof testRender>>) => {
+		expect(t.captureCharFrame()).not.toContain("retry(alpha)");
+		await press(t, "RETURN");
+		expect(t.captureCharFrame()).toContain("retry(alpha)");
+		expect(t.captureCharFrame()).not.toContain("New review thread");
+		expect(statusLine(t)).not.toContain("Ctrl-Enter save");
+	};
+
+	const pointer = await renderPatch();
+	const pointerLines = pointer.captureCharFrame().split("\n");
+	const sourceY = pointerLines.findIndex((line) => line.includes("retry(alpha)"));
+	const sourceLine = pointerLines[sourceY] ?? "";
+	await click(pointer, sourceLine.indexOf("1", sourceLine.indexOf("│")), sourceY);
+	const selectedLines = pointer.captureCharFrame().split("\n");
+	const headerY = selectedLines.findIndex(
+		(line) => line.includes("retry.ts") && line.includes("▼"),
+	);
+	await click(pointer, (selectedLines[headerY] ?? "").indexOf("▼"), headerY);
+	await expectEnterExpandsWithoutComposer(pointer);
+
+	const action = await renderPatch();
+	await press(action, "v");
+	await press(action, "-");
+	await expectEnterExpandsWithoutComposer(action);
+
+	const menu = await renderPatch();
+	await press(menu, "v");
+	const bar = menu.captureCharFrame().split("\n")[0] ?? "";
+	await click(menu, bar.indexOf("View") + 1, 0);
+	const menuLines = menu.captureCharFrame().split("\n");
+	const collapseY = menuLines.findIndex((line) => line.includes("Collapse files"));
+	await click(menu, (menuLines[collapseY] ?? "").indexOf("Collapse files") + 1, collapseY);
+	await expectEnterExpandsWithoutComposer(menu);
 });
 
 test("shift-equals expands files when the terminal reports the unshifted punctuation", async () => {

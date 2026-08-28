@@ -3995,10 +3995,26 @@ export function App({
 		setFoldedDiagrams(toggleMembership(key));
 	}
 	function toggleExcerpt(key: string) {
+		if (openExcerpts.has(key)) {
+			const hiddenExcerpt = chapterExcerpts.find((candidate) => candidate.key === key);
+			if (
+				hiddenExcerpt &&
+				excerptSelection &&
+				excerptCovers(hiddenExcerpt.plan.quotation, excerptSelection)
+			) {
+				clearReviewSelection();
+			}
+		}
 		setOpenExcerpts(toggleMembership(key));
 		setFocusedExcerpt(key);
 	}
 	function toggleCollapsedFile(path: string) {
+		const hidesSelectedPatch =
+			!collapsedFiles.has(path) &&
+			(lineSelection?.filePath === path ||
+				pointerSelection?.filePath === path ||
+				lineSelectionAnchor?.filePath === path);
+		if (hidesSelectedPatch) clearReviewSelection();
 		setCollapsedFiles((currentCollapsed) => {
 			const next = new Set(currentCollapsed);
 			if (next.has(path)) next.delete(path);
@@ -4174,7 +4190,15 @@ export function App({
 	}
 	function collapseFiles() {
 		if (!chapter) return;
-		setCollapsedFiles(new Set(chapterFilePaths(chapter)));
+		const paths = chapterFilePaths(chapter);
+		if (
+			(lineSelection && paths.includes(lineSelection.filePath)) ||
+			(pointerSelection && paths.includes(pointerSelection.filePath)) ||
+			(lineSelectionAnchor && paths.includes(lineSelectionAnchor.filePath))
+		) {
+			clearReviewSelection();
+		}
+		setCollapsedFiles(new Set(paths));
 		requestFileFocus();
 	}
 	function expandFiles() {

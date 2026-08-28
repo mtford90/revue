@@ -91,6 +91,7 @@ import {
 	selectChapterFiles,
 	statsByPath,
 } from "./diff.ts";
+import { type EditorOpenResult, openReviewLineInEditor } from "./editor.ts";
 import {
 	boundaryActions,
 	expandBoundary,
@@ -141,6 +142,12 @@ import {
 	type PathTreeRow,
 } from "./pathDisplay.ts";
 import type { FileDisplayPreference, Preferences } from "./preferences.ts";
+import {
+	initialReviewLine,
+	moveReviewLine,
+	reviewableLines,
+	reviewLineSelection,
+} from "./reviewLineCursor.ts";
 import { useScrollWindow } from "./scrollWindow.ts";
 import {
 	formatSourceLocation,
@@ -1931,6 +1938,7 @@ function ChapterView({
 	onToggleCollapse,
 	onToggleFileReview,
 	onSelectThreadRange,
+	onRangeStart,
 	onRangeContextMenu,
 	onReplyThread,
 	onDeleteThread,
@@ -1970,6 +1978,7 @@ function ChapterView({
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
 	onSelectThreadRange: (range: DiffLineRange) => void;
+	onRangeStart: (range: DiffLineRange) => void;
 	onRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
 	onReplyThread: (thread: ReviewThread) => void;
 	onDeleteThread: (id: string) => void;
@@ -2133,6 +2142,7 @@ function ChapterView({
 						window={item.window}
 						onAttachmentNode={onAttachmentNode}
 						onRangeSelect={onSelectThreadRange}
+						onRangeStart={onRangeStart}
 						onRangeContextMenu={onRangeContextMenu}
 					/>
 				);
@@ -2375,6 +2385,7 @@ export function App({
 	onSessionStateChange,
 	onPreferencesChange,
 	onThemeChange,
+	onOpenEditor,
 	onQuit,
 	onReload,
 	keymap = KEYMAP,
@@ -2424,6 +2435,8 @@ export function App({
 	onSessionStateChange?: (next: ReviewSessionState) => void;
 	onPreferencesChange?: (next: Preferences) => void;
 	onThemeChange?: (next: Theme) => void;
+	/** Genuine process boundary; component tests inject this rather than launching an editor. */
+	onOpenEditor?: (range: DiffLineRange) => Promise<EditorOpenResult>;
 	onQuit?: () => void;
 	onReload?: () => void;
 	/** The registry merged with any `~/.revue/keybindings.json` overrides. */
@@ -2510,6 +2523,8 @@ export function App({
 	const [focusedThreadRef, setFocusedThreadRef] = useState<string | null>(null);
 	/** A quoted range the gutter drag left behind. It has no composer to hold it, so it lives here. */
 	const [excerptSelection, setExcerptSelection] = useState<DiffLineRange | null>(null);
+	const [lineCursor, setLineCursor] = useState<DiffLineRange | null>(null);
+	const [lineSelectionAnchor, setLineSelectionAnchor] = useState<DiffLineRange | null>(null);
 	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
 	const [expansions, setExpansions] = useState<Map<string, FileExpansion>>(() => new Map());
 	const [expandedVariants, setExpandedVariants] = useState<Map<string, DiffFile>>(() => new Map());
@@ -2823,6 +2838,18 @@ export function App({
 			}),
 		[viewportFiles, contentWidth, diffTheme.syntaxTheme],
 	);
+	const focusedReviewPath = chapter ? chapterFilePaths(chapter)[selectedFile] : undefined;
+	const focusedReviewLines = useMemo(() => {
+		const focused = plannedViewportFiles.find((entry) => entry.path === focusedReviewPath);
+		return focused?.measurement ? reviewableLines(focused.measurement) : [];
+	}, [plannedViewportFiles, focusedReviewPath]);
+	const lineSelection = useMemo(
+		() =>
+			lineSelectionAnchor && lineCursor
+				? reviewLineSelection(lineSelectionAnchor, lineCursor)
+				: null,
+		[lineSelectionAnchor, lineCursor],
+	);
 	const chapterSegments = useMemo(
 		() =>
 			viewportSegments({
@@ -2993,6 +3020,20 @@ export function App({
 	}
 
 	useEffect(() => {
+		if (!focusedReviewPath) {
+			setLineCursor(null);
+			setLineSelectionAnchor(null);
+			return;
+		}
+		setLineCursor((currentLine) =>
+			currentLine?.filePath === focusedReviewPath
+				? currentLine
+				: initialReviewLine(focusedReviewLines),
+		);
+		setLineSelectionAnchor((anchor) => (anchor?.filePath === focusedReviewPath ? anchor : null));
+	}, [focusedReviewPath, focusedReviewLines]);
+
+	useEffect(() => {
 		if (!loadFileLines || !chapter) return;
 		let live = true;
 		for (const path of chapterFilePaths(chapter)) {
@@ -3114,6 +3155,24 @@ export function App({
 			clearTimeout(lateRetry);
 		};
 	}, [chapter, selectedFile, focusedExcerpt, focusedThreadRef, fileFocusRequest]);
+
+	useEffect(() => {
+		if (!lineCursor) return;
+		const file = viewportFilesRef.current.find(
+			(candidate) => candidate.path === lineCursor.filePath,
+		);
+		if (!file) return;
+		const row = attachmentRowIndex(file, lineCursor);
+		const offset =
+			row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
+		if (offset !== null) {
+			revealContentOffset({
+				scroll: pageScroll.current,
+				leadingHeight: leadingContent.current?.height ?? 0,
+				offset,
+			});
+		}
+	}, [lineCursor]);
 
 	useEffect(() => {
 		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
@@ -3317,8 +3376,42 @@ export function App({
 		setThreadBody("");
 		setThreadNotice(null);
 	}
+	function repositionLineCursor(range: DiffLineRange) {
+		setLineCursor(range);
+		setLineSelectionAnchor(null);
+	}
+	function moveLineCursor(delta: -1 | 1) {
+		setLineCursor((currentLine) =>
+			moveReviewLine({
+				lines: focusedReviewLines,
+				current: currentLine,
+				delta,
+				selectionAnchor: lineSelectionAnchor,
+			}),
+		);
+	}
+	function startLineSelection() {
+		if (lineCursor) setLineSelectionAnchor(lineCursor);
+	}
+	function cancelLineSelection() {
+		setLineSelectionAnchor(null);
+	}
+	async function openLineInEditor() {
+		const target = lineSelection ?? lineCursor;
+		if (!target) {
+			setMountNotice({ text: "No reviewable source line is focused", tone: "error" });
+			return;
+		}
+		if (!onOpenEditor) {
+			setMountNotice({ text: "Editor opening is unavailable", tone: "error" });
+			return;
+		}
+		setMountNotice(await onOpenEditor(target));
+	}
 	function selectThreadRange(range: DiffLineRange) {
 		setExcerptSelection(null);
+		setLineCursor({ ...range, endLine: range.startLine });
+		setLineSelectionAnchor(null);
 		startThread(
 			{
 				kind: THREAD_ANCHOR_KIND.HUNK,
@@ -4092,6 +4185,10 @@ export function App({
 		if (copyNotice) setCopyNotice(null);
 
 		if (name === "escape") {
+			if (lineSelectionAnchor) {
+				cancelLineSelection();
+				return;
+			}
 			quit();
 			return;
 		}
@@ -4187,6 +4284,18 @@ export function App({
 			case "line-down":
 				pageScroll.current?.scrollBy(1);
 				break;
+			case "previous-source-line":
+				moveLineCursor(-1);
+				break;
+			case "next-source-line":
+				moveLineCursor(1);
+				break;
+			case "select-lines":
+				startLineSelection();
+				break;
+			case "open-editor":
+				void openLineInEditor();
+				break;
 			case "scroll-bottom":
 				pageScroll.current?.scrollTo(Number.MAX_SAFE_INTEGER);
 				break;
@@ -4201,6 +4310,10 @@ export function App({
 				break;
 			case "toggle-file-diff": {
 				if (!chapter) break;
+				if (lineSelection) {
+					selectThreadRange(lineSelection);
+					break;
+				}
 				// A standing quoted selection is what the reviewer is acting on, so Enter comments on
 				// it rather than folding the block it sits in.
 				if (excerptSelection) {
@@ -4462,7 +4575,11 @@ export function App({
 										(contextMenu?.kind === "range" &&
 										contextMenu.anchorKind === THREAD_ANCHOR_KIND.HUNK
 											? contextMenu.range
-											: undefined) ?? newThreadDraft?.anchor
+											: undefined) ??
+										newThreadDraft?.anchor ??
+										lineSelection ??
+										lineCursor ??
+										undefined
 									}
 									threadDraft={newThreadDraft}
 									excerptDraft={newExcerptDraft}
@@ -4471,6 +4588,7 @@ export function App({
 									onToggleCollapse={toggleCollapsedFile}
 									onToggleFileReview={toggleFileReview}
 									onSelectThreadRange={selectThreadRange}
+									onRangeStart={repositionLineCursor}
 									onRangeContextMenu={openRangeContextMenu}
 									onReplyThread={startThreadReply}
 									onDeleteThread={requestDeleteThread}
@@ -4579,6 +4697,8 @@ export async function runApp(
 		omittedNotice?: string | null;
 		diffFiles?: DiffFile[] | null;
 		loadFileLines?: (path: string) => Promise<string[] | null>;
+		/** Root of the reviewed worktree; editor paths are resolved only from here. */
+		repositoryRoot?: string | null;
 		initialViewState?: ViewState;
 		initialSessionState?: ReviewSessionState;
 		initialPreferences?: Preferences;
@@ -4651,6 +4771,14 @@ export async function runApp(
 				onSessionStateChange={options.onSessionStateChange}
 				onPreferencesChange={options.onPreferencesChange}
 				onThemeChange={options.onThemeChange}
+				onOpenEditor={(range) =>
+					openReviewLineInEditor({
+						range,
+						repositoryRoot: options.repositoryRoot ?? null,
+						beforeOpen: () => renderer.suspend(),
+						afterOpen: () => renderer.resume(),
+					})
+				}
 				onQuit={() => resolveOutcome("quit")}
 				onReload={() => resolveOutcome("reload")}
 				keymap={options.keymap}

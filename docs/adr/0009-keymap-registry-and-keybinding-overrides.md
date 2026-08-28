@@ -60,8 +60,12 @@ start file with comments. The user owns the file, and the machine does not write
 
 ## Consequences
 
-- To add an action, add one registry entry. The help, the menus, the CLI, and the overrides then
-  follow.
+- To add an action, add one registry entry. The handler, help, status and menu hints, CLI, generated
+  template, and overrides then follow.
+- Motion action IDs preserve their meaning: `line-up`/`line-down` scroll the viewport, while
+  `previous-source-line`/`next-source-line`, `select-lines`, and `open-editor` own the keyboard
+  review cursor workflow. A default-key redesign must add or rebind those typed actions rather than
+  silently changing an existing action's semantics.
 - The action ids in `keybindings.json` are a public contract. A rename of an id is a breaking
   change.
 - The fixed-point merge makes the order of the entries unimportant. But rules resolve the conflicts,

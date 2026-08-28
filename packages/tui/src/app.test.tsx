@@ -62,7 +62,7 @@ async function press(t: Awaited<ReturnType<typeof testRender>>, key: string) {
 }
 
 async function nextChapter(t: Awaited<ReturnType<typeof testRender>>) {
-	await press(t, ".");
+	await press(t, "]");
 }
 
 async function arrow(
@@ -385,7 +385,7 @@ test("an interlude is an ordinary page marked as carrying no diff", async () => 
 	expect(frame).not.toContain("Files ("); // no file list
 	expect(frame).not.toContain("What to review");
 	expect(frame).toContain("── end of chapter ──");
-	expect(frame).toContain("x mark this chapter read · . next page");
+	expect(frame).toContain("x mark this chapter read · ] next page");
 	expect(statusLine(t)).toContain("Ch 4/4");
 
 	await press(t, "x");
@@ -595,13 +595,13 @@ test("a new file is rendered unified so no pane sits empty", async () => {
 	expect(codeLine.slice(codeLine.indexOf("│") + 1)).not.toContain("│");
 });
 
-test(", walks back into the prologue instead of stopping at chapter one", async () => {
+test("[ walks back into the prologue instead of stopping at chapter one", async () => {
 	const t = await testRender(<App file={file} />, { width: 110, height: 32 });
 	await t.renderOnce();
 	await nextChapter(t);
 	expect(statusLine(t)).toContain("Ch 1/3");
 
-	await press(t, ",");
+	await press(t, "[");
 	expect(statusLine(t)).toContain("Prologue");
 	expect(t.captureCharFrame()).toContain("Dashboards stay up during deploys now");
 });
@@ -768,16 +768,16 @@ ${additions}
 	expect(sessions.at(-1)?.pages["restored-scroll"]?.scrollTop).toBe(16);
 });
 
-test("the bracket keys stay unbound now the chapter chord is retired", async () => {
+test("the bracket keys navigate chapters in both directions", async () => {
 	const t = await testRender(<App file={file} />, {
 		width: 110,
 		height: 32,
 		kittyKeyboard: true,
 	});
 	await t.renderOnce();
-	await press(t, "[");
 	await press(t, "]");
-
+	expect(statusLine(t)).toContain("Ch 1/3");
+	await press(t, "[");
 	expect(statusLine(t)).toContain("Prologue");
 });
 
@@ -923,7 +923,7 @@ test("typing into the filter narrows the list without firing the actions it spel
 	const frame = t.captureCharFrame();
 	expect(frame).toContain("filter: quit");
 	expect(frame).toContain("Quit (Esc also works)");
-	expect(frame).not.toContain("Scroll down one line");
+	expect(frame).not.toContain("Scroll down one visual row");
 	// `q` quits, `u` and `i` scroll and `t` opens the theme picker — none of them may act while
 	// the filter has the keyboard.
 	expect(quits).toBe(0);
@@ -931,7 +931,7 @@ test("typing into the filter narrows the list without firing the actions it spel
 
 	// Esc empties the filter first; only a second Esc closes.
 	await press(t, "ESCAPE");
-	expect(t.captureCharFrame()).toContain("Scroll down one line");
+	expect(t.captureCharFrame()).toContain("Scroll down one visual row");
 	await press(t, "ESCAPE");
 	expect(t.captureCharFrame()).not.toContain("Here — Narrative & diff");
 	expect(quits).toBe(0);
@@ -940,13 +940,13 @@ test("typing into the filter narrows the list without firing the actions it spel
 test("the status bar hints follow the surface and name the keys that are actually bound", async () => {
 	const t = await testRender(<App file={file} />, { width: 130, height: 44 });
 	await t.renderOnce();
-	expect(statusLine(t)).toContain("j/k move");
+	expect(statusLine(t)).toContain("j/k line");
 	expect(statusLine(t)).toContain("o comments");
 
 	// A long chapter title eats the width the hints were using, so they shed whole from the right
 	// rather than truncating into half a hint.
 	await nextChapter(t);
-	expect(statusLine(t)).toContain("j/k move");
+	expect(statusLine(t)).toContain("j/k line");
 	expect(statusLine(t)).not.toContain("o comments");
 
 	await press(t, "o");
@@ -1153,7 +1153,7 @@ test("key change content navigates while only its checkbox toggles review", asyn
 	expect(seen).toHaveLength(0);
 	const focusedFrame = t.captureCharFrame();
 	expect(focusedFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
-	expect(focusedFrame.split("\n").find((line) => line.includes("return fetch"))).not.toContain("▌");
+	expect(focusedFrame.split("\n").find((line) => line.includes("return fetch"))).toContain("▌");
 	expect(focusedFrame.split("\n").find((line) => line.includes("attempt += 1"))).not.toContain("▌");
 
 	await click(t, keyChangeLine.indexOf("[ ]") + 1, keyChangeY);
@@ -3188,4 +3188,89 @@ test("following the banner opens the superseding run on its epilogue", async () 
 
 	expect(statusLine(t)).toContain("Ch 2/2");
 	expect(t.captureCharFrame()).toContain("Changes since your review");
+});
+
+test("j and k move the visible review line while arrows only scroll narrative and Diff", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 110,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await settle(t);
+	const cursorRow = (text: string) =>
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((line) => line.includes(text)) ?? "";
+	expect(cursorRow("alpha")).toContain("▌");
+	expect(cursorRow("beta")).not.toContain("▌");
+
+	await press(t, "j");
+	expect(cursorRow("beta")).toContain("▌");
+	await arrow(t, "down");
+	expect(cursorRow("beta")).toContain("▌");
+	await press(t, "k");
+	expect(cursorRow("alpha")).toContain("▌");
+
+	await press(t, "w");
+	await press(t, "j");
+	expect(cursorRow("beta")).toContain("▌");
+	await arrow(t, "up");
+	expect(cursorRow("beta")).toContain("▌");
+});
+
+test("v selects and extends an exact keyboard range for the inline composer", async () => {
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+
+	await press(t, "v");
+	await press(t, "j");
+	await press(t, "ESCAPE");
+	expect(t.captureCharFrame()).not.toContain("New review thread");
+
+	await press(t, "v");
+	await press(t, "j");
+	await act(async () => t.mockInput.pressEnter());
+	await act(async () => t.renderOnce());
+	expect(t.captureCharFrame()).toContain("New review thread");
+	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
+	await act(async () => t.renderOnce());
+	expect(copied).toEqual(["retry.ts:2-3"]);
+});
+
+test("e requests the cursor or selected range from the injected editor boundary", async () => {
+	const requested: Array<{ startLine: number; endLine: number; side: string }> = [];
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			onOpenEditor={async (range) => {
+				requested.push(range);
+				return { text: "Editor returned", tone: "success" };
+			}}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+
+	await press(t, "e");
+	await press(t, "v");
+	await press(t, "j");
+	await press(t, "e");
+	expect(requested).toMatchObject([
+		{ startLine: 1, endLine: 1, side: "additions" },
+		{ startLine: 1, endLine: 2, side: "additions" },
+	]);
 });

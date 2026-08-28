@@ -107,6 +107,8 @@ type AttachmentCounts = Partial<Record<DiffSide, number>>;
 type RangeSelectionInput = {
 	selectedRange?: DiffLineRange;
 	onRangeSelect?: (range: DiffLineRange) => void;
+	/** Reports the selectable gutter line where a pointer selection begins. */
+	onRangeStart?: (range: DiffLineRange) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
 };
 
@@ -117,6 +119,7 @@ type RangeSelectionInput = {
 const useRangeSelection = ({
 	selectedRange,
 	onRangeSelect,
+	onRangeStart,
 	onRangeContextMenu,
 }: RangeSelectionInput) => {
 	const activeStart = useRef<DiffLineRange | null>(null);
@@ -184,6 +187,7 @@ const useRangeSelection = ({
 						if (event.button !== 0) return;
 						event.preventDefault();
 						event.stopPropagation();
+						onRangeStart?.(target);
 						activeStart.current = target;
 						activeRange.current = target;
 						setDragRange(target);
@@ -504,6 +508,7 @@ interface DiffBodyPaintProps {
 	window?: { start: number; end: number };
 	onAttachmentNode?: (id: string, node: { height: number } | null) => void;
 	onRangeSelect?: (range: DiffLineRange) => void;
+	onRangeStart?: (range: DiffLineRange) => void;
 	onRangeContextMenu?: (range: DiffLineRange, position: { x: number; y: number }) => void;
 }
 
@@ -599,6 +604,7 @@ export function DiffBody(props: DiffBodyProps) {
 		window: rowWindow,
 		onAttachmentNode,
 		onRangeSelect,
+		onRangeStart,
 		onRangeContextMenu,
 	} = props;
 	const geometry = useMemo(() => {
@@ -629,6 +635,7 @@ export function DiffBody(props: DiffBodyProps) {
 	const { displayedRange, gutterHandlers, contextHandler, cancelActiveRange } = useRangeSelection({
 		selectedRange,
 		onRangeSelect,
+		onRangeStart,
 		onRangeContextMenu,
 	});
 	const selectionDecoration = useMemo<RangeDecoration | null>(

@@ -141,11 +141,15 @@ misinforms and source does not.
 
 ## Inline review threads
 
-A **thread** is the official feedback concept. In Patch view, click a visible old/new line-number
-gutter to start one on a single line, or drag within one gutter to select an inclusive range in the
-same hunk and side. Dragging source code instead highlights the text itself, which the next section
-covers. The composer opens inline beneath the selected range; use `Ctrl+Enter` or its pointer control
-to save and `Escape` to cancel. Any number of independent threads may share an exact anchor.
+A **thread** is the official feedback concept. In Patch view, the explicit source-line cursor starts
+on the first additions-side review line in the focused file (or the first deletion when the file has
+no additions). `j`/`k` move it; `v` selects its line immediately and subsequent `j`/`k` extend the
+inclusive range within that one file, hunk, and side. `Enter` opens the inline composer for the
+selected range and `Escape` cancels the selection. Clicking a visible old/new line-number gutter
+repositions the cursor and starts a thread on that line, while dragging within one gutter selects a
+range under the same anchor restriction. Dragging source code instead highlights text for copying.
+The composer opens beneath the range; use `Ctrl+Enter` or its pointer control to save and `Escape` to
+cancel. Any number of independent threads may share an exact anchor.
 
 Every root message and reply records an author kind (`human` or `agent`) and display name. Human TUI
 messages use the reviewed repository's `git config user.name`, falling back to the system login.
@@ -271,8 +275,8 @@ and the panel's navigation row is replaced by a strip under the menu bar. Termin
 the panel are unaffected: they keep the two-column layout exactly as before.
 
 File display is **all** by default, stacking every chapter file in narrative order. **Focused**
-shows only the selected file; `Tab` / `Shift+Tab` and the sidebar file list replace it with the next
-selection.
+shows only the selected file; `J` / `K`, `Tab` / `Shift+Tab`, and the sidebar file list replace it
+with the next or previous selection.
 
 ## Themes
 
@@ -353,17 +357,19 @@ chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused 
 the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking chapter, file, or key-
 change content navigates without changing review state—only its checkbox toggles it.
 
-Most actions answer to several keys, so muscle memory from Vim, `less`, the diff TUIs, the IDEs or
-plain arrow-key use lands on the right thing. `j`/`k`, `↑`/`↓`, or `Ctrl-n`/`Ctrl-p` scroll by line ·
-`d`/`u` or `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/
-`Page Up` scroll by page · `g`/`G`, `Home`/`End`, or `<`/`>` jump to the top/bottom · `,`/`.` move
-between pages · `{`/`}` or `F7`/`Shift-F7` focus key changes · `tab`/`shift-tab` or `J`/`K` focus
-files · `enter` toggles the focused diff · `c`/`e` collapse/expand all diffs · `a` jumps to the next
-unreviewed chapter · `w` opens the Files surface · `o` opens the Comments surface · `p` cycles path
-display · `s` shows/hides the sidebar · `x` marks the chapter reviewed, `f` or `v` the focused file ·
-`y` copies the highlighted text · `Ctrl-y`/`Ctrl-g` copy the open thread's location/GitHub link ·
-`F10` or `F9` opens the menu · `?` or `F1` toggles the keys surface · `Ctrl-r`/`F5` (or File →
-Reload) reloads · `q`/`esc` quits. The status bar names the few keys that matter where you are.
+Most actions answer to several keys. `j`/`k` move the source-line cursor; `v` begins or extends a
+line range, `Enter` comments on that range, and `Escape` cancels it. `↑`/`↓` scroll exactly one
+visual row without moving the cursor (`Ctrl-n`/`Ctrl-p` and `Ctrl-e`/`Ctrl-k` are aliases) · `d`/`u`
+or `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
+scroll by page · `g`/`G`, `Home`/`End`, or `<`/`>` jump to the top/bottom · `[`/`]` move between
+chapters · `{`/`}` or `F7`/`Shift-F7` focus key changes · `Tab`/`Shift-Tab` or `J`/`K` focus files ·
+`-`/`+` collapse/expand all diffs · `e` opens the cursor or selection's first current-side line in
+`$VISUAL`, falling back to `$EDITOR` (deleted-side lines refuse rather than guessing) · `a` jumps to
+the next unreviewed chapter · `w` opens Diff · `o` opens Comments · `p` cycles path display · `s`
+shows/hides the sidebar · `x` marks the chapter reviewed and `f` marks the focused file · `y` copies
+highlighted text · `Ctrl-y`/`Ctrl-g` copy an open thread's location/GitHub link · `F10` or `F9` opens
+the menu · `?` or `F1` toggles the keys surface · `Ctrl-r`/`F5` reloads · `q`/`Esc` quits. The
+status bar names the few keys that matter where you are.
 
 `?` opens the keys surface: every action for the surface you are on under **Here**, everything that
 does not fire there dimmed under **Elsewhere** with the key that gets you to it. Type to filter by

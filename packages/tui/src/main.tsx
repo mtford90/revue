@@ -985,6 +985,7 @@ async function showRun(
 			syntaxWarning,
 			initialNotice: notice,
 			loadFileLines,
+			repositoryRoot,
 			initialViewState: store.get(),
 			initialSessionState: hasSavedPosition ? storedSession : carriedSessionState,
 			initialPreferences: preferences,

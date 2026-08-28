@@ -132,17 +132,20 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   narration rather than an ad-hoc reveal. Quoted lines are currently rendered unhighlighted.
 - **Coverage** — every prepared review unit must appear in exactly one chapter: no omissions, no
   duplicates. `revue show --check` reports the narrated count for every run.
-- **Selection** — the gutter-drag line range that says what the reviewer is acting on. Comment,
-  copy-text, copy-location, and copy-GitHub-link are verbs hung off the one selection, reachable
-  from the composer footer keys and the right-click menu alike. A GitHub permalink is offered per
+- **Selection** — the side-aware line range that says what the reviewer is acting on, created by a
+  gutter drag or from the explicit keyboard source-line cursor. The cursor starts on additions in a
+  focused file, falling back to deletions; `j`/`k` move it, `v` begins a one-line range, and movement
+  extends only within one file, hunk, and side. Comment, editor-open, copy-text, copy-location, and
+  copy-GitHub-link are verbs hung off the selection. Editor-open uses the range's first current-side
+  line and refuses deleted-side locations rather than guessing. A GitHub permalink is offered per
   side only when that side's endpoint is a pinned commit; unpinned sides are greyed out with the
   reason.
 - **Keybindings** — every shortcut derives from one typed keymap registry (handler, keys surface,
-  menu hints, and CLI all read it). Reviewers override actions via hand-edited JSONC at
+  status and menu hints, and CLI all read it). Reviewers override actions via hand-edited JSONC at
   `~/.revue/keybindings.json`; escape and digits are reserved, and validation drops just the broken
-  entry with a surfaced warning. Most actions carry several keys so that muscle memory from Vim,
-  `less`, the diff TUIs and plain arrow-key use all resolve; `revue keybindings` prints the
-  effective map, including the aliases the keys surface holds back.
+  entry with a surfaced warning. Navigation separates source motion (`j`/`k`) from visual-row
+  scrolling (arrows), file motion (`J`/`K`, Tab variants), and chapter motion (`[`/`]`);
+  `revue keybindings` prints the effective map, including aliases the keys surface holds back.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes

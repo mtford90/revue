@@ -42,8 +42,9 @@ const sameKeySet = (a: readonly string[], b: readonly string[]): boolean => {
 test("the listing shows every action's id, description, and effective keys", () => {
 	const listing = formatKeybindingsListing(KEYMAP, KEYMAP, []);
 	expect(listing).toContain("line-up");
-	expect(listing).toContain("Scroll up one line");
-	expect(listing).toContain("k/↑");
+	expect(listing).toContain("Scroll up one visual row without moving the line cursor");
+	expect(listing).toMatch(/line-up\s+↑/);
+	expect(listing).toMatch(/previous-source-line\s+k/);
 });
 
 test("the listing flags an overridden action against its default", () => {
@@ -69,8 +70,8 @@ test("the listing does not flag an unchanged value as overridden once shift alia
 
 test("the listing shows page navigation as an ordinary rebindable action", () => {
 	const listing = formatKeybindingsListing(KEYMAP, KEYMAP, []);
-	expect(listing).toMatch(/previous-page\s+,/);
-	expect(listing).toMatch(/next-page\s+\./);
+	expect(listing).toMatch(/previous-page\s+\[/);
+	expect(listing).toMatch(/next-page\s+\]/);
 	expect(listing).not.toContain("fixed, not rebindable");
 });
 

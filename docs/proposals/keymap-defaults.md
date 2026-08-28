@@ -1,8 +1,25 @@
 # Proposal — redesigned default key mappings
 
-Status: **implemented.** Kept as the reasoning record behind the defaults in `keymap.ts`.
+Status: **superseded in part by the coherent keyboard review workflow.** The analysis below is a
+historical reasoning record, not the effective default map; `packages/tui/src/keymap.ts` and
+`revue keybindings` are authoritative.
 
-Goal: bind several keys per action so that muscle memory from vim, less/man, git, the diff/review
+The approved workflow that supersedes its conflicting defaults is:
+
+- `[`/`]` previous/next chapter; `J`/`K` and Tab/Shift-Tab previous/next file;
+- `j`/`k` previous/next reviewable source line, while Up/Down and their coherent Ctrl aliases retain
+  the `line-up`/`line-down` viewport-scroll semantics;
+- `v` begins a one-line, one-file/hunk/side selection, `j`/`k` extend it, Escape cancels, and Enter
+  opens the exact range's composer;
+- `e` opens the cursor or selected range's first additions-side line in `$VISUAL` or `$EDITOR`, and
+  deleted-side locations refuse clearly;
+- `-`/`+` collapse/expand all files, `f` toggles the file reviewed, and `x` toggles the chapter.
+
+The typed registry, keys surface, status/menu hints, CLI listing, and generated override template all
+reflect this effective map. In particular, the old `,`/`.` chapter defaults, `j`/`k` scrolling,
+`c`/`e` collapse/expand defaults, and `v` file-review alias described below are no longer effective.
+
+Goal (historical): bind several keys per action so that muscle memory from vim, less/man, git, the diff/review
 TUIs, the IDEs and plain arrow-key use all land on the right thing.
 
 Decisions taken by Mike and folded in: revue is **pre-launch**, so breaking changes to action ids and

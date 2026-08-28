@@ -240,7 +240,7 @@ test("a ctrl override matches exactly and doesn't also fire on the bare key", ()
 	const { keymap, issues } = mergeKeymap(KEYMAP, { "toggle-sidebar": "ctrl+j" });
 	expect(issues).toEqual([]);
 	expect(matchKeymapAction("page", { name: "j", ctrl: true }, keymap)).toBe("toggle-sidebar");
-	expect(matchKeymapAction("page", { name: "j" }, keymap)).toBe("line-down");
+	expect(matchKeymapAction("page", { name: "j" }, keymap)).toBe("next-source-line");
 });
 
 test("the default ctrl fallback keeps working alongside user overrides elsewhere", () => {
@@ -294,12 +294,10 @@ test("the search keys stay unbound so they are not quietly spent", () => {
 	}
 });
 
-test("the bracket keys stay unbound now the chapter chord is retired", () => {
-	// Retiring the chord frees [ and ]; leaving them unbound is the decision that makes
-	// a stray "]c" merely collapse files rather than do something worse.
+test("the bracket keys navigate chapters on every surface", () => {
 	for (const context of ["page", "comments"] as const) {
-		expect(matchKeymapAction(context, { name: "[" })).toBeUndefined();
-		expect(matchKeymapAction(context, { name: "]" })).toBeUndefined();
+		expect(matchKeymapAction(context, { name: "[" })).toBe("previous-page");
+		expect(matchKeymapAction(context, { name: "]" })).toBe("next-page");
 	}
 });
 
@@ -312,10 +310,10 @@ test("shifted letters match without the registry spelling out the alias", () => 
 	expect(matchKeymapAction("page", { name: "k", shift: true })).toBe("previous-file");
 });
 
-test("page navigation is global, so it resolves on the comments surface too", () => {
+test("chapter navigation is global, so it resolves on the comments surface too", () => {
 	for (const context of ["page", "comments"] as const) {
-		expect(matchKeymapAction(context, { name: "," })).toBe("previous-page");
-		expect(matchKeymapAction(context, { name: "." })).toBe("next-page");
+		expect(matchKeymapAction(context, { name: "[" })).toBe("previous-page");
+		expect(matchKeymapAction(context, { name: "]" })).toBe("next-page");
 	}
 });
 
@@ -360,7 +358,7 @@ test("the filter matches keys, descriptions and ids, and ranks what fires here f
 	expect(searchKeymap("page", "quit").map((match) => match.id)).toEqual(["quit"]);
 	expect(searchKeymap("page", "").length).toBe(0);
 
-	// `j` is line-down here and comments-next elsewhere; the one that fires sorts first.
+	// `j` moves the line cursor here and the selected comment elsewhere; the active one sorts first.
 	const [first] = searchKeymap("comments", "j");
 	expect(first?.id).toBe("comments-next");
 	expect(first?.scope).toBe("here");
@@ -372,7 +370,8 @@ test("the filter matches keys, descriptions and ids, and ranks what fires here f
 });
 
 test("the footer names each surface's own keys, and follows a rebind", () => {
-	expect(footerHints("page")).toContainEqual({ keys: "j/k", label: "move" });
+	expect(footerHints("page")).toContainEqual({ keys: "j/k", label: "line" });
+	expect(footerHints("page")).toContainEqual({ keys: "↓/↑", label: "scroll" });
 	expect(footerHints("comments")).toContainEqual({ keys: "Enter", label: "jump" });
 	expect(footerHints("comments").map((hint) => hint.label)).not.toContain("comments");
 

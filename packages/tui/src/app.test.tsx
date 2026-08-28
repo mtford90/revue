@@ -3220,6 +3220,36 @@ test("j and k move the visible review line while arrows only scroll narrative an
 	expect(cursorRow("beta")).toContain("▌");
 });
 
+test("stacked j movement and editor opening stay on replacement additions", async () => {
+	const requested: Array<{ startLine: number; side: string }> = [];
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "stacked" }}
+			onOpenEditor={async (range) => {
+				requested.push(range);
+				return { text: "Editor returned", tone: "success" };
+			}}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+	// The old and new cells occupy separate presentation rows, confirming this is stacked layout.
+	expect(rowOf(t, "retry(one)")).toBeLessThan(rowOf(t, "retry(alpha)"));
+
+	await press(t, "j");
+	const betaRow =
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((line) => line.includes("retry(beta)")) ?? "";
+	expect(betaRow).toContain("▌");
+	await press(t, "e");
+	expect(requested).toMatchObject([{ side: "additions", startLine: 2 }]);
+});
+
 test("v visibly enters selection mode before the range extends, and Escape restores the cursor", async () => {
 	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
 		width: 110,

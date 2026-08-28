@@ -4,7 +4,7 @@ import {
 	type DiffSide,
 	type DiffSourceLineIdentity,
 	type DiffVisualPlan,
-	plannedRowIdentity,
+	diffStructure,
 	structureRowIdentity,
 } from "@revue/diff";
 
@@ -18,57 +18,24 @@ const lineRange = (identity: DiffSourceLineIdentity): DiffLineRange => ({
 	endLine: identity.lineNumber,
 });
 
-const measurementLines = (measurement: DiffMeasurement): DiffLineRange[] =>
-	measurement.structure.rows.flatMap((row) => {
-		if (row.type === "hunk-header") return [];
-		if (row.type === "split-line") {
-			const side: DiffSide | null =
-				row.new.kind === "addition"
-					? "additions"
-					: row.old.kind === "deletion"
-						? "deletions"
-						: null;
-			const identity = side
-				? structureRowIdentity({ structure: measurement.structure, row, side })
-				: undefined;
-			return identity ? [lineRange(identity)] : [];
-		}
+const canonicalLines = (plan: ReviewLinePlan): DiffLineRange[] => {
+	// Split rows provide a layout-neutral pairing model: each replacement occupies one logical row,
+	// with the current side preferred and only an unmatched old-side row retained as a deletion stop.
+	const structure = diffStructure({
+		file: "structure" in plan ? plan.structure.file : plan.file,
+		layout: "split",
+	});
+	return structure.rows.flatMap((row) => {
+		if (row.type !== "split-line") return [];
 		const side: DiffSide | null =
-			row.cell.kind === "addition"
-				? "additions"
-				: row.cell.kind === "deletion"
-					? "deletions"
-					: null;
-		const identity = side
-			? structureRowIdentity({ structure: measurement.structure, row, side })
-			: undefined;
+			row.new.kind === "addition" ? "additions" : row.old.kind === "deletion" ? "deletions" : null;
+		const identity = side ? structureRowIdentity({ structure, row, side }) : undefined;
 		return identity ? [lineRange(identity)] : [];
 	});
+};
 
-const visualPlanLines = (plan: DiffVisualPlan): DiffLineRange[] =>
-	plan.rows.flatMap((row) => {
-		if (row.type === "hunk-header") return [];
-		if (row.type === "split-line") {
-			const first = row.visualRows[0];
-			const side: DiffSide | null =
-				first?.new.kind === "addition"
-					? "additions"
-					: first?.old.kind === "deletion"
-						? "deletions"
-						: null;
-			const identity = side ? plannedRowIdentity(row, side) : undefined;
-			return identity ? [lineRange(identity)] : [];
-		}
-		const first = row.visualRows[0]?.cell;
-		const side: DiffSide | null =
-			first?.kind === "addition" ? "additions" : first?.kind === "deletion" ? "deletions" : null;
-		const identity = side ? plannedRowIdentity(row, side) : undefined;
-		return identity ? [lineRange(identity)] : [];
-	});
-
-/** Ordered changed source lines for keyboard review. Context rows are scenery, not review stops. */
-export const reviewableLines = (plan: ReviewLinePlan): DiffLineRange[] =>
-	"structure" in plan ? measurementLines(plan) : visualPlanLines(plan);
+/** Ordered changed source lines for keyboard review, independent of presentation layout. */
+export const reviewableLines = (plan: ReviewLinePlan): DiffLineRange[] => canonicalLines(plan);
 
 const sameLine = (left: DiffLineRange, right: DiffLineRange): boolean =>
 	left.filePath === right.filePath &&

@@ -33,16 +33,23 @@ const PATCH = `diff --git a/value.ts b/value.ts
 -deleted tail
 `;
 
-test("review line order prefers the new side of paired rows and retains deletion-only rows", () => {
-	const lines = reviewableLines(plan(PATCH));
-	expect(lines.map(({ side, startLine, hunkOldStart }) => [side, startLine, hunkOldStart])).toEqual(
-		[
-			["additions", 1, 1],
-			["additions", 3, 1],
-			["deletions", 10, 10],
-		],
+test("review line order is identical across layouts, preferring replacements' current side", () => {
+	const expected: Array<["additions" | "deletions", number, number]> = [
+		["additions", 1, 1],
+		["additions", 3, 1],
+		["deletions", 10, 10],
+	];
+	const splitLines = reviewableLines(plan(PATCH, "split"));
+	const stackLines = reviewableLines(plan(PATCH, "stack"));
+	const identities = (lines: typeof splitLines) =>
+		lines.map(({ side, startLine, hunkOldStart }) => [side, startLine, hunkOldStart]);
+
+	expect(identities(splitLines)).toEqual(expected);
+	expect(identities(stackLines)).toEqual(expected);
+	expect(initialReviewLine(stackLines)).toEqual(stackLines[0] ?? null);
+	expect(moveReviewLine({ lines: stackLines, current: stackLines[0] ?? null, delta: 1 })).toEqual(
+		stackLines[1] ?? null,
 	);
-	expect(initialReviewLine(lines)).toEqual(lines[0] ?? null);
 });
 
 test("a deletion-only file starts and moves on its old side", () => {

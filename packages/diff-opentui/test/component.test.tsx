@@ -160,6 +160,57 @@ test("gutter selection preserves review tints and stays neutral across diff side
 	]);
 });
 
+test("an active range overrides a key-change tint from the other side of every context row", async () => {
+	const [file] = parsePatch(`diff --git a/context.ts b/context.ts
+--- a/context.ts
++++ b/context.ts
+@@ -1,3 +1,3 @@
+ keep one
+-old two
++new two
+ keep three
+`);
+	if (!file) throw new Error("missing fixture");
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			decorations={[
+				{
+					id: "key-change-old-side",
+					filePath: "context.ts",
+					side: "deletions",
+					startLine: 1,
+					endLine: 2,
+					backgroundColor: "#552244",
+					showGutterMarker: false,
+				},
+			]}
+			focusedDecorationId="key-change-old-side"
+			selectedRange={{
+				filePath: "context.ts",
+				hunkOldStart: 1,
+				side: "additions",
+				startLine: 1,
+				endLine: 2,
+			}}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	await t.renderOnce();
+	const lines = t.captureCharFrame().split("\n");
+	const capture = t.captureSpans();
+	const background = (text: string) => {
+		const row = lines.findIndex((line) => line.includes(text));
+		return capture.lines[row]?.spans.find((span) => span.text.includes(text))?.bg?.toInts();
+	};
+
+	expect(background("keep one")).toEqual(hexInts(theme.selectedHunk));
+	expect(background("new two")).toEqual(hexInts(theme.selectedHunk));
+});
+
 test("stack context focus uses the requested side's visible highlight", async () => {
 	const [file] = parsePatch(`diff --git a/context.ts b/context.ts
 --- a/context.ts

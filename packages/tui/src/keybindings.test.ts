@@ -301,6 +301,13 @@ test("the bracket keys navigate chapters on every surface", () => {
 	}
 });
 
+test("shifted punctuation matches terminals that report the base key with shift", () => {
+	expect(matchKeymapAction("page", { name: "=", shift: true })).toBe("expand-files");
+	expect(matchKeymapAction("page", { name: "+" })).toBe("expand-files");
+	expect(matchKeymapAction("page", { name: "[", shift: true })).toBe("previous-key-change");
+	expect(matchKeymapAction("page", { name: "/", shift: true })).toBe("toggle-shortcut-help");
+});
+
 test("shifted letters match without the registry spelling out the alias", () => {
 	// The §1 bug: comments-last declared only "G", so Shift-G fell through to comments-first.
 	expect(matchKeymapAction("comments", { name: "g", shift: true })).toBe("comments-last");

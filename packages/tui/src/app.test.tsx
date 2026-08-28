@@ -3220,6 +3220,43 @@ test("j and k move the visible review line while arrows only scroll narrative an
 	expect(cursorRow("beta")).toContain("▌");
 });
 
+test("v visibly enters selection mode before the range extends, and Escape restores the cursor", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 110,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await settle(t);
+
+	const codeTint = () => {
+		const row = t
+			.captureCharFrame()
+			.split("\n")
+			.findIndex((line) => line.includes("retry(alpha)"));
+		return t
+			.captureSpans()
+			.lines[row]?.spans.find((span) => span.text.includes("alpha"))
+			?.bg?.toString();
+	};
+	const cursorTint = codeTint();
+	const selectedTint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
+	expect(cursorTint).toBeDefined();
+	expect(cursorTint).not.toBe(selectedTint);
+	expect(
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((line) => line.includes("retry(alpha)")),
+	).toContain("▌");
+
+	await press(t, "v");
+	expect(codeTint()).toBe(selectedTint);
+
+	await press(t, "ESCAPE");
+	expect(codeTint()).toBe(cursorTint);
+});
+
 test("v selects and extends an exact keyboard range for the inline composer", async () => {
 	const copied: string[] = [];
 	const t = await testRender(
@@ -3248,6 +3285,85 @@ test("v selects and extends an exact keyboard range for the inline composer", as
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
 	expect(copied).toEqual(["retry.ts:2-3"]);
+});
+
+test("shift-equals expands files when the terminal reports the unshifted punctuation", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 110,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+
+	await press(t, "-");
+	expect(t.captureCharFrame()).not.toContain("retry(alpha)");
+	await act(async () => t.mockInput.pressKey("=", { shift: true }));
+	await act(async () => t.renderOnce());
+	expect(t.captureCharFrame()).toContain("retry(alpha)");
+});
+
+test("cursor and selection reset when consecutive chapters reuse a path for different hunks", async () => {
+	const chapters = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "same-path-first",
+				order: 1,
+				title: "First hunk",
+				summary: "The first change.",
+				hunkRefs: [{ filePath: "same.ts", oldStart: 1 }],
+				keyChanges: [],
+			},
+			{
+				id: "same-path-second",
+				order: 2,
+				title: "Second hunk",
+				summary: "The later change.",
+				hunkRefs: [{ filePath: "same.ts", oldStart: 10 }],
+				keyChanges: [],
+			},
+		],
+	});
+	const diffFiles = parsePatch(`diff --git a/same.ts b/same.ts
+--- a/same.ts
++++ b/same.ts
+@@ -1 +1 @@
+-old first
++new first
+@@ -10 +10 @@
+-old second
++new second
+`);
+	const editorRanges: Array<{ hunkOldStart: number; startLine: number }> = [];
+	const copied: string[] = [];
+	const t = await testRender(
+		<App
+			file={chapters}
+			diffFiles={diffFiles}
+			onOpenEditor={async (range) => {
+				editorRanges.push(range);
+				return { text: "Editor returned", tone: "success" };
+			}}
+			onCopy={(text) => {
+				copied.push(text);
+				return true;
+			}}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await press(t, "v"); // leave both a cursor and selection anchor on the first hunk
+	await nextChapter(t);
+
+	await press(t, "e");
+	await press(t, "v");
+	await act(async () => t.mockInput.pressEnter());
+	await act(async () => t.renderOnce());
+	expect(t.captureCharFrame()).toContain("New review thread");
+	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
+	await act(async () => t.renderOnce());
+
+	expect(editorRanges).toMatchObject([{ hunkOldStart: 10, startLine: 10 }]);
+	expect(copied).toEqual(["same.ts:10"]);
 });
 
 test("e requests the cursor or selected range from the injected editor boundary", async () => {

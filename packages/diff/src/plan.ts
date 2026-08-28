@@ -932,16 +932,29 @@ const paintCell = ({
 		decorations,
 		focusedDecorationId,
 	});
-	const backgroundColor = deletionFocus
-		? (deletionFocus.backgroundColor ?? styles.deletionFocusedBackground)
-		: additionFocus
-			? (additionFocus.backgroundColor ?? styles.additionFocusedBackground)
-			: cell.kind === "addition"
-				? styles.additionBackground
-				: cell.kind === "deletion"
-					? styles.deletionBackground
-					: styles.contextBackground;
-	const overlay = intralineOverlay({ cell, styles });
+	// An active cursor/selection is the reviewer's immediate target. On a context row both source
+	// identities can coexist, so it must outrank a focused key-change decoration on the other side.
+	const activeFocus = deletionFocus?.active
+		? { range: deletionFocus, side: "deletions" as const }
+		: additionFocus?.active
+			? { range: additionFocus, side: "additions" as const }
+			: null;
+	const backgroundColor = activeFocus
+		? (activeFocus.range.backgroundColor ??
+			(activeFocus.side === "deletions"
+				? styles.deletionFocusedBackground
+				: styles.additionFocusedBackground))
+		: deletionFocus
+			? (deletionFocus.backgroundColor ?? styles.deletionFocusedBackground)
+			: additionFocus
+				? (additionFocus.backgroundColor ?? styles.additionFocusedBackground)
+				: cell.kind === "addition"
+					? styles.additionBackground
+					: cell.kind === "deletion"
+						? styles.deletionBackground
+						: styles.contextBackground;
+	const activeBackground = activeFocus?.range.backgroundColor;
+	const overlay = activeBackground ? null : intralineOverlay({ cell, styles });
 	const length = cell.spans.reduce((total, span) => total + span.text.length, 0);
 	const spans = (
 		overlay
@@ -951,7 +964,11 @@ const paintCell = ({
 					overlay.style,
 				)
 			: [...cell.spans]
-	).map((span) => ({ ...span, fg: span.fg ?? styles.text }));
+	).map((span) => ({
+		...span,
+		fg: span.fg ?? styles.text,
+		...(activeBackground ? { bg: activeBackground } : {}),
+	}));
 	const gutters = cell.gutters
 		? (Object.fromEntries(
 				Object.entries(cell.gutters).map(([side, gutter]) => {

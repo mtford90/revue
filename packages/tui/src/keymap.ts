@@ -345,8 +345,30 @@ export type KeymapActionId = (typeof KEYMAP_DEF)[number]["id"];
 
 export type KeymapAction = KeymapActionDef<KeymapActionId>;
 
-/** Shifted punctuation whose base key a terminal reports alongside the shift flag. */
-const SHIFT_PUNCTUATION_BASE: Record<string, string> = { "{": "[", "}": "]" };
+/** Shifted US-keyboard punctuation whose base key a terminal may report with a shift flag. */
+const SHIFT_PUNCTUATION_BASE: Record<string, string> = {
+	"~": "`",
+	"!": "1",
+	"@": "2",
+	"#": "3",
+	$: "4",
+	"%": "5",
+	"^": "6",
+	"&": "7",
+	"*": "8",
+	"(": "9",
+	")": "0",
+	_: "-",
+	"+": "=",
+	"{": "[",
+	"}": "]",
+	"|": "\\",
+	":": ";",
+	'"': "'",
+	"<": ",",
+	">": ".",
+	"?": "/",
+};
 
 const shiftAliasFor = (key: string): string | undefined => {
 	if (/^[A-Z]$/.test(key)) return `shift+${key.toLowerCase()}`;

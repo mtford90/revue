@@ -1924,6 +1924,7 @@ function ChapterView({
 	selectedKeyChange,
 	collapsedFiles,
 	threads,
+	keyboardCursor,
 	selectedThreadRange,
 	threadDraft,
 	excerptDraft,
@@ -1963,6 +1964,8 @@ function ChapterView({
 	selectedKeyChange: number;
 	collapsedFiles: Set<string>;
 	threads: ReviewThread[];
+	/** Ordinary source-line focus; active ranges are rendered separately as selections. */
+	keyboardCursor: DiffLineRange | undefined;
 	selectedThreadRange: DiffLineRange | undefined;
 	threadDraft: DiffInlineAttachment | undefined;
 	/** The composer for a new thread on quoted code, which mounts inside its excerpt block. */
@@ -1994,14 +1997,26 @@ function ChapterView({
 	// diff on unrelated state changes (e.g. dragging the sidebar divider).
 	const decorations: RangeDecoration[] = useMemo(() => {
 		const keyChange = chapter.keyChanges[selectedKeyChange];
-		return (keyChange?.lineRefs ?? []).map((ref, refIndex) => ({
-			...ref,
-			id: `${focusedDecorationId}:${refIndex}`,
-			focusId: focusedDecorationId,
-			backgroundColor: severityBackgroundColor(theme, keyChange?.severity),
-			showGutterMarker: false,
-		}));
-	}, [chapter, selectedKeyChange, focusedDecorationId, theme]);
+		const cursorDecoration: RangeDecoration[] = keyboardCursor
+			? [
+					{
+						...keyboardCursor,
+						id: "keyboard-line-cursor",
+						active: true,
+					},
+				]
+			: [];
+		return [
+			...cursorDecoration,
+			...(keyChange?.lineRefs ?? []).map((ref, refIndex) => ({
+				...ref,
+				id: `${focusedDecorationId}:${refIndex}`,
+				focusId: focusedDecorationId,
+				backgroundColor: severityBackgroundColor(theme, keyChange?.severity),
+				showGutterMarker: false,
+			})),
+		];
+	}, [chapter, selectedKeyChange, focusedDecorationId, keyboardCursor, theme]);
 	const mountThread = (thread: ReviewThread): DiffInlineAttachment => ({
 		id: thread.id,
 		anchor: diffRangeForAnchor(thread.anchor),
@@ -3020,18 +3035,23 @@ export function App({
 	}
 
 	useEffect(() => {
-		if (!focusedReviewPath) {
-			setLineCursor(null);
-			setLineSelectionAnchor(null);
-			return;
-		}
+		const containsExactLine = (candidate: DiffLineRange | null): candidate is DiffLineRange =>
+			Boolean(
+				candidate &&
+					focusedReviewLines.some(
+						(line) =>
+							line.filePath === candidate.filePath &&
+							line.hunkOldStart === candidate.hunkOldStart &&
+							line.side === candidate.side &&
+							line.startLine === candidate.startLine &&
+							line.endLine === candidate.endLine,
+					),
+			);
 		setLineCursor((currentLine) =>
-			currentLine?.filePath === focusedReviewPath
-				? currentLine
-				: initialReviewLine(focusedReviewLines),
+			containsExactLine(currentLine) ? currentLine : initialReviewLine(focusedReviewLines),
 		);
-		setLineSelectionAnchor((anchor) => (anchor?.filePath === focusedReviewPath ? anchor : null));
-	}, [focusedReviewPath, focusedReviewLines]);
+		setLineSelectionAnchor((anchor) => (containsExactLine(anchor) ? anchor : null));
+	}, [focusedReviewLines]);
 
 	useEffect(() => {
 		if (!loadFileLines || !chapter) return;
@@ -4571,6 +4591,7 @@ export function App({
 									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}
 									threads={threads}
+									keyboardCursor={lineSelectionAnchor ? undefined : (lineCursor ?? undefined)}
 									selectedThreadRange={
 										(contextMenu?.kind === "range" &&
 										contextMenu.anchorKind === THREAD_ANCHOR_KIND.HUNK
@@ -4578,7 +4599,6 @@ export function App({
 											: undefined) ??
 										newThreadDraft?.anchor ??
 										lineSelection ??
-										lineCursor ??
 										undefined
 									}
 									threadDraft={newThreadDraft}

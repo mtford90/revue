@@ -121,6 +121,9 @@ for the command name. Thread is the model, and `revue threads` is the official A
   `migratedFrom` that does not resolve remains fatal.
 - 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes Markdown export, so
   "display, export, and agent reading" above names only display and agent reading now.
+- 2026-08-29 — [ADR 0020](0020-review-feedback-handoff.md) adds the handoff record beside
+  `.revue/threads.json`, next to the thread store this ADR defines but outside it, and does not
+  change the thread schema.
 
 ## Amendment
 

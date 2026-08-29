@@ -99,6 +99,23 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   body, creation time, and `{ kind: "human" | "agent", name }` author. Human TUI names resolve from
   repository-aware `git config user.name`, then the system login. Agent CLI messages require an
   explicit author name. Root messages are removed with their thread; replies may be deleted alone.
+- **Unsent** — a **thread** that is open, whose last message is from a human, and whose
+  `createdAt` is later than the last **handoff**'s `requestedAt`, or there is no handoff yet.
+  Derived fresh from the thread store and the handoff record each time; nothing is written to a
+  thread to mark it sent.
+- **Handoff** — the durable record of one Send: `.revue/handoff.json`, beside the thread store and
+  outside any run. Holds `handoffId` (the identity a waiter compares, not `requestedAt`), the
+  `runId` it was requested against, the `threadIds` sent, and `delivery` (`queued`, `delivered`, or
+  `copied`). Each Send overwrites it whole — one record, no history. Written before any delivery is
+  attempted, so a failed or absent nudge never costs the agent the feedback itself. `revue status`
+  resolves the record's `threadIds` against the run it reports on as `resolvedThreadIds`, since
+  threads migrate across supersession and the handoff does not.
+- **Agent origin** — `.revue/agent.json`, the Orca pane and `runId` that `revue prep` and `revue
+  threads reply` record after they succeed, so a later Send's wake-up prompt finds the right
+  terminal. Repo-level, beside the thread store, because prep can return an existing run early on a
+  dedup and the origin must still follow whichever pane last did agent work. Written only by the
+  top-level CLI commands, never by the prep library, so the TUI's own reload path never overwrites
+  it with the reviewer's pane. `revue threads reply` moves it to the replying agent.
 - **Prologue** — a high-level overview of the whole change: motivation, outcome, optional Mermaid
   diagram (drawn as a **diagram**, in a bordered box of its own), 2–5 key changes, 1–5 focus areas,
   and a complexity rating. Shown before chapter one.

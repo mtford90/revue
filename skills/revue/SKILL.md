@@ -401,9 +401,11 @@ flag it uses the reviewer's remembered theme.
 ## Step 8 — Responding to review feedback
 
 The user says "I added comments", "check the threads", "deal with my review feedback", "I've left
-you notes on the revue", or asks what is still outstanding on a review. That is this step. The
-review already exists, so never start it by preparing a fresh run: that discards the narration the
-reviewer has been reading and the marks recording how far they got.
+you notes on the revue", asks what is still outstanding on a review, or sends the wake-up prompt
+Revue delivers on Send: Review feedback is waiting in revue: run `revue status --json` and follow
+the revue skill's "Responding to review feedback" step. That is this step. The review already
+exists, so never start it by preparing a fresh run: that discards the narration the reviewer has
+been reading and the marks recording how far they got.
 
 One pass answers everything at once — orient, read every thread, make the changes you agree with,
 reply to all of them, report in chat, and regenerate the review a single time at the end.
@@ -436,7 +438,15 @@ revue status --wait --since <handoffId>
 
 That returns as soon as a handoff whose id differs from `<handoffId>` lands, printing the same
 report; a wait with nothing to compare against can omit `--since`. It gives up after 15 minutes by
-default (`--timeout-ms` to change that) and exits non-zero on timeout.
+default (`--timeout-ms` to change that) and exits with code 3 on timeout.
+
+A damaged handoff or agent-origin record reads as absent rather than stopping orientation; `status`
+lists it in `warnings` instead.
+
+`revue prep` and `revue threads reply` each record this session's Orca pane in `.revue/agent.json`
+once they succeed, so the reviewer's next Send reaches this terminal rather than another one. The
+record follows whichever of the two commands ran last. Outside Orca neither command writes
+anything, and the reviewer pastes the wake-up prompt into your terminal by hand.
 
 Work against the directory status prints for `pendingRun` when there is one, and the `activeRun`
 directory otherwise. Prep moves the conversation onto the newest run, so that is where the threads

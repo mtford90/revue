@@ -1,6 +1,6 @@
 # 08 — Skill, ADR 0020, and glossary
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -18,10 +18,10 @@ PRDs are.
 
 ## Acceptance criteria
 
-- [ ] The skill routes the wake-up prompt to the feedback step and documents the new status fields and flags
-- [ ] `revue show --check` and the skill install still pass
-- [ ] ADR 0020 exists in the house format with status accepted
-- [ ] `CONTEXT.md` defines the three terms
+- [x] The skill routes the wake-up prompt to the feedback step and documents the new status fields and flags
+- [x] `revue show --check` and the skill install still pass
+- [x] ADR 0020 exists in the house format with status accepted
+- [x] `CONTEXT.md` defines the three terms
 
 ## Blocked by
 

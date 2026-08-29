@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { finaliseHandoff, readHandoff, writeHandoff } from "@revue/prep";
+import { finaliseHandoff, readAgentOrigin, readHandoff, writeHandoff } from "@revue/prep";
 import {
+	type AgentOrigin,
 	HANDOFF_DELIVERY_KIND,
 	HANDOFF_SCHEMA_VERSION,
 	type HandoffRecord,
 	type ReviewThread,
 } from "@revue/types";
+import type { HostAdapter, HostTerminal } from "./host.ts";
 import { unsentThreads } from "./threads.ts";
 
 // Send is one action with a durable half and a courtesy half. This controller owns both, so the
@@ -18,7 +20,9 @@ export const WAKE_UP_PROMPT =
 
 export type SendOutcome =
 	| { kind: "nothing" }
-	| { kind: "queued"; count: number }
+	/** `candidates` is the choice the reviewer has yet to make: more than one terminal could be it. */
+	| { kind: "queued"; count: number; candidates?: readonly HostTerminal[] }
+	| { kind: "delivered"; count: number; title: string }
 	| { kind: "copied"; count: number }
 	| { kind: "error"; message: string };
 
@@ -36,6 +40,8 @@ export type FeedbackControllerInput = {
 	/** The run the reviewer is reading: what the batch is requested against, not where it is read. */
 	runId: string;
 	threads: () => readonly ReviewThread[];
+	/** Absent outside a host that can type for the reviewer, which is where the clipboard takes over. */
+	host?: HostAdapter | null;
 };
 
 const describe = (error: unknown): string =>
@@ -54,6 +60,7 @@ export const createFeedbackController = ({
 	repositoryRoot,
 	runId,
 	threads,
+	host,
 }: FeedbackControllerInput): FeedbackController => ({
 	async send(copyPrompt?: (text: string) => boolean): Promise<SendOutcome> {
 		// A damaged record reads as absent, which sends the whole open conversation again. That is
@@ -67,14 +74,88 @@ export const createFeedbackController = ({
 		} catch (error) {
 			return { kind: "error", message: describe(error) };
 		}
-		// No host module exists yet: delivery always falls through to the clipboard fallback. The
-		// Orca delivery ticket plugs a host attempt in ahead of this step.
-		const copied = tryCopyPrompt(repositoryRoot, record.handoffId, copyPrompt);
-		return copied
-			? { kind: "copied", count: unsent.length }
-			: { kind: "queued", count: unsent.length };
+		// A host owns delivery outright. The clipboard is for a reviewer nothing can type for, not
+		// a second attempt after the host has declined.
+		const count = unsent.length;
+		if (host) return await deliver({ host, repositoryRoot, handoffId: record.handoffId, count });
+		return tryCopyPrompt(repositoryRoot, record.handoffId, copyPrompt)
+			? { kind: "copied", count }
+			: { kind: "queued", count };
 	},
 });
+
+type DeliveryInput = {
+	host: HostAdapter;
+	repositoryRoot: string;
+	handoffId: string;
+	count: number;
+};
+
+const deliver = async ({
+	host,
+	repositoryRoot,
+	handoffId,
+	count,
+}: DeliveryInput): Promise<SendOutcome> => {
+	const terminals = await tryListTerminals(host);
+	if (!terminals) return { kind: "queued", count };
+	const target = resolveTarget(terminals, readAgentOrigin(repositoryRoot).origin);
+	// The picker a reviewer chooses from is the TUI's, and it is the next slice's work; until then
+	// an undecidable list stays queued and its candidates ride out with the outcome.
+	if (!target) return queuedWithChoice(count, terminals);
+	if (!(await trySendPrompt(host, target.handle))) return { kind: "queued", count };
+	return delivered({ repositoryRoot, handoffId, count, target });
+};
+
+const queuedWithChoice = (count: number, candidates: readonly HostTerminal[]): SendOutcome =>
+	candidates.length > 1 ? { kind: "queued", count, candidates } : { kind: "queued", count };
+
+const delivered = ({
+	repositoryRoot,
+	handoffId,
+	count,
+	target,
+}: Omit<DeliveryInput, "host"> & { target: HostTerminal }): SendOutcome => {
+	const finalised = finaliseHandoff(repositoryRoot, handoffId, {
+		kind: HANDOFF_DELIVERY_KIND.DELIVERED,
+		host: "orca",
+		terminal: target.handle,
+		title: target.title,
+	});
+	// A later Send has already replaced the record, and its own delivery owns the outcome now.
+	return finalised ? { kind: "delivered", count, title: target.title } : { kind: "queued", count };
+};
+
+/**
+ * Where the nudge goes: the pane the agent last worked in, when the host still lists it, and
+ * otherwise the one terminal left. A run the origin does not share with this review is a weaker
+ * signal but not a wrong one — a single origin is recorded at a time, so there is no better-matched
+ * pane to prefer over it, and the last agent to work the review is still the one to wake.
+ */
+const resolveTarget = (
+	terminals: readonly HostTerminal[],
+	origin: AgentOrigin | null,
+): HostTerminal | null => {
+	const recorded = terminals.find((terminal) => terminal.paneKey === origin?.paneKey);
+	if (recorded) return recorded;
+	return terminals.length === 1 ? (terminals[0] ?? null) : null;
+};
+
+const tryListTerminals = async (host: HostAdapter): Promise<HostTerminal[] | null> => {
+	try {
+		return await host.listTerminals();
+	} catch {
+		return null;
+	}
+};
+
+const trySendPrompt = async (host: HostAdapter, handle: string): Promise<boolean> => {
+	try {
+		return await host.sendToTerminal(handle, WAKE_UP_PROMPT);
+	} catch {
+		return false;
+	}
+};
 
 const tryCopyPrompt = (
 	repositoryRoot: string,

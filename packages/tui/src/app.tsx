@@ -1851,6 +1851,9 @@ const sendNotice = (outcome: SendOutcome): StatusNotice => {
 	if (outcome.kind === "error") return { text: outcome.message, tone: "error" };
 	if (outcome.kind === "nothing") return { text: "Nothing to send", tone: "success" };
 	const threads = `${outcome.count} thread${outcome.count === 1 ? "" : "s"}`;
+	if (outcome.kind === "delivered") {
+		return { text: `Delivered to ${outcome.title} (${threads})`, tone: "success" };
+	}
 	if (outcome.kind === "copied") {
 		return { text: `Queued for polling — prompt copied (${threads})`, tone: "success" };
 	}

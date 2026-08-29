@@ -1,6 +1,6 @@
 # 05 — Orca delivery to the agent terminal
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -21,13 +21,13 @@ record `queued` with the queued notice; the picker comes in the next slice.
 
 ## Acceptance criteria
 
-- [ ] With a fake `orca` via `ORCA_CLI_COMMAND`, Send delivers to the origin terminal and the record reads `delivered`
-- [ ] The TUI's own pane is never a candidate
-- [ ] A `runId` match on the origin wins over a mismatch; the sole other terminal is used when there is no origin
-- [ ] A list or send failure leaves `queued`; no error dialog
-- [ ] A newer handoff written mid-flight is not overwritten by the older result
-- [ ] Terminal titles with control characters are sanitised before display and storage
-- [ ] Host module tests use the fake CLI; controller tests cover the resolution order and guarded finalisation
+- [x] With a fake `orca` via `ORCA_CLI_COMMAND`, Send delivers to the origin terminal and the record reads `delivered`
+- [x] The TUI's own pane is never a candidate
+- [x] A `runId` match on the origin wins over a mismatch; the sole other terminal is used when there is no origin
+- [x] A list or send failure leaves `queued`; no error dialog
+- [x] A newer handoff written mid-flight is not overwritten by the older result
+- [x] Terminal titles with control characters are sanitised before display and storage
+- [x] Host module tests use the fake CLI; controller tests cover the resolution order and guarded finalisation
 
 ## Blocked by
 

@@ -4607,6 +4607,17 @@ test("Send says when there is nothing to send and reports a record it could not 
 	expect(statusLine(failed)).toContain("Could not write the handoff");
 });
 
+test("Send names the terminal it delivered the nudge to", async () => {
+	const feedback = fakeFeedback({ kind: "delivered", count: 2, title: "claude — agent" });
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+	await press(t, "S");
+	expect(statusLine(t)).toContain("Delivered to claude — agent (2 threads)");
+});
+
 test("Send reports a copied prompt outside a host", async () => {
 	const feedback = fakeFeedback({ kind: "copied", count: 2 });
 	const t = await testRender(<App file={file} feedback={feedback.controller} />, {

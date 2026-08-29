@@ -45,6 +45,7 @@ import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
 import { createFeedbackController } from "./feedback.ts";
 import { waitForHandoff } from "./handoffWait.ts";
+import { createHostAdapter } from "./host.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
 import { KEYMAP } from "./keymap.ts";
@@ -1025,6 +1026,7 @@ async function showRun(
 					repositoryRoot,
 					runId: run.manifest.runId,
 					threads: () => threadStore.get(),
+					host: createHostAdapter(),
 				})
 			: undefined;
 		const readHandoffRecord = repositoryRoot ? () => readHandoff(repositoryRoot).record : undefined;

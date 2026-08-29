@@ -32,6 +32,12 @@ const anchor = (line: number) => ({
 const thread = (line: number, minute: number): ReviewThread =>
 	createThread(runId, anchor(line), reviewer, `Line ${line}?`, { createdAt: at(minute) });
 
+/** A thread later than any `send()` this test has already made, real-time rather than fixed 2026. */
+const freshThread = (line: number): ReviewThread =>
+	createThread(runId, anchor(line), reviewer, `Line ${line}?`, {
+		createdAt: new Date(Date.now() + 1_000).toISOString(),
+	});
+
 const answered = (base: ReviewThread, minute: number): ReviewThread => ({
 	...base,
 	messages: [...base.messages, createThreadMessage(agent, "Fixed.", { createdAt: at(minute) })],
@@ -374,14 +380,208 @@ test("several terminals and no origin is a choice the reviewer has yet to make",
 		const candidates = [terminal("term_a", { lastOutputAt: 9 }), terminal("term_b")];
 		const { host, sent } = fakeHost({ terminals: candidates });
 
-		expect(await hostControllerFor(root, [thread(1, 0)], host).send(clipboard.copy)).toEqual({
-			kind: "queued",
+		const outcome = await hostControllerFor(root, [thread(1, 0)], host).send(clipboard.copy);
+		expect(outcome).toEqual({
+			kind: "choose",
 			count: 1,
+			handoffId: readHandoff(root).record?.handoffId ?? "",
 			candidates,
 		});
 		expect(sent).toHaveLength(0);
 		expect(readHandoff(root).record?.delivery).toEqual({ kind: "queued" });
 		expect(clipboard.copies).toEqual([]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("no terminals at all leaves the batch queued rather than an empty choice", async () => {
+	const root = await scratchRepository();
+	try {
+		const { host, sent } = fakeHost({ terminals: [] });
+
+		expect(await hostControllerFor(root, [thread(1, 0)], host).send(refuseClipboard)).toEqual({
+			kind: "queued",
+			count: 1,
+		});
+		expect(sent).toHaveLength(0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+// ── The picker's choice and the session target it leaves behind ────────────
+
+test("deliverTo delivers, finalises the record, and remembers the choice", async () => {
+	const root = await scratchRepository();
+	try {
+		const candidates = [terminal("term_a", { lastOutputAt: 9 }), terminal("term_b")];
+		const { host, sent } = fakeHost({ terminals: candidates });
+		const controller = hostControllerFor(root, [thread(1, 0)], host);
+
+		const choice = await controller.send(refuseClipboard);
+		expect(choice.kind).toBe("choose");
+		const handoffId = readHandoff(root).record?.handoffId ?? "";
+
+		const outcome = await controller.deliverTo(handoffId, candidates[1] as HostTerminal);
+		expect(outcome).toEqual({ kind: "delivered", count: 1, title: "term_b" });
+		expect(sent).toEqual([{ handle: "term_b", text: WAKE_UP_PROMPT }]);
+		expect(readHandoff(root).record?.delivery).toMatchObject({
+			kind: "delivered",
+			terminal: "term_b",
+		});
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("the next Send reuses the terminal deliverTo chose, without asking again", async () => {
+	const root = await scratchRepository();
+	try {
+		const candidates = [terminal("term_a", { lastOutputAt: 9 }), terminal("term_b")];
+		const { host, sent } = fakeHost({ terminals: candidates });
+		let threads = [thread(1, 0)];
+		const controller = createFeedbackController({
+			repositoryRoot: root,
+			runId,
+			threads: () => threads,
+			host,
+		});
+
+		const choice = await controller.send(refuseClipboard);
+		expect(choice.kind).toBe("choose");
+		const handoffId = readHandoff(root).record?.handoffId ?? "";
+		await controller.deliverTo(handoffId, candidates[1] as HostTerminal);
+
+		threads = [...threads, freshThread(2)];
+		const outcome = await controller.send(refuseClipboard);
+		expect(outcome).toEqual({ kind: "delivered", count: 1, title: "term_b" });
+		expect(sent.map((each) => each.handle)).toEqual(["term_b", "term_b"]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a session target the host no longer lists falls through to the origin, then the picker", async () => {
+	const root = await scratchRepository();
+	try {
+		const chosen = terminal("term_a", { lastOutputAt: 9 });
+		const other = terminal("term_b");
+		const sent: { handle: string; text: string }[] = [];
+		let listing = [chosen, other];
+		const host: HostAdapter = {
+			listTerminals: async () => listing,
+			sendToTerminal: async (handle, text) => {
+				sent.push({ handle, text });
+				return true;
+			},
+		};
+		let threads = [thread(1, 0)];
+		const controller = createFeedbackController({
+			repositoryRoot: root,
+			runId,
+			threads: () => threads,
+			host,
+		});
+		await controller.send(refuseClipboard);
+		const handoffId = readHandoff(root).record?.handoffId ?? "";
+		await controller.deliverTo(handoffId, chosen);
+
+		// term_a vanishes; term_b is now the origin, so it wins over the picker.
+		listing = [other];
+		threads = [...threads, freshThread(2)];
+		recordOrigin(root, "tab1:term_b");
+
+		const outcome = await controller.send(refuseClipboard);
+		expect(outcome).toEqual({ kind: "delivered", count: 1, title: "term_b" });
+		expect(sent.map((each) => each.handle)).toEqual(["term_a", "term_b"]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a vanished session target with no origin falls through to the picker", async () => {
+	const root = await scratchRepository();
+	try {
+		const chosen = terminal("term_a", { lastOutputAt: 9 });
+		const others = [terminal("term_b"), terminal("term_c")];
+		const sent: { handle: string; text: string }[] = [];
+		let listing = [chosen, ...others];
+		const host: HostAdapter = {
+			listTerminals: async () => listing,
+			sendToTerminal: async (handle, text) => {
+				sent.push({ handle, text });
+				return true;
+			},
+		};
+		let threads = [thread(1, 0)];
+		const controller = createFeedbackController({
+			repositoryRoot: root,
+			runId,
+			threads: () => threads,
+			host,
+		});
+		await controller.send(refuseClipboard);
+		const handoffId = readHandoff(root).record?.handoffId ?? "";
+		await controller.deliverTo(handoffId, chosen);
+
+		// term_a vanishes with no origin recorded, so the two remaining terminals go to the picker.
+		listing = others;
+		threads = [...threads, freshThread(2)];
+
+		const outcome = await controller.send(refuseClipboard);
+		expect(outcome).toEqual({
+			kind: "choose",
+			count: 1,
+			handoffId: readHandoff(root).record?.handoffId ?? "",
+			candidates: others,
+		});
+		expect(sent.map((each) => each.handle)).toEqual(["term_a"]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("forced choose returns candidates even with a live origin", async () => {
+	const root = await scratchRepository();
+	try {
+		const candidates = [terminal("term_a", { lastOutputAt: 9 }), terminal("term_b")];
+		const { host, sent } = fakeHost({ terminals: candidates });
+		recordOrigin(root, "tab1:term_b");
+
+		const outcome = await hostControllerFor(root, [thread(1, 0)], host).send(refuseClipboard, {
+			choose: true,
+		});
+
+		expect(outcome).toEqual({
+			kind: "choose",
+			count: 1,
+			handoffId: readHandoff(root).record?.handoffId ?? "",
+			candidates,
+		});
+		expect(sent).toHaveLength(0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("deliverTo with a stale handoffId does not overwrite a newer record", async () => {
+	const root = await scratchRepository();
+	try {
+		const candidates = [terminal("term_a", { lastOutputAt: 9 }), terminal("term_b")];
+		const { host, sent } = fakeHost({ terminals: candidates });
+		const controller = hostControllerFor(root, [thread(1, 0)], host);
+		const choice = await controller.send(refuseClipboard);
+		expect(choice.kind).toBe("choose");
+		const staleHandoffId = readHandoff(root).record?.handoffId ?? "";
+
+		const newer = handoff(at(50), []);
+		writeHandoff(root, newer);
+
+		const outcome = await controller.deliverTo(staleHandoffId, candidates[1] as HostTerminal);
+		expect(outcome).toEqual({ kind: "queued", count: 0 });
+		expect(readHandoff(root).record).toEqual(newer);
+		expect(sent).toEqual([{ handle: "term_b", text: WAKE_UP_PROMPT }]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

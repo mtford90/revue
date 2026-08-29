@@ -20,11 +20,17 @@ export const WAKE_UP_PROMPT =
 
 export type SendOutcome =
 	| { kind: "nothing" }
-	/** `candidates` is the choice the reviewer has yet to make: more than one terminal could be it. */
-	| { kind: "queued"; count: number; candidates?: readonly HostTerminal[] }
+	| { kind: "queued"; count: number }
+	/** The choice the reviewer has yet to make: more than one terminal could be the target. */
+	| { kind: "choose"; count: number; handoffId: string; candidates: readonly HostTerminal[] }
 	| { kind: "delivered"; count: number; title: string }
 	| { kind: "copied"; count: number }
 	| { kind: "error"; message: string };
+
+export type SendOptions = {
+	/** Forces the picker even when a session target or origin would otherwise settle it. */
+	choose?: boolean;
+};
 
 export type FeedbackController = {
 	/**
@@ -32,7 +38,13 @@ export type FeedbackController = {
 	 * `copyPrompt` is the clipboard fallback used when there is no host to deliver to; it stands
 	 * in for a call the TUI makes because only it has a renderer to copy through.
 	 */
-	send(copyPrompt?: (text: string) => boolean): Promise<SendOutcome>;
+	send(copyPrompt?: (text: string) => boolean, options?: SendOptions): Promise<SendOutcome>;
+	/** Delivers a queued handoff to the terminal the reviewer picked, guarded by `handoffId` so a
+	 * newer Send is never overwritten by a slower, older choice. The terminal becomes the session
+	 * target for later Sends. */
+	deliverTo(handoffId: string, terminal: HostTerminal): Promise<SendOutcome>;
+	/** Whether a host is present to deliver to, which is what gates the "another terminal" menu item. */
+	hasHost: boolean;
 };
 
 export type FeedbackControllerInput = {
@@ -61,34 +73,65 @@ export const createFeedbackController = ({
 	runId,
 	threads,
 	host,
-}: FeedbackControllerInput): FeedbackController => ({
-	async send(copyPrompt?: (text: string) => boolean): Promise<SendOutcome> {
-		// A damaged record reads as absent, which sends the whole open conversation again. That is
-		// the safe way round: the agent re-reads feedback rather than never hearing it.
-		const previous = readHandoff(repositoryRoot).record;
-		const unsent = unsentThreads(threads(), previous?.requestedAt ?? null);
-		if (unsent.length === 0) return { kind: "nothing" };
-		const record = queuedHandoff(runId, unsent);
-		try {
-			writeHandoff(repositoryRoot, record);
-		} catch (error) {
-			return { kind: "error", message: describe(error) };
-		}
-		// A host owns delivery outright. The clipboard is for a reviewer nothing can type for, not
-		// a second attempt after the host has declined.
-		const count = unsent.length;
-		if (host) return await deliver({ host, repositoryRoot, handoffId: record.handoffId, count });
-		return tryCopyPrompt(repositoryRoot, record.handoffId, copyPrompt)
-			? { kind: "copied", count }
-			: { kind: "queued", count };
-	},
-});
+}: FeedbackControllerInput): FeedbackController => {
+	// A terminal the reviewer has chosen once outlives the Send that chose it, so later Sends do
+	// not ask again while it is still there to answer.
+	const sessionTarget: SessionTargetRef = { current: null };
+	return {
+		async send(
+			copyPrompt?: (text: string) => boolean,
+			options?: SendOptions,
+		): Promise<SendOutcome> {
+			// A damaged record reads as absent, which sends the whole open conversation again. That is
+			// the safe way round: the agent re-reads feedback rather than never hearing it.
+			const previous = readHandoff(repositoryRoot).record;
+			const unsent = unsentThreads(threads(), previous?.requestedAt ?? null);
+			if (unsent.length === 0) return { kind: "nothing" };
+			const record = queuedHandoff(runId, unsent);
+			try {
+				writeHandoff(repositoryRoot, record);
+			} catch (error) {
+				return { kind: "error", message: describe(error) };
+			}
+			// A host owns delivery outright. The clipboard is for a reviewer nothing can type for, not
+			// a second attempt after the host has declined.
+			const count = unsent.length;
+			if (host) {
+				return await deliver({
+					host,
+					repositoryRoot,
+					handoffId: record.handoffId,
+					count,
+					sessionTarget,
+					forceChoose: options?.choose ?? false,
+				});
+			}
+			return tryCopyPrompt(repositoryRoot, record.handoffId, copyPrompt)
+				? { kind: "copied", count }
+				: { kind: "queued", count };
+		},
+		async deliverTo(handoffId: string, terminal: HostTerminal): Promise<SendOutcome> {
+			if (!host) return { kind: "queued", count: 0 };
+			const current = readHandoff(repositoryRoot).record;
+			const count = current?.handoffId === handoffId ? current.threadIds.length : 0;
+			if (!(await trySendPrompt(host, terminal.handle))) return { kind: "queued", count };
+			const outcome = delivered({ repositoryRoot, handoffId, count, target: terminal });
+			if (outcome.kind === "delivered") sessionTarget.current = terminal;
+			return outcome;
+		},
+		hasHost: Boolean(host),
+	};
+};
+
+type SessionTargetRef = { current: HostTerminal | null };
 
 type DeliveryInput = {
 	host: HostAdapter;
 	repositoryRoot: string;
 	handoffId: string;
 	count: number;
+	sessionTarget: SessionTargetRef;
+	forceChoose: boolean;
 };
 
 const deliver = async ({
@@ -96,26 +139,54 @@ const deliver = async ({
 	repositoryRoot,
 	handoffId,
 	count,
+	sessionTarget,
+	forceChoose,
 }: DeliveryInput): Promise<SendOutcome> => {
 	const terminals = await tryListTerminals(host);
 	if (!terminals) return { kind: "queued", count };
-	const target = resolveTarget(terminals, readAgentOrigin(repositoryRoot).origin);
-	// The picker a reviewer chooses from is the TUI's, and it is the next slice's work; until then
-	// an undecidable list stays queued and its candidates ride out with the outcome.
-	if (!target) return queuedWithChoice(count, terminals);
+	forgetVanishedSessionTarget(sessionTarget, terminals);
+	if (forceChoose) return chooseOrQueued(terminals, count, handoffId);
+	const target = resolveTarget(
+		terminals,
+		sessionTarget.current,
+		readAgentOrigin(repositoryRoot).origin,
+	);
+	if (!target) return chooseOrQueued(terminals, count, handoffId);
 	if (!(await trySendPrompt(host, target.handle))) return { kind: "queued", count };
-	return delivered({ repositoryRoot, handoffId, count, target });
+	const outcome = delivered({ repositoryRoot, handoffId, count, target });
+	if (outcome.kind === "delivered") sessionTarget.current = target;
+	return outcome;
 };
 
-const queuedWithChoice = (count: number, candidates: readonly HostTerminal[]): SendOutcome =>
-	candidates.length > 1 ? { kind: "queued", count, candidates } : { kind: "queued", count };
+/** A session target the host no longer lists is forgotten, not carried forward as a dead handle. */
+const forgetVanishedSessionTarget = (
+	sessionTarget: SessionTargetRef,
+	terminals: readonly HostTerminal[],
+): void => {
+	const live = sessionTarget.current
+		? terminals.some((terminal) => terminal.paneKey === sessionTarget.current?.paneKey)
+		: true;
+	if (!live) sessionTarget.current = null;
+};
+
+/** The picker a reviewer chooses from when nothing else has settled it; an empty list stays queued. */
+const chooseOrQueued = (
+	candidates: readonly HostTerminal[],
+	count: number,
+	handoffId: string,
+): SendOutcome =>
+	candidates.length > 0
+		? { kind: "choose", count, handoffId, candidates }
+		: { kind: "queued", count };
 
 const delivered = ({
 	repositoryRoot,
 	handoffId,
 	count,
 	target,
-}: Omit<DeliveryInput, "host"> & { target: HostTerminal }): SendOutcome => {
+}: Omit<DeliveryInput, "host" | "sessionTarget" | "forceChoose"> & {
+	target: HostTerminal;
+}): SendOutcome => {
 	const finalised = finaliseHandoff(repositoryRoot, handoffId, {
 		kind: HANDOFF_DELIVERY_KIND.DELIVERED,
 		host: "orca",
@@ -127,15 +198,19 @@ const delivered = ({
 };
 
 /**
- * Where the nudge goes: the pane the agent last worked in, when the host still lists it, and
- * otherwise the one terminal left. A run the origin does not share with this review is a weaker
- * signal but not a wrong one — a single origin is recorded at a time, so there is no better-matched
- * pane to prefer over it, and the last agent to work the review is still the one to wake.
+ * Where the nudge goes: the terminal the reviewer chose last, when the host still lists it; then
+ * the pane the agent last worked in, when the host still lists it; then the one terminal left. A
+ * run the origin does not share with this review is a weaker signal but not a wrong one — a single
+ * origin is recorded at a time, so there is no better-matched pane to prefer over it, and the last
+ * agent to work the review is still the one to wake.
  */
 const resolveTarget = (
 	terminals: readonly HostTerminal[],
+	sessionTarget: HostTerminal | null,
 	origin: AgentOrigin | null,
 ): HostTerminal | null => {
+	const session = terminals.find((terminal) => terminal.paneKey === sessionTarget?.paneKey);
+	if (session) return session;
 	const recorded = terminals.find((terminal) => terminal.paneKey === origin?.paneKey);
 	if (recorded) return recorded;
 	return terminals.length === 1 ? (terminals[0] ?? null) : null;

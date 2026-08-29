@@ -3572,6 +3572,44 @@ const gutterFor = (t: Awaited<ReturnType<typeof testRender>>, text: string, line
 	return { x: rows[y]?.lastIndexOf(lineNumber, sourceX) ?? -1, y };
 };
 
+test("crossing into an already-visible file preserves the viewport while moving focus", async () => {
+	const editorRanges: Array<{ filePath: string; startLine: number }> = [];
+	const t = await testRender(
+		<App
+			file={streamChapters}
+			diffFiles={streamDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "stacked" }}
+			onOpenEditor={async (range) => {
+				editorRanges.push(range);
+				return { text: "Editor returned", tone: "success" };
+			}}
+		/>,
+		{ width: 90, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+
+	for (let step = 0; step < 11; step += 1) await press(t, "j");
+	expect(visibleRow(t, "a-line-12")).toContain("▌");
+	expect(t.captureCharFrame()).toContain("b-line-1");
+	const topBeforeCrossing = t
+		.captureCharFrame()
+		.split("\n")
+		.findIndex((row) => row.includes("a-line-1"));
+
+	await press(t, "j");
+
+	expect(visibleRow(t, "b-line-1")).toContain("▌");
+	expect(
+		t
+			.captureCharFrame()
+			.split("\n")
+			.findIndex((row) => row.includes("a-line-1")),
+	).toBe(topBeforeCrossing);
+	await press(t, "e");
+	expect(editorRanges.at(-1)).toMatchObject({ filePath: "b.ts", startLine: 1 });
+});
+
 test("j/k forms one revealed review-line stream across expanded files in a chapter", async () => {
 	const editorRanges: Array<{ filePath: string; startLine: number }> = [];
 	const copied: string[] = [];
@@ -3605,7 +3643,7 @@ test("j/k forms one revealed review-line stream across expanded files in a chapt
 
 	// Crossing reveals the next file rather than leaving the cursor pinned off-screen in a.ts.
 	expect(visibleRow(t, "b-line-1")).toContain("▌");
-	expect(t.captureCharFrame()).not.toContain("a-line-1");
+	expect(t.captureCharFrame()).not.toMatch(/a-line-1\s/);
 
 	for (let step = 0; step < 12; step += 1) await press(t, "j");
 	expect(visibleRow(t, "b-line-12")).toContain("▌");

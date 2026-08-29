@@ -3318,7 +3318,6 @@ export function App({
 		};
 	}, [chapter, selectedFile, focusedExcerpt, focusedThreadRef, fileFocusRequest]);
 
-	const revealedCursorFile = useRef<string | null>(null);
 	const lineMotionRequest = useRef(0);
 	const handledLineMotionRequest = useRef(0);
 	useEffect(() => {
@@ -3332,20 +3331,11 @@ export function App({
 		const offset =
 			row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
 		if (offset !== null) {
-			const crossedFile =
-				revealedCursorFile.current !== null && revealedCursorFile.current !== lineCursor.filePath;
-			revealedCursorFile.current = lineCursor.filePath;
-			if (crossedFile) {
-				pageScroll.current?.scrollTo(
-					Math.max(0, offset + (leadingContent.current?.height ?? 0) + VIEWPORT_TOP_PADDING - 1),
-				);
-			} else {
-				revealContentOffset({
-					scroll: pageScroll.current,
-					leadingHeight: leadingContent.current?.height ?? 0,
-					offset,
-				});
-			}
+			revealContentOffset({
+				scroll: pageScroll.current,
+				leadingHeight: leadingContent.current?.height ?? 0,
+				offset,
+			});
 		}
 	}, [lineCursor]);
 

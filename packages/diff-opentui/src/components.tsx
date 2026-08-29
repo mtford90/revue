@@ -158,6 +158,11 @@ const lineRangeFor = (filePath: string, range: DiffSelectionRange): DiffLineRang
 
 const DOUBLE_CLICK_MS = 400;
 
+let activeRangeGesture: {
+	update: (target: DiffLineRange) => void;
+	finish: (target: DiffLineRange | null) => void;
+} | null = null;
+
 /** Pointer cursor, actual drag selection, activation, and context action are separate gestures. */
 const useRangeSelection = ({
 	selectedRange,
@@ -197,23 +202,8 @@ const useRangeSelection = ({
 		if (!next) return;
 		activeSelection.current = next;
 		setDragSelection(next);
-		onSelectionChange?.(next);
-		if (onRangeSelect) {
-			const matching = next.ranges.filter(
-				(range) => range.oldStart === start.oldStart && range.side === start.side,
-			);
-			if (matching.length) {
-				onRangeSelect({
-					filePath: start.filePath,
-					hunkOldStart: start.oldStart,
-					side: start.side,
-					startLine: Math.min(...matching.map((range) => range.startLine)),
-					endLine: Math.max(...matching.map((range) => range.endLine)),
-				});
-			}
-		}
 	};
-	const finishAtEventTarget = (event: OpenTUIMouseEvent) => {
+	const rangeAtEvent = (event: OpenTUIMouseEvent) => {
 		const eventTarget = event.target?.id ? parseDiffLineId(event.target.id) : null;
 		const coordinateTarget = [...gutterNodes.current.values()].find(
 			({ node }) =>
@@ -222,19 +212,7 @@ const useRangeSelection = ({
 				event.y >= node.y &&
 				event.y < node.y + node.height,
 		)?.range;
-		const target = coordinateTarget ?? eventTarget;
-		const start = activeStart.current;
-		const targetStop = target ? stopForRange(target) : null;
-		const moved = Boolean(
-			start &&
-				targetStop &&
-				(start.filePath !== targetStop.filePath ||
-					start.oldStart !== targetStop.oldStart ||
-					start.side !== targetStop.side ||
-					start.lineNumber !== targetStop.lineNumber),
-		);
-		if (target && (moved || dragged.current)) updateSelection(target, dragged.current);
-		finishSelection();
+		return coordinateTarget ?? eventTarget;
 	};
 	const finishSelection = () => {
 		const start = activeStart.current;
@@ -250,6 +228,7 @@ const useRangeSelection = ({
 		const completed = wasDragged || legacyClick ? activeSelection.current : null;
 		const activation = activated ? activeSelection.current : null;
 		const clickKey = `${start.filePath}:${start.oldStart}:${start.side}:${start.lineNumber}`;
+		activeRangeGesture = null;
 		activeStart.current = null;
 		activeSelection.current = null;
 		dragged.current = false;
@@ -263,8 +242,30 @@ const useRangeSelection = ({
 			onRangeSelect?.(lineRangeFor(completed.filePath, completed.ranges[0]));
 		}
 	};
-	const cancelActiveRange = () => {
-		activeStart.current = null;
+	const finishAtTarget = (target: DiffLineRange | null) => {
+		const start = activeStart.current;
+		const targetStop = target ? stopForRange(target) : null;
+		const moved = Boolean(
+			start &&
+				targetStop &&
+				(start.filePath !== targetStop.filePath ||
+					start.oldStart !== targetStop.oldStart ||
+					start.side !== targetStop.side ||
+					start.lineNumber !== targetStop.lineNumber),
+		);
+		if (target && (moved || dragged.current)) updateSelection(target, dragged.current);
+		finishSelection();
+	};
+	const finishAtEventTarget = (event: OpenTUIMouseEvent) => {
+		const target = rangeAtEvent(event);
+		if (!activeStart.current && activeRangeGesture) activeRangeGesture.finish(target);
+		else finishAtTarget(target);
+	};
+	const cancelActiveRange = (event: OpenTUIMouseEvent) => {
+		if (activeStart.current || activeRangeGesture) {
+			finishAtEventTarget(event);
+			return;
+		}
 		activeSelection.current = null;
 		dragged.current = false;
 		doubleClickCandidate.current = false;
@@ -324,17 +325,22 @@ const useRangeSelection = ({
 						activeStart.current = stop;
 						activeSelection.current = selectionForRange(target);
 						dragged.current = false;
+						activeRangeGesture = {
+							update: (nextTarget) => updateSelection(nextTarget, true),
+							finish: finishAtTarget,
+						};
 					},
 					onMouseDrag: (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						updateSelection(target, true);
+						updateSelection(rangeAtEvent(event) ?? target, true);
 					},
 					onMouseOver: (event) => {
-						if (!activeStart.current) return;
+						if (!activeStart.current && !activeRangeGesture) return;
 						event.preventDefault();
 						event.stopPropagation();
-						updateSelection(target, true);
+						if (activeStart.current) updateSelection(target, true);
+						else activeRangeGesture?.update(target);
 					},
 					onMouseDragEnd: (event) => {
 						event.preventDefault();

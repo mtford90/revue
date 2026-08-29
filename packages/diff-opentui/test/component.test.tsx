@@ -431,6 +431,64 @@ test("line-number gutters select exact side-aware single and multi-line ranges",
 	});
 });
 
+test("gutter drag previews locally and publishes once when the drag completes", async () => {
+	const [file] = parsePatch(`diff --git a/drag.ts b/drag.ts
+new file mode 100644
+--- /dev/null
++++ b/drag.ts
+@@ -0,0 +1,5 @@
++drag one
++drag two
++drag three
++drag four
++drag five
+`);
+	if (!file) throw new Error("missing drag fixture");
+	const selected: DiffSelection[] = [];
+	const t = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			onSelectionChange={(selection) => selected.push(selection)}
+		/>,
+		{ width: 60, height: 10 },
+	);
+	await t.renderOnce();
+	const gutter = (text: string, number: string) => {
+		const rows = t.captureCharFrame().split("\n");
+		const y = rows.findIndex((row) => row.includes(text));
+		const source = rows[y]?.indexOf(text) ?? -1;
+		return { x: rows[y]?.lastIndexOf(number, source) ?? -1, y };
+	};
+	const first = gutter("drag one", "1");
+	const third = gutter("drag three", "3");
+	const fifth = gutter("drag five", "5");
+
+	await act(async () => t.mockMouse.moveTo(first.x, first.y));
+	await act(async () => t.mockMouse.pressDown(first.x, first.y));
+	await act(async () => t.mockMouse.moveTo(third.x, third.y));
+	await act(async () => t.renderOnce());
+	await act(async () => t.mockMouse.moveTo(fifth.x, fifth.y));
+	await act(async () => t.renderOnce());
+
+	const lines = t.captureCharFrame().split("\n");
+	const spans = t.captureSpans();
+	const fifthRow = lines.findIndex((row) => row.includes("drag five"));
+	expect(
+		spans.lines[fifthRow]?.spans.find((span) => span.text.includes("drag five"))?.bg.toInts(),
+	).toEqual(hexInts(theme.selectedHunk));
+	expect(selected).toEqual([]);
+
+	await act(async () => t.mockMouse.release(fifth.x, fifth.y));
+	await t.renderOnce();
+	expect(selected).toHaveLength(1);
+	expect(selected[0]?.ranges).toEqual([
+		{ oldStart: 0, side: "additions", startLine: 1, endLine: 5 },
+	]);
+});
+
 test("gutter drags follow stacked rows while a split-side drag stays in its visible gutter", async () => {
 	const [file] = parsePatch(`diff --git a/replacement.ts b/replacement.ts
 --- a/replacement.ts

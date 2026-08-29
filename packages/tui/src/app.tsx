@@ -93,6 +93,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { AgentTerminalPicker, AgentTerminalPickerBackdrop } from "./agentTerminalPicker.tsx";
 import { copyToClipboard } from "./clipboard.ts";
 import {
 	type ChapterDiffFile,
@@ -110,6 +111,7 @@ import {
 } from "./expand.ts";
 import type { FeedbackController, SendOutcome } from "./feedback.ts";
 import { HelpSurface } from "./helpSurface.tsx";
+import type { HostTerminal } from "./host.ts";
 import type { KeymapIssue } from "./keybindings.ts";
 import {
 	deriveAppKeys,
@@ -2644,6 +2646,12 @@ export function App({
 	);
 	const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 	const [themePicker, setThemePicker] = useState<{ selected: number } | null>(null);
+	const [agentPicker, setAgentPicker] = useState<{
+		handoffId: string;
+		count: number;
+		selected: number;
+		candidates: readonly HostTerminal[];
+	} | null>(null);
 	const shownTheme = previewTheme ?? chosenTheme;
 	const theme = transparentSurfaces ? withTransparentSurfaces(shownTheme) : shownTheme;
 	const filesChapter = useMemo(
@@ -3255,20 +3263,54 @@ export function App({
 		saveCurrentSession();
 		onReload?.();
 	}
-	async function sendFeedback() {
+	async function sendFeedback(options?: { choose?: boolean }) {
 		if (sendingRef.current) {
 			setMountNotice({ text: "Sending…", tone: "success" });
 			return;
 		}
 		sendingRef.current = true;
 		try {
-			const outcome = (await feedback?.send((text) => copyToClipboard(renderer, text))) ?? {
-				kind: "nothing" as const,
-			};
+			const outcome = (await feedback?.send(
+				(text) => copyToClipboard(renderer, text),
+				options,
+			)) ?? { kind: "nothing" as const };
+			if (outcome.kind === "choose") {
+				setAgentPicker({
+					handoffId: outcome.handoffId,
+					count: outcome.count,
+					selected: 0,
+					candidates: outcome.candidates,
+				});
+				return;
+			}
 			setMountNotice(sendNotice(outcome));
 		} finally {
 			sendingRef.current = false;
 		}
+	}
+	async function deliverToAgentTerminal(index: number) {
+		const picker = agentPicker;
+		const terminal = picker?.candidates[index];
+		if (!picker || !terminal) return;
+		setAgentPicker(null);
+		const outcome = (await feedback?.deliverTo(picker.handoffId, terminal)) ?? {
+			kind: "queued" as const,
+			count: picker.count,
+		};
+		setMountNotice(sendNotice(outcome));
+	}
+	function closeAgentPicker() {
+		if (!agentPicker) return;
+		setMountNotice(sendNotice({ kind: "queued", count: agentPicker.count }));
+		setAgentPicker(null);
+	}
+	function moveAgentPickerSelection(delta: number) {
+		if (!agentPicker) return;
+		const count = agentPicker.candidates.length;
+		setAgentPicker({
+			...agentPicker,
+			selected: (agentPicker.selected + delta + count) % count,
+		});
 	}
 
 	useEffect(() => {
@@ -4410,6 +4452,9 @@ export function App({
 		requestQuit: quit,
 		requestReload: reload,
 		requestSendFeedback: () => void sendFeedback(),
+		requestSendToAnotherTerminal: feedback?.hasHost
+			? () => void sendFeedback({ choose: true })
+			: undefined,
 		movePrevious: () => movePage(-1),
 		moveNext: () => movePage(1),
 		moveNextUnreviewed,
@@ -4545,7 +4590,13 @@ export function App({
 			return;
 		}
 
-		if (appKeys.has(name) || menu.activeMenuId || themePicker || (name && /^[1-9]$/.test(name))) {
+		if (
+			appKeys.has(name) ||
+			menu.activeMenuId ||
+			themePicker ||
+			agentPicker ||
+			(name && /^[1-9]$/.test(name))
+		) {
 			key.preventDefault();
 			key.stopPropagation();
 		}
@@ -4556,6 +4607,14 @@ export function App({
 			else if (name === "down" || name === "j") moveThemePreview(1);
 			else if (name === "a") toggleFollowTerminal();
 			else if (name === "return") chooseTheme(themePicker.selected);
+			return;
+		}
+
+		if (agentPicker) {
+			if (name === "escape" || name === "q") closeAgentPicker();
+			else if (name === "up" || name === "k") moveAgentPickerSelection(-1);
+			else if (name === "down" || name === "j") moveAgentPickerSelection(1);
+			else if (name === "return") void deliverToAgentTerminal(agentPicker.selected);
 			return;
 		}
 
@@ -5163,6 +5222,18 @@ export function App({
 							terminalHeight={height}
 							onPick={chooseTheme}
 							onToggleFollowTerminal={toggleFollowTerminal}
+						/>
+					</>
+				) : null}
+				{agentPicker ? (
+					<>
+						<AgentTerminalPickerBackdrop onClose={closeAgentPicker} />
+						<AgentTerminalPicker
+							candidates={agentPicker.candidates}
+							selectedIndex={agentPicker.selected}
+							terminalWidth={width}
+							terminalHeight={height}
+							onPick={(index) => void deliverToAgentTerminal(index)}
 						/>
 					</>
 				) : null}

@@ -1,6 +1,6 @@
 # 06 — Terminal picker and session target
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -19,12 +19,12 @@ when an origin is alive.
 
 ## Acceptance criteria
 
-- [ ] The picker opens when more than one candidate exists and no origin or session target is live
-- [ ] A chosen terminal is delivered to and reused by the next Send without a prompt
-- [ ] A vanished session target falls through to the origin, then the picker
-- [ ] Escape leaves the record `queued` with the queued notice
-- [ ] The menu item opens the picker even when an origin is live, and the choice becomes the session target
-- [ ] Render tests drive the picker with a fake controller; controller tests cover the order
+- [x] The picker opens when more than one candidate exists and no origin or session target is live
+- [x] A chosen terminal is delivered to and reused by the next Send without a prompt
+- [x] A vanished session target falls through to the origin, then the picker
+- [x] Escape leaves the record `queued` with the queued notice
+- [x] The menu item opens the picker even when an origin is live, and the choice becomes the session target
+- [x] Render tests drive the picker with a fake controller; controller tests cover the order
 
 ## Blocked by
 

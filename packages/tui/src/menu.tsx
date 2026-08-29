@@ -116,6 +116,7 @@ export const buildAppMenus = ({
 	requestQuit,
 	requestReload,
 	requestSendFeedback,
+	requestSendToAnotherTerminal,
 	movePrevious,
 	moveNext,
 	moveNextUnreviewed,
@@ -152,6 +153,8 @@ export const buildAppMenus = ({
 	requestQuit: () => void;
 	requestReload: () => void;
 	requestSendFeedback: () => void;
+	/** Absent outside a host, which is where there is no terminal to name. */
+	requestSendToAnotherTerminal?: () => void;
 	movePrevious: () => void;
 	moveNext: () => void;
 	moveNextUnreviewed: () => void;
@@ -169,6 +172,15 @@ export const buildAppMenus = ({
 			hint: keymapHint("send-to-agent", keymap),
 			action: requestSendFeedback,
 		},
+		...(requestSendToAnotherTerminal
+			? [
+					{
+						kind: "item",
+						label: "Send feedback to another terminal…",
+						action: requestSendToAnotherTerminal,
+					} as const,
+				]
+			: []),
 		{
 			kind: "item",
 			label: "Reload",

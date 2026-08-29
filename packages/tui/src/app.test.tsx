@@ -25,6 +25,7 @@ import sample from "../../../examples/sample-run/chapters.json" with { type: "js
 import { App, type ReviewUpdate } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
 import type { FeedbackController, SendOutcome } from "./feedback.ts";
+import type { HostTerminal } from "./host.ts";
 import { mergeKeymap } from "./keybindings.ts";
 import { KEYMAP } from "./keymap.ts";
 import { defaultPanelWidth } from "./layout.ts";
@@ -4539,13 +4540,19 @@ test("status hints describe cursor, selecting, and composer actions", async () =
 
 const fakeFeedback = (...outcomes: SendOutcome[]) => {
 	let sends = 0;
+	const delivered: { handoffId: string; terminal: HostTerminal }[] = [];
 	const controller: FeedbackController = {
 		send: async () => {
 			sends += 1;
 			return outcomes[sends - 1] ?? { kind: "nothing" };
 		},
+		deliverTo: async (handoffId, terminal) => {
+			delivered.push({ handoffId, terminal });
+			return { kind: "delivered", count: 1, title: terminal.title };
+		},
+		hasHost: false,
 	};
-	return { controller, sends: () => sends };
+	return { controller, sends: () => sends, delivered };
 };
 
 test("S sends from the page and from Comments, and leaves s toggling the sidebar", async () => {
@@ -4627,6 +4634,85 @@ test("Send reports a copied prompt outside a host", async () => {
 	await t.renderOnce();
 	await press(t, "S");
 	expect(statusLine(t)).toContain("Queued for polling — prompt copied (2 threads)");
+});
+
+// ── The agent terminal picker ───────────────────────────────────────────────
+
+const hostTerminal = (handle: string, title: string): HostTerminal => ({
+	handle,
+	paneKey: `tab1:${handle}`,
+	title,
+	lastOutputAt: null,
+});
+
+test("a choose outcome opens the picker, and Enter delivers to the selection", async () => {
+	const claude = hostTerminal("term_a", "claude — agent");
+	const codex = hostTerminal("term_b", "codex");
+	const feedback = fakeFeedback({
+		kind: "choose",
+		count: 2,
+		handoffId: "handoff-1",
+		candidates: [claude, codex],
+	});
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+
+	await press(t, "S");
+	expect(t.captureCharFrame()).toContain("claude — agent");
+	expect(t.captureCharFrame()).toContain("codex");
+
+	await press(t, "RETURN");
+	expect(feedback.delivered).toEqual([{ handoffId: "handoff-1", terminal: claude }]);
+	expect(statusLine(t)).toContain("Delivered to claude — agent (1 thread)");
+});
+
+test("Escape leaves the picker's record queued", async () => {
+	const candidates = [hostTerminal("term_a", "claude — agent"), hostTerminal("term_b", "codex")];
+	const feedback = fakeFeedback({
+		kind: "choose",
+		count: 2,
+		handoffId: "handoff-1",
+		candidates,
+	});
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+
+	await press(t, "S");
+	await press(t, "ESCAPE");
+	expect(t.captureCharFrame()).not.toContain("claude — agent");
+	expect(feedback.delivered).toEqual([]);
+	expect(statusLine(t)).toContain("Queued for polling (2 threads)");
+});
+
+test("the File menu opens the picker even with an origin live", async () => {
+	const candidates = [hostTerminal("term_a", "claude — agent")];
+	const feedback = fakeFeedback({
+		kind: "choose",
+		count: 1,
+		handoffId: "handoff-1",
+		candidates,
+	});
+	feedback.controller.hasHost = true;
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+
+	await press(t, "F10");
+	expect(t.captureCharFrame()).toContain("Send feedback to another terminal…");
+	await arrow(t, "down");
+	await press(t, "RETURN");
+
+	expect(feedback.sends()).toBe(1);
+	expect(t.captureCharFrame()).toContain("claude — agent");
 });
 
 // ── The status-bar thread slot ──────────────────────────────────────────────
@@ -4790,6 +4876,8 @@ const deferredFeedback = () => {
 				sends += 1;
 				settle = resolve;
 			}),
+		deliverTo: async () => ({ kind: "queued", count: 0 }),
+		hasHost: false,
 	};
 	return {
 		controller,

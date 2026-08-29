@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { writeHandoff } from "@revue/prep";
 import {
 	type ReviewThread,
 	runManifestSchema,
@@ -671,6 +673,8 @@ test("status says plainly that a repository has nothing to orient around yet", a
 			pendingRun: null,
 			threads: { runId: null, open: 0, awaitingAgent: 0, awaitingHuman: 0, orphaned: 0 },
 			drift: null,
+			handoff: null,
+			warnings: [],
 		});
 
 		const human = await run(root, ["status"]);
@@ -811,6 +815,112 @@ test("status orients a cold agent on the active run, its threads, and working-tr
 			"2 open threads (1 awaiting the agent, 1 awaiting the reviewer)",
 		);
 		expect(human.stdout).toContain("the scope has changed since this run was prepped");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("status reports the last handoff against the run its threads are on now", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-handoff-status-"));
+	try {
+		await git(root, "init", "-b", "main");
+		await git(root, "config", "user.email", "revue@example.com");
+		await git(root, "config", "user.name", "Revue Test");
+		await mkdir(join(root, "src"));
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 1;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 1;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Baseline");
+		await git(root, "checkout", "-b", "feature");
+		await writeFile(join(root, "src", "alpha.ts"), "export const alpha = 2;\n");
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 2;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Feature work");
+
+		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const firstRunId = first.split("/").at(-1) ?? "";
+		await writeFile(
+			join(first, "chapters.json"),
+			`${JSON.stringify({
+				chapters: ["alpha", "beta"].map((name, index) => ({
+					id: name,
+					order: index + 1,
+					title: `Chapter ${name}`,
+					summary: `What src/${name}.ts now does.`,
+					hunkRefs: [{ filePath: `src/${name}.ts`, oldStart: 1 }],
+					keyChanges: [],
+					excerpts: [],
+				})),
+			})}\n`,
+		);
+
+		const store = openThreadStore(join(root, ".revue", "threads.json"), firstRunId);
+		const comment = (filePath: string, body: string) =>
+			store.create(
+				{
+					kind: THREAD_ANCHOR_KIND.HUNK,
+					filePath,
+					oldStart: 1,
+					side: "additions",
+					startLine: 1,
+					endLine: 1,
+				},
+				{ kind: THREAD_AUTHOR_KIND.HUMAN, name: "Reviewer" },
+				body,
+			);
+		const alpha = comment("src/alpha.ts", "Is two the right constant?");
+		const beta = comment("src/beta.ts", "Why does beta move at all?");
+		// A thread the reviewer deleted after sending: the batch remembers it, the run does not.
+		const deleted = randomUUID();
+		const handoffId = randomUUID();
+		writeHandoff(root, {
+			schemaVersion: 1,
+			handoffId,
+			requestedAt: new Date().toISOString(),
+			runId: firstRunId,
+			threadIds: [alpha.id, deleted, beta.id],
+			delivery: { kind: "queued" },
+		});
+
+		const sent = await run(root, ["status", "--json"]);
+		expect(sent).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(sent.stdout)).toMatchObject({
+			handoff: {
+				handoffId,
+				runId: firstRunId,
+				threadIds: [alpha.id, deleted, beta.id],
+				resolvedThreadIds: [alpha.id, beta.id],
+				delivery: { kind: "queued" },
+			},
+			warnings: [],
+		});
+
+		const human = await run(root, ["status"]);
+		expect(human.stdout).toContain(`Handoff    ${handoffId.slice(0, 8)} queued for polling`);
+		expect(human.stdout).toContain("3 threads sent, 2 on this run");
+
+		// The agent answers, so the next prep supersedes the run the batch was requested against.
+		await writeFile(join(root, "src", "beta.ts"), "export const beta = 3;\n");
+		await git(root, "add", "-A");
+		await git(root, "commit", "-m", "Address the review");
+		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+
+		const migrated = await run(root, ["status", "--json"]);
+		expect(migrated).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(migrated.stdout)).toMatchObject({
+			threads: { runId: second.split("/").at(-1) },
+			// The handoff names the run it was requested from; its threads are read on the new one.
+			handoff: { runId: firstRunId, resolvedThreadIds: [alpha.id, beta.id] },
+		});
+
+		await writeFile(join(root, ".revue", "handoff.json"), "{ not a handoff");
+		const damaged = await run(root, ["status", "--json"]);
+		expect(damaged).toMatchObject({ exitCode: 0, stderr: "" });
+		const report = JSON.parse(damaged.stdout);
+		expect(report.handoff).toBeNull();
+		expect(report.threads).toMatchObject({ open: 2 });
+		expect(report.warnings[0]).toContain("not valid JSON");
+		expect((await run(root, ["status"])).stdout).toContain("Warning    ");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

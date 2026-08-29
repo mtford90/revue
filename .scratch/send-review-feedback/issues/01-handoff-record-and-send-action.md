@@ -1,6 +1,6 @@
 # 01 — Handoff record and the Send action
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -24,15 +24,15 @@ a fake. The TUI keeps only key handling and the notice.
 
 ## Acceptance criteria
 
-- [ ] `S` and the File menu item write a handoff with the unsent thread ids and `queued`
-- [ ] Threads whose last message is from the agent, and threads sent by an earlier handoff, are excluded
-- [ ] An empty unsent set writes nothing and shows "Nothing to send"
-- [ ] A failed write shows an error notice and writes no partial file
-- [ ] `S` works from the page and from the Comments surface; `s` still toggles the sidebar
-- [ ] `revue status --json` reports `handoff` with `resolvedThreadIds`, and null when absent
-- [ ] After a supersession, `resolvedThreadIds` names the migrated threads on the new run
-- [ ] A malformed handoff file yields a warning, not a failing `revue status`
-- [ ] Controller tests run against a scratch `.revue` directory; CLI process tests cover the status shape
+- [x] `S` and the File menu item write a handoff with the unsent thread ids and `queued`
+- [x] Threads whose last message is from the agent, and threads sent by an earlier handoff, are excluded
+- [x] An empty unsent set writes nothing and shows "Nothing to send"
+- [x] A failed write shows an error notice and writes no partial file
+- [x] `S` works from the page and from the Comments surface; `s` still toggles the sidebar
+- [x] `revue status --json` reports `handoff` with `resolvedThreadIds`, and null when absent
+- [x] After a supersession, `resolvedThreadIds` names the migrated threads on the new run
+- [x] A malformed handoff file yields a warning, not a failing `revue status`
+- [x] Controller tests run against a scratch `.revue` directory; CLI process tests cover the status shape
 
 ## Blocked by
 

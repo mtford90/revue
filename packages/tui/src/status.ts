@@ -2,15 +2,19 @@ import {
 	defaultRunsDirectory,
 	findGitContext,
 	GitError,
+	type HandoffRead,
 	PrepArgumentError,
 	PrepError,
 	previewRunId,
 	type RunRecord,
+	readHandoff,
 	readRunRecords,
 	rerunArgsFor,
 	threadStorePath,
 } from "@revue/prep";
 import {
+	type HandoffDelivery,
+	type HandoffRecord,
 	type ReviewThread,
 	type RunManifest,
 	THREAD_AUTHOR_KIND,
@@ -58,12 +62,24 @@ export type ThreadStatus = {
 /** Whether the reviewed scope has moved since it was prepped; `changed` is null when unknowable. */
 export type DriftStatus = { since: string; changed: boolean | null; reason?: string };
 
+/**
+ * The reviewer's last batch of feedback. `runId` says what it was requested against, which a
+ * supersession leaves behind; `resolvedThreadIds` says where to read it now.
+ */
+export type HandoffStatus = HandoffRecord & {
+	/** The record's threads that are on the run this report describes. */
+	resolvedThreadIds: string[];
+};
+
 export type StatusReport = {
 	repositoryRoot: string;
 	activeRun: RunStatus | null;
 	pendingRun: PendingRunStatus | null;
 	threads: ThreadStatus;
 	drift: DriftStatus | null;
+	handoff: HandoffStatus | null;
+	/** Records too damaged to read. Orientation reports them and carries on. */
+	warnings: string[];
 };
 
 const EMPTY_THREADS: ThreadStatus = {
@@ -112,6 +128,20 @@ const threadStatus = (
 };
 
 /**
+ * Threads migrate across supersession and the handoff does not, so the ids are resolved against
+ * the run the reviewer is on rather than against the run the batch was requested from.
+ */
+const handoffStatus = (
+	read: HandoffRead,
+	threads: readonly ReviewThread[],
+): HandoffStatus | null => {
+	if (!read.record) return null;
+	const known = new Set(threads.map((thread) => thread.id));
+	const resolvedThreadIds = read.record.threadIds.filter((id) => known.has(id));
+	return { ...read.record, resolvedThreadIds };
+};
+
+/**
  * Drift is asked of the run id rather than of Git: run ids are content addresses, so the scope has
  * moved exactly when re-prepping it now would produce a different run.
  */
@@ -135,12 +165,22 @@ const driftStatus = async (record: RunRecord, repositoryRoot: string): Promise<D
 export async function readStatus(directory?: string): Promise<StatusReport> {
 	const { root } = await findGitContext(directory);
 	const records = await readRunRecords(defaultRunsDirectory(root));
+	const handoff = readHandoff(root);
+	const warnings = handoff.warning ? [handoff.warning] : [];
 	const newest = records[0];
 	const active = records.find((record) => record.narrated) ?? null;
 	const pending = newest && !newest.narrated ? newest : null;
 	const reference = pending ?? active;
 	const empty = { repositoryRoot: root, activeRun: null, pendingRun: null };
-	if (!reference) return { ...empty, threads: EMPTY_THREADS, drift: null };
+	if (!reference) {
+		return {
+			...empty,
+			threads: EMPTY_THREADS,
+			drift: null,
+			handoff: handoffStatus(handoff, []),
+			warnings,
+		};
+	}
 
 	const run = await loadReviewRun(reference.directory);
 	const { threads, orphaned } = loadValidatedThreads(threadStorePath(root), run);
@@ -162,6 +202,8 @@ export async function readStatus(directory?: string): Promise<StatusReport> {
 			: null,
 		threads: threadStatus(run.manifest.runId, threads, orphaned.length),
 		drift: await driftStatus(active ?? reference, root),
+		handoff: handoffStatus(handoff, threads),
+		warnings,
 	};
 }
 
@@ -179,6 +221,17 @@ const deltaLine = (pending: PendingRunStatus): string =>
 const threadsLine = (threads: ThreadStatus): string =>
 	`${plural(threads.open, "open thread")} (${threads.awaitingAgent} awaiting the agent, ${threads.awaitingHuman} awaiting the reviewer), ${threads.dealtWith} dealt with, ${threads.orphaned} orphaned`;
 
+const deliveryLabel = (delivery: HandoffDelivery): string => {
+	if (delivery.kind === "delivered") return `delivered to ${delivery.title}`;
+	if (delivery.kind === "copied") return "prompt copied";
+	return "queued for polling";
+};
+
+const handoffLine = (handoff: HandoffStatus): string =>
+	`Handoff    ${handoff.handoffId.slice(0, 8)} ${deliveryLabel(handoff.delivery)} — ` +
+	`${plural(handoff.threadIds.length, "thread")} sent, ${handoff.resolvedThreadIds.length} on this run, ` +
+	`requested ${handoff.requestedAt}`;
+
 const driftLine = (drift: DriftStatus): string => {
 	const detail = drift.reason ? ` (${drift.reason})` : "";
 	if (drift.changed === null) return `Drift      unknown${detail}`;
@@ -186,9 +239,9 @@ const driftLine = (drift: DriftStatus): string => {
 	return "Drift      none — the working tree still matches this run";
 };
 
-export function formatStatus(report: StatusReport): string {
+const reportLines = (report: StatusReport): string[] => {
 	if (!report.activeRun && !report.pendingRun) {
-		return `No prepared runs in ${report.repositoryRoot} — run revue prep to start a review.`;
+		return [`No prepared runs in ${report.repositoryRoot} — run revue prep to start a review.`];
 	}
 	const lines: string[] = [];
 	if (report.activeRun) {
@@ -206,6 +259,12 @@ export function formatStatus(report: StatusReport): string {
 		);
 	}
 	lines.push(`Threads    ${threadsLine(report.threads)}`);
+	if (report.handoff) lines.push(handoffLine(report.handoff));
 	if (report.drift) lines.push(driftLine(report.drift));
-	return lines.join("\n");
+	return lines;
+};
+
+export function formatStatus(report: StatusReport): string {
+	const warnings = report.warnings.map((warning) => `Warning    ${warning}`);
+	return [...reportLines(report), ...warnings].join("\n");
 }

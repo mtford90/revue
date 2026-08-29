@@ -45,6 +45,7 @@ export {
 export { exclusionSource } from "./format.ts";
 export { findGitContext, GitError } from "./git.ts";
 export {
+	finaliseHandoff,
 	HandoffError,
 	type HandoffRead,
 	handoffPath,

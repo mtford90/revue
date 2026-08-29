@@ -4,7 +4,13 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HandoffRecord } from "@revue/types";
-import { HandoffError, handoffPath, readHandoff, writeHandoff } from "./handoff.ts";
+import {
+	finaliseHandoff,
+	HandoffError,
+	handoffPath,
+	readHandoff,
+	writeHandoff,
+} from "./handoff.ts";
 
 const runId = "b".repeat(64);
 
@@ -62,6 +68,36 @@ test("a malformed handoff is a warning rather than a throw, and reads as absent"
 		expect(parsed.record).toBeNull();
 		expect(parsed.warning).toContain("does not match the handoff schema");
 		expect(parsed.warning).not.toContain("\n");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("finalising rewrites the delivery when the handoff on disk is still the one named", async () => {
+	const root = await scratchRoot();
+	try {
+		const written = record();
+		writeHandoff(root, written);
+
+		const finalised = finaliseHandoff(root, written.handoffId, { kind: "copied" });
+		expect(finalised).toBe(true);
+		expect(readHandoff(root).record).toEqual({ ...written, delivery: { kind: "copied" } });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("finalising refuses when a later handoff has replaced the one named", async () => {
+	const root = await scratchRoot();
+	try {
+		const stale = record();
+		writeHandoff(root, stale);
+		const newer = record();
+		writeHandoff(root, newer);
+
+		const finalised = finaliseHandoff(root, stale.handoffId, { kind: "copied" });
+		expect(finalised).toBe(false);
+		expect(readHandoff(root).record).toEqual(newer);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

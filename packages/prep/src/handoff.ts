@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type HandoffRecord, handoffRecordSchema } from "@revue/types";
+import { type HandoffDelivery, type HandoffRecord, handoffRecordSchema } from "@revue/types";
 import { z } from "zod";
 import { writeFileAtomically } from "./atomic.ts";
 import { threadStorePath, withThreadStoreLock } from "./threads.ts";
@@ -68,4 +68,24 @@ export function writeHandoff(repositoryRoot: string, record: HandoffRecord): voi
 	} catch (error) {
 		throw new HandoffError(`Could not write the handoff at ${path}: ${describe(error)}`);
 	}
+}
+
+/**
+ * Rewrite an existing handoff's delivery in place, guarded so that a delivery result for a
+ * superseded handoff can never clobber the one a later Send has already written. Reports whether
+ * the rewrite happened, so a stale result can be treated the same as no delivery at all.
+ */
+export function finaliseHandoff(
+	repositoryRoot: string,
+	handoffId: string,
+	delivery: HandoffDelivery,
+): boolean {
+	const path = handoffPath(repositoryRoot);
+	return withThreadStoreLock(threadStorePath(repositoryRoot), () => {
+		const current = readHandoff(repositoryRoot).record;
+		if (!current || current.handoffId !== handoffId) return false;
+		const updated = handoffRecordSchema.parse({ ...current, delivery });
+		writeFileAtomically(path, `${JSON.stringify(updated, null, 2)}\n`);
+		return true;
+	});
 }

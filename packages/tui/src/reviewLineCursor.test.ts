@@ -7,6 +7,7 @@ import {
 	moveSelectionReviewLine,
 	reviewableLines,
 	reviewLineFile,
+	reviewLineFileContains,
 	reviewLineSelection,
 	selectionLineFile,
 	switchReviewLineSide,
@@ -86,6 +87,63 @@ test("split motion stays in-pane, switches only on the same row, and retains sid
 	expect(moveReviewLine({ files: [first, second], current: old, delta: 1 })).toMatchObject({
 		filePath: "b.ts",
 		side: "deletions",
+		startLine: 1,
+	});
+});
+
+test("ordinary motion leaves a clicked context row for the adjacent changed row in its lane", () => {
+	const file = reviewLineFile(
+		plan(`diff --git a/lane.ts b/lane.ts
+--- a/lane.ts
++++ b/lane.ts
+@@ -1,3 +1,4 @@
+-old paired
++new paired
+ context
++new only
+ tail
+`),
+	);
+	const contextRow = file.rows.find((row) => row.kind === "context");
+	const oldContext = contextRow?.stops.find((stop) => stop.side === "deletions");
+	if (!oldContext) throw new Error("missing old context authority");
+	const context = {
+		filePath: oldContext.filePath,
+		hunkOldStart: oldContext.oldStart,
+		side: oldContext.side,
+		startLine: oldContext.lineNumber,
+		endLine: oldContext.lineNumber,
+	} as const;
+
+	expect(file.changedRows).toHaveLength(2);
+	expect(reviewLineFileContains(file, context)).toBe(true);
+	expect(switchReviewLineSide({ file, current: context, side: "additions" })).toMatchObject({
+		side: "additions",
+		startLine: 2,
+	});
+	expect(moveReviewLine({ files: [file], current: context, delta: -1 })).toMatchObject({
+		side: "deletions",
+		startLine: 1,
+	});
+	const newContext = switchReviewLineSide({ file, current: context, side: "additions" });
+	expect(moveReviewLine({ files: [file], current: newContext, delta: 1 })).toMatchObject({
+		side: "additions",
+		startLine: 3,
+	});
+});
+
+test("selection can stop on context before ordinary motion resumes on changed rows", () => {
+	const file = reviewLineFile(plan(PATCH, "split"));
+	const initial = initialReviewLine(file);
+	const context = moveSelectionReviewLine({ file, current: initial, delta: 1 });
+	expect(context).toMatchObject({ side: "additions", startLine: 2 });
+	expect(reviewLineFileContains(file, context)).toBe(true);
+	expect(moveReviewLine({ files: [file], current: context, delta: 1 })).toMatchObject({
+		side: "additions",
+		startLine: 3,
+	});
+	expect(moveReviewLine({ files: [file], current: context, delta: -1 })).toMatchObject({
+		side: "additions",
 		startLine: 1,
 	});
 });

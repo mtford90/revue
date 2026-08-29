@@ -3331,6 +3331,62 @@ test("split cursor crosses paired rows horizontally and moves vertically within 
 	expect(statusLine(t)).toContain("h/l side");
 });
 
+test("a clicked split context row keeps its authority and moves to changed rows in-lane", async () => {
+	const render = async () => {
+		const t = await testRender(
+			<App
+				file={paneChapters}
+				diffFiles={paneDiff}
+				initialPreferences={{ sidebarPreference: "hidden", diffPreference: "split" }}
+			/>,
+			{ width: 120, height: 34, kittyKeyboard: true },
+		);
+		await t.renderOnce();
+		await settle(t);
+		const context = gutterFor(t, "keep a", "2");
+		await click(t, context.x, context.y);
+		expect(cursorSide(t, "keep a")).toBe("old");
+		return t;
+	};
+
+	const down = await render();
+	await press(down, "l");
+	expect(cursorSide(down, "keep a")).toBe("new");
+	await arrow(down, "left");
+	expect(cursorSide(down, "keep a")).toBe("old");
+	await arrow(down, "right");
+	expect(cursorSide(down, "keep a")).toBe("new");
+	await press(down, "j");
+	expect(cursorSide(down, "new only a")).toBe("new");
+
+	const up = await render();
+	await press(up, "k");
+	expect(cursorSide(up, "old paired a")).toBe("old");
+});
+
+test("Escape on a context selection restores ordinary changed-line motion", async () => {
+	const t = await testRender(
+		<App
+			file={paneChapters}
+			diffFiles={paneDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "split" }}
+		/>,
+		{ width: 120, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+
+	await press(t, "v");
+	await press(t, "j");
+	expect(cursorSide(t, "keep a")).toBe("new");
+	await press(t, "ESCAPE");
+	expect(cursorSide(t, "keep a")).toBe("new");
+	await press(t, "j");
+	expect(cursorSide(t, "new only a")).toBe("new");
+	await press(t, "k");
+	expect(cursorSide(t, "new paired a")).toBe("new");
+});
+
 test("stacked cursor follows visible old-then-new rows and ignores horizontal motion", async () => {
 	const t = await testRender(
 		<App

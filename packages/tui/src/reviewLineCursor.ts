@@ -20,7 +20,10 @@ type ReviewLinePlan = DiffVisualPlan | DiffMeasurement;
 export type ReviewLineFile = {
 	filePath: string;
 	layout: "split" | "stack";
+	/** Every presentation row, retained so pointer and selection cursors keep their identity. */
 	rows: readonly DiffPresentationRow[];
+	/** Changed rows are the actionable boundaries and destinations for ordinary vertical motion. */
+	changedRows: readonly DiffPresentationRow[];
 };
 
 const sourceFile = (plan: ReviewLinePlan) =>
@@ -53,23 +56,21 @@ const sameStop = (left: DiffSelectionStop, right: DiffSelectionStop): boolean =>
 const rowHasStop = (row: DiffPresentationRow, stop: DiffSelectionStop): boolean =>
 	row.stops.some((candidate) => sameStop(candidate, stop));
 
-/** Changed presentation rows for ordinary source navigation. */
+/** Full presentation identity paired with the actionable changed rows. */
 export const reviewLineFile = (plan: ReviewLinePlan): ReviewLineFile => {
 	const file = sourceFile(plan);
 	const layout = sourceLayout(plan);
+	const rows = diffPresentationRows(file, layout);
 	return {
 		filePath: file.path,
 		layout,
-		rows: diffPresentationRows(file, layout).filter((row) => row.kind === "change"),
+		rows,
+		changedRows: rows.filter((row) => row.kind === "change"),
 	};
 };
 
 /** Every original-hunk presentation row for file-local selection extension. */
-export const selectionLineFile = (plan: ReviewLinePlan): ReviewLineFile => {
-	const file = sourceFile(plan);
-	const layout = sourceLayout(plan);
-	return { filePath: file.path, layout, rows: diffPresentationRows(file, layout) };
-};
+export const selectionLineFile = reviewLineFile;
 
 /**
  * Ordered changed source lines for compatibility with callers that need a flat list. Split prefers
@@ -77,16 +78,16 @@ export const selectionLineFile = (plan: ReviewLinePlan): ReviewLineFile => {
  */
 export const reviewableLines = (plan: ReviewLinePlan): DiffLineRange[] => {
 	const file = reviewLineFile(plan);
-	return file.rows.map((row) => rangeForStop(presentationRowStop(row, "additions")));
+	return file.changedRows.map((row) => rangeForStop(presentationRowStop(row, "additions")));
 };
 
 /** Start on current-side code whenever the file has any, retaining deletion-only reviewability. */
 export const initialReviewLine = (file: ReviewLineFile | null): DiffLineRange | null => {
 	if (!file) return null;
-	const current = file.rows.flatMap(
+	const current = file.changedRows.flatMap(
 		(row) => row.stops.find((stop) => stop.side === "additions") ?? [],
 	)[0];
-	const fallback = file.rows[0] ? presentationRowStop(file.rows[0]) : undefined;
+	const fallback = file.changedRows[0] ? presentationRowStop(file.changedRows[0]) : undefined;
 	const selected = current ?? fallback;
 	return selected ? rangeForStop(selected) : null;
 };
@@ -109,7 +110,7 @@ const boundaryLine = ({
 	delta: -1 | 1;
 	preferredSide?: DiffSide;
 }): DiffLineRange | null => {
-	const rows = delta === 1 ? file.rows : [...file.rows].reverse();
+	const rows = delta === 1 ? file.changedRows : [...file.changedRows].reverse();
 	if (file.layout === "split" && preferredSide) {
 		for (const row of rows) {
 			const stop = row.stops.find((candidate) => candidate.side === preferredSide);
@@ -139,14 +140,24 @@ export const moveReviewLine = ({
 	const file = files[fileIndex];
 	if (!file) return initialReviewLine(files[0] ?? null);
 	const stop = reviewStopForLine(current);
-	const moved =
-		file.layout === "split"
-			? moveSplitSelectionStop({ rows: file.rows, current: stop, delta })
-			: moveStackedSelectionStop({ rows: file.rows, current: stop, delta });
-	if (!sameStop(moved, stop)) return rangeForStop(moved);
+	const currentRow = file.rows.findIndex((row) => rowHasStop(row, stop));
+	for (
+		let rowIndex = currentRow < 0 ? -1 : currentRow + delta;
+		rowIndex >= 0 && rowIndex < file.rows.length;
+		rowIndex += delta
+	) {
+		const row = file.rows[rowIndex];
+		if (row?.kind !== "change") continue;
+		if (file.layout === "split") {
+			const sameLane = row.stops.find((candidate) => candidate.side === current.side);
+			if (sameLane) return rangeForStop(sameLane);
+		} else {
+			return rangeForStop(presentationRowStop(row, current.side));
+		}
+	}
 	for (let index = fileIndex + delta; index >= 0 && index < files.length; index += delta) {
 		const candidate = files[index];
-		if (!candidate?.rows.length) continue;
+		if (!candidate?.changedRows.length) continue;
 		const boundary = boundaryLine({
 			file: candidate,
 			delta,

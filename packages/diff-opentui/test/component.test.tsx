@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { type DiffSelection, parsePatch, planDiff, prepareSyntaxHighlighting } from "@revue/diff";
 import { resolveTheme } from "@revue/theme";
-import { act } from "react";
+import { act, useState } from "react";
 import { DiffBody, DiffFileHeader, diffLineId, OPENTUI_DIFF_CHROME } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -487,6 +487,103 @@ new file mode 100644
 	expect(selected[0]?.ranges).toEqual([
 		{ oldStart: 0, side: "additions", startLine: 1, endLine: 5 },
 	]);
+});
+
+test("an unfinished gutter drag cannot cross independent renderer roots", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const firstSelections: DiffSelection[] = [];
+	const first = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			onSelectionChange={(selection) => firstSelections.push(selection)}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	const second = await testRender(
+		<DiffBody
+			file={file}
+			theme={theme}
+			layout="stack"
+			width={60}
+			onSelectionChange={() => undefined}
+		/>,
+		{ width: 60, height: 8 },
+	);
+	await first.renderOnce();
+	await second.renderOnce();
+	const firstRows = first.captureCharFrame().split("\n");
+	const firstY = firstRows.findIndex((row) => row.includes("new one"));
+	const firstSource = firstRows[firstY]?.indexOf("new one") ?? -1;
+	const firstGutter = firstRows[firstY]?.lastIndexOf("1", firstSource) ?? -1;
+	const secondRows = second.captureCharFrame().split("\n");
+	const secondY = secondRows.findIndex((row) => row.includes("new two"));
+	const secondSource = secondRows[secondY]?.indexOf("new two") ?? -1;
+	const secondGutter = secondRows[secondY]?.lastIndexOf("2", secondSource) ?? -1;
+
+	await act(async () => first.mockMouse.pressDown(firstGutter, firstY));
+	await act(async () => second.mockMouse.moveTo(secondGutter, secondY));
+	await act(async () => first.mockMouse.release(firstGutter, firstY));
+	await first.renderOnce();
+
+	expect(firstSelections).toEqual([]);
+});
+
+test("unmounting the gesture owner cancels its unpublished drag", async () => {
+	const file = parsePatch(patch)[0];
+	if (!file) throw new Error("missing fixture");
+	const fixture = file;
+	const staleSelections: DiffSelection[] = [];
+	let hideOwner: () => void = () => {
+		throw new Error("harness not rendered");
+	};
+	function Harness() {
+		const [showOwner, setShowOwner] = useState(true);
+		hideOwner = () => setShowOwner(false);
+		return (
+			<box flexDirection="column">
+				{showOwner ? (
+					<DiffBody
+						file={fixture}
+						theme={theme}
+						layout="stack"
+						width={60}
+						onSelectionChange={(selection) => {
+							staleSelections.push(selection);
+						}}
+					/>
+				) : null}
+				<DiffBody
+					file={fixture}
+					theme={theme}
+					layout="stack"
+					width={60}
+					onSelectionChange={() => undefined}
+				/>
+			</box>
+		);
+	}
+	const t = await testRender(<Harness />, { width: 60, height: 16 });
+	await t.renderOnce();
+	const rows = t.captureCharFrame().split("\n");
+	const ownerY = rows.findIndex((row) => row.includes("new one"));
+	const ownerSource = rows[ownerY]?.indexOf("new one") ?? -1;
+	const ownerGutter = rows[ownerY]?.lastIndexOf("1", ownerSource) ?? -1;
+
+	await act(async () => t.mockMouse.pressDown(ownerGutter, ownerY));
+	await act(async () => hideOwner());
+	await t.renderOnce();
+	const remainingRows = t.captureCharFrame().split("\n");
+	const remainingY = remainingRows.findIndex((row) => row.includes("new two"));
+	const remainingSource = remainingRows[remainingY]?.indexOf("new two") ?? -1;
+	const remainingGutter = remainingRows[remainingY]?.lastIndexOf("2", remainingSource) ?? -1;
+	await act(async () => t.mockMouse.release(remainingGutter, remainingY));
+	await t.renderOnce();
+
+	expect(staleSelections).toEqual([]);
 });
 
 test("gutter drags follow stacked rows while a split-side drag stays in its visible gutter", async () => {

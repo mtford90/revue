@@ -1,4 +1,5 @@
 import { type MouseEvent as OpenTUIMouseEvent, TextAttributes } from "@opentui/core";
+import { useRenderer } from "@opentui/react";
 import {
 	anchorRowIndex,
 	createDiffFile,
@@ -30,7 +31,7 @@ import {
 	terminalSelectionRange,
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	attachmentsForExcerptLine,
 	attachmentsForRow,
@@ -158,10 +159,15 @@ const lineRangeFor = (filePath: string, range: DiffSelectionRange): DiffLineRang
 
 const DOUBLE_CLICK_MS = 400;
 
-let activeRangeGesture: {
+type ActiveRangeGesture = {
+	owner: object;
+	token: object;
 	update: (target: DiffLineRange) => void;
 	finish: (target: DiffLineRange | null) => void;
-} | null = null;
+	cancel: () => void;
+};
+
+const activeRangeGestures = new WeakMap<object, ActiveRangeGesture>();
 
 /** Pointer cursor, actual drag selection, activation, and context action are separate gestures. */
 const useRangeSelection = ({
@@ -176,6 +182,9 @@ const useRangeSelection = ({
 	selectionStops = [],
 	selectionLayout = "stack",
 }: RangeSelectionInput) => {
+	const renderer = useRenderer();
+	const owner = useRef<object>({});
+	const gestureToken = useRef<object | null>(null);
 	const activeStart = useRef<DiffSelectionStop | null>(null);
 	const activeSelection = useRef<DiffSelection | null>(null);
 	const dragged = useRef(false);
@@ -214,9 +223,38 @@ const useRangeSelection = ({
 		)?.range;
 		return coordinateTarget ?? eventTarget;
 	};
-	const finishSelection = () => {
+	const clearSelection = (updatePreview: boolean) => {
+		gestureToken.current = null;
+		activeStart.current = null;
+		activeSelection.current = null;
+		dragged.current = false;
+		doubleClickCandidate.current = false;
+		if (updatePreview) setDragSelection(null);
+	};
+	const cancelOwnedGesture = (updatePreview = true) => {
+		const active = activeRangeGestures.get(renderer);
+		if (active?.owner === owner.current && active.token === gestureToken.current) {
+			activeRangeGestures.delete(renderer);
+		}
+		clearSelection(updatePreview);
+	};
+	useEffect(() => {
+		const effectOwner = owner.current;
+		return () => {
+			const active = activeRangeGestures.get(renderer);
+			if (active?.owner === effectOwner && active.token === gestureToken.current) {
+				activeRangeGestures.delete(renderer);
+			}
+			gestureToken.current = null;
+			activeStart.current = null;
+			activeSelection.current = null;
+			dragged.current = false;
+			doubleClickCandidate.current = false;
+		};
+	}, [renderer]);
+	const finishSelection = (token: object | null) => {
 		const start = activeStart.current;
-		if (!start) return;
+		if (!start || !token || gestureToken.current !== token) return;
 		const wasDragged = dragged.current;
 		const activated = !wasDragged && doubleClickCandidate.current;
 		const legacyClick =
@@ -228,12 +266,11 @@ const useRangeSelection = ({
 		const completed = wasDragged || legacyClick ? activeSelection.current : null;
 		const activation = activated ? activeSelection.current : null;
 		const clickKey = `${start.filePath}:${start.oldStart}:${start.side}:${start.lineNumber}`;
-		activeRangeGesture = null;
-		activeStart.current = null;
-		activeSelection.current = null;
-		dragged.current = false;
-		doubleClickCandidate.current = false;
-		setDragSelection(null);
+		const active = activeRangeGestures.get(renderer);
+		if (active?.owner === owner.current && active.token === token) {
+			activeRangeGestures.delete(renderer);
+		}
+		clearSelection(true);
 		lastClick.current = wasDragged || activated ? null : { key: clickKey, at: Date.now() };
 		if (activation) onSelectionActivate?.(activation);
 		if (!completed) return;
@@ -242,7 +279,8 @@ const useRangeSelection = ({
 			onRangeSelect?.(lineRangeFor(completed.filePath, completed.ranges[0]));
 		}
 	};
-	const finishAtTarget = (target: DiffLineRange | null) => {
+	const finishAtTarget = (target: DiffLineRange | null, token = gestureToken.current) => {
+		if (!token || gestureToken.current !== token) return;
 		const start = activeStart.current;
 		const targetStop = target ? stopForRange(target) : null;
 		const moved = Boolean(
@@ -254,15 +292,16 @@ const useRangeSelection = ({
 					start.lineNumber !== targetStop.lineNumber),
 		);
 		if (target && (moved || dragged.current)) updateSelection(target, dragged.current);
-		finishSelection();
+		finishSelection(token);
 	};
 	const finishAtEventTarget = (event: OpenTUIMouseEvent) => {
 		const target = rangeAtEvent(event);
-		if (!activeStart.current && activeRangeGesture) activeRangeGesture.finish(target);
+		const active = activeRangeGestures.get(renderer);
+		if (!activeStart.current && active) active.finish(target);
 		else finishAtTarget(target);
 	};
 	const cancelActiveRange = (event: OpenTUIMouseEvent) => {
-		if (activeStart.current || activeRangeGesture) {
+		if (activeStart.current || activeRangeGestures.has(renderer)) {
 			finishAtEventTarget(event);
 			return;
 		}
@@ -317,6 +356,7 @@ const useRangeSelection = ({
 						event.preventDefault();
 						event.stopPropagation();
 						onRangeStart?.(target);
+						activeRangeGestures.get(renderer)?.cancel();
 						const stop = stopForRange(target);
 						const key = `${stop.filePath}:${stop.oldStart}:${stop.side}:${stop.lineNumber}`;
 						const now = Date.now();
@@ -325,10 +365,21 @@ const useRangeSelection = ({
 						activeStart.current = stop;
 						activeSelection.current = selectionForRange(target);
 						dragged.current = false;
-						activeRangeGesture = {
-							update: (nextTarget) => updateSelection(nextTarget, true),
-							finish: finishAtTarget,
-						};
+						const token = {};
+						gestureToken.current = token;
+						activeRangeGestures.set(renderer, {
+							owner: owner.current,
+							token,
+							update: (nextTarget) => {
+								if (activeRangeGestures.get(renderer)?.token === token) {
+									updateSelection(nextTarget, true);
+								}
+							},
+							finish: (nextTarget) => finishAtTarget(nextTarget, token),
+							cancel: () => {
+								if (gestureToken.current === token) cancelOwnedGesture();
+							},
+						});
 					},
 					onMouseDrag: (event) => {
 						event.preventDefault();
@@ -336,11 +387,12 @@ const useRangeSelection = ({
 						updateSelection(rangeAtEvent(event) ?? target, true);
 					},
 					onMouseOver: (event) => {
-						if (!activeStart.current && !activeRangeGesture) return;
+						const active = activeRangeGestures.get(renderer);
+						if (!activeStart.current && !active) return;
 						event.preventDefault();
 						event.stopPropagation();
 						if (activeStart.current) updateSelection(target, true);
-						else activeRangeGesture?.update(target);
+						else active?.update(target);
 					},
 					onMouseDragEnd: (event) => {
 						event.preventDefault();

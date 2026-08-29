@@ -8,6 +8,7 @@ import {
 	findGitContext,
 	freezeRunContext,
 	GitError,
+	handoffPath,
 	loadPreparedRun,
 	loadRunDelta,
 	PrepArgumentError,
@@ -864,6 +865,7 @@ const supersedeSummary = (run: ReviewRun): string => {
  */
 const watchForUpdates = (run: ReviewRun, directory: string) => {
 	const threadsPath = defaultThreadsPath(directory);
+	const root = repositoryRootForRun(directory);
 	let listener: ((update: ReviewUpdate) => void) | null = null;
 	let announced: ReviewUpdate | null = null;
 	let superseding: { directory: string; run: ReviewRun } | null = null;
@@ -892,10 +894,12 @@ const watchForUpdates = (run: ReviewRun, directory: string) => {
 
 	const dispose = watchRun({
 		threadsPath,
-		runsDirectory: defaultRunsDirectory(repositoryRootForRun(directory) ?? process.cwd()),
+		runsDirectory: defaultRunsDirectory(root ?? process.cwd()),
 		runId: run.manifest.runId,
+		handoffPath: root ? handoffPath(root) : undefined,
 		onEvent: (event) => {
 			if (event.kind === "threads-changed") publishThreads();
+			else if (event.kind === "handoff-changed") publish({ kind: "handoff" });
 			else void adopt(event.directory);
 		},
 	});
@@ -1023,6 +1027,7 @@ async function showRun(
 					threads: () => threadStore.get(),
 				})
 			: undefined;
+		const readHandoffRecord = repositoryRoot ? () => readHandoff(repositoryRoot).record : undefined;
 		const fileLineCache = new Map<string, Promise<string[] | null>>();
 		const loadFileLines = (path: string): Promise<string[] | null> => {
 			const cached = fileLineCache.get(path);
@@ -1065,6 +1070,7 @@ async function showRun(
 			subscribeUpdates: watched.subscribe,
 			threadActions: threadStore,
 			feedback,
+			readHandoff: readHandoffRecord,
 			humanAuthor,
 			permalinks: permalinkContextFor({
 				scope: run.manifest.scope,

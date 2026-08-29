@@ -67,6 +67,7 @@ import {
 	excerptKey,
 	frozenExcerptContaining,
 	frozenExcerptFor,
+	type HandoffRecord,
 	isExcerptAnchor,
 	isPatchAnchor,
 	type PatchThreadAnchor,
@@ -182,7 +183,13 @@ import {
 } from "./theme.ts";
 import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
 import { mergeCustomThemes, type ThemeIssue } from "./themes.ts";
-import { addThreadReply, createThread, createThreadMessage, sortThreads } from "./threads.ts";
+import {
+	addThreadReply,
+	createThread,
+	createThreadMessage,
+	sortThreads,
+	unsentThreads,
+} from "./threads.ts";
 import {
 	ALL_FILES_CHAPTER_ID,
 	chapterFilePaths,
@@ -1809,7 +1816,8 @@ function CommentsView({
  */
 export type ReviewUpdate =
 	| { kind: "threads"; threads: readonly ReviewThread[]; orphaned: readonly string[] }
-	| { kind: "superseded"; summary: string };
+	| { kind: "superseded"; summary: string }
+	| { kind: "handoff" };
 
 /**
  * The one piece of chrome that interrupts: a run continuing this review is ready, and the reload
@@ -2533,6 +2541,7 @@ export function App({
 	subscribeUpdates,
 	threadActions,
 	feedback,
+	readHandoff,
 	humanAuthor = defaultHumanAuthor,
 	permalinks = null,
 	onCopy,
@@ -2584,6 +2593,8 @@ export function App({
 	threadActions?: ThreadActions;
 	/** Sends the unsent threads to the agent; absent when the review has no repository to record in. */
 	feedback?: FeedbackController;
+	/** The last handoff, read on mount and again on a `handoff` update; absent alongside `feedback`. */
+	readHandoff?: () => HandoffRecord | null;
 	humanAuthor?: ThreadAuthor;
 	/** Where the reviewed lines live on GitHub; absent when no GitHub remote is configured. */
 	permalinks?: PermalinkContext | null;
@@ -2730,6 +2741,9 @@ export function App({
 	// The nonce re-arms the timeout when the same text is copied twice running.
 	const [copyNotice, setCopyNotice] = useState<{ text: string; nonce: number } | null>(null);
 	const [mountNotice, setMountNotice] = useState<StatusNotice | null>(initialNotice ?? null);
+	const [handoff, setHandoff] = useState<HandoffRecord | null>(() => readHandoff?.() ?? null);
+	const sendingRef = useRef(false);
+	const sendKeyLabel = formatKeymapKey(keymapHint("send-to-agent", keymap) ?? "S");
 	const selectionFlashCleanup = useRef<(() => void) | null>(null);
 	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
@@ -3239,10 +3253,19 @@ export function App({
 		onReload?.();
 	}
 	async function sendFeedback() {
-		const outcome = (await feedback?.send((text) => copyToClipboard(renderer, text))) ?? {
-			kind: "nothing" as const,
-		};
-		setMountNotice(sendNotice(outcome));
+		if (sendingRef.current) {
+			setMountNotice({ text: "Sending…", tone: "success" });
+			return;
+		}
+		sendingRef.current = true;
+		try {
+			const outcome = (await feedback?.send((text) => copyToClipboard(renderer, text))) ?? {
+				kind: "nothing" as const,
+			};
+			setMountNotice(sendNotice(outcome));
+		} finally {
+			sendingRef.current = false;
+		}
 	}
 
 	useEffect(() => {
@@ -3343,12 +3366,16 @@ export function App({
 				setSupersedeSummary(update.summary);
 				return;
 			}
+			if (update.kind === "handoff") {
+				setHandoff(readHandoff?.() ?? null);
+				return;
+			}
 			restoreSelectedThread.current =
 				orderedThreadsRef.current[selectedThreadRef.current]?.id ?? null;
 			setThreads(sortThreads(update.threads));
 			setCarriedOrphans(new Set(update.orphaned));
 		});
-	}, [subscribeUpdates]);
+	}, [subscribeUpdates, readHandoff]);
 
 	useEffect(() => {
 		if (!chapter || fileFocusRequest.sequence === 0 || focusedThreadRef) return;
@@ -3780,6 +3807,10 @@ export function App({
 				);
 			}
 			cancelThreadDraft();
+			setMountNotice({
+				text: `Comment added — ${sendKeyLabel} sends it to the agent`,
+				tone: "success",
+			});
 		} catch (error) {
 			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
@@ -4785,6 +4816,12 @@ export function App({
 	);
 	const filesSurface = page?.kind === "files";
 	const openThreadCount = threads.filter((thread) => thread.status === THREAD_STATUS.OPEN).length;
+	const unsentCount = unsentThreads(threads, handoff?.requestedAt ?? null).length;
+	const threadsSlot = {
+		open: openThreadCount,
+		unsent: unsentCount,
+		sent: unsentCount === 0 ? (handoff?.delivery.kind ?? null) : null,
+	};
 	const statusContext =
 		page?.kind === "chapter"
 			? `Ch ${page.chapter.order}/${chapters.length} · ${page.chapter.title}`
@@ -4827,15 +4864,15 @@ export function App({
 									...actionHint("toggle-file-review", "reviewed"),
 								]
 							: footerHints(keymapSurface, keymap);
-	const statusHints = showHelp
-		? []
-		: threadDraft
-			? reviewFooterHints("composer", keymap, focusedReviewFile?.layout ?? "stack")
-			: keymapSurface === "page" && sourceReviewActionable
-				? reviewFooterHints(reviewHintState, keymap, focusedReviewFile?.layout ?? "stack")
-				: keymapSurface === "page"
-					? contextualPageHints
-					: footerHints(keymapSurface, keymap);
+	const sendFooterHint = unsentCount > 0 ? [{ keys: sendKeyLabel, label: "send" }] : [];
+	const surfaceHints = threadDraft
+		? reviewFooterHints("composer", keymap, focusedReviewFile?.layout ?? "stack")
+		: keymapSurface === "page" && sourceReviewActionable
+			? reviewFooterHints(reviewHintState, keymap, focusedReviewFile?.layout ?? "stack")
+			: keymapSurface === "page"
+				? contextualPageHints
+				: footerHints(keymapSurface, keymap);
+	const statusHints = showHelp ? [] : [...sendFooterHint, ...surfaceHints];
 	const helpKeyLabel = formatKeymapKey(keymapHint("toggle-shortcut-help", keymap) ?? "?");
 	const quitKeyLabel = formatKeymapKey(keymapHint("quit", keymap) ?? "q");
 	const reloadKeyLabel = formatKeymapKey(keymapHint("reload", keymap) ?? "ctrl+r");
@@ -5130,7 +5167,7 @@ export function App({
 					context={statusContext}
 					reviewedFiles={filesSurface ? reviewedFiles : storyProgress.reviewed}
 					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
-					openThreads={openThreadCount}
+					threads={threadsSlot}
 					notice={statusNotice}
 					hints={statusHints}
 					helpKey={helpKeyLabel}
@@ -5166,6 +5203,8 @@ export async function runApp(
 		subscribeUpdates?: (listener: (update: ReviewUpdate) => void) => () => void;
 		threadActions?: ThreadActions;
 		feedback?: FeedbackController;
+		/** The last handoff, read on mount and again on a `handoff` update. */
+		readHandoff?: () => HandoffRecord | null;
 		humanAuthor?: ThreadAuthor;
 		permalinks?: PermalinkContext | null;
 		/** The pinned theme, or the light/dark pair the terminal chooses between. */
@@ -5224,6 +5263,7 @@ export async function runApp(
 				subscribeUpdates={options.subscribeUpdates}
 				threadActions={options.threadActions}
 				feedback={options.feedback}
+				readHandoff={options.readHandoff}
 				humanAuthor={options.humanAuthor}
 				permalinks={options.permalinks}
 				onViewStateChange={options.onViewStateChange}

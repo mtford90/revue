@@ -1,6 +1,6 @@
 # 02 — Unsent state in the status bar
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -20,12 +20,12 @@ reads "Comment added — S sends it to the agent". While a Send is in flight, fu
 
 ## Acceptance criteria
 
-- [ ] The slot shows each state at wide and narrow widths, and disappears at tiny width
-- [ ] The slot updates when the handoff file changes on disk without a reload
-- [ ] The `S send` hint appears only while something is unsent
-- [ ] Posting a comment shows the composer notice
-- [ ] A second press during an in-flight Send shows "Sending…" and writes no second record
-- [ ] Render tests inject a fake controller and watcher events
+- [x] The slot shows each state at wide and narrow widths, and disappears at tiny width
+- [x] The slot updates when the handoff file changes on disk without a reload
+- [x] The `S send` hint appears only while something is unsent
+- [x] Posting a comment shows the composer notice
+- [x] A second press during an in-flight Send shows "Sending…" and writes no second record
+- [x] Render tests inject a fake controller and watcher events
 
 ## Blocked by
 

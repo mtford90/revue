@@ -5,6 +5,9 @@ import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff";
 import { resolveTheme, THEME_IDS, THEMES } from "@revue/theme";
 import {
+	HANDOFF_DELIVERY_KIND,
+	HANDOFF_SCHEMA_VERSION,
+	type HandoffRecord,
 	isPatchAnchor,
 	type ReviewThread,
 	type RevueChaptersFile,
@@ -4613,4 +4616,195 @@ test("Send reports a copied prompt outside a host", async () => {
 	await t.renderOnce();
 	await press(t, "S");
 	expect(statusLine(t)).toContain("Queued for polling — prompt copied (2 threads)");
+});
+
+// ── The status-bar thread slot ──────────────────────────────────────────────
+
+const handoffRecord = ({
+	requestedAt,
+	delivery,
+}: {
+	requestedAt: string;
+	delivery: HandoffRecord["delivery"];
+}): HandoffRecord => ({
+	schemaVersion: HANDOFF_SCHEMA_VERSION,
+	handoffId: "00000000-0000-4000-8000-000000000099",
+	requestedAt,
+	runId: WATCHED_RUN,
+	threadIds: [],
+	delivery,
+});
+
+/** A stand-in for the disk read behind `readHandoff`: settable from the test, never touching disk. */
+const fakeHandoffReader = (initial: HandoffRecord | null) => {
+	let record = initial;
+	return {
+		read: () => record,
+		set: (next: HandoffRecord | null) => {
+			record = next;
+		},
+	};
+};
+
+test("the thread slot names unsent feedback, a sent handoff, and falls back to the plain count", async () => {
+	const driver = updateDriver();
+	const reader = fakeHandoffReader(null);
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[thread]}
+			subscribeUpdates={driver.subscribe}
+			readHandoff={reader.read}
+		/>,
+		{ width: 110, height: 34 },
+	);
+	await t.renderOnce();
+	expect(statusLine(t)).toContain("1 thread · 1 unsent");
+
+	reader.set(
+		handoffRecord({
+			requestedAt: "2026-08-02T10:05:00.000Z",
+			delivery: { kind: HANDOFF_DELIVERY_KIND.QUEUED },
+		}),
+	);
+	await driver.emit(t, { kind: "handoff" });
+	expect(statusLine(t)).toContain("1 thread · sent · queued");
+
+	reader.set(
+		handoffRecord({
+			requestedAt: "2026-08-02T10:05:00.000Z",
+			delivery: {
+				kind: HANDOFF_DELIVERY_KIND.DELIVERED,
+				host: "orca",
+				terminal: "term-1",
+				title: "Review agent",
+			},
+		}),
+	);
+	await driver.emit(t, { kind: "handoff" });
+	expect(statusLine(t)).toContain("1 thread · sent ✓");
+});
+
+test("the thread slot reads the plain count once the reply that answered it beats the send", async () => {
+	const answered = watchedThread({
+		line: 1,
+		body: "Share the retry budget",
+		reply: "Budget is shared now",
+	});
+	const t = await testRender(
+		<App file={watchedChapters} diffFiles={watchedDiff} initialThreads={[answered]} />,
+		{ width: 110, height: 34 },
+	);
+	await t.renderOnce();
+
+	expect(statusLine(t)).toContain(" 1 thread │");
+	expect(statusLine(t)).not.toContain("unsent");
+	expect(statusLine(t)).not.toContain("sent");
+});
+
+test("a narrow status bar keeps only the state half of the thread slot", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await testRender(
+		<App file={watchedChapters} diffFiles={watchedDiff} initialThreads={[thread]} />,
+		{ width: 45, height: 34 },
+	);
+	await t.renderOnce();
+
+	expect(statusLine(t)).toContain(" 1 unsent │");
+	expect(statusLine(t)).not.toContain("1 thread ·");
+});
+
+test("a tiny status bar drops the thread slot entirely", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await testRender(
+		<App file={watchedChapters} diffFiles={watchedDiff} initialThreads={[thread]} />,
+		{ width: 24, height: 34 },
+	);
+	await t.renderOnce();
+
+	expect(statusLine(t)).not.toContain("thread");
+	expect(statusLine(t)).not.toContain("unsent");
+});
+
+test("the send hint appears in the footer only while something is unsent", async () => {
+	const unsent = watchedThread({ line: 1, body: "Share the retry budget" });
+	const answered = watchedThread({
+		line: 2,
+		body: "Name this constant",
+		reply: "It is the retry budget",
+	});
+
+	const withUnsent = await testRender(
+		<App file={watchedChapters} diffFiles={watchedDiff} initialThreads={[unsent]} />,
+		{ width: 130, height: 34 },
+	);
+	await withUnsent.renderOnce();
+	expect(statusLine(withUnsent)).toContain("S send");
+
+	const withoutUnsent = await testRender(
+		<App file={watchedChapters} diffFiles={watchedDiff} initialThreads={[answered]} />,
+		{ width: 130, height: 34 },
+	);
+	await withoutUnsent.renderOnce();
+	expect(statusLine(withoutUnsent)).not.toContain("S send");
+});
+
+test("posting a comment shows the composer notice naming the send key", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const t = await testRender(<App file={file} diffFiles={diffFiles} />, {
+		width: 130,
+		height: 32,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await nextChapter(t); // chapter 1 covers backoff.ts, a new file
+	await settle(t);
+	await press(t, "RETURN"); // the cursor sits on the first changed row; Enter opens the composer
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
+	await act(async () => t.mockInput.typeText("Please explain the ceiling"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await t.renderOnce();
+
+	expect(statusLine(t)).toContain("Comment added — S sends it to the agent");
+});
+
+const deferredFeedback = () => {
+	let settle: ((outcome: SendOutcome) => void) | null = null;
+	let sends = 0;
+	const controller: FeedbackController = {
+		send: () =>
+			new Promise<SendOutcome>((resolve) => {
+				sends += 1;
+				settle = resolve;
+			}),
+	};
+	return {
+		controller,
+		sends: () => sends,
+		resolveWith: (outcome: SendOutcome) => settle?.(outcome),
+	};
+};
+
+test("a second Send while one is in flight shows Sending… and writes no second record", async () => {
+	const feedback = deferredFeedback();
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+
+	await press(t, "S");
+	expect(feedback.sends()).toBe(1);
+
+	await press(t, "S");
+	expect(feedback.sends()).toBe(1); // the guard, not a second write
+	expect(statusLine(t)).toContain("Sending…");
+
+	await act(async () => feedback.resolveWith({ kind: "queued", count: 1 }));
+	await act(async () => {
+		await t.renderOnce();
+	});
+	expect(statusLine(t)).toContain("Queued for polling (1 thread)");
 });

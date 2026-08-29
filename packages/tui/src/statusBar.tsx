@@ -53,11 +53,40 @@ export const hintText = (
 /** What the bar names for the current surface: a few keys, and the pair that never leaves. */
 export type StatusHints = { keys: string; label: string }[];
 
+/** What the thread slot names: how many threads are open, how many are unsent, and the last Send. */
+export type ThreadsSlotState = {
+	open: number;
+	unsent: number;
+	sent: "delivered" | "queued" | "copied" | null;
+};
+
+const threadWord = (open: number) => `${open} ${open === 1 ? "thread" : "threads"}`;
+
+/**
+ * One state wins: unsent feedback outranks a stale "sent", which outranks the plain count. Narrow
+ * keeps only the half that changes, because the reviewer already knows they have threads open.
+ */
+export const threadsSlotText = (
+	threads: ThreadsSlotState,
+	{ narrow }: { narrow: boolean },
+): string => {
+	if (threads.unsent > 0) {
+		const suffix = `${threads.unsent} unsent`;
+		return narrow ? suffix : `${threadWord(threads.open)} · ${suffix}`;
+	}
+	if (threads.sent) {
+		const suffix = threads.sent === "delivered" ? "sent ✓" : "sent · queued";
+		return narrow ? suffix : `${threadWord(threads.open)} · ${suffix}`;
+	}
+	if (threads.open > 0) return threadWord(threads.open);
+	return "";
+};
+
 export function StatusBar({
 	context,
 	reviewedFiles,
 	totalFiles,
-	openThreads,
+	threads,
 	notice,
 	hints: hintList = [],
 	helpKey = "?",
@@ -67,7 +96,7 @@ export function StatusBar({
 	context: string;
 	reviewedFiles: number;
 	totalFiles: number;
-	openThreads: number;
+	threads: ThreadsSlotState;
 	notice: StatusNotice | null;
 	hints?: StatusHints;
 	helpKey?: string;
@@ -84,10 +113,8 @@ export function StatusBar({
 	const filled = boundary === -1 ? bar : bar.slice(0, boundary);
 	const empty = boundary === -1 ? "" : bar.slice(boundary);
 	const filesText = tiny ? "" : ` ${reviewedFiles}/${totalFiles} files `;
-	const threadsText =
-		!narrow && openThreads > 0
-			? ` ${openThreads} ${openThreads === 1 ? "thread" : "threads"} │`
-			: "";
+	const threadsSlot = tiny ? "" : threadsSlotText(threads, { narrow });
+	const threadsText = threadsSlot ? ` ${threadsSlot} │` : "";
 	const tailText = tiny ? ` ${helpKey} · ${quitKey} ` : ` ${helpKey} help · ${quitKey} quit `;
 	const spent =
 		" revue ".length +

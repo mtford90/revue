@@ -1374,3 +1374,166 @@ test("prep --pr fetches a pull request head from the remote and pins it as the c
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+const orcaEnv = { ORCA_WORKTREE_ID: "worktree-1", ORCA_PANE_KEY: "tab-1:leaf-1" };
+// Explicit empty strings, rather than an absent key, so a caller that inherited these
+// variables from its own Orca session does not leak them into a "no Orca" scenario.
+const noOrcaEnv = { ORCA_WORKTREE_ID: "", ORCA_PANE_KEY: "" };
+
+const seedFeatureRepo = async (root: string): Promise<void> => {
+	await git(root, "init", "-b", "main");
+	await git(root, "config", "user.email", "revue@example.com");
+	await git(root, "config", "user.name", "Revue Test");
+	await writeFile(join(root, "value.txt"), "one\n");
+	await git(root, "add", "-A");
+	await git(root, "commit", "-m", "Baseline");
+	await git(root, "checkout", "-b", "feature");
+	await writeFile(join(root, "value.txt"), "two\n");
+	await git(root, "add", "-A");
+	await git(root, "commit", "-m", "Change value");
+};
+
+const agentOriginFile = (root: string) => join(root, ".revue", "agent.json");
+
+test("prep under Orca variables records the agent's pane, including on a deduplicated run", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-agent-origin-prep-"));
+	try {
+		await seedFeatureRepo(root);
+
+		const first = await run(root, ["prep", "main", "HEAD"], orcaEnv);
+		expect(first.exitCode).toBe(0);
+		const manifest = runManifestSchema.parse(
+			await Bun.file(join(first.stdout.trim(), "run.json")).json(),
+		);
+		const recorded = await Bun.file(agentOriginFile(root)).json();
+		expect(recorded).toMatchObject({
+			schemaVersion: 1,
+			host: "orca",
+			paneKey: "tab-1:leaf-1",
+			worktreeId: "worktree-1",
+			runId: manifest.runId,
+		});
+		expect(recorded.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+		// Re-preparing the same scope reproduces the same run and returns it early, but the
+		// origin must still follow whichever pane most recently ran the agent.
+		const second = await run(root, ["prep", "main", "HEAD"], {
+			ORCA_WORKTREE_ID: "worktree-1",
+			ORCA_PANE_KEY: "tab-2:leaf-2",
+		});
+		expect(second.exitCode).toBe(0);
+		expect(second.stdout.trim()).toBe(first.stdout.trim());
+		const recordedAfterDedup = await Bun.file(agentOriginFile(root)).json();
+		expect(recordedAfterDedup).toMatchObject({ paneKey: "tab-2:leaf-2", runId: manifest.runId });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("threads reply under Orca variables records the agent's pane", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-agent-origin-reply-"));
+	try {
+		await seedFeatureRepo(root);
+		const runDirectory = (await run(root, ["prep", "main", "HEAD"], noOrcaEnv)).stdout.trim();
+		expect(await Bun.file(agentOriginFile(root)).exists()).toBe(false);
+		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
+
+		const created = await run(root, [
+			"threads",
+			"create",
+			runDirectory,
+			"--file",
+			"value.txt",
+			"--old-start",
+			"1",
+			"--side",
+			"additions",
+			"--start-line",
+			"1",
+			"--end-line",
+			"1",
+			"--author",
+			"Review agent",
+			"--body",
+			"Looks fine.",
+		]);
+		const threadId = JSON.parse(created.stdout).thread.id;
+
+		const replied = await run(
+			root,
+			["threads", "reply", runDirectory, threadId, "--author", "Fix agent", "--body", "Done."],
+			orcaEnv,
+		);
+		expect(replied.exitCode).toBe(0);
+		const recorded = await Bun.file(agentOriginFile(root)).json();
+		expect(recorded).toMatchObject({
+			host: "orca",
+			paneKey: "tab-1:leaf-1",
+			worktreeId: "worktree-1",
+			runId: manifest.runId,
+		});
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a failed prep or reply under Orca variables writes nothing", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-agent-origin-failure-"));
+	try {
+		const failedPrep = await run(root, ["prep", "no-such-ref", "HEAD"], orcaEnv);
+		expect(failedPrep.exitCode).toBe(1);
+		expect(await Bun.file(agentOriginFile(root)).exists()).toBe(false);
+
+		await seedFeatureRepo(root);
+		const runDirectory = (await run(root, ["prep", "main", "HEAD"], noOrcaEnv)).stdout.trim();
+		const failedReply = await run(
+			root,
+			[
+				"threads",
+				"reply",
+				runDirectory,
+				"00000000-0000-4000-8000-000000000099",
+				"--author",
+				"Fix agent",
+				"--body",
+				"Done.",
+			],
+			orcaEnv,
+		);
+		expect(failedReply.exitCode).toBe(1);
+		expect(await Bun.file(agentOriginFile(root)).exists()).toBe(false);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("without Orca variables prep writes nothing", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-agent-origin-none-"));
+	try {
+		await seedFeatureRepo(root);
+		const prepped = await run(root, ["prep", "main", "HEAD"], noOrcaEnv);
+		expect(prepped.exitCode).toBe(0);
+		expect(await Bun.file(agentOriginFile(root)).exists()).toBe(false);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("an unwritable .revue directory warns on stderr and the command still exits 0", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-agent-origin-unwritable-"));
+	try {
+		await seedFeatureRepo(root);
+		await run(root, ["prep", "main", "HEAD"], noOrcaEnv);
+		await chmod(join(root, ".revue"), 0o500);
+		try {
+			const prepped = await run(root, ["prep", "main", "HEAD"], orcaEnv);
+			expect(prepped.exitCode).toBe(0);
+			expect(prepped.stderr).toContain("warning:");
+			expect(await Bun.file(agentOriginFile(root)).exists()).toBe(false);
+		} finally {
+			await chmod(join(root, ".revue"), 0o700);
+		}
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+	AgentOriginError,
 	defaultRunsDirectory,
 	freezeRunContext,
 	GitError,
@@ -14,6 +15,7 @@ import {
 	prepareRun,
 	ReviewCoverageError,
 	RunArtifactError,
+	recordAgentOrigin,
 	rerunArgsFor,
 } from "@revue/prep";
 import {
@@ -229,6 +231,25 @@ const ignoredDetails = (run: PreparedRun): string => {
 	].join("\n");
 };
 
+/**
+ * Records the agent's pane in `.revue/agent.json` once a top-level command has succeeded. Never
+ * called from the prep library itself, so the TUI's reload path never records the reviewer's pane.
+ * A write failure is a warning, not a command failure.
+ */
+const recordOrigin = (runDirectory: string, runId: string): void => {
+	const repositoryRoot = repositoryRootForRun(runDirectory);
+	if (!repositoryRoot) return;
+	try {
+		recordAgentOrigin({ repositoryRoot, runId });
+	} catch (error) {
+		if (error instanceof AgentOriginError) {
+			process.stderr.write(`warning: ${error.message}\n`);
+			return;
+		}
+		throw error;
+	}
+};
+
 async function cmdPrep(args: string[]): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(`${PREP_HELP}\n`);
@@ -238,6 +259,7 @@ async function cmdPrep(args: string[]): Promise<number> {
 		const showIgnored = args.includes("--show-ignored");
 		const prepArgs = args.filter((argument) => argument !== "--show-ignored");
 		const run = await prepareRun(prepArgs);
+		recordOrigin(run.directory, run.manifest.runId);
 		process.stderr.write(`${prepSummary(run)}\n`);
 		const delta = await loadRunDelta(run);
 		if (delta) process.stderr.write(`${deltaSummary(run.directory, delta)}\n`);
@@ -605,8 +627,9 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 				throw new Error(`${commandName} reply requires a run directory and thread ID`);
 			}
 			const threadId = requireEntityId(rawThreadId, "Thread");
-			const { store } = await loadThreadCommand(directory);
+			const { run, store } = await loadThreadCommand(directory);
 			const thread = store.reply(threadId, agentAuthor(options), await threadBody(options));
+			recordOrigin(directory, run.manifest.runId);
 			process.stdout.write(`${JSON.stringify({ action: operation, thread }, null, 2)}\n`);
 			return 0;
 		}

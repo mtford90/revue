@@ -1,6 +1,6 @@
 # 04 — Agent origin recorded by prep and reply
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -17,13 +17,13 @@ not a command failure. Outside Orca nothing is written.
 
 ## Acceptance criteria
 
-- [ ] A successful `revue prep` under Orca variables writes the origin with the run id, also when prep deduplicates to an existing run
-- [ ] A successful `revue threads reply` under Orca variables writes the origin
-- [ ] A failed prep or reply writes nothing
-- [ ] Without Orca variables nothing is written
-- [ ] A reload from the TUI never writes the origin
-- [ ] An unwritable `.revue` directory produces a warning and the command still exits 0
-- [ ] CLI process tests cover all of the above
+- [x] A successful `revue prep` under Orca variables writes the origin with the run id, also when prep deduplicates to an existing run
+- [x] A successful `revue threads reply` under Orca variables writes the origin
+- [x] A failed prep or reply writes nothing
+- [x] Without Orca variables nothing is written
+- [x] A reload from the TUI never writes the origin
+- [x] An unwritable `.revue` directory produces a warning and the command still exits 0
+- [x] CLI process tests cover all of the above
 
 ## Blocked by
 

@@ -1,102 +1,211 @@
 import {
 	type DiffLineRange,
 	type DiffMeasurement,
+	type DiffPresentationRow,
+	type DiffSelection,
+	type DiffSelectionStop,
 	type DiffSide,
-	type DiffSourceLineIdentity,
 	type DiffVisualPlan,
-	diffStructure,
-	structureRowIdentity,
+	diffPresentationRows,
+	moveSplitSelectionStop,
+	moveStackedSelectionStop,
+	presentationRowStop,
+	rectangularSelectionBetween,
+	stackedSelectionBetween,
+	switchSplitSelectionStop,
 } from "@revue/diff";
 
 type ReviewLinePlan = DiffVisualPlan | DiffMeasurement;
 
-const lineRange = (identity: DiffSourceLineIdentity): DiffLineRange => ({
-	filePath: identity.filePath,
-	hunkOldStart: identity.hunkOldStart,
-	side: identity.side,
-	startLine: identity.lineNumber,
-	endLine: identity.lineNumber,
-});
-
-const canonicalLines = (plan: ReviewLinePlan): DiffLineRange[] => {
-	// Split rows provide a layout-neutral pairing model: each replacement occupies one logical row,
-	// with the current side preferred and only an unmatched old-side row retained as a deletion stop.
-	const structure = diffStructure({
-		file: "structure" in plan ? plan.structure.file : plan.file,
-		layout: "split",
-	});
-	return structure.rows.flatMap((row) => {
-		if (row.type !== "split-line") return [];
-		const side: DiffSide | null =
-			row.new.kind === "addition" ? "additions" : row.old.kind === "deletion" ? "deletions" : null;
-		const identity = side ? structureRowIdentity({ structure, row, side }) : undefined;
-		return identity ? [lineRange(identity)] : [];
-	});
+export type ReviewLineFile = {
+	filePath: string;
+	layout: "split" | "stack";
+	rows: readonly DiffPresentationRow[];
 };
 
-/** Ordered changed source lines for keyboard review, independent of presentation layout. */
-export const reviewableLines = (plan: ReviewLinePlan): DiffLineRange[] => canonicalLines(plan);
+const sourceFile = (plan: ReviewLinePlan) =>
+	"structure" in plan ? plan.structure.file : plan.file;
 
-const sameLine = (left: DiffLineRange, right: DiffLineRange): boolean =>
+const sourceLayout = (plan: ReviewLinePlan) =>
+	"structure" in plan ? plan.structure.layout : plan.layout;
+
+const rangeForStop = (stop: DiffSelectionStop): DiffLineRange => ({
+	filePath: stop.filePath,
+	hunkOldStart: stop.oldStart,
+	side: stop.side,
+	startLine: stop.lineNumber,
+	endLine: stop.lineNumber,
+});
+
+export const reviewStopForLine = (line: DiffLineRange): DiffSelectionStop => ({
+	filePath: line.filePath,
+	oldStart: line.hunkOldStart,
+	side: line.side,
+	lineNumber: line.startLine,
+});
+
+const sameStop = (left: DiffSelectionStop, right: DiffSelectionStop): boolean =>
 	left.filePath === right.filePath &&
-	left.hunkOldStart === right.hunkOldStart &&
+	left.oldStart === right.oldStart &&
 	left.side === right.side &&
-	left.startLine === right.startLine;
+	left.lineNumber === right.lineNumber;
 
-const sameAnchorDomain = (left: DiffLineRange, right: DiffLineRange): boolean =>
-	left.filePath === right.filePath &&
-	left.hunkOldStart === right.hunkOldStart &&
-	left.side === right.side;
+const rowHasStop = (row: DiffPresentationRow, stop: DiffSelectionStop): boolean =>
+	row.stops.some((candidate) => sameStop(candidate, stop));
+
+/** Changed presentation rows for ordinary source navigation. */
+export const reviewLineFile = (plan: ReviewLinePlan): ReviewLineFile => {
+	const file = sourceFile(plan);
+	const layout = sourceLayout(plan);
+	return {
+		filePath: file.path,
+		layout,
+		rows: diffPresentationRows(file, layout).filter((row) => row.kind === "change"),
+	};
+};
+
+/** Every original-hunk presentation row for file-local selection extension. */
+export const selectionLineFile = (plan: ReviewLinePlan): ReviewLineFile => {
+	const file = sourceFile(plan);
+	const layout = sourceLayout(plan);
+	return { filePath: file.path, layout, rows: diffPresentationRows(file, layout) };
+};
+
+/**
+ * Ordered changed source lines for compatibility with callers that need a flat list. Split prefers
+ * current-side code; stacked follows visible source-row order and counts context at most once.
+ */
+export const reviewableLines = (plan: ReviewLinePlan): DiffLineRange[] => {
+	const file = reviewLineFile(plan);
+	return file.rows.map((row) => rangeForStop(presentationRowStop(row, "additions")));
+};
 
 /** Start on current-side code whenever the file has any, retaining deletion-only reviewability. */
-export const initialReviewLine = (lines: readonly DiffLineRange[]): DiffLineRange | null =>
-	lines.find((line) => line.side === "additions") ?? lines[0] ?? null;
+export const initialReviewLine = (file: ReviewLineFile | null): DiffLineRange | null => {
+	if (!file) return null;
+	const current = file.rows.flatMap(
+		(row) => row.stops.find((stop) => stop.side === "additions") ?? [],
+	)[0];
+	const fallback = file.rows[0] ? presentationRowStop(file.rows[0]) : undefined;
+	const selected = current ?? fallback;
+	return selected ? rangeForStop(selected) : null;
+};
 
-/** Move one source line without wrapping; a live selection cannot cross its anchor contract. */
+export const reviewLineFileContains = (
+	file: ReviewLineFile | null,
+	line: DiffLineRange | null,
+): line is DiffLineRange => {
+	if (!file || !line || line.startLine !== line.endLine) return false;
+	const stop = reviewStopForLine(line);
+	return file.rows.some((row) => rowHasStop(row, stop));
+};
+
+const boundaryLine = ({
+	file,
+	delta,
+	preferredSide,
+}: {
+	file: ReviewLineFile;
+	delta: -1 | 1;
+	preferredSide?: DiffSide;
+}): DiffLineRange | null => {
+	const rows = delta === 1 ? file.rows : [...file.rows].reverse();
+	if (file.layout === "split" && preferredSide) {
+		for (const row of rows) {
+			const stop = row.stops.find((candidate) => candidate.side === preferredSide);
+			if (stop) return rangeForStop(stop);
+		}
+	}
+	const row = rows[0];
+	return row ? rangeForStop(presentationRowStop(row)) : null;
+};
+
+/**
+ * Ordinary movement crosses expanded files. Split retains its pane whenever the destination file
+ * has that side; stacked follows its visible old-then-new source-row order.
+ */
 export const moveReviewLine = ({
-	lines,
+	files,
 	current,
 	delta,
-	selectionAnchor,
 }: {
-	lines: readonly DiffLineRange[];
+	files: readonly ReviewLineFile[];
 	current: DiffLineRange | null;
 	delta: -1 | 1;
-	selectionAnchor?: DiffLineRange | null;
 }): DiffLineRange | null => {
-	if (!lines.length) return null;
-	const fallback = initialReviewLine(lines);
-	if (!current) return fallback;
-	const index = lines.findIndex((line) => sameLine(line, current));
-	if (index < 0) return selectionAnchor ? current : fallback;
-	const candidateIndex = Math.max(0, Math.min(index + delta, lines.length - 1));
-	if (!selectionAnchor) return lines[candidateIndex] ?? current;
-	for (
-		let nextIndex = candidateIndex;
-		nextIndex >= 0 && nextIndex < lines.length;
-		nextIndex += delta
-	) {
-		const candidate = lines[nextIndex];
-		if (!candidate) break;
-		if (
-			candidate.filePath !== selectionAnchor.filePath ||
-			candidate.hunkOldStart !== selectionAnchor.hunkOldStart
-		)
-			break;
-		if (sameAnchorDomain(selectionAnchor, candidate)) return candidate;
+	if (!files.length) return null;
+	if (!current) return initialReviewLine(files[0] ?? null);
+	const fileIndex = files.findIndex((file) => file.filePath === current.filePath);
+	const file = files[fileIndex];
+	if (!file) return initialReviewLine(files[0] ?? null);
+	const stop = reviewStopForLine(current);
+	const moved =
+		file.layout === "split"
+			? moveSplitSelectionStop({ rows: file.rows, current: stop, delta })
+			: moveStackedSelectionStop({ rows: file.rows, current: stop, delta });
+	if (!sameStop(moved, stop)) return rangeForStop(moved);
+	for (let index = fileIndex + delta; index >= 0 && index < files.length; index += delta) {
+		const candidate = files[index];
+		if (!candidate?.rows.length) continue;
+		const boundary = boundaryLine({
+			file: candidate,
+			delta,
+			preferredSide: file.layout === "split" ? current.side : undefined,
+		});
+		if (boundary) return boundary;
 	}
 	return current;
 };
 
-/** Inclusive anchor range for the shared pointer/keyboard selection renderer. */
-export const reviewLineSelection = (
-	anchor: DiffLineRange,
-	cursor: DiffLineRange,
-): DiffLineRange | null =>
-	sameAnchorDomain(anchor, cursor)
-		? {
-				...anchor,
-				startLine: Math.min(anchor.startLine, cursor.startLine),
-				endLine: Math.max(anchor.endLine, cursor.endLine),
-			}
-		: null;
+/** Same-row old/new motion for split review; stacked is intentionally inert. */
+export const switchReviewLineSide = ({
+	file,
+	current,
+	side,
+}: {
+	file: ReviewLineFile | null;
+	current: DiffLineRange | null;
+	side: DiffSide;
+}): DiffLineRange | null => {
+	if (!file || !current || file.layout !== "split") return current;
+	return rangeForStop(
+		switchSplitSelectionStop({ rows: file.rows, current: reviewStopForLine(current), side }),
+	);
+};
+
+/** File-local selection movement uses all original-hunk rows in the active presentation. */
+export const moveSelectionReviewLine = ({
+	file,
+	current,
+	delta,
+}: {
+	file: ReviewLineFile | null;
+	current: DiffLineRange | null;
+	delta: -1 | 1;
+}): DiffLineRange | null => {
+	if (!file || !current) return current;
+	const stop = reviewStopForLine(current);
+	return rangeForStop(
+		file.layout === "split"
+			? moveSplitSelectionStop({ rows: file.rows, current: stop, delta })
+			: moveStackedSelectionStop({ rows: file.rows, current: stop, delta }),
+	);
+};
+
+/** Active selection follows split rectangles or one-stop-per-visible-row stacked order. */
+export const reviewLineSelection = ({
+	file,
+	anchor,
+	cursor,
+}: {
+	file: ReviewLineFile | null;
+	anchor: DiffLineRange;
+	cursor: DiffLineRange;
+}): DiffSelection | null => {
+	if (!file) return null;
+	const start = reviewStopForLine(anchor);
+	const focus = reviewStopForLine(cursor);
+	return file.layout === "split"
+		? rectangularSelectionBetween(file.rows, start, focus)
+		: stackedSelectionBetween(file.rows, start, focus);
+};

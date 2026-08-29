@@ -64,15 +64,24 @@ export {
 export { anchorRowIndex, plannedRowIdentity } from "./ranges.ts";
 export {
 	canonicalizeDiffSelection,
+	type DiffPresentationRow,
 	type DiffSelection,
 	type DiffSelectionRange,
 	type DiffSelectionStop,
+	diffPresentationRows,
 	diffSelectionStops,
 	firstSelectionRange,
+	moveSplitSelectionStop,
+	moveStackedSelectionStop,
 	type NonEmptyArray,
 	normalizeDiffSelection,
+	presentationRowStop,
+	rectangularSelectionBetween,
 	selectionBetween,
 	selectionContains,
+	stackedSelectionBetween,
+	stackedVisibleSelectionStops,
+	switchSplitSelectionStop,
 	terminalSelectionRange,
 } from "./selection.ts";
 export { compositeTerminalForeground } from "./syntectTheme.ts";

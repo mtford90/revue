@@ -1,11 +1,18 @@
 import { expect, test } from "bun:test";
 import { parsePatch } from "./model.ts";
 import {
+	canonicalizeDiffSelection,
+	diffPresentationRows,
 	diffSelectionStops,
 	firstSelectionRange,
+	moveSplitSelectionStop,
+	moveStackedSelectionStop,
 	normalizeDiffSelection,
+	rectangularSelectionBetween,
 	selectionBetween,
 	selectionContains,
+	stackedVisibleSelectionStops,
+	switchSplitSelectionStop,
 	terminalSelectionRange,
 } from "./selection.ts";
 
@@ -128,4 +135,95 @@ test("normalisation preserves ranges with distinct hunk or side authority", () =
 		stops,
 	);
 	expect(normalized.ranges).toHaveLength(3);
+});
+
+const [paneFile] = parsePatch(`diff --git a/panes.ts b/panes.ts
+--- a/panes.ts
++++ b/panes.ts
+@@ -1,3 +1,3 @@
+-old one
+-old two
++new one
++new two
+ context
+`);
+if (!paneFile) throw new Error("missing pane fixture");
+
+const stopIdentity = (stop: { side: string; lineNumber: number }) => [stop.side, stop.lineNumber];
+
+test("presentation rows retain split row identity for vertical and same-row side motion", () => {
+	const rows = diffPresentationRows(paneFile, "split");
+	expect(rows.map((row) => [row.kind, row.stops.map(stopIdentity)])).toEqual([
+		[
+			"change",
+			[
+				["deletions", 1],
+				["additions", 1],
+			],
+		],
+		[
+			"change",
+			[
+				["deletions", 2],
+				["additions", 2],
+			],
+		],
+		[
+			"context",
+			[
+				["deletions", 3],
+				["additions", 3],
+			],
+		],
+	]);
+	const newOne = rows[0]?.stops.find((stop) => stop.side === "additions");
+	if (!newOne) throw new Error("missing new-side stop");
+	expect(stopIdentity(moveSplitSelectionStop({ rows, current: newOne, delta: 1 }))).toEqual([
+		"additions",
+		2,
+	]);
+	expect(
+		stopIdentity(switchSplitSelectionStop({ rows, current: newOne, side: "deletions" })),
+	).toEqual(["deletions", 1]);
+});
+
+test("split mixed selection is rectangular and canonical persistence coalesces each side", () => {
+	const rows = diffPresentationRows(paneFile, "split");
+	const anchor = rows[0]?.stops.find((stop) => stop.side === "additions");
+	const focus = rows[1]?.stops.find((stop) => stop.side === "deletions");
+	const live = rectangularSelectionBetween(rows, anchor, focus);
+	if (!live) throw new Error("missing rectangular selection");
+	expect(live.ranges).toHaveLength(4);
+	expect(canonicalizeDiffSelection(live, paneFile)).toEqual({
+		filePath: "panes.ts",
+		ranges: [
+			{ oldStart: 1, side: "deletions", startLine: 1, endLine: 2 },
+			{ oldStart: 1, side: "additions", startLine: 1, endLine: 2 },
+		],
+	});
+});
+
+test("stacked visible motion follows old then new rows and counts context once", () => {
+	const rows = diffPresentationRows(paneFile, "stack");
+	expect(stackedVisibleSelectionStops(rows).map(stopIdentity)).toEqual([
+		["deletions", 1],
+		["deletions", 2],
+		["additions", 1],
+		["additions", 2],
+		["additions", 3],
+	]);
+	let current = rows[0]?.stops[0];
+	if (!current) throw new Error("missing stacked stop");
+	const visited = [stopIdentity(current)];
+	for (let index = 0; index < rows.length - 1; index += 1) {
+		current = moveStackedSelectionStop({ rows, current, delta: 1 });
+		visited.push(stopIdentity(current));
+	}
+	expect(visited).toEqual([
+		["deletions", 1],
+		["deletions", 2],
+		["additions", 1],
+		["additions", 2],
+		["additions", 3],
+	]);
 });

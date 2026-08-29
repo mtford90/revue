@@ -19,10 +19,8 @@ import {
 	type DiffLineRange,
 	type DiffSelection,
 	type DiffSelectionRange,
-	type DiffSelectionStop,
 	type DiffSide,
 	type DiffVisualPlan,
-	diffSelectionStops,
 	drawMermaid,
 	EXCERPT_HUNK_OLD_START,
 	type ExcerptQuotation,
@@ -36,7 +34,6 @@ import {
 	prepareSyntaxHighlighting,
 	quotedLineSpans,
 	type RangeDecoration,
-	selectionBetween,
 	terminalSelectionRange,
 } from "@revue/diff";
 import {
@@ -50,6 +47,7 @@ import {
 	ExcerptBlock,
 	type ExpandDirection,
 	OPENTUI_DIFF_CHROME,
+	useResolvedInlineAttachmentPlacement,
 } from "@revue/diff-opentui";
 import {
 	type Appearance,
@@ -154,8 +152,18 @@ import {
 	type PathTreeRow,
 } from "./pathDisplay.ts";
 import type { FileDisplayPreference, Preferences } from "./preferences.ts";
-import { initialReviewLine, moveReviewLine, reviewableLines } from "./reviewLineCursor.ts";
+import {
+	initialReviewLine,
+	moveReviewLine,
+	moveSelectionReviewLine,
+	reviewLineFile,
+	reviewLineFileContains,
+	reviewLineSelection,
+	selectionLineFile,
+	switchReviewLineSide,
+} from "./reviewLineCursor.ts";
 import { useScrollWindow } from "./scrollWindow.ts";
+import { selectionAttachmentPlacement, selectionSideLabel } from "./selectionSides.ts";
 import {
 	formatSourceLocation,
 	type PermalinkContext,
@@ -1335,13 +1343,6 @@ const diffRangeForSelectionRange = (
 	endLine: range.endLine,
 });
 
-const selectionStopForDiffRange = (range: DiffLineRange): DiffSelectionStop => ({
-	filePath: range.filePath,
-	oldStart: range.hunkOldStart,
-	side: range.side,
-	lineNumber: range.startLine,
-});
-
 const selectionForDiffRange = (range: DiffLineRange): DiffSelection => ({
 	filePath: range.filePath,
 	ranges: [
@@ -1565,6 +1566,7 @@ function InlineThread({
 	onToggleStatus: (thread: ReviewThread) => void;
 }) {
 	const theme = useTheme();
+	const placement = useResolvedInlineAttachmentPlacement();
 	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
 	return (
 		<box
@@ -1576,7 +1578,7 @@ function InlineThread({
 			paddingLeft={1}
 			paddingRight={1}
 			marginLeft={2}
-			marginRight={1}
+			marginRight={placement === "deletions" ? 3 : 1}
 			gap={1}
 		>
 			{thread.messages.map((message, index) => (
@@ -2092,20 +2094,24 @@ function ChapterView({
 			})),
 		];
 	}, [chapter, selectedKeyChange, focusedDecorationId, keyboardCursor, theme]);
-	const mountThread = (thread: ReviewThread): DiffInlineAttachment => ({
-		id: thread.id,
-		anchor: diffRangeForAnchor(thread.anchor),
-		content: (
-			<InlineThread
-				thread={thread}
-				replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
-				onReply={onReplyThread}
-				onDeleteThread={onDeleteThread}
-				onDeleteMessage={onDeleteThreadMessage}
-				onToggleStatus={onToggleThreadStatus}
-			/>
-		),
-	});
+	const mountThread = (thread: ReviewThread): DiffInlineAttachment => {
+		const placement = selectionAttachmentPlacement(selectionForAnchor(thread.anchor));
+		return {
+			id: thread.id,
+			anchor: diffRangeForAnchor(thread.anchor),
+			placement,
+			content: (
+				<InlineThread
+					thread={thread}
+					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
+					onReply={onReplyThread}
+					onDeleteThread={onDeleteThread}
+					onDeleteMessage={onDeleteThreadMessage}
+					onToggleStatus={onToggleThreadStatus}
+				/>
+			),
+		};
+	};
 	const inlineAttachments: DiffInlineAttachment[] = [
 		...chapterHunkThreads(chapter, threads).map(mountThread),
 		...(threadDraft ? [threadDraft] : []),
@@ -2452,6 +2458,7 @@ const diffRangeForThread = (thread: ReviewThread): DiffLineRange =>
 const measuredAnchor = (thread: ReviewThread): DiffInlineAttachment => ({
 	id: thread.id,
 	anchor: diffRangeForAnchor(thread.anchor),
+	placement: selectionAttachmentPlacement(selectionForAnchor(thread.anchor)),
 	content: null,
 });
 
@@ -2911,7 +2918,14 @@ export function App({
 		() => [
 			...chapterThreadList.map(measuredAnchor),
 			...(threadDraft?.kind === "thread" && !quotedDraft
-				? [{ id: THREAD_COMPOSER_ID, anchor: threadDraft.range, content: null }]
+				? [
+						{
+							id: THREAD_COMPOSER_ID,
+							anchor: threadDraft.range,
+							placement: selectionAttachmentPlacement(threadDraft.selection),
+							content: null,
+						},
+					]
 				: []),
 		],
 		[chapterThreadList, threadDraft, quotedDraft],
@@ -2974,38 +2988,32 @@ export function App({
 	const focusedNavigationFile = navigationViewportFiles.find(
 		(entry) => entry.path === focusedReviewPath,
 	);
-	const focusedReviewLines = useMemo(
-		() =>
-			focusedNavigationFile?.measurement ? reviewableLines(focusedNavigationFile.measurement) : [],
-		[focusedNavigationFile],
-	);
-	const chapterReviewLines = useMemo(
+	const navigationReviewFiles = useMemo(
 		() =>
 			navigationViewportFiles.flatMap((entry) =>
-				entry.measurement ? reviewableLines(entry.measurement) : [],
+				entry.measurement ? [reviewLineFile(entry.measurement)] : [],
 			),
 		[navigationViewportFiles],
 	);
-	const focusedSelectionStops = useMemo(() => {
-		const focused =
-			chapterDiffFiles.find((entry) => entry.chapterPath === focusedReviewPath) ??
-			chapterDiffFiles[selectedFile] ??
-			chapterDiffFiles[0];
-		const layout = focused
-			? layoutForFile({ file: focused, preference: diffPreference, splitFits })
-			: "split";
-		return focused ? diffSelectionStops(createDiffFile(focused), layout) : [];
-	}, [chapterDiffFiles, focusedReviewPath, selectedFile, diffPreference, splitFits]);
+	const focusedReviewFile =
+		navigationReviewFiles.find((entry) => entry.filePath === focusedReviewPath) ?? null;
+	const focusedSelectionFile = useMemo(
+		() =>
+			focusedNavigationFile?.measurement
+				? selectionLineFile(focusedNavigationFile.measurement)
+				: null,
+		[focusedNavigationFile],
+	);
 	const lineSelection = useMemo(
 		() =>
 			lineSelectionAnchor && lineCursor
-				? selectionBetween(
-						focusedSelectionStops,
-						selectionStopForDiffRange(lineSelectionAnchor),
-						selectionStopForDiffRange(lineCursor),
-					)
+				? reviewLineSelection({
+						file: focusedSelectionFile,
+						anchor: lineSelectionAnchor,
+						cursor: lineCursor,
+					})
 				: null,
-		[lineSelectionAnchor, lineCursor, focusedSelectionStops],
+		[lineSelectionAnchor, lineCursor, focusedSelectionFile],
 	);
 	const chapterSegments = useMemo(
 		() =>
@@ -3177,23 +3185,15 @@ export function App({
 	}
 
 	useEffect(() => {
-		const containsExactLine = (candidate: DiffLineRange | null): candidate is DiffLineRange =>
-			Boolean(
-				candidate &&
-					focusedReviewLines.some(
-						(line) =>
-							line.filePath === candidate.filePath &&
-							line.hunkOldStart === candidate.hunkOldStart &&
-							line.side === candidate.side &&
-							line.startLine === candidate.startLine &&
-							line.endLine === candidate.endLine,
-					),
-			);
 		setLineCursor((currentLine) =>
-			containsExactLine(currentLine) ? currentLine : initialReviewLine(focusedReviewLines),
+			reviewLineFileContains(focusedReviewFile, currentLine)
+				? currentLine
+				: initialReviewLine(focusedReviewFile),
 		);
-		setLineSelectionAnchor((anchor) => (containsExactLine(anchor) ? anchor : null));
-	}, [focusedReviewLines]);
+		setLineSelectionAnchor((anchor) =>
+			reviewLineFileContains(focusedReviewFile, anchor) ? anchor : null,
+		);
+	}, [focusedReviewFile]);
 
 	useEffect(() => {
 		if (!loadFileLines || !chapter) return;
@@ -3579,38 +3579,34 @@ export function App({
 		if (nextFile >= 0) setSelectedFile(nextFile);
 	}
 	function moveLineCursor(delta: -1 | 1) {
-		if (lineSelectionAnchor && lineCursor) {
-			const currentIndex = focusedSelectionStops.findIndex(
-				(stop) =>
-					stop.filePath === lineCursor.filePath &&
-					stop.oldStart === lineCursor.hunkOldStart &&
-					stop.side === lineCursor.side &&
-					stop.lineNumber === lineCursor.startLine,
-			);
-			const nextIndex = Math.max(
-				0,
-				Math.min(currentIndex + delta, focusedSelectionStops.length - 1),
-			);
-			const next = focusedSelectionStops[nextIndex];
-			if (next) {
-				lineMotionRequest.current += 1;
-				setLineCursor({
-					filePath: next.filePath,
-					hunkOldStart: next.oldStart,
-					side: next.side,
-					startLine: next.lineNumber,
-					endLine: next.lineNumber,
-				});
-			}
-			return;
-		}
-		const next = moveReviewLine({ lines: chapterReviewLines, current: lineCursor, delta });
+		const next = lineSelectionAnchor
+			? moveSelectionReviewLine({ file: focusedSelectionFile, current: lineCursor, delta })
+			: moveReviewLine({ files: navigationReviewFiles, current: lineCursor, delta });
 		if (!next) return;
 		lineMotionRequest.current += 1;
 		setLineCursor(next);
-		setPointerSelection(null);
+		if (!lineSelectionAnchor) setPointerSelection(null);
 		const fileIndex = chapter ? chapterFilePaths(chapter).indexOf(next.filePath) : -1;
 		if (fileIndex >= 0 && fileIndex !== selectedFile) setSelectedFile(fileIndex);
+	}
+	function moveLineCursorSide(side: DiffSide) {
+		const next = switchReviewLineSide({
+			file: lineSelectionAnchor ? focusedSelectionFile : focusedReviewFile,
+			current: lineCursor,
+			side,
+		});
+		if (
+			!next ||
+			(lineCursor &&
+				next.filePath === lineCursor.filePath &&
+				next.hunkOldStart === lineCursor.hunkOldStart &&
+				next.side === lineCursor.side &&
+				next.startLine === lineCursor.startLine)
+		)
+			return;
+		lineMotionRequest.current += 1;
+		setLineCursor(next);
+		if (!lineSelectionAnchor) setPointerSelection(null);
 	}
 	function startLineSelection() {
 		if (lineCursor) {
@@ -4326,7 +4322,13 @@ export function App({
 	const threadComposer = threadDraft ? (
 		<ThreadComposer
 			key={threadDraft.kind === "thread" ? "new-thread" : threadDraft.threadId}
-			title={threadDraft.kind === "thread" ? "New review thread" : "Reply to thread"}
+			title={
+				threadDraft.kind === "reply"
+					? "Reply to thread"
+					: isExcerptAnchor(threadDraft.anchor)
+						? "New review thread"
+						: `Comment on ${selectionSideLabel(threadDraft.selection)}`
+			}
 			body={threadBody}
 			notice={threadNotice}
 			copyNotice={copyNotice?.text ?? null}
@@ -4344,6 +4346,7 @@ export function App({
 			? {
 					id: THREAD_COMPOSER_ID,
 					anchor: threadDraft.range,
+					placement: selectionAttachmentPlacement(threadDraft.selection),
 					content: threadComposer,
 				}
 			: undefined;
@@ -4577,6 +4580,12 @@ export function App({
 			case "next-source-line":
 				moveLineCursor(1);
 				break;
+			case "move-to-old-side":
+				moveLineCursorSide("deletions");
+				break;
+			case "move-to-new-side":
+				moveLineCursorSide("additions");
+				break;
 			case "select-lines":
 				startLineSelection();
 				break;
@@ -4689,7 +4698,7 @@ export function App({
 			!focusedExcerpt &&
 			!focusedThreadRef &&
 			focusedNavigationFile &&
-			focusedReviewLines.length,
+			focusedReviewFile?.rows.length,
 	);
 	const actionHint = (id: Parameters<typeof keymapHint>[0], label: string) => {
 		const key = keymapHint(id, keymap);
@@ -4717,9 +4726,9 @@ export function App({
 	const statusHints = showHelp
 		? []
 		: threadDraft
-			? reviewFooterHints("composer", keymap)
+			? reviewFooterHints("composer", keymap, focusedReviewFile?.layout ?? "stack")
 			: keymapSurface === "page" && sourceReviewActionable
-				? reviewFooterHints(reviewHintState, keymap)
+				? reviewFooterHints(reviewHintState, keymap, focusedReviewFile?.layout ?? "stack")
 				: keymapSurface === "page"
 					? contextualPageHints
 					: footerHints(keymapSurface, keymap);

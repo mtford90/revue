@@ -9,10 +9,44 @@ import {
 } from "@revue/diff";
 import type { ReactNode } from "react";
 
+export type DiffInlineAttachmentPlacement = "full" | "deletions" | "additions";
+
 export type DiffInlineAttachment = {
 	id: string;
 	anchor: DiffLineRange;
 	content: ReactNode;
+	/** Semantic split placement; actual columns remain the adapter's geometry responsibility. */
+	placement?: DiffInlineAttachmentPlacement;
+};
+
+/**
+ * A pane narrower than this cannot hold the composer controls and useful draft text together.
+ * Side-specific threads therefore use the full row below this width, even under forced split.
+ */
+export const MIN_USABLE_INLINE_ATTACHMENT_WIDTH = 40;
+
+export type InlineAttachmentGeometry = { offset: number; width: number };
+
+/** Map semantic placement to the active plan without leaking pane columns into the host TUI. */
+export const inlineAttachmentGeometry = ({
+	placement,
+	layout,
+	width,
+	paneWidths,
+}: {
+	placement: DiffInlineAttachmentPlacement;
+	layout: "split" | "stack";
+	width: number;
+	paneWidths: { old: number; new: number };
+}): InlineAttachmentGeometry => {
+	if (layout !== "split" || placement === "full") return { offset: 0, width };
+	const paneWidth = placement === "deletions" ? paneWidths.old : paneWidths.new;
+	if (paneWidth < MIN_USABLE_INLINE_ATTACHMENT_WIDTH) return { offset: 0, width };
+	return {
+		offset:
+			placement === "deletions" ? 0 : paneWidths.old + (width - paneWidths.old - paneWidths.new),
+		width: paneWidth,
+	};
 };
 
 /**

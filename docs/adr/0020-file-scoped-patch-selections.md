@@ -40,13 +40,19 @@ the store is version 2. Readers migrate strict historical version-1 hunk/excerpt
 reinterpreting their anchors; every subsequent write emits version 2.
 
 `@revue/diff` owns the feedback-neutral `DiffSelection`: file locality, non-emptiness, stop-to-stop
-selection, membership, and first and terminal ranges. Interaction stops follow the active split or
-stacked presentation; a drag confined to one split gutter remains in that side's visible lane.
+selection, membership, and first and terminal ranges. It also owns logical presentation-row
+identity, separate from wrapping: a split row may expose old and new stops, while one stacked
+context row may retain both authorities without becoming two keyboard steps. Split vertical motion
+stays in the current pane and same-row horizontal motion changes sides only when a counterpart
+exists. A split selection that crosses sides becomes the rectangle of available old/new stops over
+the selected presentation-row span. Stacked motion and selection follow visible old-then-new rows.
+A drag confined to one split gutter remains in that side's visible lane.
+
 Persisted selections cross a separate seam: they use one layout-neutral canonical order and merge
-adjacent or overlapping ranges only when hunk and side authority also match. Selection stops come
-from original parsed hunks and never from synthesised-only context. Normal cursor movement may
-retain additions-first replacement pairing; selecting uses the complete file-local stream with both
-sides.
+adjacent or overlapping ranges whenever hunk and side authority match, even when mixed interaction
+order interleaved those ranges. Selection stops come from original parsed hunks and never from
+synthesised-only context. Ordinary cursor movement may cross expanded files; selection remains
+file-local and uses the complete original-hunk presentation stream.
 
 A click moves the cursor, an actual drag leaves a selection, and a double-click activates a one-line
 comment. Fast drags resolve their endpoints through plan order. Wrapped selection edges are paint,
@@ -55,8 +61,12 @@ not selectable continuation gutters.
 Every patch range validates independently against original hunk authority. Narration ownership is
 also evaluated per range. A patch thread whose ranges share one chapter renders inline there; one
 whose ranges cross chapters renders only on the Diff surface. Exactly one thread box mounts at the
-canonical terminal range. Persisted threads do not tint their ranges: attachment placement and count
-carry their history without obscuring key-change or intra-line styling. A live selection or composer
+canonical terminal range. Each attachment carries only a semantic placement (`full`, `deletions`, or
+`additions`): the OpenTUI adapter maps that to active split-pane geometry and falls back to full
+width when stacked or when a pane is narrower than the adapter's documented usable minimum.
+Old-only drafts and saved threads use the deletion pane, new-only ones the addition pane, and mixed
+ones full width. Persisted threads do not tint their ranges: attachment placement and count carry
+their history without obscuring key-change or intra-line styling. A live selection or composer
 continues to highlight every selected range.
 
 Supersession remaps every patch range as one transaction and normalises only after every segment

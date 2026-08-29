@@ -141,6 +141,22 @@ const KEYMAP_DEF = [
 		section: "Review",
 	},
 	{
+		id: "move-to-old-side",
+		description: "Move to the old side of the same split row",
+		keys: ["h", "left"],
+		displayKeys: ["h", "left"],
+		context: "page",
+		section: "Review",
+	},
+	{
+		id: "move-to-new-side",
+		description: "Move to the new side of the same split row",
+		keys: ["l", "right"],
+		displayKeys: ["l", "right"],
+		context: "page",
+		section: "Review",
+	},
+	{
 		id: "select-lines",
 		description: "Select lines from the review line cursor",
 		keys: ["v"],
@@ -443,6 +459,7 @@ export const matchKeymapAction = (
 const KEY_LABELS: Record<string, string> = {
 	up: "↑",
 	down: "↓",
+	left: "←",
 	right: "→",
 	pageup: "PgUp",
 	pagedown: "PgDn",
@@ -656,6 +673,7 @@ const actionKeys = (ids: readonly KeymapActionId[], keymap: readonly KeymapActio
 export const reviewFooterHints = (
 	state: ReviewHintState,
 	keymap: readonly KeymapAction[] = KEYMAP,
+	layout: "split" | "stack" = "stack",
 ): { keys: string; label: string }[] => {
 	if (state === "composer") {
 		return [
@@ -664,11 +682,14 @@ export const reviewFooterHints = (
 		];
 	}
 	const movement = actionKeys(["next-source-line", "previous-source-line"], keymap);
+	const side =
+		layout === "split" ? actionKeys(["move-to-old-side", "move-to-new-side"], keymap) : "";
 	const comment = actionKeys(["toggle-file-diff"], keymap);
 	const edit = actionKeys(["open-editor"], keymap);
 	if (state === "selecting" || state === "selected") {
 		return [
 			{ keys: movement, label: state === "selecting" ? "extend" : "move" },
+			...(state === "selecting" && side ? [{ keys: side, label: "cross side" }] : []),
 			{ keys: comment, label: "comment" },
 			{ keys: edit, label: "edit" },
 			{ keys: "Esc", label: "cancel" },
@@ -677,6 +698,7 @@ export const reviewFooterHints = (
 	const select = actionKeys(["select-lines"], keymap);
 	return [
 		{ keys: movement, label: "move" },
+		...(side ? [{ keys: side, label: "side" }] : []),
 		{ keys: select, label: "select" },
 		{ keys: comment, label: "comment" },
 		{ keys: edit, label: "edit" },

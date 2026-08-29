@@ -31,11 +31,12 @@ import {
 	terminalSelectionRange,
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
 	attachmentsForExcerptLine,
 	attachmentsForRow,
 	type DiffInlineAttachment,
+	inlineAttachmentGeometry,
 } from "./attachments.ts";
 import { decorationAnchorId } from "./ids.ts";
 import { diffLineId, parseDiffLineId } from "./selectionIds.ts";
@@ -801,6 +802,49 @@ function ExpanderBand({
 	);
 }
 
+const ResolvedInlineAttachmentPlacementContext = createContext<"full" | "deletions" | "additions">(
+	"full",
+);
+
+/** Actual placement after layout and minimum-width fallback, for attachment-owned inner chrome. */
+export const useResolvedInlineAttachmentPlacement = () =>
+	useContext(ResolvedInlineAttachmentPlacementContext);
+
+function InlineAttachmentRow({
+	attachment,
+	plan,
+	onAttachmentNode,
+}: {
+	attachment: DiffInlineAttachment;
+	plan: DiffVisualPlan;
+	onAttachmentNode?: (id: string, node: { height: number } | null) => void;
+}) {
+	const requested = attachment.placement ?? "full";
+	const placement = inlineAttachmentGeometry({
+		placement: requested,
+		layout: plan.layout,
+		width: plan.width,
+		paneWidths: plan.paneWidths,
+	});
+	const resolved = placement.offset === 0 && placement.width === plan.width ? "full" : requested;
+	return (
+		<ResolvedInlineAttachmentPlacementContext.Provider value={resolved}>
+			<box width="100%" flexDirection="row">
+				{placement.offset > 0 ? <box width={placement.offset} flexShrink={0} /> : null}
+				<box
+					id={attachment.id}
+					width={placement.width}
+					flexShrink={0}
+					flexDirection="column"
+					ref={(node) => onAttachmentNode?.(attachment.id, node)}
+				>
+					{attachment.content}
+				</box>
+			</box>
+		</ResolvedInlineAttachmentPlacementContext.Provider>
+	);
+}
+
 function emptyBodyMessage(file: DiffFile): string {
 	if (file.isTooLarge) return "Diff too large to display.";
 	if (file.isBinary) return "Binary file differs.";
@@ -1046,15 +1090,12 @@ export function DiffBody(props: DiffBodyProps) {
 					<box key={row.key} flexDirection="column" width="100%">
 						{body}
 						{attachments.map((attachment) => (
-							<box
+							<InlineAttachmentRow
 								key={attachment.id}
-								id={attachment.id}
-								width="100%"
-								flexDirection="column"
-								ref={(node) => onAttachmentNode?.(attachment.id, node)}
-							>
-								{attachment.content}
-							</box>
+								attachment={attachment}
+								plan={geometry}
+								onAttachmentNode={onAttachmentNode}
+							/>
 						))}
 					</box>
 				);

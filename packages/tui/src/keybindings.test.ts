@@ -15,6 +15,7 @@ import {
 	type KeymapAction,
 	keymapGroups,
 	matchKeymapAction,
+	reviewFooterHints,
 	searchKeymap,
 } from "./keymap.ts";
 
@@ -374,6 +375,57 @@ test("the filter matches keys, descriptions and ids, and ranks what fires here f
 		"cycle-path-display",
 	]);
 	expect(searchKeymap("page", "no-such-thing")).toEqual([]);
+});
+
+test("horizontal review motion is registry-owned and discoverable", () => {
+	const oldWithH = matchKeymapAction("page", { name: "h" });
+	const oldWithArrow = matchKeymapAction("page", { name: "left" });
+	const newWithL = matchKeymapAction("page", { name: "l" });
+	const newWithArrow = matchKeymapAction("page", { name: "right" });
+
+	expect(oldWithH).toBeDefined();
+	expect(oldWithArrow).toBe(oldWithH);
+	expect(newWithL).toBeDefined();
+	expect(newWithArrow).toBe(newWithL);
+	expect(newWithL).not.toBe(oldWithH);
+
+	const reviewRows = keymapGroups("page")
+		.filter((group) => group.scope === "here" && group.title === "Review")
+		.flatMap((group) => group.rows);
+	for (const id of [oldWithH, newWithL]) {
+		expect(reviewRows.find((row) => row.id === id)?.description.toLowerCase()).toContain("side");
+	}
+});
+
+test("horizontal overrides stay page-scoped and report genuine conflicts", () => {
+	const { keymap, issues } = mergeKeymap(KEYMAP, {
+		"move-to-old-side": ["z", "left"],
+		"move-to-new-side": "z",
+	});
+	expect(issues).toEqual([
+		{
+			entry: "move-to-new-side",
+			reason: '"z" already bound to another action in this context',
+		},
+	]);
+	expect(matchKeymapAction("page", { name: "z" }, keymap)).toBe("move-to-old-side");
+	// Comments keeps its established l/right jump aliases even though page motion owns them elsewhere.
+	expect(matchKeymapAction("comments", { name: "l" }, keymap)).toBe("jump-to-thread");
+	expect(matchKeymapAction("comments", { name: "right" }, keymap)).toBe("jump-to-thread");
+});
+
+test("side status hints are state-aware and split-only", () => {
+	expect(reviewFooterHints("cursor", KEYMAP, "split")).toContainEqual({
+		keys: "h/l",
+		label: "side",
+	});
+	expect(reviewFooterHints("selecting", KEYMAP, "split")).toContainEqual({
+		keys: "h/l",
+		label: "cross side",
+	});
+	expect(reviewFooterHints("cursor", KEYMAP, "stack").map((hint) => hint.label)).not.toContain(
+		"side",
+	);
 });
 
 test("the footer names each surface's own keys, and follows a rebind", () => {

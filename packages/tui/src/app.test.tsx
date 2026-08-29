@@ -1349,13 +1349,13 @@ test("inline threads show authors and compose new roots and replies", async () =
 	await click(t, gutterX, lineY);
 	await press(t, "RETURN");
 	const composerFrame = t.captureCharFrame();
-	expect(composerFrame).toContain("New review thread");
+	expect(composerFrame).toContain("Comment on new lines");
 	expect(composerFrame).not.toContain("review unit oldStart");
 	const composerLines = composerFrame.split("\n");
 	const existingThreadActionsY = composerLines.findIndex((line) =>
 		line.includes("[Delete thread]"),
 	);
-	const composerY = composerLines.findIndex((line) => line.includes("New review thread"));
+	const composerY = composerLines.findIndex((line) => line.includes("Comment on new lines"));
 	expect(composerLines[existingThreadActionsY + 1]).toContain("└");
 	expect(composerY).toBe(existingThreadActionsY + 3);
 
@@ -1366,7 +1366,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 	);
 	let collapseX = draftFrameLines[fileHeaderY]?.indexOf("▼") ?? -1;
 	await click(t, collapseX, fileHeaderY);
-	expect(t.captureCharFrame()).not.toContain("New review thread");
+	expect(t.captureCharFrame()).not.toContain("Comment on new lines");
 	draftFrameLines = t.captureCharFrame().split("\n");
 	fileHeaderY = draftFrameLines.findIndex(
 		(line) => line.includes("thread.ts") && line.includes("▶"),
@@ -1887,7 +1887,7 @@ test("an uncommitted side reports why it has no link rather than handing over a 
 		await t.renderOnce();
 	});
 	expect(copied).toEqual([]);
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
 });
 
 test("an open thread copies the range it is anchored to without losing the draft", async () => {
@@ -1911,7 +1911,7 @@ test("an open thread copies the range it is anchored to without losing the draft
 	const gutter = backoffGutter(t);
 	await click(t, gutter.x, gutter.y);
 	await press(t, "RETURN");
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
 
 	await act(async () => t.mockInput.typeText("Needs a cap"));
 	await act(async () => {
@@ -3253,6 +3253,301 @@ test("following the banner opens the superseding run on its epilogue", async () 
 	expect(t.captureCharFrame()).toContain("Changes since your review");
 });
 
+const paneChapters = RevueChaptersFileSchema.parse({
+	chapters: [
+		{
+			id: "pane-motion",
+			order: 1,
+			title: "Move within diff panes",
+			summary: "Each side is a vertical review lane.",
+			hunkRefs: [
+				{ filePath: "a.ts", oldStart: 1 },
+				{ filePath: "b.ts", oldStart: 1 },
+			],
+			keyChanges: [],
+		},
+	],
+});
+
+const paneDiff = parsePatch(`diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1,2 +1,3 @@
+-old paired a
++new paired a
+ keep a
++new only a
+diff --git a/b.ts b/b.ts
+--- a/b.ts
++++ b/b.ts
+@@ -1,2 +1,2 @@
+-old paired b
++new paired b
+ keep b
+`);
+
+const cursorSide = (
+	t: Awaited<ReturnType<typeof testRender>>,
+	needle: string,
+): "old" | "new" | "none" => {
+	const row =
+		t
+			.captureCharFrame()
+			.split("\n")
+			.find((line) => line.includes(needle)) ?? "";
+	const marker = row.indexOf("▌");
+	const divider = row.indexOf("│");
+	if (marker < 0 || divider < 0) return "none";
+	return marker < divider ? "old" : "new";
+};
+
+test("split cursor crosses paired rows horizontally and moves vertically within its side", async () => {
+	const t = await testRender(
+		<App
+			file={paneChapters}
+			diffFiles={paneDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "split" }}
+		/>,
+		{ width: 120, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+
+	expect(cursorSide(t, "new paired a")).toBe("new");
+	await press(t, "h");
+	expect(cursorSide(t, "old paired a")).toBe("old");
+	await arrow(t, "right");
+	expect(cursorSide(t, "new paired a")).toBe("new");
+
+	await press(t, "j");
+	expect(cursorSide(t, "new only a")).toBe("new");
+	await arrow(t, "left");
+	expect(cursorSide(t, "new only a")).toBe("new");
+
+	await press(t, "k");
+	await press(t, "h");
+	await press(t, "j");
+	expect(cursorSide(t, "old paired b")).toBe("old");
+	expect(statusLine(t)).toContain("h/l side");
+});
+
+test("stacked cursor follows visible old-then-new rows and ignores horizontal motion", async () => {
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "stacked" }}
+		/>,
+		{ width: 110, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+	const oldOne = gutterFor(t, "retry(one)", "1");
+	await click(t, oldOne.x, oldOne.y);
+
+	await press(t, "h");
+	await arrow(t, "right");
+	expect(visibleRow(t, "retry(one)")).toContain("▌");
+	await press(t, "j");
+	expect(visibleRow(t, "retry(two)")).toContain("▌");
+	await press(t, "j");
+	expect(visibleRow(t, "retry(three)")).toContain("▌");
+	await press(t, "j");
+	expect(visibleRow(t, "retry(alpha)")).toContain("▌");
+	expect(statusLine(t)).not.toContain("h/l");
+});
+
+test("split keyboard selection extends in-pane, crosses sides, and creates the exact patch anchor", async () => {
+	const created: ThreadAnchor[] = [];
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "split" }}
+			threadActions={recordingThreadActions(created)}
+		/>,
+		{ width: 120, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+
+	await press(t, "v");
+	await press(t, "j");
+	expect(cursorSide(t, "retry(beta)")).toBe("new");
+	expect(statusLine(t)).toContain("h/l cross side");
+	await press(t, "h");
+	expect(cursorSide(t, "retry(two)")).toBe("old");
+	await press(t, "RETURN");
+	expect(t.captureCharFrame()).toContain("Comment on old + new lines");
+	expect(composerBorderColumns(t.captureCharFrame())).toEqual({ start: 1, end: 116 });
+	await act(async () => t.mockInput.typeText("Keep both sides together"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await settle(t);
+
+	expect(created).toHaveLength(1);
+	if (!created[0] || !isPatchAnchor(created[0])) throw new Error("missing patch anchor");
+	expect([...created[0].ranges]).toEqual([
+		{ oldStart: 1, side: "deletions", startLine: 1, endLine: 2 },
+		{ oldStart: 1, side: "additions", startLine: 1, endLine: 2 },
+	]);
+});
+
+const placementThread = ({
+	id,
+	anchor,
+	body,
+}: {
+	id: string;
+	anchor: ThreadAnchor;
+	body: string;
+}) =>
+	createThread(WATCHED_RUN, anchor, HUMAN, body, {
+		id,
+		messageId: `${id.slice(0, 24)}4${id.slice(25)}`,
+		createdAt: "2026-08-22T10:00:00.000Z",
+	});
+
+const borderColumns = (frame: string, needle: string) => {
+	const border = frame.split("\n").find((line) => line.includes(needle));
+	if (!border) throw new Error(`missing border for ${needle}`);
+	return { start: border.indexOf("┌"), end: border.lastIndexOf("┐") };
+};
+
+const composerBorderColumns = (frame: string) => {
+	const lines = frame.split("\n");
+	const title = lines.findIndex(
+		(line) => line.includes("Comment on ") || line.includes("New review thread"),
+	);
+	const border = lines[title - 1] ?? "";
+	return { start: border.indexOf("┌"), end: border.lastIndexOf("┐") };
+};
+
+test("saved split threads occupy their authoritative pane or span both sides", async () => {
+	const oldThread = placementThread({
+		id: "11111111-1111-4111-8111-111111111111",
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.HUNK,
+			filePath: "retry.ts",
+			oldStart: 1,
+			side: "deletions",
+			startLine: 1,
+			endLine: 1,
+		},
+		body: "old pane thread",
+	});
+	const newThread = placementThread({
+		id: "22222222-2222-4222-8222-222222222222",
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.HUNK,
+			filePath: "retry.ts",
+			oldStart: 1,
+			side: "additions",
+			startLine: 2,
+			endLine: 2,
+		},
+		body: "new pane thread",
+	});
+	const mixedThread = placementThread({
+		id: "33333333-3333-4333-8333-333333333333",
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.PATCH,
+			filePath: "retry.ts",
+			ranges: [
+				{ oldStart: 1, side: "deletions", startLine: 3, endLine: 3 },
+				{ oldStart: 1, side: "additions", startLine: 3, endLine: 3 },
+			],
+		},
+		body: "mixed pane thread",
+	});
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[oldThread, newThread, mixedThread]}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "split" }}
+		/>,
+		{ width: 120, height: 40, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+	const source = visibleRow(t, "retry(alpha)");
+	const divider = source.indexOf("│");
+	expect(divider).toBeGreaterThan(1);
+	const fullWidth = borderColumns(t.captureCharFrame(), "33333333");
+	expect(borderColumns(t.captureCharFrame(), "11111111")).toEqual({ start: 3, end: divider - 4 });
+	expect(borderColumns(t.captureCharFrame(), "22222222")).toEqual({
+		start: divider + 3,
+		end: fullWidth.end,
+	});
+	expect(fullWidth).toEqual({ start: 3, end: 115 });
+
+	const stacked = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[oldThread]}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "stacked" }}
+		/>,
+		{ width: 120, height: 34, kittyKeyboard: true },
+	);
+	await stacked.renderOnce();
+	await settle(stacked);
+	expect(borderColumns(stacked.captureCharFrame(), "11111111")).toEqual({ start: 3, end: 115 });
+});
+
+test("a split draft uses the selected pane instead of a full-width composer", async () => {
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "split" }}
+		/>,
+		{ width: 120, height: 34, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await settle(t);
+	await press(t, "RETURN");
+	const frame = t.captureCharFrame();
+	const divider = visibleRow(t, "retry(alpha)").indexOf("│");
+	expect(composerBorderColumns(frame)).toEqual({ start: divider + 1, end: 116 });
+});
+
+test("composer titles name anchor sides and pane placement falls back when split is unusable", async () => {
+	const renderDraft = async (width: number, layout: "split" | "stacked", side: "old" | "new") => {
+		const t = await testRender(
+			<App
+				file={watchedChapters}
+				diffFiles={watchedDiff}
+				initialPreferences={{ sidebarPreference: "hidden", diffPreference: layout }}
+			/>,
+			{ width, height: 34, kittyKeyboard: true },
+		);
+		await t.renderOnce();
+		await settle(t);
+		if (side === "old") {
+			const gutter = gutterFor(t, "retry(one)", "1");
+			await click(t, gutter.x, gutter.y);
+		}
+		await press(t, "RETURN");
+		await settle(t);
+		return t;
+	};
+
+	const old = await renderDraft(120, "split", "old");
+	expect(old.captureCharFrame()).toContain("Comment on old lines");
+	expect(composerBorderColumns(old.captureCharFrame())).toEqual({ start: 1, end: 57 });
+
+	const current = await renderDraft(120, "split", "new");
+	expect(current.captureCharFrame()).toContain("Comment on new lines");
+	expect(composerBorderColumns(current.captureCharFrame())).toEqual({ start: 59, end: 116 });
+
+	const stacked = await renderDraft(120, "stacked", "old");
+	expect(composerBorderColumns(stacked.captureCharFrame())).toEqual({ start: 1, end: 116 });
+
+	const narrow = await renderDraft(50, "split", "new");
+	expect(composerBorderColumns(narrow.captureCharFrame())).toEqual({ start: 1, end: 46 });
+});
+
 test("j and k move the visible review line while arrows only scroll narrative and Diff", async () => {
 	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
 		width: 110,
@@ -3368,16 +3663,16 @@ test("v selects and extends an exact keyboard range for the inline composer", as
 	await press(t, "v");
 	await press(t, "j");
 	await press(t, "ESCAPE");
-	expect(t.captureCharFrame()).not.toContain("New review thread");
+	expect(t.captureCharFrame()).not.toContain("Comment on new lines");
 
 	await press(t, "v");
 	await press(t, "j");
 	await act(async () => t.mockInput.pressEnter());
 	await act(async () => t.renderOnce());
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
-	expect(copied).toEqual(["retry.ts:2 (old)\nretry.ts:2 (new)"]);
+	expect(copied).toEqual(["retry.ts:2-3"]);
 });
 
 test("hiding selected patch source clears its action before Enter", async () => {
@@ -3496,7 +3791,7 @@ test("cursor and selection reset when consecutive chapters reuse a path for diff
 	await press(t, "v");
 	await act(async () => t.mockInput.pressEnter());
 	await act(async () => t.renderOnce());
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
 
@@ -3525,7 +3820,7 @@ test("e requests the cursor or selected range from the injected editor boundary"
 	await press(t, "e");
 	expect(requested).toMatchObject([
 		{ startLine: 1, endLine: 1, side: "additions" },
-		{ startLine: 1, endLine: 1, side: "additions" },
+		{ startLine: 1, endLine: 2, side: "additions" },
 	]);
 });
 
@@ -3655,7 +3950,7 @@ test("j/k forms one revealed review-line stream across expanded files in a chapt
 	await press(t, "e");
 	expect(editorRanges.at(-1)).toMatchObject({ filePath: "b.ts", startLine: 1 });
 	await press(t, "RETURN");
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
 	expect(copied).toEqual(["b.ts:1"]);
@@ -3681,7 +3976,7 @@ test("Enter comments on the ordinary one-line cursor without first pressing v", 
 	await settle(t);
 
 	await press(t, "RETURN");
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await act(async () => t.renderOnce());
 	expect(copied).toEqual(["retry.ts:1"]);
@@ -3700,19 +3995,19 @@ test("gutter click, drag, and double-click have distinct pointer semantics", asy
 
 	await click(t, beta.x, beta.y);
 	expect(visibleRow(t, "retry(beta)")).toContain("▌");
-	expect(t.captureCharFrame()).not.toContain("New review thread");
+	expect(t.captureCharFrame()).not.toContain("Comment on new lines");
 
 	await act(async () => t.mockMouse.drag(alpha.x, alpha.y, beta.x, beta.y));
 	await act(async () => t.renderOnce());
 	const selectedTint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
 	expect(rowBackground(t, "retry(alpha)")).toBe(selectedTint);
 	expect(rowBackground(t, "retry(beta)")).toBe(selectedTint);
-	expect(t.captureCharFrame()).not.toContain("New review thread");
+	expect(t.captureCharFrame()).not.toContain("Comment on new lines");
 
 	await press(t, "ESCAPE");
 	await act(async () => t.mockMouse.doubleClick(alpha.x, alpha.y));
 	await act(async () => t.renderOnce());
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on new lines");
 });
 
 const multiRangeChapters = RevueChaptersFileSchema.parse({
@@ -3797,7 +4092,7 @@ test("one file-scoped selection spans diff sides and separate hunks before comme
 
 	await act(async () => t.mockMouse.drag(first.x, first.y, last.x, last.y));
 	await act(async () => t.renderOnce());
-	expect(t.captureCharFrame()).not.toContain("New review thread");
+	expect(t.captureCharFrame()).not.toContain("Comment on old + new lines");
 	const selectedTint = RGBA.fromHex(resolveTheme(undefined).selectedHunk).toString();
 	for (const [row, fragment] of [
 		["old first", "old"],
@@ -3809,18 +4104,13 @@ test("one file-scoped selection spans diff sides and separate hunks before comme
 	}
 
 	await press(t, "RETURN");
-	expect(t.captureCharFrame()).toContain("New review thread");
+	expect(t.captureCharFrame()).toContain("Comment on old + new lines");
 	await act(async () => t.mockInput.pressKey("y", { ctrl: true }));
 	await t.renderOnce();
 	expect(copied).toEqual([
-		[
-			"multi.ts:1 (old)",
-			"multi.ts:1 (new)",
-			"multi.ts:2 (old)",
-			"multi.ts:2 (new)",
-			"multi.ts:10 (old)",
-			"multi.ts:10 (new)",
-		].join("\n"),
+		["multi.ts:1-2 (old)", "multi.ts:1-2 (new)", "multi.ts:10 (old)", "multi.ts:10 (new)"].join(
+			"\n",
+		),
 	]);
 	await act(async () => t.mockInput.typeText("Treat these changes as one concern"));
 	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
@@ -3830,10 +4120,8 @@ test("one file-scoped selection spans diff sides and separate hunks before comme
 			kind: THREAD_ANCHOR_KIND.PATCH,
 			filePath: "multi.ts",
 			ranges: [
-				{ oldStart: 1, side: "deletions", startLine: 1, endLine: 1 },
-				{ oldStart: 1, side: "additions", startLine: 1, endLine: 1 },
-				{ oldStart: 1, side: "deletions", startLine: 2, endLine: 2 },
-				{ oldStart: 1, side: "additions", startLine: 2, endLine: 2 },
+				{ oldStart: 1, side: "deletions", startLine: 1, endLine: 2 },
+				{ oldStart: 1, side: "additions", startLine: 1, endLine: 2 },
 				{ oldStart: 10, side: "deletions", startLine: 10, endLine: 10 },
 				{ oldStart: 10, side: "additions", startLine: 10, endLine: 10 },
 			],
@@ -3867,10 +4155,7 @@ const recordingThreadActions = (created: ThreadAnchor[]) => ({
 for (const scenario of [
 	{
 		layout: "split" as const,
-		expected: [
-			{ oldStart: 1, side: "additions" as const, startLine: 1, endLine: 1 },
-			{ oldStart: 1, side: "deletions" as const, startLine: 2, endLine: 2 },
-		],
+		expected: [{ oldStart: 1, side: "additions" as const, startLine: 1, endLine: 2 }],
 	},
 	{
 		layout: "stacked" as const,

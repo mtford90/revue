@@ -143,18 +143,25 @@ misinforms and source does not.
 
 A **thread** is the official feedback concept. In Patch view, the explicit source-line cursor starts
 on the first additions-side review line in the focused file (or the first deletion when the file has
-no additions). `j`/`k` walk one continuous stream across expanded text files in the current chapter,
-changing the focused file and revealing the cursor at boundaries. `v` enters selection mode;
-`j`/`k` then extend through both sides and separate original hunks, but never into another file.
-`Enter` comments on either the ordinary one-line cursor or the selection, and `Escape` cancels a
-selection. A gutter click moves the cursor, an actual drag leaves a selection, and a double-click
-opens a one-line comment. Split and stacked selection follow their visible row order; a drag kept in
-the additions gutter of a split diff does not collect deletion-side rows. Quoted excerpts preserve
-their separate anchor authority while using coherent gestures: click selects one quoted line, drag
-extends the quoted range, and double-click comments on that excerpt line. Dragging source code
-instead highlights text for copying.
-The composer opens beneath the range; use `Ctrl+Enter` or its pointer control to save and `Escape` to
-cancel. Any number of independent threads may share an exact anchor.
+no additions). In split layout, `j`/`k` move vertically in the current old/new pane; they cross
+expanded file boundaries retaining that side where the destination has it. `h`/`l` and Left/Right
+switch to the old/new side of the same presentation row, and do nothing when that counterpart is
+missing. In stacked layout, `j`/`k` follow visible old-then-new source rows and horizontal motion is
+inert. `v` enters selection mode. Split vertical motion then stays in-pane; crossing sides makes a
+mixed rectangle over both panes for the selected visual-row span. Stacked selection follows visible
+original-hunk order, counting a context row once even though it has old and new line identities.
+Selection never enters another file. `Enter` comments on either the ordinary one-line cursor or the
+selection, and `Escape` cancels a selection. A gutter click moves the cursor, an actual drag leaves a
+selection, and a double-click opens a one-line comment; a drag kept in one split gutter stays in that
+lane. Quoted excerpts preserve their separate anchor authority. Dragging source code instead
+highlights text for copying.
+
+The composer opens beneath the terminal range and names its authority: `Comment on old lines`,
+`Comment on new lines`, or `Comment on old + new lines`. In split layout an old-only composer sits in
+the left pane, a new-only composer in the right, and a mixed composer spans both; stacked always uses
+the full width, as does a forced split whose pane is too narrow for a usable composer. Saved threads
+follow the same placement rule. Use `Ctrl+Enter` or the pointer control to save and `Escape` to cancel.
+Any number of independent threads may share an exact anchor.
 
 Every root message and reply records an author kind (`human` or `agent`) and display name. Human TUI
 messages use the reviewed repository's `git config user.name`, falling back to the system login.
@@ -366,8 +373,10 @@ chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused 
 the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking chapter, file, or key-
 change content navigates without changing review state—only its checkbox toggles it.
 
-Most actions answer to several keys. `j`/`k` move the source-line cursor; `v` begins or extends a
-line range, `Enter` comments on that range, and `Escape` cancels it. `↑`/`↓` scroll exactly one
+Most actions answer to several keys. `j`/`k` move the source-line cursor vertically; in split,
+`h`/`l` or `←`/`→` move to the old/new side of the same row, while stacked ignores horizontal
+motion. `v` begins or extends a line range, `Enter` comments on that range, and `Escape` cancels it.
+`↑`/`↓` scroll exactly one
 visual row without moving the cursor (`Ctrl-n`/`Ctrl-p` and `Ctrl-e`/`Ctrl-k` are aliases) · `d`/`u`
 or `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
 scroll by page · `g`/`G`, `Home`/`End`, or `<`/`>` jump to the top/bottom · `[`/`]` move between

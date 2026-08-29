@@ -135,21 +135,24 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Coverage** — every prepared review unit must appear in exactly one chapter: no omissions, no
   duplicates. `revue show --check` reports the narrated count for every run.
 - **Selection** — a feedback-neutral, non-empty list of side-aware ranges in one file. Normal
-  `j`/`k` walks reviewable lines continuously across expanded text files in the current chapter;
-  `v` enters selection mode and `j`/`k` then use the complete original-hunk stream in the active
-  split or stacked presentation order, crossing sides and hunks but stopping at the file. A click
-  moves the cursor, a drag selects, and a double-click activates a one-line comment. Excerpts keep
-  their own anchor authority: a click leaves a quoted-line selection, a drag extends it, and a
-  double-click comments on that excerpt line. Interaction order and canonical persisted order are
-  separate `@revue/diff` contracts, independent of wrapping, mounting, and threads. Editor-open
-  uses the first additions-side range or refuses; location copy emits every range; a GitHub link
-  requires exactly one normalised range.
+  `j`/`k` walks reviewable lines continuously across expanded text files in the current chapter:
+  split movement stays in the current old/new pane (retaining it across files when possible), while
+  stacked movement follows visible old-then-new source-row order. In split, `h`/`l` or Left/Right
+  switches sides only on the same presentation row; stacked horizontal motion is inert. `v` enters
+  selection mode: split vertical motion stays in-pane and crossing sides makes a mixed rectangle
+  over both panes for the selected row span, while stacked follows visible original-hunk rows and
+  counts a dual-authority context row once. A click moves the cursor, a drag selects, and a
+  double-click activates a one-line comment. Excerpts keep their own anchor authority. Interaction
+  row order and canonical persisted order are separate `@revue/diff` contracts, independent of
+  wrapping, mounting, and threads. Editor-open uses the first additions-side range or refuses;
+  location copy emits every canonical range; a GitHub link requires exactly one normalised range.
 - **Keybindings** — every shortcut derives from one typed keymap registry (handler, keys surface,
   status and menu hints, and CLI all read it). Reviewers override actions via hand-edited JSONC at
   `~/.revue/keybindings.json`; escape and digits are reserved, and validation drops just the broken
-  entry with a surfaced warning. Navigation separates source motion (`j`/`k`) from visual-row
-  scrolling (arrows), file motion (`J`/`K`, Tab variants), and chapter motion (`[`/`]`);
-  `revue keybindings` prints the effective map, including aliases the keys surface holds back.
+  entry with a surfaced warning. Navigation separates vertical source motion (`j`/`k`) from split
+  old/new side motion (`h`/`l`, Left/Right), visual-row scrolling (Up/Down), file motion (`J`/`K`,
+  Tab variants), and chapter motion (`[`/`]`); `revue keybindings` prints the effective map,
+  including aliases the keys surface holds back.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes

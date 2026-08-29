@@ -1843,6 +1843,9 @@ const sendNotice = (outcome: SendOutcome): StatusNotice => {
 	if (outcome.kind === "error") return { text: outcome.message, tone: "error" };
 	if (outcome.kind === "nothing") return { text: "Nothing to send", tone: "success" };
 	const threads = `${outcome.count} thread${outcome.count === 1 ? "" : "s"}`;
+	if (outcome.kind === "copied") {
+		return { text: `Queued for polling — prompt copied (${threads})`, tone: "success" };
+	}
 	return { text: `Queued for polling (${threads})`, tone: "success" };
 };
 const SELECTION_FLASH_MS = 150;
@@ -3236,7 +3239,9 @@ export function App({
 		onReload?.();
 	}
 	async function sendFeedback() {
-		const outcome = (await feedback?.send()) ?? { kind: "nothing" as const };
+		const outcome = (await feedback?.send((text) => copyToClipboard(renderer, text))) ?? {
+			kind: "nothing" as const,
+		};
 		setMountNotice(sendNotice(outcome));
 	}
 

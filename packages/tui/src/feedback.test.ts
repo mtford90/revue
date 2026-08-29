@@ -10,7 +10,7 @@ import {
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
 } from "@revue/types";
-import { createFeedbackController } from "./feedback.ts";
+import { createFeedbackController, WAKE_UP_PROMPT } from "./feedback.ts";
 import { createThread, createThreadMessage } from "./threads.ts";
 
 const runId = "c".repeat(64);
@@ -115,6 +115,52 @@ test("a damaged handoff sends the whole conversation again rather than nothing",
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+test("a successful copy rewrites the record as copied and reports copied", async () => {
+	const root = await scratchRepository();
+	try {
+		const threads = [thread(1, 0), thread(2, 1)];
+		const copyPrompt = (text: string) => {
+			expect(text).toBe(WAKE_UP_PROMPT);
+			return true;
+		};
+
+		const outcome = await controllerFor(root, threads).send(copyPrompt);
+		expect(outcome).toEqual({ kind: "copied", count: 2 });
+		expect(readHandoff(root).record).toMatchObject({ delivery: { kind: "copied" } });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a copy that reports failure leaves the record queued", async () => {
+	const root = await scratchRepository();
+	try {
+		const outcome = await controllerFor(root, [thread(1, 0)]).send(() => false);
+		expect(outcome).toEqual({ kind: "queued", count: 1 });
+		expect(readHandoff(root).record).toMatchObject({ delivery: { kind: "queued" } });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a copy that throws leaves the record queued", async () => {
+	const root = await scratchRepository();
+	try {
+		const outcome = await controllerFor(root, [thread(1, 0)]).send(() => {
+			throw new Error("no clipboard channel");
+		});
+		expect(outcome).toEqual({ kind: "queued", count: 1 });
+		expect(readHandoff(root).record).toMatchObject({ delivery: { kind: "queued" } });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("the prompt carries no thread content", () => {
+	expect(WAKE_UP_PROMPT).not.toContain("Line ");
+	expect(WAKE_UP_PROMPT).toContain("revue status --json");
 });
 
 test("a record that cannot be written is reported, and no partial handoff is left", async () => {

@@ -4603,3 +4603,14 @@ test("Send says when there is nothing to send and reports a record it could not 
 	await press(failed, "S");
 	expect(statusLine(failed)).toContain("Could not write the handoff");
 });
+
+test("Send reports a copied prompt outside a host", async () => {
+	const feedback = fakeFeedback({ kind: "copied", count: 2 });
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+	await press(t, "S");
+	expect(statusLine(t)).toContain("Queued for polling — prompt copied (2 threads)");
+});

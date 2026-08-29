@@ -1,6 +1,6 @@
 # 07 — Clipboard fallback outside a host
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -15,10 +15,10 @@ by hand. When the copy reports failure the record stays `queued` and the notice 
 
 ## Acceptance criteria
 
-- [ ] Without a host, Send writes `copied` and the clipboard holds the prompt
-- [ ] A failed copy leaves `queued` with the queued notice
-- [ ] The prompt carries no thread content
-- [ ] Controller tests use a fake clipboard
+- [x] Without a host, Send writes `copied` and the clipboard holds the prompt
+- [x] A failed copy leaves `queued` with the queued notice
+- [x] The prompt carries no thread content
+- [x] Controller tests use a fake clipboard
 
 ## Blocked by
 

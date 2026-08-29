@@ -21,6 +21,7 @@ import { act } from "react";
 import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
 import { App, type ReviewUpdate } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
+import type { FeedbackController, SendOutcome } from "./feedback.ts";
 import { mergeKeymap } from "./keybindings.ts";
 import { KEYMAP } from "./keymap.ts";
 import { defaultPanelWidth } from "./layout.ts";
@@ -4531,4 +4532,74 @@ test("status hints describe cursor, selecting, and composer actions", async () =
 	for (const hint of ["Ctrl-Enter save", "Esc cancel"]) {
 		expect(statusLine(t)).toContain(hint);
 	}
+});
+
+const fakeFeedback = (...outcomes: SendOutcome[]) => {
+	let sends = 0;
+	const controller: FeedbackController = {
+		send: async () => {
+			sends += 1;
+			return outcomes[sends - 1] ?? { kind: "nothing" };
+		},
+	};
+	return { controller, sends: () => sends };
+};
+
+test("S sends from the page and from Comments, and leaves s toggling the sidebar", async () => {
+	const feedback = fakeFeedback({ kind: "queued", count: 2 }, { kind: "queued", count: 1 });
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+	expect(t.captureCharFrame()).toContain("Chapters (3)");
+
+	await press(t, "s");
+	expect(t.captureCharFrame()).not.toContain("Chapters (3)"); // the sidebar, not a send
+	expect(feedback.sends()).toBe(0);
+
+	await press(t, "S");
+	expect(feedback.sends()).toBe(1);
+	expect(statusLine(t)).toContain("Queued for polling (2 threads)");
+
+	await press(t, "o"); // the Comments surface, where Send must still reach the agent
+	await press(t, "S");
+	expect(feedback.sends()).toBe(2);
+	expect(statusLine(t)).toContain("Queued for polling (1 thread)");
+});
+
+test("the File menu sends the same feedback as the key", async () => {
+	const feedback = fakeFeedback({ kind: "queued", count: 3 });
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+
+	await press(t, "F10");
+	expect(t.captureCharFrame()).toContain("Send feedback to agent");
+	await press(t, "RETURN");
+
+	expect(feedback.sends()).toBe(1);
+	expect(statusLine(t)).toContain("Queued for polling (3 threads)");
+});
+
+test("Send says when there is nothing to send and reports a record it could not write", async () => {
+	const quiet = fakeFeedback({ kind: "nothing" });
+	const t = await testRender(<App file={file} feedback={quiet.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+	await press(t, "S");
+	expect(statusLine(t)).toContain("Nothing to send");
+
+	const failing = fakeFeedback({ kind: "error", message: "Could not write the handoff" });
+	const failed = await testRender(<App file={file} feedback={failing.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await failed.renderOnce();
+	await press(failed, "S");
+	expect(statusLine(failed)).toContain("Could not write the handoff");
 });

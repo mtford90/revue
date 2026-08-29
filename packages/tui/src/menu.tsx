@@ -115,6 +115,7 @@ export const buildAppMenus = ({
 	setChangeMarkers,
 	requestQuit,
 	requestReload,
+	requestSendFeedback,
 	movePrevious,
 	moveNext,
 	moveNextUnreviewed,
@@ -150,6 +151,7 @@ export const buildAppMenus = ({
 	setChangeMarkers: (visible: boolean) => void;
 	requestQuit: () => void;
 	requestReload: () => void;
+	requestSendFeedback: () => void;
 	movePrevious: () => void;
 	moveNext: () => void;
 	moveNextUnreviewed: () => void;
@@ -161,6 +163,12 @@ export const buildAppMenus = ({
 	keymap?: readonly KeymapAction[];
 }): Record<MenuId, MenuEntry[]> => ({
 	file: [
+		{
+			kind: "item",
+			label: "Send feedback to agent",
+			hint: keymapHint("send-to-agent", keymap),
+			action: requestSendFeedback,
+		},
 		{
 			kind: "item",
 			label: "Reload",

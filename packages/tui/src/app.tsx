@@ -107,6 +107,7 @@ import {
 	expandedPatchText,
 	type FileExpansion,
 } from "./expand.ts";
+import type { FeedbackController, SendOutcome } from "./feedback.ts";
 import { HelpSurface } from "./helpSurface.tsx";
 import type { KeymapIssue } from "./keybindings.ts";
 import {
@@ -1836,6 +1837,14 @@ function SupersedeBanner({ summary, reloadKey }: { summary: string; reloadKey: s
 
 const THREAD_COMPOSER_ID = "inline-thread-composer";
 const COPY_NOTICE_MS = 2_500;
+
+/** What the reviewer is told about a Send. Nothing unsent is a fact, not a failure. */
+const sendNotice = (outcome: SendOutcome): StatusNotice => {
+	if (outcome.kind === "error") return { text: outcome.message, tone: "error" };
+	if (outcome.kind === "nothing") return { text: "Nothing to send", tone: "success" };
+	const threads = `${outcome.count} thread${outcome.count === 1 ? "" : "s"}`;
+	return { text: `Queued for polling (${threads})`, tone: "success" };
+};
 const SELECTION_FLASH_MS = 150;
 
 const flashTextSelection = ({
@@ -2520,6 +2529,7 @@ export function App({
 	initialOrphanedThreads = [],
 	subscribeUpdates,
 	threadActions,
+	feedback,
 	humanAuthor = defaultHumanAuthor,
 	permalinks = null,
 	onCopy,
@@ -2569,6 +2579,8 @@ export function App({
 	/** Changes on disk the review adopts in place; the caller decides what is worth reporting. */
 	subscribeUpdates?: (listener: (update: ReviewUpdate) => void) => () => void;
 	threadActions?: ThreadActions;
+	/** Sends the unsent threads to the agent; absent when the review has no repository to record in. */
+	feedback?: FeedbackController;
 	humanAuthor?: ThreadAuthor;
 	/** Where the reviewed lines live on GitHub; absent when no GitHub remote is configured. */
 	permalinks?: PermalinkContext | null;
@@ -3222,6 +3234,10 @@ export function App({
 	function reload() {
 		saveCurrentSession();
 		onReload?.();
+	}
+	async function sendFeedback() {
+		const outcome = (await feedback?.send()) ?? { kind: "nothing" as const };
+		setMountNotice(sendNotice(outcome));
 	}
 
 	useEffect(() => {
@@ -4354,6 +4370,7 @@ export function App({
 		setChangeMarkers: changeChangeMarkers,
 		requestQuit: quit,
 		requestReload: reload,
+		requestSendFeedback: () => void sendFeedback(),
 		movePrevious: () => movePage(-1),
 		moveNext: () => movePage(1),
 		moveNextUnreviewed,
@@ -4552,6 +4569,10 @@ export function App({
 		// Comments surface, whose switch would otherwise fall through to no-op.
 		if (actionId === "previous-page" || actionId === "next-page") {
 			movePage(actionId === "next-page" ? 1 : -1);
+			return;
+		}
+		if (actionId === "send-to-agent") {
+			void sendFeedback();
 			return;
 		}
 		if (copyNotice) setCopyNotice(null);
@@ -5139,6 +5160,7 @@ export async function runApp(
 		/** Changes on disk the review adopts in place. */
 		subscribeUpdates?: (listener: (update: ReviewUpdate) => void) => () => void;
 		threadActions?: ThreadActions;
+		feedback?: FeedbackController;
 		humanAuthor?: ThreadAuthor;
 		permalinks?: PermalinkContext | null;
 		/** The pinned theme, or the light/dark pair the terminal chooses between. */
@@ -5196,6 +5218,7 @@ export async function runApp(
 				initialOrphanedThreads={options.initialOrphanedThreads}
 				subscribeUpdates={options.subscribeUpdates}
 				threadActions={options.threadActions}
+				feedback={options.feedback}
 				humanAuthor={options.humanAuthor}
 				permalinks={options.permalinks}
 				onViewStateChange={options.onViewStateChange}

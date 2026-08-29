@@ -38,6 +38,22 @@ export {
 	ThreadStoreError,
 } from "@revue/prep";
 
+/**
+ * The threads Send would carry: open, with a human's word last, and spoken since the last handoff.
+ * Nothing about sending is stored on a thread, so this is derived at each Send and each render.
+ */
+export const unsentThreads = (
+	threads: readonly ReviewThread[],
+	sentAt: string | null,
+): ReviewThread[] => threads.filter((thread) => isUnsent(thread, sentAt));
+
+const isUnsent = (thread: ReviewThread, sentAt: string | null): boolean => {
+	if (thread.status !== THREAD_STATUS.OPEN) return false;
+	const last = thread.messages.at(-1);
+	if (last?.author.kind !== THREAD_AUTHOR_KIND.HUMAN) return false;
+	return sentAt === null || Date.parse(last.createdAt) > Date.parse(sentAt);
+};
+
 export type NewThreadOptions = {
 	id?: string;
 	messageId?: string;

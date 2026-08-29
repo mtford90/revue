@@ -40,6 +40,7 @@ import {
 import type { ReviewUpdate } from "./app.tsx";
 import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
+import { createFeedbackController } from "./feedback.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
 import { KEYMAP } from "./keymap.ts";
@@ -983,6 +984,15 @@ async function showRun(
 		const threadStore = openThreadStore(defaultThreadsPath(currentDirectory), run.manifest.runId);
 		const repositoryRoot = repositoryRootForRun(currentDirectory);
 		const humanAuthor = resolveHumanAuthor(repositoryRoot);
+		// The handoff is repository-local, so a run opened outside a checkout has nowhere to record
+		// one and the Send action reports that there is nothing to send.
+		const feedback = repositoryRoot
+			? createFeedbackController({
+					repositoryRoot,
+					runId: run.manifest.runId,
+					threads: () => threadStore.get(),
+				})
+			: undefined;
 		const fileLineCache = new Map<string, Promise<string[] | null>>();
 		const loadFileLines = (path: string): Promise<string[] | null> => {
 			const cached = fileLineCache.get(path);
@@ -1024,6 +1034,7 @@ async function showRun(
 			initialOrphanedThreads: orphaned,
 			subscribeUpdates: watched.subscribe,
 			threadActions: threadStore,
+			feedback,
 			humanAuthor,
 			permalinks: permalinkContextFor({
 				scope: run.manifest.scope,

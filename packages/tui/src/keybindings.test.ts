@@ -237,6 +237,13 @@ test("an uppercase override doesn't leak onto whatever now owns the freed lowerc
 	expect(matchKeymapAction("page", { name: "o" }, keymap)).toBe("cycle-path-display");
 });
 
+test("Send answers Shift-S on every surface and leaves the sidebar its lowercase key", () => {
+	expect(matchKeymapAction("page", { name: "S" })).toBe("send-to-agent");
+	expect(matchKeymapAction("page", { name: "s", shift: true })).toBe("send-to-agent");
+	expect(matchKeymapAction("comments", { name: "S" })).toBe("send-to-agent");
+	expect(matchKeymapAction("page", { name: "s" })).toBe("toggle-sidebar");
+});
+
 test("a ctrl override matches exactly and doesn't also fire on the bare key", () => {
 	const { keymap, issues } = mergeKeymap(KEYMAP, { "toggle-sidebar": "ctrl+j" });
 	expect(issues).toEqual([]);

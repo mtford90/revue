@@ -83,6 +83,13 @@ const KEYMAP_DEF = [
 		section: "Navigation",
 	},
 	{
+		id: "send-to-agent",
+		description: "Send feedback to the agent",
+		keys: ["S"],
+		context: "global",
+		section: "Review",
+	},
+	{
 		id: "previous-key-change",
 		description: "Focus the previous key change",
 		keys: ["{", "shift+f7"],

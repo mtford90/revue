@@ -37,7 +37,12 @@ const makeRepository = () => {
 	const revue = join(root, ".revue");
 	const runsDirectory = join(revue, "runs");
 	mkdirSync(runsDirectory, { recursive: true });
-	return { root, threadsPath: join(revue, "threads.json"), runsDirectory };
+	return {
+		root,
+		threadsPath: join(revue, "threads.json"),
+		handoffPath: join(revue, "handoff.json"),
+		runsDirectory,
+	};
 };
 
 /** Replace a file the way every writer in revue does: write a sibling, then rename over the target. */
@@ -62,7 +67,11 @@ const writeRun = async (runsDirectory: string, runId: string, supersedes?: strin
  * Start watching and hand back a settled recorder. Settling matters: the platform replays what
  * happened moments before the watch began, so a test that acts immediately measures its own setup.
  */
-const startWatch = async (input: { threadsPath: string; runsDirectory: string }) => {
+const startWatch = async (input: {
+	threadsPath: string;
+	runsDirectory: string;
+	handoffPath?: string;
+}) => {
 	const events: RunWatchEvent[] = [];
 	const dispose = watchRun({
 		...input,
@@ -79,6 +88,9 @@ const startWatch = async (input: { threadsPath: string; runsDirectory: string })
 const threadKinds = (events: readonly RunWatchEvent[]) =>
 	events.filter((event) => event.kind === "threads-changed");
 
+const handoffKinds = (events: readonly RunWatchEvent[]) =>
+	events.filter((event) => event.kind === "handoff-changed");
+
 test("a burst of thread-store rewrites reports as one change", async () => {
 	const repository = makeRepository();
 	writeAtomically(repository.threadsPath, "{}");
@@ -89,6 +101,48 @@ test("a burst of thread-store rewrites reports as one change", async () => {
 	expect(await waitFor(() => threadKinds(events).length > 0)).toBe(true);
 	await wait(SETTLE_MS);
 	expect(threadKinds(events)).toHaveLength(1);
+});
+
+test("a handoff write reports as a change, and the thread store stays quiet", async () => {
+	const repository = makeRepository();
+	writeAtomically(repository.threadsPath, "{}");
+	const { events } = await startWatch(repository);
+
+	writeAtomically(repository.handoffPath, "{}");
+
+	expect(await waitFor(() => handoffKinds(events).length > 0)).toBe(true);
+	await wait(SETTLE_MS);
+	expect(handoffKinds(events)).toHaveLength(1);
+	expect(threadKinds(events)).toHaveLength(0);
+});
+
+test("a burst of handoff rewrites, temporary file and all, reports as one change", async () => {
+	const repository = makeRepository();
+	writeAtomically(repository.threadsPath, "{}");
+	const { events } = await startWatch(repository);
+
+	// writeAtomically already exercises the intermediate .tmp name; the burst proves the watcher
+	// coalesces both that write and the rename over it into a single reported change.
+	for (const body of ['{"a":1}', '{"a":2}', '{"a":3}'])
+		writeAtomically(repository.handoffPath, body);
+
+	expect(await waitFor(() => handoffKinds(events).length > 0)).toBe(true);
+	await wait(SETTLE_MS);
+	expect(handoffKinds(events)).toHaveLength(1);
+});
+
+test("a repository watched without a handoff path never reports a handoff change", async () => {
+	const repository = makeRepository();
+	writeAtomically(repository.threadsPath, "{}");
+	const { events } = await startWatch({
+		threadsPath: repository.threadsPath,
+		runsDirectory: repository.runsDirectory,
+	});
+
+	writeAtomically(repository.handoffPath, "{}");
+	await wait(SETTLE_MS);
+
+	expect(handoffKinds(events)).toHaveLength(0);
 });
 
 test("a run that supersedes the open one stays quiet until it is narrated", async () => {

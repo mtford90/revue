@@ -8,7 +8,8 @@ import { readRunRecords } from "@revue/prep";
 
 export type RunWatchEvent =
 	| { kind: "threads-changed" }
-	| { kind: "run-superseded"; runId: string; directory: string };
+	| { kind: "run-superseded"; runId: string; directory: string }
+	| { kind: "handoff-changed" };
 
 export type WatchRunInput = {
 	/** The repository-local thread store, rewritten by rename from here and from other terminals. */
@@ -18,6 +19,8 @@ export type WatchRunInput = {
 	runId: string;
 	onEvent: (event: RunWatchEvent) => void;
 	debounceMs?: number;
+	/** The handoff record, watched alongside the thread store when Send has somewhere to write. */
+	handoffPath?: string;
 };
 
 /** Long enough to swallow the burst one rewrite makes, short enough that a reply still feels live. */
@@ -25,10 +28,10 @@ export const WATCH_DEBOUNCE_MS = 120;
 
 const CHAPTERS_FILE = "chapters.json";
 
-const isThreadStoreChange = (filename: string | null, threadsName: string) =>
+const isStoreFileChange = (filename: string | null, storeName: string) =>
 	filename === null ||
-	filename === threadsName ||
-	(filename.startsWith(`${threadsName}.`) && filename.endsWith(".tmp"));
+	filename === storeName ||
+	(filename.startsWith(`${storeName}.`) && filename.endsWith(".tmp"));
 
 type Debounced = { trigger: () => void; cancel: () => void };
 
@@ -76,6 +79,7 @@ export const watchRun = ({
 	runId,
 	onEvent,
 	debounceMs = WATCH_DEBOUNCE_MS,
+	handoffPath,
 }: WatchRunInput): (() => void) => {
 	let live = true;
 	const watchers: { close: () => void }[] = [];
@@ -108,10 +112,14 @@ export const watchRun = ({
 	const runs = debounce(debounceMs, () => {
 		void inspectRuns();
 	});
+	const handoff = debounce(debounceMs, () => {
+		if (live && handoffPath && existsSync(handoffPath)) onEvent({ kind: "handoff-changed" });
+	});
 
 	track(
 		watchDirectory(dirname(threadsPath), (filename) => {
-			if (isThreadStoreChange(filename, basename(threadsPath))) threads.trigger();
+			if (isStoreFileChange(filename, basename(threadsPath))) threads.trigger();
+			if (handoffPath && isStoreFileChange(filename, basename(handoffPath))) handoff.trigger();
 		}),
 	);
 	track(watchDirectory(runsDirectory, () => runs.trigger()));
@@ -122,6 +130,7 @@ export const watchRun = ({
 		live = false;
 		threads.cancel();
 		runs.cancel();
+		handoff.cancel();
 		for (const watcher of watchers) watcher.close();
 	};
 };

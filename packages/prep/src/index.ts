@@ -1,4 +1,14 @@
 export {
+	type AgentHost,
+	AgentOriginError,
+	agentOriginPath,
+	detectAgentHost,
+	type ReadAgentOriginResult,
+	type RecordAgentOriginInput,
+	readAgentOrigin,
+	recordAgentOrigin,
+} from "./agentOrigin.ts";
+export {
 	defaultRunsDirectory,
 	digest,
 	loadPreparedRun,

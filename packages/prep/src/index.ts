@@ -44,6 +44,13 @@ export {
 } from "./delta.ts";
 export { exclusionSource } from "./format.ts";
 export { findGitContext, GitError } from "./git.ts";
+export {
+	HandoffError,
+	type HandoffRead,
+	handoffPath,
+	readHandoff,
+	writeHandoff,
+} from "./handoff.ts";
 export { type RunRecord, readRunRecords, resolveSupersedes } from "./lineage.ts";
 export { PrepError, prepareRun, previewRunId } from "./prep.ts";
 export {

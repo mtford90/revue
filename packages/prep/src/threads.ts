@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { canonicalizeDiffSelection, type DiffFile, parsePatch } from "@revue/diff";
 import {
@@ -15,6 +15,7 @@ import {
 } from "@revue/types";
 import { z } from "zod";
 import { loadPreparedRun, type PreparedRun } from "./artifact.ts";
+import { writeFileAtomically } from "./atomic.ts";
 import { matchReviewUnits, type ReviewUnitMatch, unitKey, unitSide } from "./delta.ts";
 
 // Threads are the mutable overlay on immutable runs, so the store lives beside the runs rather than
@@ -124,16 +125,9 @@ export const withThreadStoreLock = <Value>(path: string, action: () => Value): V
 
 export function persistThreadStoreFile(path: string, file: ThreadStoreFile): void {
 	const parsed = threadStoreFileSchema.parse(file);
-	mkdirSync(dirname(path), { recursive: true });
-	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
 	try {
-		writeFileSync(temporary, `${JSON.stringify(parsed, null, 2)}\n`, {
-			encoding: "utf8",
-			mode: 0o600,
-		});
-		renameSync(temporary, path);
+		writeFileAtomically(path, `${JSON.stringify(parsed, null, 2)}\n`);
 	} catch (error) {
-		rmSync(temporary, { force: true });
 		throw new ThreadStoreError(`Could not persist thread store at ${path}: ${describe(error)}`);
 	}
 }

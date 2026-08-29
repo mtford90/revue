@@ -1,6 +1,6 @@
 # 03 — `revue status --wait`
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -19,11 +19,11 @@ The skill's orient section documents `--wait` for an agent told to wait for the 
 
 ## Acceptance criteria
 
-- [ ] `--wait` returns at once when a handoff newer than `--since` already exists
-- [ ] `--wait` returns when a new handoff lands after the wait started, with no missed write between the first read and the watch
-- [ ] Timeout exits non-zero with a distinct code and a clear message
-- [ ] `--since` without `--wait` is rejected
-- [ ] CLI process tests cover all of the above in a scratch repository
+- [x] `--wait` returns at once when a handoff newer than `--since` already exists
+- [x] `--wait` returns when a new handoff lands after the wait started, with no missed write between the first read and the watch
+- [x] Timeout exits non-zero with a distinct code and a clear message
+- [x] `--since` without `--wait` is rejected
+- [x] CLI process tests cover all of the above in a scratch repository
 
 ## Blocked by
 

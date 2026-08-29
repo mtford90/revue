@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
 	AgentOriginError,
 	defaultRunsDirectory,
+	findGitContext,
 	freezeRunContext,
 	GitError,
 	loadPreparedRun,
@@ -15,6 +16,7 @@ import {
 	prepareRun,
 	ReviewCoverageError,
 	RunArtifactError,
+	readHandoff,
 	recordAgentOrigin,
 	rerunArgsFor,
 } from "@revue/prep";
@@ -41,6 +43,7 @@ import type { ReviewUpdate } from "./app.tsx";
 import { runDoctor } from "./doctor.ts";
 import { splitFileLines } from "./expand.ts";
 import { createFeedbackController } from "./feedback.ts";
+import { waitForHandoff } from "./handoffWait.ts";
 import { defaultKeybindingsPath, loadEffectiveKeymap } from "./keybindings.ts";
 import { formatKeybindingsListing, initKeybindingsFile } from "./keybindingsCli.ts";
 import { KEYMAP } from "./keymap.ts";
@@ -166,7 +169,11 @@ unnarrated  every review unit no carried chapter covers, marked unchanged,
 Narration is complete once every unnarrated unit sits in a chapter; run
 revue context freeze and then revue show <run-directory> --check to confirm it.`;
 
-const STATUS_HELP = `usage: revue status [--json]
+/** Distinct from every other exit code the CLI uses, so a caller can tell "timed out" apart. */
+const STATUS_WAIT_TIMEOUT_EXIT_CODE = 3;
+const STATUS_WAIT_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+
+const STATUS_HELP = `usage: revue status [--json] [--wait [--since <handoffId>] [--timeout-ms <n>]]
 
 Reads the repository's own review state off disk — nothing depends on an earlier session:
 
@@ -180,7 +187,14 @@ threads     the run's threads, open ones split into those awaiting the agent (a
 drift       whether re-prepping the active run's scope would capture different
             code than the run pinned
 
-A repository with no prepared runs reports that and exits 0.`;
+A repository with no prepared runs reports that and exits 0.
+
+--wait          block until a handoff whose id differs from --since exists, then print the
+                report as usual and exit 0. Without --since, waits for a handoff that differs
+                from whichever one is on disk when the wait starts (or for any handoff at all
+                if none is). Requires --wait; using it alone is a usage error.
+--timeout-ms    how long to wait before giving up, default 900000 (15 minutes). A timeout
+                prints a message to stderr and exits ${STATUS_WAIT_TIMEOUT_EXIT_CODE}.`;
 
 const prepSummary = (run: PreparedRun): string => {
 	const { manifest } = run;
@@ -405,10 +419,17 @@ async function cmdStatus(args: string[]): Promise<number> {
 		return 0;
 	}
 	let json = false;
+	let wait = false;
+	let since: string | undefined;
+	let timeoutMs = STATUS_WAIT_DEFAULT_TIMEOUT_MS;
 	try {
-		const options = parseCommandOptions(args, [], ["--json"]);
+		const options = parseCommandOptions(args, ["--since", "--timeout-ms"], ["--json", "--wait"]);
 		if (options.positionals.length) throw new Error("status takes no positional arguments");
 		json = options.booleans.has("--json");
+		wait = options.booleans.has("--wait");
+		since = options.values.get("--since");
+		if (options.values.has("--timeout-ms")) timeoutMs = integerOption(options, "--timeout-ms");
+		if (since !== undefined && !wait) throw new Error("--since requires --wait");
 	} catch (error) {
 		process.stderr.write(
 			`${error instanceof Error ? error.message : String(error)}\n${STATUS_HELP}\n`,
@@ -416,6 +437,15 @@ async function cmdStatus(args: string[]): Promise<number> {
 		return 1;
 	}
 	try {
+		if (wait) {
+			const { root } = await findGitContext();
+			const seen = since ?? readHandoff(root).record?.handoffId ?? null;
+			const outcome = await waitForHandoff({ repositoryRoot: root, since: seen, timeoutMs });
+			if (outcome.kind === "timeout") {
+				process.stderr.write(`revue status --wait timed out after ${timeoutMs}ms\n`);
+				return STATUS_WAIT_TIMEOUT_EXIT_CODE;
+			}
+		}
 		const report = await readStatus();
 		process.stdout.write(
 			json ? `${JSON.stringify(report, null, 2)}\n` : `${formatStatus(report)}\n`,

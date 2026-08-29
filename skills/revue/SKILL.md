@@ -425,6 +425,19 @@ last) and those **awaiting the reviewer** (an agent did), plus dealt-with and or
 whether re-prepping that scope would now capture different code than the run pinned. Without
 `--json` the same state prints for a human; a repository with no runs says so and exits 0.
 
+`handoff` is the reviewer's last batch of feedback, if any: its `threadIds` are the batch they
+sent, and `resolvedThreadIds` are the ones still findable on the run this report describes — a
+thread the reviewer deleted after sending is in the first list and not the second. When told to
+wait for the next round, block for it instead of polling:
+
+```bash
+revue status --wait --since <handoffId>
+```
+
+That returns as soon as a handoff whose id differs from `<handoffId>` lands, printing the same
+report; a wait with nothing to compare against can omit `--since`. It gives up after 15 minutes by
+default (`--timeout-ms` to change that) and exits non-zero on timeout.
+
 Work against the directory status prints for `pendingRun` when there is one, and the `activeRun`
 directory otherwise. Prep moves the conversation onto the newest run, so that is where the threads
 are.

@@ -926,6 +926,102 @@ test("status reports the last handoff against the run its threads are on now", a
 	}
 });
 
+const initGitRepo = async (root: string) => {
+	await git(root, "init", "-b", "main");
+	await git(root, "config", "user.email", "revue@example.com");
+	await git(root, "config", "user.name", "Revue Test");
+	await writeFile(join(root, "README.md"), "hello\n");
+	await git(root, "add", "-A");
+	await git(root, "commit", "-m", "Baseline");
+};
+
+const sendHandoff = (root: string) => {
+	const handoffId = randomUUID();
+	writeHandoff(root, {
+		schemaVersion: 1,
+		handoffId,
+		requestedAt: new Date().toISOString(),
+		runId: "a".repeat(64),
+		threadIds: [],
+		delivery: { kind: "queued" },
+	});
+	return handoffId;
+};
+
+test("status --wait returns at once when a handoff newer than --since already exists", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
+	try {
+		await initGitRepo(root);
+		const handoffId = sendHandoff(root);
+
+		const result = await run(root, [
+			"status",
+			"--json",
+			"--wait",
+			"--since",
+			randomUUID(),
+			"--timeout-ms",
+			"2000",
+		]);
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout).handoff).toMatchObject({ handoffId });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("status --wait resolves once a new handoff lands after the wait started", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
+	try {
+		await initGitRepo(root);
+
+		const child = Bun.spawn(
+			[process.execPath, mainPath, "status", "--json", "--wait", "--timeout-ms", "10000"],
+			{ cwd: root, stdout: "pipe", stderr: "pipe" },
+		);
+		// Give the waiter time to attach before the handoff lands, so this proves the watch path
+		// rather than the immediate-read path the previous test covers.
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		const handoffId = sendHandoff(root);
+
+		const [stdout, stderr, exitCode] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		expect({ stderr, exitCode }).toEqual({ stderr: "", exitCode: 0 });
+		expect(JSON.parse(stdout).handoff).toMatchObject({ handoffId });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("status --wait times out with a distinct exit code", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
+	try {
+		await initGitRepo(root);
+
+		const result = await run(root, ["status", "--wait", "--timeout-ms", "200"]);
+		expect(result.exitCode).toBe(3);
+		expect(result.stderr).toContain("timed out");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("status --since without --wait is rejected", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
+	try {
+		await initGitRepo(root);
+
+		const result = await run(root, ["status", "--since", randomUUID()]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("--since requires --wait");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("threads carry onto the superseding run, orphaned rather than lost when their code goes", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-thread-carry-"));
 	try {

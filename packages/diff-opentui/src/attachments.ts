@@ -69,6 +69,22 @@ export const attachmentsForExcerptLine = ({
 			attachment.anchor.filePath === filePath && attachment.anchor.endLine === lineNumber,
 	);
 
+/**
+ * Whether an anchor names this candidate line. The candidate is the row's own authority on the
+ * anchor's side, so a row without that side holds no attachment at all.
+ */
+export const attachmentAnchoredAt = ({
+	anchor,
+	candidate,
+}: {
+	anchor: DiffLineRange;
+	candidate: DiffLineRange | null;
+}): boolean =>
+	candidate !== null &&
+	candidate.filePath === anchor.filePath &&
+	candidate.hunkOldStart === anchor.hunkOldStart &&
+	candidate.endLine === anchor.endLine;
+
 /** The React-valued inline attachments anchored after this exact planned logical row. */
 export const attachmentsForRow = ({
 	row,
@@ -91,7 +107,7 @@ export const attachmentsForRow = ({
 					})
 				: plannedRowIdentity(row, attachment.anchor.side);
 		if (!identity) return false;
-		const range = resolveRange
+		const candidate = resolveRange
 			? resolveRange(identity.side, identity.lineNumber)
 			: {
 					filePath: identity.filePath,
@@ -100,11 +116,6 @@ export const attachmentsForRow = ({
 					startLine: identity.lineNumber,
 					endLine: identity.lineNumber,
 				};
-		return (
-			range !== null &&
-			range.filePath === attachment.anchor.filePath &&
-			range.hunkOldStart === attachment.anchor.hunkOldStart &&
-			range.endLine === attachment.anchor.endLine
-		);
+		return attachmentAnchoredAt({ anchor: attachment.anchor, candidate });
 	});
 };

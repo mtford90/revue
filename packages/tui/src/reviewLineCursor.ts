@@ -14,8 +14,17 @@ import {
 	stackedSelectionBetween,
 	switchSplitSelectionStop,
 } from "@revue/diff";
+import { attachmentAnchoredAt } from "@revue/diff-opentui";
 
 type ReviewLinePlan = DiffVisualPlan | DiffMeasurement;
+
+/** What the cursor needs of an inline card: the thread it holds and the line it hangs from. */
+export type ReviewCard = { id: string; anchor: DiffLineRange };
+
+/** Where the review cursor rests: a source line, or a thread card hanging beneath one. */
+export type ReviewStop =
+	| { kind: "line"; line: DiffLineRange }
+	| { kind: "thread"; threadId: string; anchor: DiffLineRange };
 
 export type ReviewLineFile = {
 	filePath: string;
@@ -101,69 +110,169 @@ export const reviewLineFileContains = (
 	return file.rows.some((row) => rowHasStop(row, stop));
 };
 
-const boundaryLine = ({
+/** The line a stop reads from: a card answers with the line it hangs from, never with itself. */
+export const reviewStopRange = (stop: ReviewStop): DiffLineRange =>
+	stop.kind === "line" ? stop.line : stop.anchor;
+
+const sameRange = (left: DiffLineRange, right: DiffLineRange): boolean =>
+	left.filePath === right.filePath &&
+	left.hunkOldStart === right.hunkOldStart &&
+	left.side === right.side &&
+	left.startLine === right.startLine &&
+	left.endLine === right.endLine;
+
+const sameReviewStop = (left: ReviewStop, right: ReviewStop): boolean =>
+	left.kind === "thread"
+		? right.kind === "thread" && left.threadId === right.threadId
+		: right.kind === "line" && sameRange(left.line, right.line);
+
+/** The cards one row carries, matched by the rule inline attachments are placed with. */
+const cardsForRow = (
+	row: DiffPresentationRow,
+	cards: readonly ReviewCard[],
+): readonly ReviewCard[] =>
+	cards.filter((card) => {
+		const stop = row.stops.find((candidate) => candidate.side === card.anchor.side);
+		return (
+			stop !== undefined &&
+			attachmentAnchoredAt({ anchor: card.anchor, candidate: rangeForStop(stop) })
+		);
+	});
+
+/** The lane a changed row offers: a split pane skips the rows it has no authority on. */
+const laneStop = (
+	row: DiffPresentationRow,
+	layout: "split" | "stack",
+	side?: DiffSide,
+): DiffSelectionStop | undefined => {
+	if (side === undefined) return presentationRowStop(row);
+	return layout === "split"
+		? row.stops.find((candidate) => candidate.side === side)
+		: presentationRowStop(row, side);
+};
+
+/** A stop with the row it belongs to, so a cursor resting between stops still knows its place. */
+type PlacedStop = { stop: ReviewStop; rowIndex: number };
+
+const placeStops = ({
 	file,
-	delta,
-	preferredSide,
+	cards,
+	side,
 }: {
 	file: ReviewLineFile;
+	cards: readonly ReviewCard[];
+	side?: DiffSide;
+}): PlacedStop[] =>
+	file.rows.flatMap((row, rowIndex): PlacedStop[] => {
+		const line = row.kind === "change" ? laneStop(row, file.layout, side) : undefined;
+		return [
+			...(line ? [{ stop: { kind: "line" as const, line: rangeForStop(line) }, rowIndex }] : []),
+			...cardsForRow(row, cards).map((card) => ({
+				stop: { kind: "thread" as const, threadId: card.id, anchor: card.anchor },
+				rowIndex,
+			})),
+		];
+	});
+
+/** A file with nothing in the requested lane is walked on the authority its rows do have. */
+const placedWalk = (args: {
+	file: ReviewLineFile;
+	cards: readonly ReviewCard[];
+	side?: DiffSide;
+}): PlacedStop[] => {
+	const placed = placeStops(args);
+	return placed.some(({ stop }) => stop.kind === "line")
+		? placed
+		: placeStops({ ...args, side: undefined });
+};
+
+/**
+ * One file's stops in walking order: each changed row in the lane, then the cards hanging from it.
+ * Cards are side-neutral, so a card on the other pane still stops the walk that passes it.
+ */
+export const reviewStops = ({
+	file,
+	cards = [],
+	side,
+}: {
+	file: ReviewLineFile;
+	cards?: readonly ReviewCard[];
+	side?: DiffSide;
+}): ReviewStop[] => placedWalk({ file, cards, side }).map(({ stop }) => stop);
+
+const firstReviewStop = (file: ReviewLineFile | null): ReviewStop | null => {
+	const line = initialReviewLine(file);
+	return line ? { kind: "line", line } : null;
+};
+
+/** The stop next to a cursor that is not itself a stop, such as a line clicked on context. */
+const stopBesideRow = (stops: readonly PlacedStop[], rowIndex: number, delta: -1 | 1) =>
+	delta === 1
+		? stops.find(
+				(placed) =>
+					placed.rowIndex > rowIndex ||
+					(placed.rowIndex === rowIndex && placed.stop.kind === "thread"),
+			)
+		: [...stops].reverse().find((placed) => placed.rowIndex < rowIndex);
+
+const stepWithinFile = ({
+	stops,
+	file,
+	current,
+	delta,
+}: {
+	stops: readonly PlacedStop[];
+	file: ReviewLineFile;
+	current: ReviewStop;
 	delta: -1 | 1;
-	preferredSide?: DiffSide;
-}): DiffLineRange | null => {
-	const rows = delta === 1 ? file.changedRows : [...file.changedRows].reverse();
-	if (file.layout === "split" && preferredSide) {
-		for (const row of rows) {
-			const stop = row.stops.find((candidate) => candidate.side === preferredSide);
-			if (stop) return rangeForStop(stop);
-		}
-	}
-	const row = rows[0];
-	return row ? rangeForStop(presentationRowStop(row)) : null;
+}): ReviewStop | null => {
+	const at = stops.findIndex((placed) => sameReviewStop(placed.stop, current));
+	if (at >= 0) return stops[at + delta]?.stop ?? null;
+	// A card the walk does not hold — a quoted one, say — re-enters this file at its edge.
+	if (current.kind === "thread") return (delta === 1 ? stops[0] : stops.at(-1))?.stop ?? null;
+	const rowIndex = file.rows.findIndex((row) => rowHasStop(row, reviewStopForLine(current.line)));
+	if (rowIndex < 0) return null;
+	return stopBesideRow(stops, rowIndex, delta)?.stop ?? null;
 };
 
 /**
  * Ordinary movement crosses expanded files. Split retains its pane whenever the destination file
  * has that side; stacked follows its visible old-then-new source-row order.
  */
-export const moveReviewLine = ({
+export const moveReviewStop = ({
 	files,
+	cards = [],
 	current,
 	delta,
 }: {
 	files: readonly ReviewLineFile[];
-	current: DiffLineRange | null;
+	cards?: readonly ReviewCard[];
+	current: ReviewStop | null;
 	delta: -1 | 1;
-}): DiffLineRange | null => {
+}): ReviewStop | null => {
 	if (!files.length) return null;
-	if (!current) return initialReviewLine(files[0] ?? null);
-	const fileIndex = files.findIndex((file) => file.filePath === current.filePath);
+	if (!current) return firstReviewStop(files[0] ?? null);
+	const from = reviewStopRange(current);
+	const fileIndex = files.findIndex((file) => file.filePath === from.filePath);
 	const file = files[fileIndex];
-	if (!file) return initialReviewLine(files[0] ?? null);
-	const stop = reviewStopForLine(current);
-	const currentRow = file.rows.findIndex((row) => rowHasStop(row, stop));
-	for (
-		let rowIndex = currentRow < 0 ? -1 : currentRow + delta;
-		rowIndex >= 0 && rowIndex < file.rows.length;
-		rowIndex += delta
-	) {
-		const row = file.rows[rowIndex];
-		if (row?.kind !== "change") continue;
-		if (file.layout === "split") {
-			const sameLane = row.stops.find((candidate) => candidate.side === current.side);
-			if (sameLane) return rangeForStop(sameLane);
-		} else {
-			return rangeForStop(presentationRowStop(row, current.side));
-		}
-	}
+	if (!file) return firstReviewStop(files[0] ?? null);
+	const within = stepWithinFile({
+		stops: placedWalk({ file, cards, side: from.side }),
+		file,
+		current,
+		delta,
+	});
+	if (within) return within;
 	for (let index = fileIndex + delta; index >= 0 && index < files.length; index += delta) {
 		const candidate = files[index];
 		if (!candidate?.changedRows.length) continue;
-		const boundary = boundaryLine({
+		const stops = placedWalk({
 			file: candidate,
-			delta,
-			preferredSide: file.layout === "split" ? current.side : undefined,
+			cards,
+			side: file.layout === "split" ? from.side : undefined,
 		});
-		if (boundary) return boundary;
+		const boundary = delta === 1 ? stops[0] : stops.at(-1);
+		if (boundary) return boundary.stop;
 	}
 	return current;
 };

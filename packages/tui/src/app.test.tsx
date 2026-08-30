@@ -1388,7 +1388,8 @@ test("inline threads show authors and compose new roots and replies", async () =
 	let lifecycleLines = t.captureCharFrame().split("\n");
 	const initialStatusY = lifecycleLines.findIndex((line) => line.includes("✓ Resolved"));
 	expect(lifecycleLines[initialStatusY]).toContain("┌");
-	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen X]"));
+	// An untouched card names no keys; the press that resolves it also puts the cursor on it.
+	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen]"));
 	await click(t, lifecycleLines[lifecycleY]?.indexOf("Reopen") ?? -1, lifecycleY);
 	expect(t.captureCharFrame()).toContain("! Open");
 	lifecycleLines = t.captureCharFrame().split("\n");
@@ -1406,7 +1407,8 @@ test("inline threads show authors and compose new roots and replies", async () =
 	expect(composerFrame).toContain("Comment on new lines");
 	expect(composerFrame).not.toContain("review unit oldStart");
 	const composerLines = composerFrame.split("\n");
-	const existingThreadActionsY = composerLines.findIndex((line) => line.includes("[Delete D]"));
+	// The gutter click moved the cursor to the line, so the card behind the composer names no keys.
+	const existingThreadActionsY = composerLines.findIndex((line) => line.includes("[Delete]"));
 	const composerY = composerLines.findIndex((line) => line.includes("Comment on new lines"));
 	expect(composerLines[existingThreadActionsY + 1]).toContain("└");
 	expect(composerY).toBe(existingThreadActionsY + 3);
@@ -1440,7 +1442,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 	expect(t.captureCharFrame()).toContain("2●");
 
 	const replyLines = t.captureCharFrame().split("\n");
-	const replyY = replyLines.findIndex((line) => line.includes("[Reply R]"));
+	const replyY = replyLines.findIndex((line) => line.includes("[Reply]"));
 	await click(t, replyLines[replyY]?.indexOf("Reply") ?? -1, replyY);
 	expect(t.captureCharFrame()).toContain("Reply to thread");
 	await act(async () => t.mockInput.typeText("Human follow-up"));
@@ -3027,7 +3029,7 @@ diff --git a/retry.ts b/retry.ts
 	expect(frame).toContain("Share the retry budget");
 	expect(frame).toContain("retry(shared)"); // and it narrates the fix hunk itself
 
-	// The citation is the first stop on the chapter walk, and Enter opens the conversation.
+	// The citation is the first stop on the chapter walk, and it puts the cursor on the card.
 	await press(t, "J");
 	expect(t.captureCharFrame()).toContain("▸ retry.ts:1");
 	expect(statusLine(t)).not.toContain("j/k move");
@@ -3038,7 +3040,11 @@ diff --git a/retry.ts b/retry.ts
 	await act(async () => {
 		await t.renderOnce();
 	});
+	expect(t.captureCharFrame()).toContain("Reply to thread");
+	await press(t, "ESCAPE");
 
+	// The citation row itself stays a link into the conversation where it lives.
+	await clickAction(t, "▸ retry.ts:1");
 	expect(statusLine(t)).toContain("Comments");
 	expect(t.captureCharFrame()).toContain("1 open · 0 resolved");
 	expect(t.captureCharFrame()).toContain("Share the retry budget");
@@ -5124,6 +5130,7 @@ test("every thread card button names its key, and Send and Delete answer the mou
 	});
 	await t.renderOnce();
 	await nextChapter(t);
+	await press(t, "j"); // the card is the stop below the line it hangs from
 
 	const frame = t.captureCharFrame();
 	for (const button of ["[Reply R]", "[Resolve X]", "[Send to agent A]", "[Delete D]"]) {
@@ -5223,4 +5230,207 @@ test("the footer names exactly the thread actions the focused thread's state all
 	expect(statusLine(t)).toContain("X reopen");
 	expect(statusLine(t)).not.toContain("A send");
 	expect(statusLine(t)).not.toContain("X resolve");
+});
+
+// ── The cursor stops on thread cards ─────────────────────────────────────────
+
+const cursorRow = (t: Awaited<ReturnType<typeof testRender>>, text: string) =>
+	t
+		.captureCharFrame()
+		.split("\n")
+		.find((line) => line.includes(text)) ?? "";
+
+test("j and k walk a card between the lines around it", async () => {
+	const thread = watchedThread({ line: 2, body: "Name this constant" });
+	const t = await renderThreads([thread]);
+	await t.renderOnce();
+	await nextChapter(t);
+	await settle(t);
+	expect(cursorRow(t, "retry(alpha)")).toContain("▌");
+
+	await press(t, "j");
+	expect(cursorRow(t, "retry(beta)")).toContain("▌");
+	await press(t, "j"); // the card hanging from that line
+	expect(t.captureCharFrame()).toContain("[Reply R]");
+	expect(cursorRow(t, "retry(beta)")).not.toContain("▌");
+	await press(t, "j");
+	expect(cursorRow(t, "retry(gamma)")).toContain("▌");
+
+	await press(t, "k");
+	expect(t.captureCharFrame()).toContain("[Reply R]");
+	await press(t, "k");
+	expect(cursorRow(t, "retry(beta)")).toContain("▌");
+	expect(t.captureCharFrame()).not.toContain("[Reply R]");
+});
+
+test("a card takes no selection and no editor, and h steps back onto its line", async () => {
+	const requested: { side: string; startLine: number }[] = [];
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[thread]}
+			onOpenEditor={async (range) => {
+				requested.push(range);
+				return { text: "Editor returned", tone: "success" };
+			}}
+		/>,
+		{ width: 130, height: 40, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await press(t, "j");
+	expect(t.captureCharFrame()).toContain("[Reply R]");
+
+	await press(t, "e");
+	expect(requested).toEqual([]);
+	expect(statusLine(t)).toContain("No reviewable source line is focused");
+
+	await press(t, "v");
+	expect(statusLine(t)).not.toContain("j/k extend");
+	expect(t.captureCharFrame()).toContain("[Reply R]");
+
+	await press(t, "l"); // a side move leaves the card for the line it hangs from
+	expect(t.captureCharFrame()).not.toContain("[Reply R]");
+	expect(cursorRow(t, "retry(alpha)")).toContain("▌");
+
+	await press(t, "j");
+	await press(t, "h");
+	expect(t.captureCharFrame()).not.toContain("[Reply R]");
+	expect(cursorRow(t, "retry(one)")).toContain("▌");
+});
+
+test("Enter on a card opens the reply composer its own key opens", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await renderThreads([thread]);
+	await t.renderOnce();
+	await nextChapter(t);
+	await press(t, "j");
+
+	await press(t, "RETURN");
+	await settle(t);
+	expect(t.captureCharFrame()).toContain("Reply to thread");
+
+	await press(t, "ESCAPE");
+	await press(t, "R");
+	await settle(t);
+	expect(t.captureCharFrame()).toContain("Reply to thread");
+});
+
+test("only the card under the cursor names its keys and takes the accent border", async () => {
+	const resolved = {
+		...watchedThread({ line: 1, body: "Share the retry budget" }),
+		status: THREAD_STATUS.DEALT_WITH,
+	};
+	const open = watchedThread({ line: 2, body: "Name this constant" });
+	const t = await testRender(
+		<App
+			file={watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={[resolved, open]}
+			initialPreferences={{ sidebarPreference: "hidden" }}
+		/>,
+		{ width: 130, height: 44, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await press(t, "j");
+
+	const frame = t.captureCharFrame();
+	expect(frame.match(/\[Reply R\]/g)).toHaveLength(1);
+	expect(frame.match(/\[Reply\]/g)).toHaveLength(1);
+
+	// The card under the cursor takes the accent, and gives its status colour back on the way out.
+	const theme = resolveTheme(undefined);
+	const borderTint = () =>
+		t
+			.captureSpans()
+			.lines[rowOf(t, "Share the retry budget")]?.spans.find((span) => span.text.includes("│"))
+			?.fg?.toString();
+	expect(borderTint()).toBe(RGBA.fromHex(theme.accent).toString());
+	await press(t, "k");
+	expect(borderTint()).toBe(RGBA.fromHex(theme.badgeAdded).toString());
+});
+
+test("the thread keys act on the card the cursor is on, not the one beside it", async () => {
+	const first = watchedThread({ line: 1, body: "Share the retry budget" });
+	const second = watchedThread({ line: 2, body: "Name this constant" });
+	const feedback = fakeFeedback({ kind: "queued", count: 1 });
+	const resolved: string[] = [];
+	const deleted: string[] = [];
+	const t = await renderThreads([first, second], {
+		feedback: feedback.controller,
+		threadActions: {
+			create: () => first,
+			reply: () => first,
+			delete: (id) => {
+				deleted.push(id);
+				return first;
+			},
+			deleteMessage: () => first.messages[0] as never,
+			markDealt: (id) => {
+				resolved.push(id);
+				return { ...second, status: THREAD_STATUS.DEALT_WITH };
+			},
+			reopen: () => second,
+		},
+	});
+	await t.renderOnce();
+	await nextChapter(t);
+	await press(t, "j");
+	await press(t, "j");
+	await press(t, "j"); // past the first card and its next line, onto the second card
+
+	await press(t, "A");
+	expect(feedback.asked).toEqual([{ threadIds: [second.id] }]);
+	await press(t, "X");
+	expect(resolved).toEqual([second.id]);
+	await press(t, "D");
+	await press(t, "D");
+	expect(deleted).toEqual([second.id]);
+});
+
+test("a resolved card is a stop of its own, so the walk can reopen it", async () => {
+	const thread = {
+		...watchedThread({ line: 1, body: "Share the retry budget" }),
+		status: THREAD_STATUS.DEALT_WITH,
+	};
+	const t = await renderThreads([thread]);
+	await t.renderOnce();
+	await nextChapter(t);
+	expect(t.captureCharFrame()).toContain("✓ Resolved");
+
+	await press(t, "j");
+	expect(t.captureCharFrame()).toContain("[Reopen X]");
+	await press(t, "X");
+	expect(t.captureCharFrame()).toContain("! Open");
+});
+
+test("a jump from Comments leaves the cursor on the thread's card", async () => {
+	const thread = watchedThread({ line: 2, body: "Name this constant" });
+	const t = await renderThreads([thread]);
+	await t.renderOnce();
+
+	await press(t, "o");
+	await press(t, "RETURN");
+	await settle(t);
+	expect(t.captureCharFrame()).toContain("[Reply R]");
+	expect(statusLine(t)).not.toContain("j/k move");
+});
+
+test("the footer names source actions on a line and thread actions on a card, never both", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await renderThreads([thread], { width: 200 });
+	await t.renderOnce();
+	await nextChapter(t);
+	expect(statusLine(t)).toContain("j/k move");
+	expect(statusLine(t)).not.toContain("R reply");
+
+	await press(t, "j");
+	for (const hint of ["Enter reply", "R reply", "X resolve", "A send", "D delete"]) {
+		expect(statusLine(t)).toContain(hint);
+	}
+	expect(statusLine(t)).not.toContain("j/k move");
+	expect(statusLine(t)).not.toContain("v select");
 });

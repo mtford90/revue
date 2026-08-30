@@ -1,14 +1,18 @@
 import { expect, test } from "bun:test";
-import { createDiffFile, parsePatch, planDiff } from "@revue/diff";
+import { createDiffFile, type DiffLineRange, parsePatch, planDiff } from "@revue/diff";
 import { OPENTUI_DIFF_CHROME } from "@revue/diff-opentui";
 import {
 	initialReviewLine,
-	moveReviewLine,
+	moveReviewStop,
 	moveSelectionReviewLine,
+	type ReviewCard,
+	type ReviewLineFile,
+	type ReviewStop,
 	reviewableLines,
 	reviewLineFile,
 	reviewLineFileContains,
 	reviewLineSelection,
+	reviewStops,
 	selectionLineFile,
 	switchReviewLineSide,
 } from "./reviewLineCursor.ts";
@@ -23,6 +27,24 @@ const plan = (patch: string, layout: "split" | "stack" = "split") => {
 		visibility: { lineNumbers: true, changeMarkers: true, hunkHeaders: true },
 		chrome: OPENTUI_DIFF_CHROME,
 	});
+};
+
+/** Line-only motion, so the cursor tests below still read as the line walk they describe. */
+const moveReviewLine = ({
+	files,
+	current,
+	delta,
+}: {
+	files: readonly ReviewLineFile[];
+	current: DiffLineRange | null;
+	delta: -1 | 1;
+}): DiffLineRange | null => {
+	const next = moveReviewStop({
+		files,
+		current: current ? { kind: "line", line: current } : null,
+		delta,
+	});
+	return next?.kind === "line" ? next.line : null;
 };
 
 const PATCH = `diff --git a/value.ts b/value.ts
@@ -217,4 +239,91 @@ test("stacked selection counts a dual-authority context row once", () => {
 	expect(context).toMatchObject({ side: "additions", startLine: 2 });
 	const next = moveSelectionReviewLine({ file: allRows, current: context, delta: 1 });
 	expect(next).toMatchObject({ side: "deletions", startLine: 3 });
+});
+
+// ── Thread cards as stops ─────────────────────────────────────────────────────
+
+const anchoredAt = (side: "additions" | "deletions", line: number, hunkOldStart = 1) => ({
+	filePath: "value.ts",
+	hunkOldStart,
+	side,
+	startLine: line,
+	endLine: line,
+});
+
+const card = (id: string, anchor: DiffLineRange): ReviewCard => ({ id, anchor });
+
+const named = (stop: ReviewStop) =>
+	stop.kind === "line" ? `${stop.line.side} ${stop.line.startLine}` : `card ${stop.threadId}`;
+
+test("cards stop after the row they hang from, in the order they were given", () => {
+	const file = reviewLineFile(plan(PATCH, "split"));
+	const first = anchoredAt("additions", 1);
+	const stops = reviewStops({
+		file,
+		cards: [card("upper", first), card("lower", first)],
+		side: "additions",
+	});
+
+	expect(stops.map(named)).toEqual(["additions 1", "card upper", "card lower", "additions 3"]);
+});
+
+test("a card on a deletion row is a stop in either pane", () => {
+	const file = reviewLineFile(plan(PATCH, "split"));
+	const cards = [card("tail", anchoredAt("deletions", 10, 10))];
+
+	expect(reviewStops({ file, cards, side: "additions" }).map(named)).toEqual([
+		"additions 1",
+		"additions 3",
+		"card tail",
+	]);
+	expect(reviewStops({ file, cards, side: "deletions" }).map(named)).toEqual([
+		"deletions 1",
+		"deletions 3",
+		"deletions 10",
+		"card tail",
+	]);
+});
+
+test("ordinary motion lands on a card between the lines around it", () => {
+	const files = [reviewLineFile(plan(PATCH, "split"))];
+	const cards = [card("upper", anchoredAt("additions", 1))];
+	const start: ReviewStop = { kind: "line", line: anchoredAt("additions", 1) };
+
+	const onCard = moveReviewStop({ files, cards, current: start, delta: 1 });
+	expect(onCard).toEqual({ kind: "thread", threadId: "upper", anchor: anchoredAt("additions", 1) });
+	expect(moveReviewStop({ files, cards, current: onCard, delta: 1 })).toMatchObject({
+		kind: "line",
+		line: { side: "additions", startLine: 3 },
+	});
+	expect(moveReviewStop({ files, cards, current: onCard, delta: -1 })).toEqual(start);
+});
+
+test("a card at the end of a file is the stop the walk back from the next file lands on", () => {
+	const first = reviewLineFile(plan(PATCH, "split"));
+	const second = reviewLineFile(
+		plan(`diff --git a/next.ts b/next.ts
+--- a/next.ts
++++ b/next.ts
+@@ -1 +1 @@
+-old next
++new next
+`),
+	);
+	const cards = [card("last", anchoredAt("additions", 3))];
+	const entry = moveReviewStop({
+		files: [first, second],
+		cards,
+		current: { kind: "line", line: anchoredAt("additions", 1) },
+		delta: 1,
+	});
+
+	expect(entry).toMatchObject({ kind: "line", line: { side: "additions", startLine: 3 } });
+	const next = moveReviewStop({ files: [first, second], cards, current: entry, delta: 1 });
+	expect(next).toMatchObject({ kind: "thread", threadId: "last" });
+	const crossed = moveReviewStop({ files: [first, second], cards, current: next, delta: 1 });
+	expect(crossed).toMatchObject({ kind: "line", line: { filePath: "next.ts", startLine: 1 } });
+	expect(moveReviewStop({ files: [first, second], cards, current: crossed, delta: -1 })).toEqual(
+		next,
+	);
 });

@@ -158,11 +158,13 @@ import {
 import type { FileDisplayPreference, Preferences } from "./preferences.ts";
 import {
 	initialReviewLine,
-	moveReviewLine,
+	moveReviewStop,
 	moveSelectionReviewLine,
+	type ReviewStop,
 	reviewLineFile,
 	reviewLineFileContains,
 	reviewLineSelection,
+	reviewStopRange,
 	selectionLineFile,
 	switchReviewLineSide,
 } from "./reviewLineCursor.ts";
@@ -424,8 +426,8 @@ const threadRefRowId = (chapterId: string, threadId: string) =>
 
 /**
  * What a chapter cites of the review's own conversation. An epilogue narrates fixes the reviewer
- * asked for, so each citation is a link back to the thread that asked: the cursor stops on it and
- * Enter opens it where the conversation lives, on the Comments surface.
+ * asked for, so each citation is a link back to the thread that asked: the chapter walk puts the
+ * cursor on that thread's card, and clicking the citation opens it where the conversation lives.
  */
 type ChapterThreadRefs = {
 	threads: readonly ReviewThread[];
@@ -1615,11 +1617,17 @@ export type ThreadActionKeys = {
 	delete: string;
 };
 
+/** A card names its keys only while the cursor is on it, so one key never reads as two threads. */
+const cardButtonLabel = (label: string, key: string, focused: boolean) =>
+	focused ? `[${label} ${key}]` : `[${label}]`;
+
 function InlineThread({
 	thread,
 	replyComposer,
 	keys,
 	unsent,
+	focused,
+	onFocus,
 	onReply,
 	onSend,
 	onDeleteThread,
@@ -1631,6 +1639,9 @@ function InlineThread({
 	keys: ThreadActionKeys;
 	/** Send has something to carry for this thread; sending an answered one would say it twice. */
 	unsent: boolean;
+	/** The review cursor rests on this card, so it alone answers to the thread keys. */
+	focused: boolean;
+	onFocus: (thread: ReviewThread) => void;
 	onReply: (thread: ReviewThread) => void;
 	onSend: (thread: ReviewThread) => void;
 	onDeleteThread: (id: string) => void;
@@ -1640,11 +1651,17 @@ function InlineThread({
 	const theme = useTheme();
 	const placement = useResolvedInlineAttachmentPlacement();
 	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
+	// A button press is a press on the card, so the cursor arrives before the action runs.
+	const claimButton = (run: () => void) => (event: OpenTUIMouseEvent) =>
+		claimClick(event, () => {
+			onFocus(thread);
+			run();
+		});
 	return (
 		<box
 			flexDirection="column"
 			border
-			borderColor={dealtWith ? theme.badgeAdded : theme.badgeModified}
+			borderColor={focused ? theme.accent : dealtWith ? theme.badgeAdded : theme.badgeModified}
 			backgroundColor={theme.panel}
 			title={` ${dealtWith ? "✓ Resolved" : "! Open"} · ${thread.id.slice(0, 8)} `}
 			paddingLeft={1}
@@ -1652,6 +1669,7 @@ function InlineThread({
 			marginLeft={2}
 			marginRight={placement === "deletions" ? 3 : 1}
 			gap={1}
+			onMouseDown={() => onFocus(thread)}
 		>
 			{thread.messages.map((message, index) => (
 				<ThreadMessageView
@@ -1664,33 +1682,24 @@ function InlineThread({
 			))}
 			{replyComposer}
 			<box flexDirection="row" flexWrap="wrap">
-				<text fg={theme.accent} onMouseDown={(event) => claimClick(event, () => onReply(thread))}>
-					{`[Reply ${keys.reply}]`}
+				<text fg={theme.accent} onMouseDown={claimButton(() => onReply(thread))}>
+					{cardButtonLabel("Reply", keys.reply, focused)}
 				</text>
 				<text> </text>
-				<text
-					fg={theme.accent}
-					onMouseDown={(event) => claimClick(event, () => onToggleStatus(thread))}
-				>
-					{`[${dealtWith ? "Reopen" : "Resolve"} ${keys.status}]`}
+				<text fg={theme.accent} onMouseDown={claimButton(() => onToggleStatus(thread))}>
+					{cardButtonLabel(dealtWith ? "Reopen" : "Resolve", keys.status, focused)}
 				</text>
 				{unsent ? (
 					<>
 						<text> </text>
-						<text
-							fg={theme.accent}
-							onMouseDown={(event) => claimClick(event, () => onSend(thread))}
-						>
-							{`[Send to agent ${keys.send}]`}
+						<text fg={theme.accent} onMouseDown={claimButton(() => onSend(thread))}>
+							{cardButtonLabel("Send to agent", keys.send, focused)}
 						</text>
 					</>
 				) : null}
 				<text> </text>
-				<text
-					fg={theme.badgeRemoved}
-					onMouseDown={(event) => claimClick(event, () => onDeleteThread(thread.id))}
-				>
-					{`[Delete ${keys.delete}]`}
+				<text fg={theme.badgeRemoved} onMouseDown={claimButton(() => onDeleteThread(thread.id))}>
+					{cardButtonLabel("Delete", keys.delete, focused)}
 				</text>
 			</box>
 		</box>
@@ -2166,6 +2175,8 @@ function ChapterView({
 	onActivateThreadRange,
 	onRangeStart,
 	onRangeContextMenu,
+	focusedThreadId,
+	onFocusThread,
 	onReplyThread,
 	onSendThread,
 	onDeleteThread,
@@ -2213,6 +2224,9 @@ function ChapterView({
 	onActivateThreadRange: (selection: DiffSelection) => void;
 	onRangeStart: (range: DiffLineRange) => void;
 	onRangeContextMenu: (selection: DiffSelection, position: { x: number; y: number }) => void;
+	/** The thread the review cursor rests on, the one card that names its keys. */
+	focusedThreadId: string | null;
+	onFocusThread: (thread: ReviewThread) => void;
 	onReplyThread: (thread: ReviewThread) => void;
 	onSendThread: (thread: ReviewThread) => void;
 	onDeleteThread: (id: string) => void;
@@ -2262,6 +2276,8 @@ function ChapterView({
 					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
 					keys={threadKeys}
 					unsent={unsentThreadIds.has(thread.id)}
+					focused={thread.id === focusedThreadId}
+					onFocus={onFocusThread}
 					onReply={onReplyThread}
 					onSend={onSendThread}
 					onDeleteThread={onDeleteThread}
@@ -2621,6 +2637,21 @@ const measuredAnchor = (thread: ReviewThread): DiffInlineAttachment => ({
 	content: null,
 });
 
+const lineReviewStop = (line: DiffLineRange | null): ReviewStop | null =>
+	line ? { kind: "line", line } : null;
+
+const sameDiffLine = (left: DiffLineRange, right: DiffLineRange): boolean =>
+	left.filePath === right.filePath &&
+	left.hunkOldStart === right.hunkOldStart &&
+	left.side === right.side &&
+	left.startLine === right.startLine;
+
+const threadReviewStop = (thread: ReviewThread): ReviewStop => ({
+	kind: "thread",
+	threadId: thread.id,
+	anchor: diffRangeForAnchor(thread.anchor),
+});
+
 export function App({
 	file,
 	context = null,
@@ -2776,6 +2807,7 @@ export function App({
 	const [allFiles, setAllFiles] = useState(initialAllFiles);
 	const [commentsSurface, setCommentsSurface] = useState(false);
 	const [selectedThread, setSelectedThread] = useState(0);
+	/** A request to bring one thread's card into view. It carries no focus; the cursor does that. */
 	const [threadFocusTarget, setThreadFocusTarget] = useState<{
 		threadId: string;
 		request: number;
@@ -2794,11 +2826,16 @@ export function App({
 	);
 	/** The excerpt the file cursor has stepped onto; excerpt rows carry no focus marker. */
 	const [focusedExcerpt, setFocusedExcerpt] = useState<string | null>(null);
-	/** The cited thread the chapter cursor is on, so Enter knows which conversation to open. */
-	const [focusedThreadRef, setFocusedThreadRef] = useState<string | null>(null);
 	/** A quoted range the gutter drag left behind. It has no composer to hold it, so it lives here. */
 	const [excerptSelection, setExcerptSelection] = useState<DiffLineRange | null>(null);
-	const [lineCursor, setLineCursor] = useState<DiffLineRange | null>(null);
+	/** The reviewer's one place on the page: a source line, or a thread card hanging beneath one. */
+	const [reviewCursor, setReviewCursor] = useState<ReviewStop | null>(null);
+	/** Line work — selecting, editing, commenting — reads this, so a card simply offers it nothing. */
+	const cursorLine = reviewCursor?.kind === "line" ? reviewCursor.line : null;
+	const cursorThreadId = reviewCursor?.kind === "thread" ? reviewCursor.threadId : null;
+	// Effects that must not re-run on every step read the cursor here instead of depending on it.
+	const cursorRef = useRef(reviewCursor);
+	cursorRef.current = reviewCursor;
 	const [lineSelectionAnchor, setLineSelectionAnchor] = useState<DiffLineRange | null>(null);
 	const [pointerSelection, setPointerSelection] = useState<DiffSelection | null>(null);
 	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
@@ -3050,10 +3087,13 @@ export function App({
 				.map((entry): ChapterFocusTarget => ({ kind: "excerpt", key: entry.key })),
 		];
 	}, [chapter, chapterExcerpts, citedThreads]);
+	/** The cursor is on a card the narration cites, which is what the citation row marks as active. */
+	const citedCursorThreadId =
+		citedThreads.find((thread) => thread.id === cursorThreadId)?.id ?? null;
 	const chapterThreadRefs: ChapterThreadRefs = {
 		threads: citedThreads,
-		focused: focusedThreadRef,
-		onFocus: setFocusedThreadRef,
+		focused: cursorThreadId,
+		onFocus: focusCitedThread,
 		onOpen: openReferencedThread,
 	};
 	/** Validated orphans stay in Comments but have no inline source presence, even by coincidence. */
@@ -3104,21 +3144,23 @@ export function App({
 		[threads, handoff],
 	);
 	/**
-	 * The thread an action names. On Comments it is the selected row; on the page it is the cited
-	 * thread the chapter cursor is on, and otherwise the conversation the reviewer opened — but only
-	 * while this page still shows it, because a jump elsewhere leaves that target behind.
+	 * The thread an action names. On Comments it is the selected row; on the page it is the card
+	 * the review cursor rests on. There is nowhere else for a thread to be focused.
 	 */
 	const focusedThread: ReviewThread | null = commentsSurface
 		? (orderedThreads[selectedThread] ?? null)
-		: (threads.find((thread) => thread.id === focusedThreadRef) ??
-			[...chapterThreadList, ...chapterQuotedThreads].find(
-				(thread) => thread.id === threadFocusTarget?.threadId,
-			) ??
-			null);
+		: (threads.find((thread) => thread.id === cursorThreadId) ?? null);
+	/** The cards hanging from diff lines: the stops the cursor shares with the source it annotates. */
+	const diffCards = useMemo(() => chapterThreadList.map(measuredAnchor), [chapterThreadList]);
+	/** Every card this page mounts, quoted ones included, so the cursor knows when its card is gone. */
+	const pageCardIds = useMemo(
+		() => new Set([...chapterThreadList, ...chapterQuotedThreads].map((thread) => thread.id)),
+		[chapterThreadList, chapterQuotedThreads],
+	);
 	const quotedDraft = threadDraft?.kind === "thread" && isExcerptAnchor(threadDraft.anchor);
 	const attachmentAnchors = useMemo<DiffInlineAttachment[]>(
 		() => [
-			...chapterThreadList.map(measuredAnchor),
+			...diffCards,
 			...(threadDraft?.kind === "thread" && !quotedDraft
 				? [
 						{
@@ -3130,7 +3172,7 @@ export function App({
 					]
 				: []),
 		],
-		[chapterThreadList, threadDraft, quotedDraft],
+		[diffCards, threadDraft, quotedDraft],
 	);
 	const excerptAttachmentAnchors = useMemo<DiffInlineAttachment[]>(
 		() => [
@@ -3208,14 +3250,14 @@ export function App({
 	);
 	const lineSelection = useMemo(
 		() =>
-			lineSelectionAnchor && lineCursor
+			lineSelectionAnchor && cursorLine
 				? reviewLineSelection({
 						file: focusedSelectionFile,
 						anchor: lineSelectionAnchor,
-						cursor: lineCursor,
+						cursor: cursorLine,
 					})
 				: null,
-		[lineSelectionAnchor, lineCursor, focusedSelectionFile],
+		[lineSelectionAnchor, cursorLine, focusedSelectionFile],
 	);
 	const chapterSegments = useMemo(
 		() =>
@@ -3439,16 +3481,18 @@ export function App({
 		});
 	}
 
+	// A card outlives a change of file: it is the reviewer's place until the page stops mounting it.
 	useEffect(() => {
-		setLineCursor((currentLine) =>
-			reviewLineFileContains(focusedReviewFile, currentLine)
-				? currentLine
-				: initialReviewLine(focusedReviewFile),
-		);
+		setReviewCursor((current) => {
+			if (current?.kind === "thread" && pageCardIds.has(current.threadId)) return current;
+			const line = current?.kind === "line" ? current.line : null;
+			if (reviewLineFileContains(focusedReviewFile, line)) return current;
+			return lineReviewStop(initialReviewLine(focusedReviewFile));
+		});
 		setLineSelectionAnchor((anchor) =>
 			reviewLineFileContains(focusedReviewFile, anchor) ? anchor : null,
 		);
-	}, [focusedReviewFile]);
+	}, [focusedReviewFile, pageCardIds]);
 
 	useEffect(() => {
 		if (!loadFileLines || !chapter) return;
@@ -3506,11 +3550,12 @@ export function App({
 		return () => clearTimeout(retry);
 	}, [current, indexExpanded]);
 
+	// The citation is where the cursor arrived from, so its row follows the cursor onto the card.
 	useEffect(() => {
-		if (!chapter || !focusedThreadRef) return;
+		if (!chapter || !citedCursorThreadId) return;
 		const host = showChapterPanel ? panelScroll : pageScroll;
-		host.current?.scrollChildIntoView(threadRefRowId(chapter.id, focusedThreadRef));
-	}, [chapter, focusedThreadRef, showChapterPanel]);
+		host.current?.scrollChildIntoView(threadRefRowId(chapter.id, citedCursorThreadId));
+	}, [chapter, citedCursorThreadId, showChapterPanel]);
 
 	useEffect(() => {
 		if (!commentsSurface) return;
@@ -3549,7 +3594,8 @@ export function App({
 	}, [subscribeUpdates, readHandoff]);
 
 	useEffect(() => {
-		if (!chapter || fileFocusRequest.sequence === 0 || focusedThreadRef) return;
+		// A cursor resting on a card is not asking for its file's header, so the scroll stands down.
+		if (!chapter || fileFocusRequest.sequence === 0 || cursorRef.current?.kind === "thread") return;
 		const path = chapterFilePaths(chapter)[selectedFile];
 		const segment = focusedExcerpt
 			? excerptSegmentId(focusedExcerpt)
@@ -3578,18 +3624,17 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [chapter, selectedFile, focusedExcerpt, focusedThreadRef, fileFocusRequest]);
+	}, [chapter, selectedFile, focusedExcerpt, fileFocusRequest]);
 
 	const lineMotionRequest = useRef(0);
 	const handledLineMotionRequest = useRef(0);
 	useEffect(() => {
-		if (!lineCursor || handledLineMotionRequest.current === lineMotionRequest.current) return;
+		if (!reviewCursor || handledLineMotionRequest.current === lineMotionRequest.current) return;
 		handledLineMotionRequest.current = lineMotionRequest.current;
-		const file = viewportFilesRef.current.find(
-			(candidate) => candidate.path === lineCursor.filePath,
-		);
+		const range = reviewStopRange(reviewCursor);
+		const file = viewportFilesRef.current.find((candidate) => candidate.path === range.filePath);
 		if (!file) return;
-		const row = attachmentRowIndex(file, lineCursor);
+		const row = attachmentRowIndex(file, range);
 		const offset =
 			row >= 0 ? segmentOffset(chapterSegmentsRef.current, bodySegmentId(file.path), row) : null;
 		if (offset !== null) {
@@ -3597,9 +3642,14 @@ export function App({
 				scroll: pageScroll.current,
 				leadingHeight: leadingContent.current?.height ?? 0,
 				offset,
+				// A card sits under its line, so revealing the line alone would leave it off screen.
+				span: reviewCursor.kind === "thread" ? ESTIMATED_ATTACHMENT_HEIGHT + 1 : undefined,
 			});
 		}
-	}, [lineCursor]);
+		if (reviewCursor.kind === "thread") {
+			pageScroll.current?.scrollChildIntoView(reviewCursor.threadId);
+		}
+	}, [reviewCursor]);
 
 	useEffect(() => {
 		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
@@ -3834,46 +3884,49 @@ export function App({
 		setThreadNotice(null);
 	}
 	function repositionLineCursor(range: DiffLineRange) {
-		setLineCursor(range);
+		setReviewCursor({ kind: "line", line: range });
 		setLineSelectionAnchor(null);
 		setPointerSelection(null);
 		const nextFile = chapter ? chapterFilePaths(chapter).indexOf(range.filePath) : -1;
 		if (nextFile >= 0) setSelectedFile(nextFile);
 	}
-	function moveLineCursor(delta: -1 | 1) {
+	/** Extension walks source lines alone; ordinary motion walks the stops, cards among them. */
+	function moveReviewCursor(delta: -1 | 1) {
 		const next = lineSelectionAnchor
-			? moveSelectionReviewLine({ file: focusedSelectionFile, current: lineCursor, delta })
-			: moveReviewLine({ files: navigationReviewFiles, current: lineCursor, delta });
+			? lineReviewStop(
+					moveSelectionReviewLine({ file: focusedSelectionFile, current: cursorLine, delta }),
+				)
+			: moveReviewStop({
+					files: navigationReviewFiles,
+					cards: diffCards,
+					current: reviewCursor,
+					delta,
+				});
 		if (!next) return;
 		lineMotionRequest.current += 1;
-		setLineCursor(next);
+		setReviewCursor(next);
 		if (!lineSelectionAnchor) setPointerSelection(null);
-		const fileIndex = chapter ? chapterFilePaths(chapter).indexOf(next.filePath) : -1;
+		const path = reviewStopRange(next).filePath;
+		const fileIndex = chapter ? chapterFilePaths(chapter).indexOf(path) : -1;
 		if (fileIndex >= 0 && fileIndex !== selectedFile) setSelectedFile(fileIndex);
 	}
-	function moveLineCursorSide(side: DiffSide) {
+	/** A card has no side of its own, so crossing panes from one lands on the line it hangs from. */
+	function moveReviewCursorSide(side: DiffSide) {
+		const from = reviewCursor ? reviewStopRange(reviewCursor) : null;
 		const next = switchReviewLineSide({
 			file: lineSelectionAnchor ? focusedSelectionFile : focusedReviewFile,
-			current: lineCursor,
+			current: from,
 			side,
 		});
-		if (
-			!next ||
-			(lineCursor &&
-				next.filePath === lineCursor.filePath &&
-				next.hunkOldStart === lineCursor.hunkOldStart &&
-				next.side === lineCursor.side &&
-				next.startLine === lineCursor.startLine)
-		)
-			return;
+		if (!next || (cursorLine && sameDiffLine(next, cursorLine))) return;
 		lineMotionRequest.current += 1;
-		setLineCursor(next);
+		setReviewCursor({ kind: "line", line: next });
 		if (!lineSelectionAnchor) setPointerSelection(null);
 	}
 	function startLineSelection() {
-		if (lineCursor) {
+		if (cursorLine) {
 			setPointerSelection(null);
-			setLineSelectionAnchor(lineCursor);
+			setLineSelectionAnchor(cursorLine);
 		}
 	}
 	async function openLineInEditor() {
@@ -3883,7 +3936,7 @@ export function App({
 			? diffRangeForSelectionRange(selected?.filePath ?? "", selectedAddition)
 			: selected
 				? null
-				: lineCursor;
+				: cursorLine;
 		if (!target) {
 			setMountNotice({
 				text: selected
@@ -4103,7 +4156,6 @@ export function App({
 		setOpenExcerpts(new Set(restored.openExcerpts));
 		setFoldedDiagrams(new Set(restored.foldedDiagrams));
 		setFocusedExcerpt(null);
-		setFocusedThreadRef(null);
 		setExpansions(new Map());
 		setExpandedVariants(new Map());
 		setFileFocusRequest({ sequence: 0, centre: false });
@@ -4176,8 +4228,16 @@ export function App({
 		restorePageFocus(nextPageId);
 		const targetChapter =
 			nextPage?.kind === "chapter" || nextPage?.kind === "files" ? nextPage.chapter : null;
-		if (targetChapter) {
-			const fileIndex = chapterFilePaths(targetChapter).indexOf(thread.anchor.filePath);
+		focusThreadCard(targetChapter, thread);
+		setThreadFocusTarget((currentTarget) => ({
+			threadId: thread.id,
+			request: (currentTarget?.request ?? 0) + 1,
+		}));
+	}
+	/** Put the cursor on a thread's card, opening whatever holds it so the card is there to rest on. */
+	function focusThreadCard(owner: Chapter | null, thread: ReviewThread) {
+		if (owner) {
+			const fileIndex = chapterFilePaths(owner).indexOf(thread.anchor.filePath);
 			if (fileIndex >= 0) {
 				setSelectedFile(fileIndex);
 				setSelectedHunkIndex(0);
@@ -4188,15 +4248,17 @@ export function App({
 				new Set([...currentCollapsed].filter((entry) => entry !== thread.anchor.filePath)),
 		);
 		// A folded excerpt renders none of its threads, so landing on one has to open it.
-		const citation = targetChapter ? citationFor(targetChapter, thread) : undefined;
+		const citation = owner ? citationFor(owner, thread) : undefined;
 		if (citation) {
 			const key = excerptKey(citation);
 			setOpenExcerpts((currentOpen) => new Set([...currentOpen, key]));
 		}
-		setThreadFocusTarget((currentTarget) => ({
-			threadId: thread.id,
-			request: (currentTarget?.request ?? 0) + 1,
-		}));
+		setReviewCursor(threadReviewStop(thread));
+	}
+	/** A citation names a thread the chapter answers; the cursor goes to the card that holds it. */
+	function focusCitedThread(threadId: string) {
+		const thread = citedThreads.find((candidate) => candidate.id === threadId);
+		if (thread) focusThreadCard(chapter, thread);
 	}
 	function expandContext(
 		path: string,
@@ -4473,16 +4535,27 @@ export function App({
 			focusTargets[(Math.max(0, at) + delta + focusTargets.length) % focusTargets.length];
 		if (!next) return;
 		setFocusedExcerpt(next.kind === "excerpt" ? next.key : null);
-		setFocusedThreadRef(next.kind === "thread" ? next.threadId : null);
+		if (next.kind === "thread") {
+			focusCitedThread(next.threadId);
+			return;
+		}
+		// Stepping off a card is leaving it: the cursor takes up the source the walk arrived at.
+		if (cursorThreadId) {
+			const path =
+				next.kind === "file" && chapter ? chapterFilePaths(chapter)[next.index] : focusedReviewPath;
+			const file = navigationReviewFiles.find((entry) => entry.filePath === path) ?? null;
+			setReviewCursor(lineReviewStop(initialReviewLine(file)));
+		}
 		if (next.kind === "file") setSelectedFile(next.index);
 		requestFileFocus(next.kind === "file");
 	}
 	function currentFocusTarget(): number {
-		if (focusedThreadRef) {
-			return focusTargets.findIndex(
-				(target) => target.kind === "thread" && target.threadId === focusedThreadRef,
-			);
-		}
+		const citedIndex = citedCursorThreadId
+			? focusTargets.findIndex(
+					(target) => target.kind === "thread" && target.threadId === citedCursorThreadId,
+				)
+			: -1;
+		if (citedIndex >= 0) return citedIndex;
 		if (focusedExcerpt) {
 			return focusTargets.findIndex(
 				(target) => target.kind === "excerpt" && target.key === focusedExcerpt,
@@ -4958,16 +5031,16 @@ export function App({
 				pageScroll.current?.scrollBy(1);
 				break;
 			case "previous-source-line":
-				moveLineCursor(-1);
+				moveReviewCursor(-1);
 				break;
 			case "next-source-line":
-				moveLineCursor(1);
+				moveReviewCursor(1);
 				break;
 			case "move-to-old-side":
-				moveLineCursorSide("deletions");
+				moveReviewCursorSide("deletions");
 				break;
 			case "move-to-new-side":
-				moveLineCursorSide("additions");
+				moveReviewCursorSide("additions");
 				break;
 			case "select-lines":
 				startLineSelection();
@@ -4990,11 +5063,11 @@ export function App({
 			case "toggle-file-diff": {
 				if (!chapter) break;
 				const patchTarget =
-					excerptSelection || focusedExcerpt || focusedThreadRef
+					excerptSelection || focusedExcerpt || cursorThreadId
 						? null
 						: (lineSelection ??
 							pointerSelection ??
-							(lineCursor ? selectionForDiffRange(lineCursor) : null));
+							(cursorLine ? selectionForDiffRange(cursorLine) : null));
 				if (patchTarget) {
 					commentOnPatchSelection(patchTarget);
 					break;
@@ -5005,8 +5078,9 @@ export function App({
 					commentOnExcerptRange(excerptSelection);
 					break;
 				}
-				if (focusedThreadRef) {
-					openReferencedThread(focusedThreadRef);
+				// A card under the cursor answers Enter with the reply its own key would open.
+				if (cursorThreadId) {
+					withFocusedThread(replyToThread);
 					break;
 				}
 				if (focusedExcerpt) {
@@ -5081,11 +5155,12 @@ export function App({
 			: pointerSelection
 				? "selected"
 				: "cursor";
+	// Hints follow the cursor's kind: source work on a line, thread work on a card, never both.
 	const sourceReviewActionable = Boolean(
 		chapter &&
 			!interlude &&
 			!focusedExcerpt &&
-			!focusedThreadRef &&
+			!cursorThreadId &&
 			focusedNavigationFile &&
 			focusedReviewFile?.rows.length,
 	);
@@ -5100,8 +5175,8 @@ export function App({
 					...actionHint("next-unreviewed", "unreviewed"),
 					...actionHint("toggle-comments", "comments"),
 				]
-			: focusedThreadRef
-				? actionHint("toggle-file-diff", "open comment")
+			: cursorThreadId
+				? actionHint("toggle-file-diff", "reply")
 				: focusedExcerpt
 					? actionHint("toggle-file-diff", "toggle excerpt")
 					: interlude
@@ -5327,7 +5402,7 @@ export function App({
 									selectedKeyChange={selectedKeyChange}
 									collapsedFiles={collapsedFiles}
 									threads={inlineThreads}
-									keyboardCursor={lineSelectionAnchor ? undefined : (lineCursor ?? undefined)}
+									keyboardCursor={lineSelectionAnchor ? undefined : (cursorLine ?? undefined)}
 									selectedThreadSelection={
 										(contextMenu?.kind === "range" &&
 										contextMenu.anchorKind !== THREAD_ANCHOR_KIND.EXCERPT
@@ -5350,6 +5425,8 @@ export function App({
 									onActivateThreadRange={commentOnPatchSelection}
 									onRangeStart={repositionLineCursor}
 									onRangeContextMenu={openRangeContextMenu}
+									focusedThreadId={cursorThreadId}
+									onFocusThread={(thread) => setReviewCursor(threadReviewStop(thread))}
 									onReplyThread={startThreadReply}
 									onSendThread={sendOneThread}
 									onDeleteThread={requestThreadDelete}

@@ -1,6 +1,6 @@
 # 10 — Thread cards as review cursor stops
 
-Status: todo
+Status: done
 
 ## Parent
 
@@ -64,15 +64,15 @@ each only when it applies) plus `Enter reply`. Never both.
 
 ## Acceptance criteria
 
-- [ ] `reviewStops` interleaves cards after their anchor row; unit tests cover one card, two cards on one row, a card on a deletion-side row in split, and a resolved card
-- [ ] `j`/`k` land on a card between the lines around it, and cross files as before
-- [ ] `v`, `e`, `h`, `l` on a card do not act on the card; `h`/`l` move to a line
-- [ ] `Enter` and `R` on a card open the reply composer; `X`, `A`, `D` act on that card only
-- [ ] Only the card under the cursor shows key labels and the accent border
-- [ ] Tab onto a cited thread puts the cursor on its card; `focusedThreadRef` no longer exists
-- [ ] Jumping from Comments lands the cursor on the card
-- [ ] Hints show review hints on a line and thread hints on a card, never both
-- [ ] Existing rev-5 cursor tests still pass
+- [x] `reviewStops` interleaves cards after their anchor row; unit tests cover one card, two cards on one row, a card on a deletion-side row in split, and a resolved card
+- [x] `j`/`k` land on a card between the lines around it, and cross files as before
+- [x] `v`, `e`, `h`, `l` on a card do not act on the card; `h`/`l` move to a line
+- [x] `Enter` and `R` on a card open the reply composer; `X`, `A`, `D` act on that card only
+- [x] Only the card under the cursor shows key labels and the accent border
+- [x] Tab onto a cited thread puts the cursor on its card; `focusedThreadRef` no longer exists
+- [x] Jumping from Comments lands the cursor on the card
+- [x] Hints show review hints on a line and thread hints on a card, never both
+- [x] Existing rev-5 cursor tests still pass
 
 ## Blocked by
 

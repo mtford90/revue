@@ -1,4 +1,5 @@
 export {
+	attachmentAnchoredAt,
 	attachmentsForExcerptLine,
 	attachmentsForRow,
 	type DiffInlineAttachment,

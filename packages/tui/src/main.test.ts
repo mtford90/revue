@@ -1023,6 +1023,21 @@ test("status --wait times out with a distinct exit code", async () => {
 	}
 });
 
+test("a damaged agent origin is a status warning, not a failure", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-origin-"));
+	try {
+		await initGitRepo(root);
+		await mkdir(join(root, ".revue"), { recursive: true });
+		await writeFile(join(root, ".revue", "agent.json"), "{ not an origin");
+
+		const result = await run(root, ["status", "--json"]);
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout).warnings[0]).toContain("agent.json");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("status --since without --wait is rejected", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
 	try {

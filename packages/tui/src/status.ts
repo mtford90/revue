@@ -7,6 +7,7 @@ import {
 	PrepError,
 	previewRunId,
 	type RunRecord,
+	readAgentOrigin,
 	readHandoff,
 	readRunRecords,
 	rerunArgsFor,
@@ -166,7 +167,12 @@ export async function readStatus(directory?: string): Promise<StatusReport> {
 	const { root } = await findGitContext(directory);
 	const records = await readRunRecords(defaultRunsDirectory(root));
 	const handoff = readHandoff(root);
-	const warnings = handoff.warning ? [handoff.warning] : [];
+	// A damaged origin costs the reviewer's next Send the pane it should wake, silently, so
+	// orientation reports it beside the handoff it reads for the same reason.
+	const origin = readAgentOrigin(root);
+	const warnings = [handoff.warning, origin.warning].filter(
+		(warning): warning is string => warning !== undefined,
+	);
 	const newest = records[0];
 	const active = records.find((record) => record.narrated) ?? null;
 	const pending = newest && !newest.narrated ? newest : null;

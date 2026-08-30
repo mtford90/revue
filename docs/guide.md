@@ -353,6 +353,11 @@ chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused 
 the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking chapter, file, or key-
 change content navigates without changing review state—only its checkbox toggles it.
 
+The same review action behaves identically wherever it appears. Completing a chapter marks and
+collapses all its files, then advances to the next unreviewed chapter; reopening it returns there,
+expands its files, and focuses the first. Completing a file collapses it and moves to the next
+unreviewed file or chapter; reopening it expands and focuses it. Key changes toggle in place.
+
 Most actions answer to several keys, so muscle memory from Vim, `less`, the diff TUIs, the IDEs or
 plain arrow-key use lands on the right thing. `j`/`k`, `↑`/`↓`, or `Ctrl-n`/`Ctrl-p` scroll by line ·
 `d`/`u` or `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/

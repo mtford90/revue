@@ -146,8 +146,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
   Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
   `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes
-  the chapter, and vice-versa. Excerpts appear in it nowhere: quoted code is scenery, not work.
-  Persisted locally, keyed by **run key**.
+  the chapter, and vice-versa. Every mouse, keyboard, and menu entry point for one review entity uses
+  the same transition: completing chapters or files collapses them and moves to the next unreviewed
+  work; reopening them expands and focuses them; key changes toggle in place. Excerpts appear in it
+  nowhere: quoted code is scenery, not work. Persisted locally, keyed by **run key**.
 - **Review session state** — narration-sensitive location within one run: current page, focused
   file/hunk/question, collapsed files, which excerpts and diagrams have been opened (both fold shut
   by default, so only the openings are recorded), and scroll offsets. It is stored beside review progress under

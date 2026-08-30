@@ -54,8 +54,13 @@ const isControl = (character: string): boolean => {
 	return (code < 0x20 && code !== 0x09 && code !== 0x0a) || (code >= 0x7f && code <= 0x9f);
 };
 
+/** The C0/C1 controls the thread schema also refuses, and the format characters — bidi overrides,
+ * zero-width joiners — that would otherwise reorder or hide the rest of the line. */
 const stripControls = (value: string): string =>
-	[...value].filter((character) => !isControl(character)).join("");
+	[...value]
+		.filter((character) => !isControl(character))
+		.join("")
+		.replace(/\p{Cf}/gu, "");
 
 const truncate = (value: string): string => {
 	const characters = [...value];
@@ -105,9 +110,12 @@ const runCli = async (host: Host, args: string[]): Promise<unknown> => {
 };
 
 /** The worktree's terminals a prompt could go to: never the TUI's own pane, and never one the host
- * says it cannot reach. Null is "the host did not answer", which is not the same as no candidates. */
+ * says it cannot reach. The worktree is named by the id the TUI is running under rather than by
+ * whichever one has focus, which need not be this one. Null is "the host did not answer", which is
+ * not the same as no candidates. */
 export const listTerminals = async (host: Host): Promise<HostTerminal[] | null> => {
-	const answer = await runCli(host, ["terminal", "list", "--worktree", "active", "--json"]);
+	const worktree = `id:${host.worktreeId}`;
+	const answer = await runCli(host, ["terminal", "list", "--worktree", worktree, "--json"]);
 	const parsed = terminalListSchema.safeParse(answer);
 	if (!parsed.success) return null;
 	return parsed.data.result.terminals

@@ -10,6 +10,7 @@ import { createHostAdapter, detectHost, type Host, listTerminals, sendToTerminal
 const SCRIPT = `#!/bin/sh
 dir=$(dirname "$0")
 if [ "$2" = "list" ]; then
+	for argument in "$@"; do printf '%s\\n' "$argument" >> "$dir/list.log"; done
 	cat "$dir/list.json"
 	exit "$(cat "$dir/list-exit")"
 fi
@@ -73,9 +74,11 @@ const fakeOrca = async (input: FakeOrcaInput = {}) => {
 	await writeFile(join(directory, "send.json"), input.send ?? JSON.stringify({ ok: true }));
 	await writeFile(join(directory, "send-exit"), String(input.sendExit ?? 0));
 	const host = detectedHost(cli);
-	const sentArguments = async () =>
-		(await readFile(join(directory, "send.log"), "utf8").catch(() => "")).split("\n").slice(0, -1);
-	return { host, directory, sentArguments };
+	const loggedArguments = async (name: string) =>
+		(await readFile(join(directory, name), "utf8").catch(() => "")).split("\n").slice(0, -1);
+	const sentArguments = () => loggedArguments("send.log");
+	const listedArguments = () => loggedArguments("list.log");
+	return { host, directory, sentArguments, listedArguments };
 };
 
 const withFakeOrca = async (
@@ -108,6 +111,22 @@ test("the TUI's own pane is never a candidate, nor is a terminal the host cannot
 	);
 });
 
+test("the list asks for this worktree by id, not for whichever one has focus", async () => {
+	await withFakeOrca(
+		{ terminals: [{ handle: "term_agent" }] },
+		async ({ host, listedArguments }) => {
+			await listTerminals(host);
+			expect(await listedArguments()).toEqual([
+				"terminal",
+				"list",
+				"--worktree",
+				"id:wt-1",
+				"--json",
+			]);
+		},
+	);
+});
+
 test("candidates are ordered by the most recent output, with silent terminals last", async () => {
 	await withFakeOrca(
 		{
@@ -135,6 +154,7 @@ test("titles are stripped of control characters, folded onto one line and cut sh
 				{ handle: "term_a", title: "agent \u001b[31mpane\n\tone", lastOutputAt: 3 },
 				{ handle: "term_b", title: `${"long".repeat(30)} tail`, lastOutputAt: 2 },
 				{ handle: "term_c", title: "", lastOutputAt: 1 },
+				{ handle: "term_d", title: "agent \u202Epane", lastOutputAt: 0 },
 			],
 		},
 		async ({ host }) => {
@@ -143,6 +163,7 @@ test("titles are stripped of control characters, folded onto one line and cut sh
 			expect(titles?.[1]).toBe(`${"long".repeat(14)}lon…`);
 			expect(titles?.[1]?.length).toBe(60);
 			expect(titles?.[2]).toBe("term_c");
+			expect(titles?.[3]).toBe("agent pane");
 		},
 	);
 });

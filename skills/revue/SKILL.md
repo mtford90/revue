@@ -437,8 +437,10 @@ revue status --wait --since <handoffId>
 ```
 
 That returns as soon as a handoff whose id differs from `<handoffId>` lands, printing the same
-report; a wait with nothing to compare against can omit `--since`. It gives up after 15 minutes by
-default (`--timeout-ms` to change that) and exits with code 3 on timeout.
+report. `revue status --wait` on its own returns the handoff already on disk, so a session that
+starts cold never waits through a batch it has not read; once a batch is handled, pass its
+`handoffId` as `--since` to wait for the next one. It gives up after 15 minutes by default
+(`--timeout-ms` to change that) and exits with code 3 on timeout.
 
 A damaged handoff or agent-origin record reads as absent rather than stopping orientation; `status`
 lists it in `warnings` instead.

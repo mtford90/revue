@@ -970,6 +970,20 @@ test("status --wait returns at once when a handoff newer than --since already ex
 	}
 });
 
+test("a bare status --wait returns the handoff already on disk", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
+	try {
+		await initGitRepo(root);
+		const handoffId = sendHandoff(root);
+
+		const result = await run(root, ["status", "--json", "--wait", "--timeout-ms", "2000"]);
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout).handoff).toMatchObject({ handoffId });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("status --wait resolves once a new handoff lands after the wait started", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
 	try {

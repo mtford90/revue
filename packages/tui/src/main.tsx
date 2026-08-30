@@ -191,10 +191,12 @@ drift       whether re-prepping the active run's scope would capture different
 
 A repository with no prepared runs reports that and exits 0.
 
---wait          block until a handoff whose id differs from --since exists, then print the
-                report as usual and exit 0. Without --since, waits for a handoff that differs
-                from whichever one is on disk when the wait starts (or for any handoff at all
-                if none is). Requires --wait; using it alone is a usage error.
+--wait          block until a handoff exists, then print the report as usual and exit 0. One
+                already on disk returns straight away, so a cold session never waits through a
+                batch it has not read.
+--since         wait instead for a handoff whose id differs from this one: pass the handoffId
+                you have already handled to wait for the batch after it. Requires --wait; using
+                it alone is a usage error.
 --timeout-ms    how long to wait before giving up, default 900000 (15 minutes). A timeout
                 prints a message to stderr and exits ${STATUS_WAIT_TIMEOUT_EXIT_CODE}.`;
 
@@ -441,8 +443,11 @@ async function cmdStatus(args: string[]): Promise<number> {
 	try {
 		if (wait) {
 			const { root } = await findGitContext();
-			const seen = since ?? readHandoff(root).record?.handoffId ?? null;
-			const outcome = await waitForHandoff({ repositoryRoot: root, since: seen, timeoutMs });
+			const outcome = await waitForHandoff({
+				repositoryRoot: root,
+				since: since ?? null,
+				timeoutMs,
+			});
 			if (outcome.kind === "timeout") {
 				process.stderr.write(`revue status --wait timed out after ${timeoutMs}ms\n`);
 				return STATUS_WAIT_TIMEOUT_EXIT_CODE;

@@ -114,7 +114,10 @@ export const createFeedbackController = ({
 		async deliverTo(handoffId: string, terminal: HostTerminal): Promise<SendOutcome> {
 			if (!host) return { kind: "queued", count: 0 };
 			const current = readHandoff(repositoryRoot).record;
-			const count = current?.handoffId === handoffId ? current.threadIds.length : 0;
+			// A newer Send replaced the record while the picker was open. That Send owns delivery
+			// now, so this choice neither nudges anyone nor claims a batch of its own.
+			if (current?.handoffId !== handoffId) return { kind: "queued", count: 0 };
+			const count = current.threadIds.length;
 			if (!(await trySendPrompt(host, terminal.handle))) return { kind: "queued", count };
 			const outcome = delivered({ repositoryRoot, handoffId, count, target: terminal });
 			if (outcome.kind === "delivered") sessionTarget.current = terminal;

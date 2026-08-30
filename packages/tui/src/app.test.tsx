@@ -4669,6 +4669,27 @@ test("a choose outcome opens the picker, and Enter delivers to the selection", a
 	expect(statusLine(t)).toContain("Delivered to claude — agent (1 thread)");
 });
 
+test("a batch a newer Send replaced reports itself as already sent", async () => {
+	const claude = hostTerminal("term_a", "claude — agent");
+	const feedback = fakeFeedback({
+		kind: "choose",
+		count: 2,
+		handoffId: "handoff-1",
+		candidates: [claude],
+	});
+	feedback.controller.deliverTo = async () => ({ kind: "queued", count: 0 });
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+
+	await press(t, "S");
+	await press(t, "RETURN");
+
+	expect(statusLine(t)).toContain("Feedback already sent");
+});
+
 test("Escape leaves the picker's record queued", async () => {
 	const candidates = [hostTerminal("term_a", "claude — agent"), hostTerminal("term_b", "codex")];
 	const feedback = fakeFeedback({

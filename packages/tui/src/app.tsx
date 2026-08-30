@@ -1859,6 +1859,8 @@ const sendNotice = (outcome: SendOutcome): StatusNotice => {
 	if (outcome.kind === "copied") {
 		return { text: `Queued for polling — prompt copied (${threads})`, tone: "success" };
 	}
+	// Nothing is queued under this batch: a newer Send replaced it before the choice landed.
+	if (outcome.count === 0) return { text: "Feedback already sent", tone: "success" };
 	return { text: `Queued for polling (${threads})`, tone: "success" };
 };
 const SELECTION_FLASH_MS = 150;

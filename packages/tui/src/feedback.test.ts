@@ -584,7 +584,7 @@ test("forced choose returns candidates even with a live origin", async () => {
 	}
 });
 
-test("deliverTo with a stale handoffId does not overwrite a newer record", async () => {
+test("deliverTo with a stale handoffId neither nudges nor overwrites the newer record", async () => {
 	const root = await scratchRepository();
 	try {
 		const candidates = [terminal("term_a", { lastOutputAt: 9 }), terminal("term_b")];
@@ -600,7 +600,7 @@ test("deliverTo with a stale handoffId does not overwrite a newer record", async
 		const outcome = await controller.deliverTo(staleHandoffId, candidates[1] as HostTerminal);
 		expect(outcome).toEqual({ kind: "queued", count: 0 });
 		expect(readHandoff(root).record).toEqual(newer);
-		expect(sent).toEqual([{ handle: "term_b", text: WAKE_UP_PROMPT }]);
+		expect(sent).toEqual([]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

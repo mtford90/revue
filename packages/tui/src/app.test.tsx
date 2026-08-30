@@ -4719,16 +4719,18 @@ test("the File menu opens the picker even with an origin live", async () => {
 
 const handoffRecord = ({
 	requestedAt,
+	threadIds,
 	delivery,
 }: {
 	requestedAt: string;
+	threadIds: string[];
 	delivery: HandoffRecord["delivery"];
 }): HandoffRecord => ({
 	schemaVersion: HANDOFF_SCHEMA_VERSION,
 	handoffId: "00000000-0000-4000-8000-000000000099",
 	requestedAt,
 	runId: WATCHED_RUN,
-	threadIds: [],
+	threadIds,
 	delivery,
 });
 
@@ -4763,6 +4765,7 @@ test("the thread slot names unsent feedback, a sent handoff, and falls back to t
 	reader.set(
 		handoffRecord({
 			requestedAt: "2026-08-02T10:05:00.000Z",
+			threadIds: [thread.id],
 			delivery: { kind: HANDOFF_DELIVERY_KIND.QUEUED },
 		}),
 	);
@@ -4772,6 +4775,7 @@ test("the thread slot names unsent feedback, a sent handoff, and falls back to t
 	reader.set(
 		handoffRecord({
 			requestedAt: "2026-08-02T10:05:00.000Z",
+			threadIds: [thread.id],
 			delivery: {
 				kind: HANDOFF_DELIVERY_KIND.DELIVERED,
 				host: "orca",

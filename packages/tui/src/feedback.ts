@@ -85,7 +85,7 @@ export const createFeedbackController = ({
 			// A damaged record reads as absent, which sends the whole open conversation again. That is
 			// the safe way round: the agent re-reads feedback rather than never hearing it.
 			const previous = readHandoff(repositoryRoot).record;
-			const unsent = unsentThreads(threads(), previous?.requestedAt ?? null);
+			const unsent = unsentThreads(threads(), previous);
 			if (unsent.length === 0) return { kind: "nothing" };
 			const record = queuedHandoff(runId, unsent);
 			try {

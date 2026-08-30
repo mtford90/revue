@@ -61,10 +61,17 @@ one: the rewrite only applies when the file still holds the `handoffId` the resu
 
 ### The unsent rule is derived
 
-A thread is unsent when it is open, its last message is from a human, and that message's
-`createdAt` is later than the last handoff's `requestedAt` — or there is no handoff yet. Nothing is
-written to a thread to mark it sent. The rule is computed fresh from the thread store and the
-handoff record each time, so a deleted or edited handoff never leaves threads in an inconsistent
+A thread is unsent when it is open, its last message is from a human, and one of two things is
+true: the last handoff does not name the thread in its `threadIds`, or that message is later than
+the handoff's `requestedAt`. A thread is also unsent when there is no handoff yet.
+
+The rule reads the ids because the handoff is repository-level and two reviews can share a
+repository. A batch sent from one review must not read as sent on the other review's threads. Thread
+ids survive supersession, so the rule needs no lineage lookup and no clock comparison across
+reviews.
+
+Nothing is written to a thread to mark it sent. The rule is computed fresh from the thread store and
+the handoff record each time, so a deleted or edited handoff never leaves threads in an inconsistent
 state.
 
 ### The agent origin follows the last agent, and only the agent records it

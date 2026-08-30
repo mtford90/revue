@@ -38,20 +38,27 @@ export {
 	ThreadStoreError,
 } from "@revue/prep";
 
+/** What the last handoff carried, which is all the unsent rule asks of a handoff record. */
+export type SentBatch = { threadIds: readonly string[]; requestedAt: string };
+
 /**
- * The threads Send would carry: open, with a human's word last, and spoken since the last handoff.
- * Nothing about sending is stored on a thread, so this is derived at each Send and each render.
+ * The threads Send would carry: open, with a human's word last, and either never named by the last
+ * handoff or spoken to again since it. The batch names its threads, so a second review in the same
+ * repository never reads as sent on the strength of another review's Send. Nothing about sending is
+ * stored on a thread, so this is derived at each Send and each render.
  */
 export const unsentThreads = (
 	threads: readonly ReviewThread[],
-	sentAt: string | null,
-): ReviewThread[] => threads.filter((thread) => isUnsent(thread, sentAt));
+	sent: SentBatch | null,
+): ReviewThread[] => threads.filter((thread) => isUnsent(thread, sent));
 
-const isUnsent = (thread: ReviewThread, sentAt: string | null): boolean => {
+const isUnsent = (thread: ReviewThread, sent: SentBatch | null): boolean => {
 	if (thread.status !== THREAD_STATUS.OPEN) return false;
 	const last = thread.messages.at(-1);
 	if (last?.author.kind !== THREAD_AUTHOR_KIND.HUMAN) return false;
-	return sentAt === null || Date.parse(last.createdAt) > Date.parse(sentAt);
+	if (!sent) return true;
+	if (!sent.threadIds.includes(thread.id)) return true;
+	return Date.parse(last.createdAt) > Date.parse(sent.requestedAt);
 };
 
 export type NewThreadOptions = {

@@ -99,8 +99,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   body, creation time, and `{ kind: "human" | "agent", name }` author. Human TUI names resolve from
   repository-aware `git config user.name`, then the system login. Agent CLI messages require an
   explicit author name. Root messages are removed with their thread; replies may be deleted alone.
-- **Unsent** — a **thread** that is open, whose last message is from a human, and whose
-  `createdAt` is later than the last **handoff**'s `requestedAt`, or there is no handoff yet.
+- **Unsent** — a **thread** that is open, whose last message is from a human, and that the last
+  **handoff** either does not name in its `threadIds` or has heard from again since its
+  `requestedAt`. A thread is unsent when there is no handoff yet. The ids tell two reviews in one
+  repository apart: a batch sent from one review never reads as sent on the other's threads.
   Derived fresh from the thread store and the handoff record each time; nothing is written to a
   thread to mark it sent.
 - **Handoff** — the durable record of one Send: `.revue/handoff.json`, beside the thread store and

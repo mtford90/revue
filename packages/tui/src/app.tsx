@@ -4878,7 +4878,7 @@ export function App({
 	);
 	const filesSurface = page?.kind === "files";
 	const openThreadCount = threads.filter((thread) => thread.status === THREAD_STATUS.OPEN).length;
-	const unsentCount = unsentThreads(threads, handoff?.requestedAt ?? null).length;
+	const unsentCount = unsentThreads(threads, handoff ?? null).length;
 	const threadsSlot = {
 		open: openThreadCount,
 		unsent: unsentCount,

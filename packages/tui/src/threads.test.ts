@@ -17,6 +17,8 @@ import {
 } from "@revue/types";
 import { loadReviewRun } from "./load.ts";
 import {
+	createThread,
+	createThreadMessage,
 	defaultThreadsPath,
 	loadValidatedThreads,
 	openThreadStore,
@@ -24,6 +26,7 @@ import {
 	readThreadStoreFile,
 	resolveHumanAuthor,
 	ThreadStoreError,
+	unsentThreads,
 } from "./threads.ts";
 
 const anchor: ThreadAnchor = {
@@ -453,4 +456,56 @@ test("the same anchor, carried from a superseded run, is orphaned instead", asyn
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+// ── The unsent rule ─────────────────────────────────────────────────────────
+
+const unsentRunId = "c".repeat(64);
+const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 10, minute)).toISOString();
+
+const humanThread = (id: string, minute: number) =>
+	createThread(unsentRunId, anchor, human, `Line ${minute}?`, { id, createdAt: at(minute) });
+
+test("a thread the last handoff never named is unsent, however old its comment is", () => {
+	const other = humanThread(ids[0], 0);
+	const batch = { threadIds: [ids[1]], requestedAt: at(30) };
+
+	expect(unsentThreads([other], batch).map((thread) => thread.id)).toEqual([ids[0]]);
+});
+
+test("a thread the last handoff named, unanswered since, is sent", () => {
+	const carried = humanThread(ids[0], 0);
+	const batch = { threadIds: [ids[0]], requestedAt: at(30) };
+
+	expect(unsentThreads([carried], batch)).toEqual([]);
+});
+
+test("a human message written after the handoff makes a sent thread unsent again", () => {
+	const base = humanThread(ids[0], 0);
+	const spokenTo = {
+		...base,
+		messages: [
+			...base.messages,
+			createThreadMessage(human, "Still waiting", { createdAt: at(40) }),
+		],
+	};
+	const batch = { threadIds: [ids[0]], requestedAt: at(30) };
+
+	expect(unsentThreads([spokenTo], batch).map((thread) => thread.id)).toEqual([ids[0]]);
+});
+
+test("an agent's reply, a closed thread, and no handoff at all", () => {
+	const answered = {
+		...humanThread(ids[0], 0),
+		messages: [
+			...humanThread(ids[0], 0).messages,
+			createThreadMessage(agent, "Fixed", { createdAt: at(40) }),
+		],
+	};
+	const closed = { ...humanThread(ids[1], 0), status: THREAD_STATUS.DEALT_WITH };
+	const open = humanThread(ids[2], 0);
+
+	expect(unsentThreads([answered, closed, open], null).map((thread) => thread.id)).toEqual([
+		ids[2],
+	]);
 });

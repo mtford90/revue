@@ -52,6 +52,18 @@ export const unsentThreads = (
 	sent: SentBatch | null,
 ): ReviewThread[] => threads.filter((thread) => isUnsent(thread, sent));
 
+/** What Send has done with one thread. Null covers everything with nothing to say: a resolved
+ * thread, and one whose last word came from the agent. */
+export type ThreadSendState = "unsent" | "sent" | null;
+
+/** The same rule read one thread at a time, for a list that marks each row. A thread is sent when
+ * a handoff carried it and the reviewer has said nothing since. */
+export const threadSendState = (thread: ReviewThread, sent: SentBatch | null): ThreadSendState => {
+	if (isUnsent(thread, sent)) return "unsent";
+	if (!sent || thread.status !== THREAD_STATUS.OPEN) return null;
+	return thread.messages.at(-1)?.author.kind === THREAD_AUTHOR_KIND.HUMAN ? "sent" : null;
+};
+
 const isUnsent = (thread: ReviewThread, sent: SentBatch | null): boolean => {
 	if (thread.status !== THREAD_STATUS.OPEN) return false;
 	const last = thread.messages.at(-1);

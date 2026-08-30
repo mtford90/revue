@@ -244,6 +244,21 @@ test("Send answers Shift-S on every surface and leaves the sidebar its lowercase
 	expect(matchKeymapAction("page", { name: "s" })).toBe("toggle-sidebar");
 });
 
+test("the thread keys answer on both surfaces and leave their lowercase owners alone", () => {
+	const shifted = [
+		["A", "send-thread", "next-unreviewed"],
+		["R", "reply-thread", "toggle-key-change"],
+		["X", "toggle-thread-status", "toggle-chapter-review"],
+		["D", "delete-thread", "half-page-down"],
+	] as const;
+	for (const [key, thread, lowercase] of shifted) {
+		expect(matchKeymapAction("page", { name: key })).toBe(thread);
+		expect(matchKeymapAction("page", { name: key.toLowerCase(), shift: true })).toBe(thread);
+		expect(matchKeymapAction("comments", { name: key })).toBe(thread);
+		expect(matchKeymapAction("page", { name: key.toLowerCase() })).toBe(lowercase);
+	}
+});
+
 test("a ctrl override matches exactly and doesn't also fire on the bare key", () => {
 	const { keymap, issues } = mergeKeymap(KEYMAP, { "toggle-sidebar": "ctrl+j" });
 	expect(issues).toEqual([]);

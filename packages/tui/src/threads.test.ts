@@ -26,6 +26,7 @@ import {
 	readThreadStoreFile,
 	resolveHumanAuthor,
 	ThreadStoreError,
+	threadSendState,
 	unsentThreads,
 } from "./threads.ts";
 
@@ -529,4 +530,20 @@ test("an agent's reply, a closed thread, and no handoff at all", () => {
 	expect(unsentThreads([answered, closed, open], null).map((thread) => thread.id)).toEqual([
 		ids[2],
 	]);
+});
+
+test("a thread reads as sent only once a handoff has carried it and the agent has yet to answer", () => {
+	const carried = humanThread(ids[0], 0);
+	const batch = { threadIds: [ids[0]], requestedAt: at(30) };
+	const answered = {
+		...carried,
+		messages: [...carried.messages, createThreadMessage(agent, "Fixed", { createdAt: at(40) })],
+	};
+	const closed = { ...carried, status: THREAD_STATUS.DEALT_WITH };
+
+	expect(threadSendState(carried, batch)).toBe("sent");
+	expect(threadSendState(carried, null)).toBe("unsent");
+	expect(threadSendState(answered, batch)).toBeNull();
+	expect(threadSendState(closed, batch)).toBeNull();
+	expect(threadSendState(humanThread(ids[1], 0), batch)).toBe("unsent");
 });

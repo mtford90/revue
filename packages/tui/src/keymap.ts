@@ -22,6 +22,7 @@ export type KeymapSection =
 	| "Navigation"
 	| "Files"
 	| "Review"
+	| "Threads"
 	| "Copying"
 	| "Views"
 	| "Menus";
@@ -88,6 +89,34 @@ const KEYMAP_DEF = [
 		keys: ["S"],
 		context: "global",
 		section: "Review",
+	},
+	{
+		id: "send-thread",
+		description: "Send the focused thread to the agent on its own",
+		keys: ["A"],
+		context: "global",
+		section: "Threads",
+	},
+	{
+		id: "reply-thread",
+		description: "Reply to the focused thread",
+		keys: ["R"],
+		context: "global",
+		section: "Threads",
+	},
+	{
+		id: "toggle-thread-status",
+		description: "Resolve the focused thread, or reopen it",
+		keys: ["X"],
+		context: "global",
+		section: "Threads",
+	},
+	{
+		id: "delete-thread",
+		description: "Delete the focused thread; the first press asks",
+		keys: ["D"],
+		context: "global",
+		section: "Threads",
 	},
 	{
 		id: "previous-key-change",
@@ -503,6 +532,7 @@ export const KEYMAP_SECTION_ORDER: KeymapSection[] = [
 	"Navigation",
 	"Files",
 	"Review",
+	"Threads",
 	"Copying",
 	"Views",
 	"Menus",

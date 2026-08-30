@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI pointer handlers use text renderables.
 import { useTheme } from "./theme.ts";
 
 /**
@@ -91,6 +92,7 @@ export function StatusBar({
 	reviewedFiles,
 	totalFiles,
 	threads,
+	onSendThreads,
 	notice,
 	hints: hintList = [],
 	helpKey = "?",
@@ -101,6 +103,8 @@ export function StatusBar({
 	reviewedFiles: number;
 	totalFiles: number;
 	threads: ThreadsSlotState;
+	/** The slot is the Send button too: it reports the feedback, so it also carries it. */
+	onSendThreads?: () => void;
 	notice: StatusNotice | null;
 	hints?: StatusHints;
 	helpKey?: string;
@@ -200,7 +204,16 @@ export function StatusBar({
 				</text>
 			) : null}
 			{threadsText ? (
-				<text flexShrink={0} fg={theme.badgeModified} bg={theme.panelAlt}>
+				<text
+					flexShrink={0}
+					fg={theme.badgeModified}
+					bg={theme.panelAlt}
+					onMouseDown={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onSendThreads?.();
+					}}
+				>
 					{threadsText}
 				</text>
 			) : null}

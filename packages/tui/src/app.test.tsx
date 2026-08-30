@@ -24,7 +24,7 @@ import { act } from "react";
 import sample from "../../../examples/sample-run/chapters.json" with { type: "json" };
 import { App, type ReviewUpdate } from "./app.tsx";
 import { preparePatch } from "./diff.ts";
-import type { FeedbackController, SendOutcome } from "./feedback.ts";
+import type { FeedbackController, SendOptions, SendOutcome } from "./feedback.ts";
 import type { HostTerminal } from "./host.ts";
 import { mergeKeymap } from "./keybindings.ts";
 import { KEYMAP } from "./keymap.ts";
@@ -947,6 +947,10 @@ test("the keys surface documents the keys that fire here, and marks the ones tha
 	// dropped: you would never learn it existed if it were hidden.
 	expect(frame).toContain("Elsewhere — Narrative & diff · press w to get there");
 	expect(frame).toContain("Scroll down half a page");
+	// The thread actions fire on either surface, so the list names them wherever the reviewer is.
+	expect(frame).toContain("Threads");
+	expect(frame).toContain("Reply to the focused thread");
+	expect(frame).toContain("Resolve the focused thread, or reopen it");
 });
 
 test("typing into the filter narrows the list without firing the actions it spells", async () => {
@@ -1384,11 +1388,11 @@ test("inline threads show authors and compose new roots and replies", async () =
 	let lifecycleLines = t.captureCharFrame().split("\n");
 	const initialStatusY = lifecycleLines.findIndex((line) => line.includes("✓ Resolved"));
 	expect(lifecycleLines[initialStatusY]).toContain("┌");
-	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen]"));
+	let lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Reopen X]"));
 	await click(t, lifecycleLines[lifecycleY]?.indexOf("Reopen") ?? -1, lifecycleY);
 	expect(t.captureCharFrame()).toContain("! Open");
 	lifecycleLines = t.captureCharFrame().split("\n");
-	lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Resolve]"));
+	lifecycleY = lifecycleLines.findIndex((line) => line.includes("[Resolve X]"));
 	await click(t, lifecycleLines[lifecycleY]?.indexOf("Resolve") ?? -1, lifecycleY);
 	expect(t.captureCharFrame()).toContain("✓ Resolved");
 
@@ -1402,9 +1406,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 	expect(composerFrame).toContain("Comment on new lines");
 	expect(composerFrame).not.toContain("review unit oldStart");
 	const composerLines = composerFrame.split("\n");
-	const existingThreadActionsY = composerLines.findIndex((line) =>
-		line.includes("[Delete thread]"),
-	);
+	const existingThreadActionsY = composerLines.findIndex((line) => line.includes("[Delete D]"));
 	const composerY = composerLines.findIndex((line) => line.includes("Comment on new lines"));
 	expect(composerLines[existingThreadActionsY + 1]).toContain("└");
 	expect(composerY).toBe(existingThreadActionsY + 3);
@@ -1438,7 +1440,7 @@ test("inline threads show authors and compose new roots and replies", async () =
 	expect(t.captureCharFrame()).toContain("2●");
 
 	const replyLines = t.captureCharFrame().split("\n");
-	const replyY = replyLines.findIndex((line) => line.includes("[Reply]"));
+	const replyY = replyLines.findIndex((line) => line.includes("[Reply R]"));
 	await click(t, replyLines[replyY]?.indexOf("Reply") ?? -1, replyY);
 	expect(t.captureCharFrame()).toContain("Reply to thread");
 	await act(async () => t.mockInput.typeText("Human follow-up"));
@@ -4540,10 +4542,12 @@ test("status hints describe cursor, selecting, and composer actions", async () =
 
 const fakeFeedback = (...outcomes: SendOutcome[]) => {
 	let sends = 0;
+	const asked: (SendOptions | undefined)[] = [];
 	const delivered: { handoffId: string; terminal: HostTerminal }[] = [];
 	const controller: FeedbackController = {
-		send: async () => {
+		send: async (_copyPrompt, options) => {
 			sends += 1;
+			asked.push(options);
 			return outcomes[sends - 1] ?? { kind: "nothing" };
 		},
 		deliverTo: async (handoffId, terminal) => {
@@ -4552,7 +4556,7 @@ const fakeFeedback = (...outcomes: SendOutcome[]) => {
 		},
 		hasHost: false,
 	};
-	return { controller, sends: () => sends, delivered };
+	return { controller, sends: () => sends, asked, delivered };
 };
 
 test("S sends from the page and from Comments, and leaves s toggling the sidebar", async () => {
@@ -4952,4 +4956,271 @@ test("a second Send while one is in flight shows Sending… and writes no second
 	expect(statusLine(t)).toContain(
 		"Saved, but not sent — tell your agent to run revue status (1 thread)",
 	);
+});
+
+// ── Acting on the focused thread ─────────────────────────────────────────────
+
+/** The same one-chapter run, with the narration citing a thread so the chapter walk stops on it. */
+const citingChapters = (threadId: string) =>
+	RevueChaptersFileSchema.parse({
+		chapters: [{ ...watchedChapters.chapters[0], threadRefs: [threadId] }],
+	});
+
+const NO_FOCUS = "No thread focused — o opens Comments";
+
+const renderThreads = async (
+	threads: ReviewThread[],
+	options: {
+		feedback?: FeedbackController;
+		file?: RevueChaptersFile;
+		threadActions?: Parameters<typeof App>[0]["threadActions"];
+		readHandoff?: () => HandoffRecord | null;
+		width?: number;
+	} = {},
+) =>
+	testRender(
+		<App
+			file={options.file ?? watchedChapters}
+			diffFiles={watchedDiff}
+			initialThreads={threads}
+			feedback={options.feedback}
+			threadActions={options.threadActions}
+			readHandoff={options.readHandoff}
+		/>,
+		{ width: options.width ?? 130, height: 40, kittyKeyboard: true },
+	);
+
+test("A sends the focused thread on its own, from Comments and from the page", async () => {
+	const first = watchedThread({ line: 1, body: "Share the retry budget" });
+	const second = watchedThread({ line: 2, body: "Name this constant" });
+	const feedback = fakeFeedback({ kind: "queued", count: 1 }, { kind: "queued", count: 1 });
+	const t = await renderThreads([first, second], { feedback: feedback.controller });
+	await t.renderOnce();
+
+	await press(t, "o"); // Comments, where the first row is the selected thread
+	await press(t, "A");
+	expect(feedback.asked).toEqual([{ threadIds: [first.id] }]);
+
+	await press(t, "j");
+	await press(t, "RETURN"); // back onto the page, with that conversation open
+	await settle(t);
+	await press(t, "A");
+	expect(feedback.asked).toEqual([{ threadIds: [first.id] }, { threadIds: [second.id] }]);
+	expect(statusLine(t)).toContain("Saved, but not sent");
+});
+
+test("A on a thread the agent has already answered says so and sends nothing", async () => {
+	const feedback = fakeFeedback();
+	const answered = watchedThread({
+		line: 1,
+		body: "Share the retry budget",
+		reply: "Shared now",
+	});
+	const t = await renderThreads([answered], { feedback: feedback.controller });
+	await t.renderOnce();
+
+	await press(t, "o");
+	await press(t, "A");
+	expect(feedback.sends()).toBe(0);
+	expect(statusLine(t)).toContain("Already sent");
+});
+
+test("a thread action with nothing focused says where the threads are and does nothing", async () => {
+	const feedback = fakeFeedback();
+	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await t.renderOnce();
+
+	for (const key of ["A", "R", "X", "D"]) {
+		await press(t, key);
+		expect(statusLine(t)).toContain(NO_FOCUS);
+	}
+	expect(feedback.sends()).toBe(0);
+});
+
+test("R opens the reply composer on the focused thread from either surface", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await renderThreads([thread]);
+	await t.renderOnce();
+
+	await press(t, "o");
+	await press(t, "R");
+	await settle(t);
+	expect(t.captureCharFrame()).toContain("Reply to thread");
+	// The composer belongs beside the thread, so a reply asked for from the list goes there.
+	expect(statusLine(t)).toContain("Ch 1/1");
+
+	await press(t, "ESCAPE");
+	await press(t, "R");
+	await settle(t);
+	expect(t.captureCharFrame()).toContain("Reply to thread");
+});
+
+test("X resolves the cited thread the chapter cursor is on, and reopens it", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await renderThreads([thread], { file: citingChapters(thread.id) });
+	await t.renderOnce();
+	await nextChapter(t);
+
+	await press(t, "J"); // the citation leads the chapter walk
+	expect(t.captureCharFrame()).toContain("▸ retry.ts:1");
+
+	await press(t, "X");
+	expect(t.captureCharFrame()).toContain("✓ Resolved");
+	await press(t, "X");
+	expect(t.captureCharFrame()).toContain("! Open");
+});
+
+test("D asks before it deletes, and any other key calls the question off", async () => {
+	const deleted: string[] = [];
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await renderThreads([thread], {
+		threadActions: {
+			create: () => thread,
+			reply: () => thread,
+			delete: (id) => {
+				deleted.push(id);
+				return thread;
+			},
+			deleteMessage: () => thread.messages[0] as never,
+			markDealt: () => thread,
+			reopen: () => thread,
+		},
+	});
+	await t.renderOnce();
+	await press(t, "o");
+
+	await press(t, "D");
+	expect(statusLine(t)).toContain("Delete this thread? D confirms · Esc cancels");
+	await press(t, "ESCAPE");
+	expect(statusLine(t)).not.toContain("Delete this thread?");
+	expect(deleted).toEqual([]);
+
+	await press(t, "D");
+	await press(t, "D");
+	expect(deleted).toEqual([thread.id]);
+	expect(t.captureCharFrame()).toContain("No comments in this review yet.");
+});
+
+test("every thread card button names its key, and Send and Delete answer the mouse", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const feedback = fakeFeedback({ kind: "queued", count: 1 });
+	const deleted: string[] = [];
+	const t = await renderThreads([thread], {
+		feedback: feedback.controller,
+		threadActions: {
+			create: () => thread,
+			reply: () => thread,
+			delete: (id) => {
+				deleted.push(id);
+				return thread;
+			},
+			deleteMessage: () => thread.messages[0] as never,
+			markDealt: () => thread,
+			reopen: () => thread,
+		},
+	});
+	await t.renderOnce();
+	await nextChapter(t);
+
+	const frame = t.captureCharFrame();
+	for (const button of ["[Reply R]", "[Resolve X]", "[Send to agent A]", "[Delete D]"]) {
+		expect(frame).toContain(button);
+	}
+
+	await clickAction(t, "[Send to agent A]");
+	expect(feedback.asked).toEqual([{ threadIds: [thread.id] }]);
+
+	await clickAction(t, "[Delete D]");
+	expect(statusLine(t)).toContain("Delete this thread? D confirms · Esc cancels");
+	expect(deleted).toEqual([]);
+
+	await clickAction(t, "Share the retry budget"); // a click anywhere else calls it off
+	expect(statusLine(t)).not.toContain("Delete this thread?");
+	expect(deleted).toEqual([]);
+
+	await clickAction(t, "[Delete D]");
+	await clickAction(t, "[Delete D]");
+	expect(deleted).toEqual([thread.id]);
+});
+
+test("the Comments surface marks what is unsent and sends it by header or by row", async () => {
+	const first = watchedThread({ line: 1, body: "Share the retry budget" });
+	const answered = watchedThread({ line: 2, body: "Name this", reply: "Named" });
+	const feedback = fakeFeedback({ kind: "queued", count: 1 }, { kind: "queued", count: 1 });
+	const t = await renderThreads([first, answered], { feedback: feedback.controller });
+	await t.renderOnce();
+	await press(t, "o");
+
+	const frame = t.captureCharFrame();
+	expect(frame).toContain("2 open · 0 resolved · 1 unsent");
+	expect(frame).toContain("[Send 1 unsent to agent · S]");
+	// The row the agent has answered has nothing to say either way, so it is marked neither.
+	expect(frame.split("\n")[rowOf(t, "Share the retry budget")]).toContain("unsent");
+	expect(frame.split("\n")[rowOf(t, "Name this")]).not.toContain("sent");
+
+	await clickAction(t, "[send A]");
+	expect(feedback.asked).toEqual([{ threadIds: [first.id] }]);
+
+	await clickAction(t, "[Send 1 unsent to agent · S]");
+	expect(feedback.asked).toEqual([{ threadIds: [first.id] }, undefined]);
+});
+
+test("a thread the last handoff carried reads as sent, and the header offers nothing", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await renderThreads([thread], {
+		readHandoff: () =>
+			handoffRecord({
+				requestedAt: "2026-08-02T11:00:00.000Z",
+				threadIds: [thread.id],
+				delivery: {
+					kind: HANDOFF_DELIVERY_KIND.DELIVERED,
+					host: "orca",
+					terminal: "t",
+					title: "T",
+				},
+			}),
+	});
+	await t.renderOnce();
+	await press(t, "o");
+
+	const frame = t.captureCharFrame();
+	expect(frame.split("\n")[rowOf(t, "Share the retry budget")]).toContain("sent");
+	expect(frame).not.toContain("unsent");
+	expect(frame).not.toContain("[Send");
+	expect(frame).not.toContain("[send A]");
+});
+
+test("clicking the status bar's thread slot sends every unsent thread", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const feedback = fakeFeedback({ kind: "queued", count: 1 });
+	const t = await renderThreads([thread], { feedback: feedback.controller });
+	await t.renderOnce();
+
+	const lines = t.captureCharFrame().split("\n");
+	const bar = lines.findIndex((line) => line.includes("help ·"));
+	await click(t, (lines[bar] ?? "").indexOf("unsent"), bar);
+
+	expect(feedback.sends()).toBe(1);
+	expect(feedback.asked).toEqual([undefined]);
+});
+
+test("the footer names exactly the thread actions the focused thread's state allows", async () => {
+	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+	const t = await renderThreads([thread], { width: 200 });
+	await t.renderOnce();
+	expect(statusLine(t)).not.toContain("R reply");
+
+	await press(t, "o");
+	for (const hint of ["R reply", "X resolve", "A send", "D delete"]) {
+		expect(statusLine(t)).toContain(hint);
+	}
+	expect(statusLine(t)).toContain("Enter jump");
+
+	await press(t, "X"); // resolved: there is nothing left to send
+	expect(statusLine(t)).toContain("X reopen");
+	expect(statusLine(t)).not.toContain("A send");
+	expect(statusLine(t)).not.toContain("X resolve");
 });

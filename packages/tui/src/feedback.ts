@@ -34,6 +34,9 @@ export type CopyReason = "no-host" | "unreached";
 export type SendOptions = {
 	/** Forces the picker even when a session target or origin would otherwise settle it. */
 	choose?: boolean;
+	/** Narrows the batch to these threads. The unsent rule still decides, so the threads left out
+	 * stay unsent and the next Send carries them. */
+	threadIds?: readonly string[];
 };
 
 export type FeedbackController = {
@@ -78,6 +81,13 @@ const queuedHandoff = (runId: string, threads: readonly ReviewThread[]): Handoff
 	delivery: { kind: "queued" },
 });
 
+/** One thread's Send is the whole batch with everything else set aside, never a rule of its own. */
+const batchToSend = (
+	unsent: readonly ReviewThread[],
+	threadIds?: readonly string[],
+): readonly ReviewThread[] =>
+	threadIds ? unsent.filter((thread) => threadIds.includes(thread.id)) : unsent;
+
 export const createFeedbackController = ({
 	repositoryRoot,
 	runId,
@@ -92,7 +102,7 @@ export const createFeedbackController = ({
 			// A damaged record reads as absent, which sends the whole open conversation again. That is
 			// the safe way round: the agent re-reads feedback rather than never hearing it.
 			const previous = readHandoff(repositoryRoot).record;
-			const unsent = unsentThreads(threads(), previous);
+			const unsent = batchToSend(unsentThreads(threads(), previous), options?.threadIds);
 			if (unsent.length === 0) return { kind: "nothing" };
 			const record = queuedHandoff(runId, unsent);
 			try {

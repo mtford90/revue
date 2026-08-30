@@ -109,7 +109,7 @@ import {
 	expandedPatchText,
 	type FileExpansion,
 } from "./expand.ts";
-import type { FeedbackController, SendOutcome } from "./feedback.ts";
+import type { FeedbackController, SendOptions, SendOutcome } from "./feedback.ts";
 import { HelpSurface } from "./helpSurface.tsx";
 import type { HostTerminal } from "./host.ts";
 import type { KeymapIssue } from "./keybindings.ts";
@@ -190,6 +190,8 @@ import {
 	createThread,
 	createThreadMessage,
 	sortThreads,
+	type ThreadSendState,
+	threadSendState,
 	unsentThreads,
 } from "./threads.ts";
 import {
@@ -1598,17 +1600,39 @@ function ThreadMessageView({
 	);
 }
 
+/** A button that owns its click outright: nothing underneath it hears about the press. */
+const claimClick = (event: OpenTUIMouseEvent, run: () => void): void => {
+	event.preventDefault();
+	event.stopPropagation();
+	run();
+};
+
+/** The keystroke each thread action answers to, so a card button and a footer hint never disagree. */
+export type ThreadActionKeys = {
+	send: string;
+	reply: string;
+	status: string;
+	delete: string;
+};
+
 function InlineThread({
 	thread,
 	replyComposer,
+	keys,
+	unsent,
 	onReply,
+	onSend,
 	onDeleteThread,
 	onDeleteMessage,
 	onToggleStatus,
 }: {
 	thread: ReviewThread;
 	replyComposer?: ReactNode;
+	keys: ThreadActionKeys;
+	/** Send has something to carry for this thread; sending an answered one would say it twice. */
+	unsent: boolean;
 	onReply: (thread: ReviewThread) => void;
+	onSend: (thread: ReviewThread) => void;
 	onDeleteThread: (id: string) => void;
 	onDeleteMessage: (threadId: string, messageId: string) => void;
 	onToggleStatus: (thread: ReviewThread) => void;
@@ -1639,38 +1663,34 @@ function InlineThread({
 				/>
 			))}
 			{replyComposer}
-			<box flexDirection="row">
-				<text
-					fg={theme.accent}
-					onMouseDown={(event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						onReply(thread);
-					}}
-				>
-					[Reply]
+			<box flexDirection="row" flexWrap="wrap">
+				<text fg={theme.accent} onMouseDown={(event) => claimClick(event, () => onReply(thread))}>
+					{`[Reply ${keys.reply}]`}
 				</text>
 				<text> </text>
 				<text
 					fg={theme.accent}
-					onMouseDown={(event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						onToggleStatus(thread);
-					}}
+					onMouseDown={(event) => claimClick(event, () => onToggleStatus(thread))}
 				>
-					[{dealtWith ? "Reopen" : "Resolve"}]
+					{`[${dealtWith ? "Reopen" : "Resolve"} ${keys.status}]`}
 				</text>
-				<box flexGrow={1} />
+				{unsent ? (
+					<>
+						<text> </text>
+						<text
+							fg={theme.accent}
+							onMouseDown={(event) => claimClick(event, () => onSend(thread))}
+						>
+							{`[Send to agent ${keys.send}]`}
+						</text>
+					</>
+				) : null}
+				<text> </text>
 				<text
 					fg={theme.badgeRemoved}
-					onMouseDown={(event) => {
-						event.preventDefault();
-						event.stopPropagation();
-						onDeleteThread(thread.id);
-					}}
+					onMouseDown={(event) => claimClick(event, () => onDeleteThread(thread.id))}
 				>
-					[Delete thread]
+					{`[Delete ${keys.delete}]`}
 				</text>
 			</box>
 		</box>
@@ -1703,18 +1723,30 @@ const threadLocation = (thread: ReviewThread) => {
 /** The narration stopped quoting this thread's code; it is kept and shown, never pruned. */
 const ORPHANED_THREAD_NOTE = " · no longer quoted";
 
+/** The send column, padded so the locations below it still line up when a row has nothing to say. */
+const SEND_STATE_LABEL: Record<"unsent" | "sent", string> = {
+	unsent: "unsent ",
+	sent: "sent   ",
+};
+
 function CommentRow({
 	thread,
 	index,
 	active,
 	orphaned,
+	sendState,
+	sendKey,
 	onJump,
+	onSend,
 }: {
 	thread: ReviewThread;
 	index: number;
 	active: boolean;
 	orphaned: boolean;
+	sendState: ThreadSendState;
+	sendKey: string;
 	onJump: (thread: ReviewThread) => void;
+	onSend: (thread: ReviewThread) => void;
 }) {
 	const theme = useTheme();
 	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
@@ -1735,6 +1767,13 @@ function CommentRow({
 			</text>
 			<text flexShrink={0} fg={dealtWith ? theme.badgeAdded : theme.badgeModified}>
 				{dealtWith ? "✓ " : "! "}
+			</text>
+			<text
+				flexShrink={0}
+				wrapMode="none"
+				fg={sendState === "unsent" ? theme.badgeModified : theme.muted}
+			>
+				{sendState ? SEND_STATE_LABEL[sendState] : "       "}
 			</text>
 			<text
 				flexShrink={0}
@@ -1763,6 +1802,15 @@ function CommentRow({
 					{` · ${replies} ${replies === 1 ? "reply" : "replies"}`}
 				</text>
 			) : null}
+			{sendState === "unsent" ? (
+				<text
+					flexShrink={0}
+					fg={theme.accent}
+					onMouseDown={(event) => claimClick(event, () => onSend(thread))}
+				>
+					{` [send ${sendKey}]`}
+				</text>
+			) : null}
 		</box>
 	);
 }
@@ -1772,15 +1820,26 @@ function CommentsView({
 	threads,
 	selected,
 	orphaned,
+	sendState,
+	keys,
+	sendAllKey,
 	onJump,
+	onSend,
+	onSendAll,
 }: {
 	threads: ReviewThread[];
 	selected: number;
 	orphaned: ReadonlySet<string>;
+	sendState: (thread: ReviewThread) => ThreadSendState;
+	keys: ThreadActionKeys;
+	sendAllKey: string;
 	onJump: (thread: ReviewThread) => void;
+	onSend: (thread: ReviewThread) => void;
+	onSendAll: () => void;
 }) {
 	const theme = useTheme();
 	const open = threads.filter((thread) => thread.status === THREAD_STATUS.OPEN).length;
+	const unsent = threads.filter((thread) => sendState(thread) === "unsent").length;
 	if (!threads.length) {
 		return (
 			<box flexDirection="column" width="100%" gap={1}>
@@ -1793,9 +1852,22 @@ function CommentsView({
 	}
 	return (
 		<box flexDirection="column" width="100%">
-			<text fg={theme.muted}>
-				{`${open} open · ${threads.length - open} resolved — Enter opens a comment in its chapter`}
-			</text>
+			<box flexDirection="row" width="100%">
+				<text flexShrink={1} minWidth={0} wrapMode="none" truncate fg={theme.muted}>
+					{`${open} open · ${threads.length - open} resolved${
+						unsent > 0 ? ` · ${unsent} unsent` : ""
+					} — Enter opens a comment in its chapter`}
+				</text>
+				{unsent > 0 ? (
+					<text
+						flexShrink={0}
+						fg={theme.accent}
+						onMouseDown={(event) => claimClick(event, onSendAll)}
+					>
+						{`  [Send ${unsent} unsent to agent · ${sendAllKey}]`}
+					</text>
+				) : null}
+			</box>
 			<box height={1} />
 			{threads.map((thread, index) => (
 				<CommentRow
@@ -1804,7 +1876,10 @@ function CommentsView({
 					index={index}
 					active={index === selected}
 					orphaned={orphaned.has(thread.id)}
+					sendState={sendState(thread)}
+					sendKey={keys.send}
 					onJump={onJump}
+					onSend={onSend}
 				/>
 			))}
 		</box>
@@ -2092,9 +2167,12 @@ function ChapterView({
 	onRangeStart,
 	onRangeContextMenu,
 	onReplyThread,
+	onSendThread,
 	onDeleteThread,
 	onDeleteThreadMessage,
 	onToggleThreadStatus,
+	threadKeys,
+	unsentThreadIds,
 }: {
 	chapter: Chapter;
 	diffTheme: Theme;
@@ -2136,9 +2214,12 @@ function ChapterView({
 	onRangeStart: (range: DiffLineRange) => void;
 	onRangeContextMenu: (selection: DiffSelection, position: { x: number; y: number }) => void;
 	onReplyThread: (thread: ReviewThread) => void;
+	onSendThread: (thread: ReviewThread) => void;
 	onDeleteThread: (id: string) => void;
 	onDeleteThreadMessage: (threadId: string, messageId: string) => void;
 	onToggleThreadStatus: (thread: ReviewThread) => void;
+	threadKeys: ThreadActionKeys;
+	unsentThreadIds: ReadonlySet<string>;
 }) {
 	const theme = useTheme();
 	const paths = chapterFilePaths(chapter);
@@ -2179,7 +2260,10 @@ function ChapterView({
 				<InlineThread
 					thread={thread}
 					replyComposer={replyDraft?.threadId === thread.id ? replyDraft.content : undefined}
+					keys={threadKeys}
+					unsent={unsentThreadIds.has(thread.id)}
 					onReply={onReplyThread}
+					onSend={onSendThread}
 					onDeleteThread={onDeleteThread}
 					onDeleteMessage={onDeleteThreadMessage}
 					onToggleStatus={onToggleThreadStatus}
@@ -2755,18 +2839,28 @@ export function App({
 	const [threadDraft, setThreadDraft] = useState<ThreadDraft | null>(null);
 	const [threadBody, setThreadBody] = useState("");
 	const [threadNotice, setThreadNotice] = useState<string | null>(null);
-	const [confirmDelete, setConfirmDelete] = useState<
-		| { kind: "thread"; threadId: string }
-		| { kind: "message"; threadId: string; messageId: string }
-		| null
-	>(null);
+	/** A reply the reviewer has asked to delete. A whole thread is confirmed in the status bar
+	 * instead, because its own key has to work from a list that has no card to click. */
+	const [confirmDelete, setConfirmDelete] = useState<{
+		threadId: string;
+		messageId: string;
+	} | null>(null);
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 	// The nonce re-arms the timeout when the same text is copied twice running.
 	const [copyNotice, setCopyNotice] = useState<{ text: string; nonce: number } | null>(null);
 	const [mountNotice, setMountNotice] = useState<StatusNotice | null>(initialNotice ?? null);
 	const [handoff, setHandoff] = useState<HandoffRecord | null>(() => readHandoff?.() ?? null);
 	const sendingRef = useRef(false);
+	/** The thread the reviewer has asked to delete once; a second ask goes through with it. */
+	const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 	const sendKeyLabel = formatKeymapKey(keymapHint("send-to-agent", keymap) ?? "S");
+	const commentsKeyLabel = formatKeymapKey(keymapHint("toggle-comments", keymap) ?? "o");
+	const threadKeys: ThreadActionKeys = {
+		send: formatKeymapKey(keymapHint("send-thread", keymap) ?? "A"),
+		reply: formatKeymapKey(keymapHint("reply-thread", keymap) ?? "R"),
+		status: formatKeymapKey(keymapHint("toggle-thread-status", keymap) ?? "X"),
+		delete: formatKeymapKey(keymapHint("delete-thread", keymap) ?? "D"),
+	};
 	const selectionFlashCleanup = useRef<(() => void) | null>(null);
 	const textareaRef = useRef<TextareaRenderable>(null);
 	const pageScroll = useRef<ScrollBoxRenderable>(null);
@@ -3003,6 +3097,24 @@ export function App({
 			),
 		[threads],
 	);
+	const sendStateOf = (thread: ReviewThread): ThreadSendState =>
+		threadSendState(thread, handoff ?? null);
+	const unsentThreadIds = useMemo(
+		() => new Set(unsentThreads(threads, handoff ?? null).map((thread) => thread.id)),
+		[threads, handoff],
+	);
+	/**
+	 * The thread an action names. On Comments it is the selected row; on the page it is the cited
+	 * thread the chapter cursor is on, and otherwise the conversation the reviewer opened — but only
+	 * while this page still shows it, because a jump elsewhere leaves that target behind.
+	 */
+	const focusedThread: ReviewThread | null = commentsSurface
+		? (orderedThreads[selectedThread] ?? null)
+		: (threads.find((thread) => thread.id === focusedThreadRef) ??
+			[...chapterThreadList, ...chapterQuotedThreads].find(
+				(thread) => thread.id === threadFocusTarget?.threadId,
+			) ??
+			null);
 	const quotedDraft = threadDraft?.kind === "thread" && isExcerptAnchor(threadDraft.anchor);
 	const attachmentAnchors = useMemo<DiffInlineAttachment[]>(
 		() => [
@@ -3275,7 +3387,7 @@ export function App({
 		saveCurrentSession();
 		onReload?.();
 	}
-	async function sendFeedback(options?: { choose?: boolean }) {
+	async function sendFeedback(options?: SendOptions) {
 		if (sendingRef.current) {
 			setMountNotice({ text: "Sending…", tone: "success" });
 			return;
@@ -3878,6 +3990,8 @@ export function App({
 		try {
 			threadActions?.delete(id);
 			setThreads((current) => current.filter((thread) => thread.id !== id));
+			// The list is one row shorter, so a selection at its end would point past it.
+			setSelectedThread((index) => Math.max(0, Math.min(index, threads.length - 2)));
 			if (threadDraft?.kind === "reply" && threadDraft.threadId === id) cancelThreadDraft();
 			setThreadNotice(null);
 		} catch (error) {
@@ -3902,16 +4016,12 @@ export function App({
 			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
 	}
-	function requestDeleteThread(threadId: string) {
-		setConfirmDelete({ kind: "thread", threadId });
-	}
 	function requestDeleteThreadMessage(threadId: string, messageId: string) {
-		setConfirmDelete({ kind: "message", threadId, messageId });
+		setConfirmDelete({ threadId, messageId });
 	}
 	function confirmPendingDelete() {
 		if (!confirmDelete) return;
-		if (confirmDelete.kind === "thread") deleteInlineThread(confirmDelete.threadId);
-		else deleteInlineThreadMessage(confirmDelete.threadId, confirmDelete.messageId);
+		deleteInlineThreadMessage(confirmDelete.threadId, confirmDelete.messageId);
 		setConfirmDelete(null);
 	}
 	function toggleInlineThreadStatus(thread: ReviewThread) {
@@ -3933,6 +4043,48 @@ export function App({
 		} catch (error) {
 			setThreadNotice(error instanceof Error ? error.message : String(error));
 		}
+	}
+	/** Every thread action runs on one thread, and says where to find one when there is none. */
+	function withFocusedThread(act: (thread: ReviewThread) => void) {
+		if (!focusedThread) {
+			setMountNotice({
+				text: `No thread focused — ${commentsKeyLabel} opens Comments`,
+				tone: "success",
+			});
+			return;
+		}
+		act(focusedThread);
+	}
+	function sendOneThread(thread: ReviewThread) {
+		if (!unsentThreadIds.has(thread.id)) {
+			setMountNotice({ text: "Already sent", tone: "success" });
+			return;
+		}
+		void sendFeedback({ threadIds: [thread.id] });
+	}
+	/** A reply belongs beside its thread, so one asked for from the list goes there first. */
+	function replyToThread(thread: ReviewThread) {
+		if (commentsSurface) jumpToThread(thread);
+		startThreadReply(thread);
+	}
+	/** The first ask arms the delete; the second carries it out. Every other key disarms it. */
+	function requestThreadDelete(threadId: string) {
+		if (pendingDelete === threadId) {
+			setPendingDelete(null);
+			setMountNotice(null);
+			deleteInlineThread(threadId);
+			return;
+		}
+		setPendingDelete(threadId);
+		setMountNotice({
+			text: `Delete this thread? ${threadKeys.delete} confirms · Esc cancels`,
+			tone: "error",
+		});
+	}
+	function cancelThreadDelete() {
+		if (!pendingDelete) return;
+		setPendingDelete(null);
+		setMountNotice(null);
 	}
 	function clearReviewSelection() {
 		setLineSelectionAnchor(null);
@@ -4668,6 +4820,8 @@ export function App({
 			},
 			keymap,
 		);
+		// An armed delete survives only its own key: everything else is the reviewer moving on.
+		if (actionId !== "delete-thread") cancelThreadDelete();
 
 		if (actionId === "open-menu") {
 			menu.open("file");
@@ -4685,6 +4839,24 @@ export function App({
 		}
 		if (actionId === "send-to-agent") {
 			void sendFeedback();
+			return;
+		}
+		// The thread actions are hoisted above the context split for the same reason Send is: the
+		// focused thread is the reviewer's place in the review, whichever surface shows it.
+		if (actionId === "send-thread") {
+			withFocusedThread(sendOneThread);
+			return;
+		}
+		if (actionId === "reply-thread") {
+			withFocusedThread(replyToThread);
+			return;
+		}
+		if (actionId === "toggle-thread-status") {
+			withFocusedThread(toggleInlineThreadStatus);
+			return;
+		}
+		if (actionId === "delete-thread") {
+			withFocusedThread((thread) => requestThreadDelete(thread.id));
 			return;
 		}
 		if (copyNotice) setCopyNotice(null);
@@ -4892,7 +5064,7 @@ export function App({
 	);
 	const filesSurface = page?.kind === "files";
 	const openThreadCount = threads.filter((thread) => thread.status === THREAD_STATUS.OPEN).length;
-	const unsentCount = unsentThreads(threads, handoff ?? null).length;
+	const unsentCount = unsentThreadIds.size;
 	const threadsSlot = {
 		open: openThreadCount,
 		unsent: unsentCount,
@@ -4941,6 +5113,18 @@ export function App({
 								]
 							: footerHints(keymapSurface, keymap);
 	const sendFooterHint = unsentCount > 0 ? [{ keys: sendKeyLabel, label: "send" }] : [];
+	/** The focused thread's own actions, each named only while the thread's state allows it. */
+	const threadHints = focusedThread
+		? [
+				...actionHint("reply-thread", "reply"),
+				...actionHint(
+					"toggle-thread-status",
+					focusedThread.status === THREAD_STATUS.OPEN ? "resolve" : "reopen",
+				),
+				...(unsentThreadIds.has(focusedThread.id) ? actionHint("send-thread", "send") : []),
+				...actionHint("delete-thread", "delete"),
+			]
+		: [];
 	const surfaceHints = threadDraft
 		? reviewFooterHints("composer", keymap, focusedReviewFile?.layout ?? "stack")
 		: keymapSurface === "page" && sourceReviewActionable
@@ -4948,7 +5132,7 @@ export function App({
 			: keymapSurface === "page"
 				? contextualPageHints
 				: footerHints(keymapSurface, keymap);
-	const statusHints = showHelp ? [] : [...sendFooterHint, ...surfaceHints];
+	const statusHints = showHelp ? [] : [...sendFooterHint, ...surfaceHints, ...threadHints];
 	const helpKeyLabel = formatKeymapKey(keymapHint("toggle-shortcut-help", keymap) ?? "?");
 	const quitKeyLabel = formatKeymapKey(keymapHint("quit", keymap) ?? "q");
 	const reloadKeyLabel = formatKeymapKey(keymapHint("reload", keymap) ?? "ctrl+r");
@@ -4986,6 +5170,7 @@ export function App({
 				width="100%"
 				height="100%"
 				backgroundColor={theme.background}
+				onMouseDown={cancelThreadDelete}
 				onMouseDrag={resizePanel}
 				onMouseDragEnd={finishPanelResize}
 				onMouseUp={finishPanelResize}
@@ -5107,7 +5292,12 @@ export function App({
 									threads={orderedThreads}
 									selected={selectedThread}
 									orphaned={orphanedThreads}
+									sendState={sendStateOf}
+									keys={threadKeys}
+									sendAllKey={sendKeyLabel}
 									onJump={jumpToThread}
+									onSend={sendOneThread}
+									onSendAll={() => void sendFeedback()}
 								/>
 							) : null}
 							{chapter ? (
@@ -5161,9 +5351,12 @@ export function App({
 									onRangeStart={repositionLineCursor}
 									onRangeContextMenu={openRangeContextMenu}
 									onReplyThread={startThreadReply}
-									onDeleteThread={requestDeleteThread}
+									onSendThread={sendOneThread}
+									onDeleteThread={requestThreadDelete}
 									onDeleteThreadMessage={requestDeleteThreadMessage}
 									onToggleThreadStatus={toggleInlineThreadStatus}
+									threadKeys={threadKeys}
+									unsentThreadIds={unsentThreadIds}
 								/>
 							) : null}
 							{interlude ? <InterludeClose keymap={keymap} /> : null}
@@ -5201,9 +5394,7 @@ export function App({
 				) : null}
 				{confirmDelete ? (
 					<ConfirmDialog
-						message={
-							confirmDelete.kind === "thread" ? "Delete this thread?" : "Delete this message?"
-						}
+						message="Delete this message?"
 						confirmLabel="Delete"
 						terminalWidth={width}
 						terminalHeight={height}
@@ -5256,6 +5447,7 @@ export function App({
 					reviewedFiles={filesSurface ? reviewedFiles : storyProgress.reviewed}
 					totalFiles={filesSurface ? filesPaths.length : storyProgress.total}
 					threads={threadsSlot}
+					onSendThreads={() => void sendFeedback()}
 					notice={statusNotice}
 					hints={statusHints}
 					helpKey={helpKeyLabel}

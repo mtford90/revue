@@ -1,6 +1,6 @@
 # 09 — Thread actions by key and by mouse
 
-Status: todo
+Status: done
 
 ## Parent
 
@@ -69,14 +69,14 @@ joining them while a thread is focused.
 
 ## Acceptance criteria
 
-- [ ] `send({ threadIds })` sends only those ids; the rest read as unsent afterwards
-- [ ] `A` sends the focused thread from the page and from Comments; the Comments row `[send]` does the same
-- [ ] `R`, `X`, `D` act on the focused thread in both contexts; `D` and the button both confirm first
-- [ ] The Comments header button sends all unsent; the status-bar slot click sends all unsent
-- [ ] Every card button shows its key
-- [ ] Footer hints show exactly the actions that apply to the focused thread's state
-- [ ] The help surface lists the four new actions
-- [ ] Render tests cover each key and click; controller tests cover `threadIds`
+- [x] `send({ threadIds })` sends only those ids; the rest read as unsent afterwards
+- [x] `A` sends the focused thread from the page and from Comments; the Comments row `[send]` does the same
+- [x] `R`, `X`, `D` act on the focused thread in both contexts; `D` and the button both confirm first
+- [x] The Comments header button sends all unsent; the status-bar slot click sends all unsent
+- [x] Every card button shows its key
+- [x] Footer hints show exactly the actions that apply to the focused thread's state
+- [x] The help surface lists the four new actions
+- [x] Render tests cover each key and click; controller tests cover `threadIds`
 
 ## Blocked by
 

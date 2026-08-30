@@ -110,6 +110,43 @@ test("a comment written after the last handoff is the only thing the next Send c
 	}
 });
 
+test("a Send narrowed to one thread carries it alone and leaves the rest unsent", async () => {
+	const root = await scratchRepository();
+	try {
+		const chosen = thread(1, 0);
+		const waiting = thread(2, 1);
+		const threads = [chosen, waiting];
+
+		const controller = controllerFor(root, threads);
+		expect(await controller.send(undefined, { threadIds: [chosen.id] })).toEqual({
+			kind: "queued",
+			count: 1,
+		});
+		expect(readHandoff(root).record?.threadIds).toEqual([chosen.id]);
+
+		expect(await controller.send()).toEqual({ kind: "queued", count: 1 });
+		expect(readHandoff(root).record?.threadIds).toEqual([waiting.id]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a Send narrowed to a thread the unsent rule excludes sends nothing", async () => {
+	const root = await scratchRepository();
+	try {
+		const spoken = answered(thread(1, 0), 3);
+		const waiting = thread(2, 1);
+
+		const controller = controllerFor(root, [spoken, waiting]);
+		expect(await controller.send(undefined, { threadIds: [spoken.id] })).toEqual({
+			kind: "nothing",
+		});
+		expect(readHandoff(root).record).toBeNull();
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("a damaged handoff sends the whole conversation again rather than nothing", async () => {
 	const root = await scratchRepository();
 	try {

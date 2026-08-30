@@ -5434,3 +5434,46 @@ test("the footer names source actions on a line and thread actions on a card, ne
 	expect(statusLine(t)).not.toContain("j/k move");
 	expect(statusLine(t)).not.toContain("v select");
 });
+
+test("a saved comment leaves the cursor on the card it became", async () => {
+	const t = await testRender(
+		<App file={watchedChapters} diffFiles={watchedDiff} initialThreads={[]} />,
+		{ width: 200, height: 40, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await settle(t);
+
+	await press(t, "RETURN"); // the composer on the first changed row
+	await act(async () => t.mockInput.typeText("Name this constant"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await settle(t);
+
+	// Only the card the cursor rests on names its keys, and the thread keys reach it at once.
+	expect(t.captureCharFrame()).toContain("[Reply R]");
+	await press(t, "R");
+	await settle(t);
+	expect(t.captureCharFrame()).toContain("Reply to thread");
+});
+
+test("the focused card is marked in its title, whatever the theme's colours are", async () => {
+	const first = watchedThread({ line: 1, body: "Share the retry budget" });
+	const second = watchedThread({ line: 2, body: "Name this constant" });
+	const t = await renderThreads([first, second]);
+	await t.renderOnce();
+	await nextChapter(t);
+	await press(t, "j");
+
+	const frame = t.captureCharFrame();
+	expect(frame.match(/! Open/g)).toHaveLength(2);
+	expect(frame.match(/▸ ! Open/g)).toHaveLength(1);
+
+	const cardTint = (body: string) =>
+		t
+			.captureSpans()
+			.lines[rowOf(t, body)]?.spans.find((span) => span.text.includes(body))
+			?.bg?.toString();
+	const plain = resolveTheme(undefined);
+	expect(cardTint("Share the retry budget")).toBe(RGBA.fromHex(plain.panelAlt).toString());
+	expect(cardTint("Name this constant")).toBe(RGBA.fromHex(plain.panel).toString());
+});

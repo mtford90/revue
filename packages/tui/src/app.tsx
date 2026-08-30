@@ -1662,8 +1662,8 @@ function InlineThread({
 			flexDirection="column"
 			border
 			borderColor={focused ? theme.accent : dealtWith ? theme.badgeAdded : theme.badgeModified}
-			backgroundColor={theme.panel}
-			title={` ${dealtWith ? "✓ Resolved" : "! Open"} · ${thread.id.slice(0, 8)} `}
+			backgroundColor={focused ? theme.panelAlt : theme.panel}
+			title={` ${focused ? "▸ " : ""}${dealtWith ? "✓ Resolved" : "! Open"} · ${thread.id.slice(0, 8)} `}
 			paddingLeft={1}
 			paddingRight={1}
 			marginLeft={2}
@@ -3890,6 +3890,12 @@ export function App({
 		const nextFile = chapter ? chapterFilePaths(chapter).indexOf(range.filePath) : -1;
 		if (nextFile >= 0) setSelectedFile(nextFile);
 	}
+	/** A comment leaves the reviewer on the card it became, revealed like any other cursor move. */
+	function focusSavedThread(thread: ReviewThread) {
+		lineMotionRequest.current += 1;
+		setReviewCursor(threadReviewStop(thread));
+		setLineSelectionAnchor(null);
+	}
 	/** Extension walks source lines alone; ordinary motion walks the stops, cards among them. */
 	function moveReviewCursor(delta: -1 | 1) {
 		const next = lineSelectionAnchor
@@ -4021,6 +4027,7 @@ export function App({
 					threadActions?.create(anchor, humanAuthor, body) ??
 					createThread("0".repeat(64), anchor, humanAuthor, body);
 				setThreads((current) => sortThreads([...current, thread]));
+				focusSavedThread(thread);
 			} else {
 				const updated =
 					threadActions?.reply(threadDraft.threadId, humanAuthor, body) ??

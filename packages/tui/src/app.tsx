@@ -276,22 +276,27 @@ const revealContentOffset = ({
 	}
 };
 
-const centreContentOffset = ({
-	scroll,
-	leadingHeight,
-	offset,
-	span = 1,
-}: {
+type ContentOffset = {
 	scroll: ScrollBoxRenderable | null;
 	leadingHeight: number;
 	offset: number;
 	span?: number;
-}) => {
+};
+
+const centreContentOffset = ({ scroll, leadingHeight, offset, span = 1 }: ContentOffset) => {
 	if (!scroll) return;
 	const top = offset + leadingHeight + VIEWPORT_TOP_PADDING;
 	const maximum = Math.max(0, scroll.scrollHeight - scroll.viewport.height);
 	const centred = top - Math.floor((scroll.viewport.height - span) / 2);
 	scroll.scrollTo(Math.max(0, Math.min(centred, maximum)));
+};
+
+const centreHiddenContentOffset = (target: ContentOffset) => {
+	const { scroll, leadingHeight, offset, span = 1 } = target;
+	if (!scroll) return;
+	const top = offset + leadingHeight + VIEWPORT_TOP_PADDING;
+	if (top >= scroll.scrollTop && top + span <= scroll.scrollTop + scroll.viewport.height) return;
+	centreContentOffset(target);
 };
 const RIGHT_MOUSE_BUTTON = 2;
 const COMPACT_NAV_WIDTH = 34;
@@ -2633,7 +2638,7 @@ export function App({
 	const [fileLines, setFileLines] = useState<Map<string, string[] | null>>(() => new Map());
 	const [expansions, setExpansions] = useState<Map<string, FileExpansion>>(() => new Map());
 	const [expandedVariants, setExpandedVariants] = useState<Map<string, DiffFile>>(() => new Map());
-	const [fileFocusRequest, setFileFocusRequest] = useState(0);
+	const [fileFocusRequest, setFileFocusRequest] = useState({ sequence: 0, centre: false });
 	const [keyFocusRequest, setKeyFocusRequest] = useState(0);
 	const [diffAnchorTarget, setDiffAnchorTarget] = useState<{
 		id: string;
@@ -3290,7 +3295,7 @@ export function App({
 	}, [subscribeUpdates]);
 
 	useEffect(() => {
-		if (!chapter || fileFocusRequest === 0 || focusedThreadRef) return;
+		if (!chapter || fileFocusRequest.sequence === 0 || focusedThreadRef) return;
 		const path = chapterFilePaths(chapter)[selectedFile];
 		const segment = focusedExcerpt
 			? excerptSegmentId(focusedExcerpt)
@@ -3300,7 +3305,10 @@ export function App({
 		if (segment !== null) {
 			const offset = segmentOffset(chapterSegmentsRef.current, segment);
 			if (offset !== null) {
-				revealContentOffset({
+				const scrollToTarget = fileFocusRequest.centre
+					? centreHiddenContentOffset
+					: revealContentOffset;
+				scrollToTarget({
 					scroll: pageScroll.current,
 					leadingHeight: leadingContent.current?.height ?? 0,
 					offset,
@@ -3800,7 +3808,7 @@ export function App({
 		setFocusedThreadRef(null);
 		setExpansions(new Map());
 		setExpandedVariants(new Map());
-		setFileFocusRequest(0);
+		setFileFocusRequest({ sequence: 0, centre: false });
 		setKeyFocusRequest(0);
 		setDiffAnchorTarget(null);
 		cancelThreadDraft();
@@ -3953,8 +3961,8 @@ export function App({
 		setVs(next);
 		onViewStateChange?.(next);
 	}
-	function requestFileFocus() {
-		setFileFocusRequest((request) => request + 1);
+	function requestFileFocus(centre = false) {
+		setFileFocusRequest((request) => ({ sequence: request.sequence + 1, centre }));
 	}
 	function requestKeyFocus() {
 		setKeyFocusRequest((request) => request + 1);
@@ -4130,7 +4138,7 @@ export function App({
 		setFocusedExcerpt(next.kind === "excerpt" ? next.key : null);
 		setFocusedThreadRef(next.kind === "thread" ? next.threadId : null);
 		if (next.kind === "file") setSelectedFile(next.index);
-		requestFileFocus();
+		requestFileFocus(next.kind === "file");
 	}
 	function currentFocusTarget(): number {
 		if (focusedThreadRef) {
@@ -4475,11 +4483,7 @@ export function App({
 		if (copyNotice) setCopyNotice(null);
 
 		if (name === "escape") {
-			if (lineSelectionAnchor || pointerSelection || excerptSelection) {
-				clearReviewSelection();
-				return;
-			}
-			quit();
+			if (lineSelectionAnchor || pointerSelection || excerptSelection) clearReviewSelection();
 			return;
 		}
 

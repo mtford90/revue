@@ -138,8 +138,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   `j`/`k` walks reviewable lines continuously across expanded text files in the current chapter:
   split movement stays in the current old/new pane (retaining it across files when possible), while
   stacked movement follows visible old-then-new source-row order. In split, `h`/`l` or Left/Right
-  switches sides only on the same presentation row; stacked horizontal motion is inert. `v` enters
-  selection mode: split vertical motion stays in-pane and crossing sides makes a mixed rectangle
+  prefers the requested side on the same presentation row, then the nearest changed row on that side
+  in the file, with ties resolved downward; stacked horizontal motion is inert. `v` enters selection
+  mode: split vertical motion stays in-pane, the same horizontal fallback applies, and crossing sides
+  makes a mixed rectangle
   over both panes for the selected row span, while stacked follows visible original-hunk rows and
   counts a dual-authority context row once. A click moves the cursor, a drag selects, and a
   double-click activates a one-line comment. Excerpts keep their own anchor authority. Interaction

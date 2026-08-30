@@ -43,9 +43,11 @@ reinterpreting their anchors; every subsequent write emits version 2.
 selection, membership, and first and terminal ranges. It also owns logical presentation-row
 identity, separate from wrapping: a split row may expose old and new stops, while one stacked
 context row may retain both authorities without becoming two keyboard steps. Split vertical motion
-stays in the current pane and same-row horizontal motion changes sides only when a counterpart
-exists. A split selection that crosses sides becomes the rectangle of available old/new stops over
-the selected presentation-row span. Stacked motion and selection follow visible old-then-new rows.
+stays in the current pane. Horizontal motion prefers a same-row counterpart, then the nearest
+changed row on the requested side anywhere in the file; an equal-distance tie resolves to the row
+below. The same rule extends selections. A split selection that crosses sides becomes the rectangle
+of available old/new stops over the selected presentation-row span. Stacked motion and selection
+follow visible old-then-new rows.
 A drag confined to one split gutter remains in that side's visible lane.
 
 Persisted selections cross a separate seam: they use one layout-neutral canonical order and merge

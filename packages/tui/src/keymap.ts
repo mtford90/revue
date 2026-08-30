@@ -3,8 +3,8 @@
  * keyboard handler, keys surface and menu hints all derive their key labels
  * from here rather than hardcoding them independently.
  *
- * Out of scope by design: digit jumps 1-9, escape (the reserved dismiss/quit
- * hatch) and modal-internal navigation/text input (confirm-delete, the
+ * Out of scope by design: digit jumps 1-9, escape (the reserved dismiss key)
+ * and modal-internal navigation/text input (confirm-delete, the
  * pointer context menu, menu-bar arrow navigation, keys-surface scrolling
  * the theme picker and thread-draft composition). Those stay hardcoded in
  * the keyboard handler.
@@ -62,7 +62,7 @@ const KEYMAP_DEF = [
 	},
 	{
 		id: "quit",
-		description: "Quit (Esc also works)",
+		description: "Quit",
 		keys: ["q", "Q"],
 		displayKeys: ["q"],
 		context: "global",
@@ -142,7 +142,7 @@ const KEYMAP_DEF = [
 	},
 	{
 		id: "move-to-old-side",
-		description: "Move to the old side of the same split row",
+		description: "Move to the nearest old-side change",
 		keys: ["h", "left"],
 		displayKeys: ["h", "left"],
 		context: "page",
@@ -150,7 +150,7 @@ const KEYMAP_DEF = [
 	},
 	{
 		id: "move-to-new-side",
-		description: "Move to the new side of the same split row",
+		description: "Move to the nearest new-side change",
 		keys: ["l", "right"],
 		displayKeys: ["l", "right"],
 		context: "page",

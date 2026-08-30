@@ -50,7 +50,7 @@ test("the listing shows every action's id, description, and effective keys", () 
 test("the listing flags an overridden action against its default", () => {
 	const { keymap } = mergeKeymap(KEYMAP, { quit: "z" });
 	const listing = formatKeybindingsListing(KEYMAP, keymap, []);
-	expect(listing).toMatch(/quit\s+z\s+Quit \(Esc also works\) \(overridden, default: q\/Q\)/);
+	expect(listing).toMatch(/quit\s+z\s+Quit \(overridden, default: q\/Q\)/);
 });
 
 test("the listing shows the full default match set, not the display-only alias form", () => {

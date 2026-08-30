@@ -926,7 +926,8 @@ test("typing into the filter narrows the list without firing the actions it spel
 
 	const frame = t.captureCharFrame();
 	expect(frame).toContain("filter: quit");
-	expect(frame).toContain("Quit (Esc also works)");
+	expect(frame).toContain("Quit");
+	expect(frame).not.toContain("Esc also works");
 	expect(frame).not.toContain("Scroll down one visual row");
 	// `q` quits, `u` and `i` scroll and `t` opens the theme picker — none of them may act while
 	// the filter has the keyboard.
@@ -2427,7 +2428,7 @@ test("clicking the band opens the excerpt in place, caption above its header", a
 	expect(t.captureCharFrame()).toContain(FOLDED_BAND);
 });
 
-test("excerpt clicks and drags replace patch selection, and Escape cancels before quitting", async () => {
+test("excerpt clicks and drags replace patch selection, and Escape never quits", async () => {
 	let quits = 0;
 	const t = await renderExcerptChapter({ onQuit: () => (quits += 1) });
 	await clickAction(t, "[▼ show");
@@ -2454,6 +2455,8 @@ test("excerpt clicks and drags replace patch selection, and Escape cancels befor
 	await press(t, "ESCAPE");
 	expect(quits).toBe(0);
 	await press(t, "ESCAPE");
+	expect(quits).toBe(0);
+	await press(t, "q");
 	expect(quits).toBe(1);
 });
 
@@ -3301,7 +3304,7 @@ const cursorSide = (
 	return marker < divider ? "old" : "new";
 };
 
-test("split cursor crosses paired rows horizontally and moves vertically within its side", async () => {
+test("split cursor crosses to the nearest changed row and moves vertically within its side", async () => {
 	const t = await testRender(
 		<App
 			file={paneChapters}
@@ -3322,7 +3325,9 @@ test("split cursor crosses paired rows horizontally and moves vertically within 
 	await press(t, "j");
 	expect(cursorSide(t, "new only a")).toBe("new");
 	await arrow(t, "left");
-	expect(cursorSide(t, "new only a")).toBe("new");
+	expect(cursorSide(t, "old paired a")).toBe("old");
+	await arrow(t, "right");
+	expect(cursorSide(t, "new paired a")).toBe("new");
 
 	await press(t, "k");
 	await press(t, "h");

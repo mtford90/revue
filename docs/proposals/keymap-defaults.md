@@ -73,7 +73,7 @@ and out of scope here, so the fallback `g` wins — **Shift-G in Comments select
 | `open-menu` | `f10` | Open the menu bar | global / Menus |
 | `toggle-shortcut-help` | `?` | Show/hide the shortcuts overlay | global / Menus |
 | `open-theme-picker` | `t` | Open the theme picker | global / Menus |
-| `quit` | `q` | Quit (Esc also works) | global / Menus |
+| `quit` | `q` | Quit | global / Menus |
 | `reload` | `ctrl+r` | Re-prep the same scope and reopen the run | global / Menus |
 | `toggle-comments` | `o` | Comments surface | global / Navigation |
 | `previous-key-change` | `{`, `shift+[` | Focus previous key change | global / Review |

@@ -168,7 +168,7 @@ export const moveReviewLine = ({
 	return current;
 };
 
-/** Same-row old/new motion for split review; stacked is intentionally inert. */
+/** File-local old/new motion for split review; stacked is intentionally inert. */
 export const switchReviewLineSide = ({
 	file,
 	current,

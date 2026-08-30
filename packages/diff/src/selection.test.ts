@@ -187,6 +187,27 @@ test("presentation rows retain split row identity for vertical and same-row side
 	).toEqual(["deletions", 1]);
 });
 
+test("split side motion falls forward to the nearest changed row in the target pane", () => {
+	const [unpaired] = parsePatch(`diff --git a/unpaired.ts b/unpaired.ts
+--- a/unpaired.ts
++++ b/unpaired.ts
+@@ -1 +1,0 @@
+-old above
+@@ -10,0 +9 @@
++new middle
+@@ -20 +20,0 @@
+-old below
+`);
+	if (!unpaired) throw new Error("missing unpaired fixture");
+	const rows = diffPresentationRows(unpaired, "split");
+	const middle = rows[1]?.stops.find((stop) => stop.side === "additions");
+	if (!middle) throw new Error("missing middle addition");
+
+	expect(
+		stopIdentity(switchSplitSelectionStop({ rows, current: middle, side: "deletions" })),
+	).toEqual(["deletions", 20]);
+});
+
 test("split mixed selection is rectangular and canonical persistence coalesces each side", () => {
 	const rows = diffPresentationRows(paneFile, "split");
 	const anchor = rows[0]?.stops.find((stop) => stop.side === "additions");

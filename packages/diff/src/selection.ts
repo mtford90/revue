@@ -147,7 +147,10 @@ export const moveSplitSelectionStop = ({
 	return current;
 };
 
-/** Switch to the requested side of the same split presentation row; no counterpart means no-op. */
+const changedStopOnSide = (row: DiffPresentationRow | undefined, side: DiffSide) =>
+	row?.kind === "change" ? row.stops.find((stop) => stop.side === side) : undefined;
+
+/** Switch panes on the same row, else use the nearest changed row; equal distances prefer below. */
 export const switchSplitSelectionStop = ({
 	rows,
 	current,
@@ -157,8 +160,17 @@ export const switchSplitSelectionStop = ({
 	current: DiffSelectionStop;
 	side: DiffSide;
 }): DiffSelectionStop => {
-	const row = rows[rowIndexForStop(rows, current)];
-	return row?.stops.find((stop) => stop.side === side) ?? current;
+	const currentIndex = rowIndexForStop(rows, current);
+	if (currentIndex < 0) return current;
+	const counterpart = rows[currentIndex]?.stops.find((stop) => stop.side === side);
+	if (counterpart) return counterpart;
+	for (let distance = 1; distance < rows.length; distance += 1) {
+		const below = changedStopOnSide(rows[currentIndex + distance], side);
+		if (below) return below;
+		const above = changedStopOnSide(rows[currentIndex - distance], side);
+		if (above) return above;
+	}
+	return current;
 };
 
 /** Move by one visible stacked source row, not by the number of authorities on a context row. */

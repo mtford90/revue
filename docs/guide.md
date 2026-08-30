@@ -145,10 +145,12 @@ A **thread** is the official feedback concept. In Patch view, the explicit sourc
 on the first additions-side review line in the focused file (or the first deletion when the file has
 no additions). In split layout, `j`/`k` move vertically in the current old/new pane; they cross
 expanded file boundaries retaining that side where the destination has it. `h`/`l` and Left/Right
-switch to the old/new side of the same presentation row, and do nothing when that counterpart is
-missing. In stacked layout, `j`/`k` follow visible old-then-new source rows and horizontal motion is
-inert. `v` enters selection mode. Split vertical motion then stays in-pane; crossing sides makes a
-mixed rectangle over both panes for the selected visual-row span. Stacked selection follows visible
+prefer the old/new authority on the same presentation row, then fall back to the nearest changed row
+on that side in the file; equal distances prefer the row below. In stacked layout, `j`/`k` follow
+visible old-then-new source rows and horizontal motion is inert. `v` enters selection mode. Split
+vertical motion then stays in-pane and the same horizontal fallback applies; crossing sides can move
+to another row and makes a mixed rectangle over both panes for the selected visual-row span.
+Stacked selection follows visible
 original-hunk order, counting a context row once even though it has old and new line identities.
 Selection never enters another file. `Enter` comments on either the ordinary one-line cursor or the
 selection, and `Escape` cancels a selection. A gutter click moves the cursor, an actual drag leaves a
@@ -374,8 +376,9 @@ the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking c
 change content navigates without changing review state—only its checkbox toggles it.
 
 Most actions answer to several keys. `j`/`k` move the source-line cursor vertically; in split,
-`h`/`l` or `←`/`→` move to the old/new side of the same row, while stacked ignores horizontal
-motion. `v` begins or extends a line range, `Enter` comments on that range, and `Escape` cancels it.
+`h`/`l` or `←`/`→` move to the same-row old/new authority or the nearest changed row on that side,
+while stacked ignores horizontal motion. `v` begins or extends a line range, `Enter` comments on that
+range, and `Escape` cancels it.
 `↑`/`↓` scroll exactly one
 visual row without moving the cursor (`Ctrl-n`/`Ctrl-p` and `Ctrl-e`/`Ctrl-k` are aliases) · `d`/`u`
 or `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
@@ -386,7 +389,7 @@ chapters · `{`/`}` or `F7`/`Shift-F7` focus key changes · `Tab`/`Shift-Tab` or
 the next unreviewed chapter · `w` opens Diff · `o` opens Comments · `p` cycles path display · `s`
 shows/hides the sidebar · `x` marks the chapter reviewed and `f` marks the focused file · `y` copies
 highlighted text · `Ctrl-y`/`Ctrl-g` copy an open thread's location/GitHub link · `F10` or `F9` opens
-the menu · `?` or `F1` toggles the keys surface · `Ctrl-r`/`F5` reloads · `q`/`Esc` quits. The
+the menu · `?` or `F1` toggles the keys surface · `Ctrl-r`/`F5` reloads · `q` quits · `Esc` dismisses the active interaction. The
 status bar names the few keys that matter where you are.
 
 `?` opens the keys surface: every action for the surface you are on under **Here**, everything that

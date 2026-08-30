@@ -182,6 +182,31 @@ test("selection extends through original rows and becomes a split rectangle afte
 	]);
 });
 
+test("selection crosses to the nearest changed row when its split row is unpaired", () => {
+	const file = selectionLineFile(
+		plan(`diff --git a/unpaired.ts b/unpaired.ts
+--- a/unpaired.ts
++++ b/unpaired.ts
+@@ -1 +1,0 @@
+-old above
+@@ -10,0 +9 @@
++new middle
+@@ -20 +20,0 @@
+-old below
+`),
+	);
+	const anchor = initialReviewLine(file);
+	if (!anchor) throw new Error("missing selection anchor");
+	const crossed = switchReviewLineSide({ file, current: anchor, side: "deletions" });
+	if (!crossed) throw new Error("missing crossed cursor");
+
+	expect(crossed).toMatchObject({ hunkOldStart: 20, side: "deletions", startLine: 20 });
+	expect(reviewLineSelection({ file, anchor, cursor: crossed })?.ranges).toEqual([
+		{ oldStart: 10, side: "additions", startLine: 9, endLine: 9 },
+		{ oldStart: 20, side: "deletions", startLine: 20, endLine: 20 },
+	]);
+});
+
 test("stacked selection counts a dual-authority context row once", () => {
 	const allRows = selectionLineFile(plan(PATCH, "stack"));
 	const oldOne = reviewableLines(plan(PATCH, "stack"))[0];

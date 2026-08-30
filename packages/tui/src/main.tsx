@@ -1030,7 +1030,9 @@ async function showRun(
 			? createFeedbackController({
 					repositoryRoot,
 					runId: run.manifest.runId,
-					threads: () => threadStore.get(),
+					// Agents reply from their own process, so the batch is read off disk at each Send
+					// rather than from the store's own last write.
+					threads: () => threadStore.reload(),
 					host: createHostAdapter(),
 				})
 			: undefined;

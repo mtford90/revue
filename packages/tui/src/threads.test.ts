@@ -458,6 +458,27 @@ test("the same anchor, carried from a superseded run, is orphaned instead", asyn
 	}
 });
 
+test("reload reads the replies another process wrote, which the cache alone cannot see", async () => {
+	const directory = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-thread-reload-"));
+	const path = join(directory, ".revue", "threads.json");
+	const runId = "a".repeat(64);
+	try {
+		const reviewer = openThreadStore(path, runId);
+		const thread = reviewer.create(anchor, human, "Explain the budget", { id: ids[0] });
+
+		openThreadStore(path, runId).reply(thread.id, agent, "It is the retry budget", { id: ids[1] });
+
+		expect(reviewer.get()[0]?.messages).toHaveLength(1);
+		expect(reviewer.reload()[0]?.messages.map((message) => message.body)).toEqual([
+			"Explain the budget",
+			"It is the retry budget",
+		]);
+		expect(reviewer.get()[0]?.messages).toHaveLength(2);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 // ── The unsent rule ─────────────────────────────────────────────────────────
 
 const unsentRunId = "c".repeat(64);

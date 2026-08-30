@@ -74,6 +74,8 @@ export type NewMessageOptions = {
 
 export type ThreadStore = {
 	get(): ReviewThread[];
+	/** The run's threads as they are on disk now, including whatever another process wrote. */
+	reload(): ReviewThread[];
 	create(
 		anchor: ThreadAnchor,
 		author: ThreadAuthor,
@@ -273,6 +275,10 @@ export function openThreadStore(path: string, runId: string): ThreadStore {
 		});
 	return {
 		get: () => current,
+		reload: () => {
+			current = sortThreads(readThreadStoreFile(path).runs[runId] ?? []);
+			return current;
+		},
 		create: (anchor, author, body, options) => {
 			const thread = createThread(runId, anchor, author, body, options);
 			return mutate((threads) => ({ threads: addThread(threads, thread), value: thread }));

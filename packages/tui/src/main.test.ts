@@ -1038,6 +1038,19 @@ test("a damaged agent origin is a status warning, not a failure", async () => {
 	}
 });
 
+test("a --timeout-ms no timer can hold is rejected rather than waiting for nothing", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
+	try {
+		await initGitRepo(root);
+
+		const result = await run(root, ["status", "--wait", "--timeout-ms", "2147483648"]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("--timeout-ms cannot exceed 2147483647");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("status --since without --wait is rejected", async () => {
 	const root = await mkdtemp(join(tmpdir(), "revue-status-wait-"));
 	try {

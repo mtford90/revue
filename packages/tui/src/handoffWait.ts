@@ -43,11 +43,6 @@ export const waitForHandoff = async ({
 	const immediate = freshRecord(repositoryRoot, since);
 	if (immediate) return { kind: "ready", record: immediate };
 
-	// Yield once before attaching the watch: a write racing the read above lands during this gap
-	// rather than being lost to a watcher that has not attached yet, since the second read below
-	// re-checks after the watch is live.
-	await Promise.resolve();
-
 	const revueDirectory = dirname(handoffPath(repositoryRoot));
 	if (!existsSync(revueDirectory)) mkdirSync(revueDirectory, { recursive: true });
 

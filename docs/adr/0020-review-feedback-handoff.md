@@ -113,11 +113,13 @@ picks, rather than Send interrupting the agent of a different review.
 
 ### The clipboard is the no-host path
 
-When no host can deliver a prompt to a terminal — no host detected, or every delivery attempt
-failed — Revue copies the wake-up prompt to the clipboard instead of showing an error. The reviewer
-pastes it into the agent by hand. This keeps Send working in a plain terminal exactly as it works
-under Orca; the record on disk is the same either way, and the clipboard is only a courtesy on top
-of it.
+Revue copies the wake-up prompt to the clipboard when it detects no host at all. The reviewer pastes
+it into the agent by hand. This keeps Send working in a plain terminal exactly as it works under
+Orca; the record on disk is the same either way, and the clipboard is only a courtesy on top of it.
+
+A host that is present owns delivery outright. When it declines — no terminals, a refused nudge, or
+no answer — the batch stays queued and nothing is copied. The clipboard is for a reviewer no host
+can type for, not a second attempt after a host has said no.
 
 ## Consequences
 

@@ -197,8 +197,8 @@ A repository with no prepared runs reports that and exits 0.
 --since         wait instead for a handoff whose id differs from this one: pass the handoffId
                 you have already handled to wait for the batch after it. Requires --wait; using
                 it alone is a usage error.
---timeout-ms    how long to wait before giving up, default 900000 (15 minutes). A timeout
-                prints a message to stderr and exits ${STATUS_WAIT_TIMEOUT_EXIT_CODE}.`;
+--timeout-ms    how long to wait before giving up, default 900000 (15 minutes) and at most
+                2147483647. A timeout prints a message to stderr and exits ${STATUS_WAIT_TIMEOUT_EXIT_CODE}.`;
 
 const prepSummary = (run: PreparedRun): string => {
 	const { manifest } = run;
@@ -432,7 +432,7 @@ async function cmdStatus(args: string[]): Promise<number> {
 		json = options.booleans.has("--json");
 		wait = options.booleans.has("--wait");
 		since = options.values.get("--since");
-		if (options.values.has("--timeout-ms")) timeoutMs = integerOption(options, "--timeout-ms");
+		if (options.values.has("--timeout-ms")) timeoutMs = waitTimeoutOption(options);
 		if (since !== undefined && !wait) throw new Error("--since requires --wait");
 	} catch (error) {
 		process.stderr.write(
@@ -523,6 +523,16 @@ const integerOption = (options: CommandOptions, name: string, allowZero = false)
 	if (!Number.isSafeInteger(value)) {
 		throw new Error(`${name} requires ${allowZero ? "a non-negative" : "a positive"} integer`);
 	}
+	return value;
+};
+
+/** A timer's delay is a signed 32-bit count of milliseconds, and a larger one fires immediately,
+ * so a wait longer than that is refused rather than silently turned into no wait at all. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+const waitTimeoutOption = (options: CommandOptions): number => {
+	const value = integerOption(options, "--timeout-ms");
+	if (value > MAX_TIMEOUT_MS) throw new Error(`--timeout-ms cannot exceed ${MAX_TIMEOUT_MS}`);
 	return value;
 };
 

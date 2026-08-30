@@ -70,8 +70,8 @@ test("resolves when a handoff is written after the wait started", async () => {
 test("catches a write that lands between the first read and the watch attaching", async () => {
 	const root = makeRepository();
 
-	// waitForHandoff yields once before it attaches the watch; a synchronous write issued right
-	// after calling it, before this test awaits anything, lands in that exact gap.
+	// A synchronous write issued right after the call, before this test awaits anything, lands
+	// before the watcher is live; the poll must still catch it.
 	const pending = waitForHandoff({ repositoryRoot: root, since: null, timeoutMs: 5_000 });
 	const handoffId = send(root);
 

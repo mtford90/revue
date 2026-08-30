@@ -18,6 +18,8 @@ export type WaitForHandoffInput = {
 export type WaitForHandoffResult = { kind: "ready"; record: HandoffRecord } | { kind: "timeout" };
 
 const HANDOFF_FILE = "handoff.json";
+/** A watcher can attach lazily or fail outright, so a slow poll backs it up. */
+const POLL_MS = 1_000;
 
 const isHandoffChange = (filename: string | null): boolean =>
 	filename === null ||
@@ -50,11 +52,13 @@ export const waitForHandoff = async ({
 		let settled = false;
 		let watcher: ReturnType<typeof watch> | null = null;
 		let timer: ReturnType<typeof setTimeout> | null = null;
+		let poll: ReturnType<typeof setInterval> | null = null;
 
 		const finish = (result: WaitForHandoffResult) => {
 			if (settled) return;
 			settled = true;
 			if (timer) clearTimeout(timer);
+			if (poll) clearInterval(poll);
 			watcher?.close();
 			signal?.removeEventListener("abort", onAbort);
 			resolve(result);
@@ -80,6 +84,7 @@ export const waitForHandoff = async ({
 		check();
 		if (settled) return;
 
+		poll = setInterval(check, Math.min(POLL_MS, timeoutMs));
 		timer = setTimeout(() => finish({ kind: "timeout" }), timeoutMs);
 		signal?.addEventListener("abort", onAbort);
 	});

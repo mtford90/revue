@@ -149,9 +149,11 @@ result of each Send.
 - **`runId` means "requested against".** It is not the lookup key. Threads move across
   supersession (ADR 0018), so `revue status` resolves `threadIds` against the current active or
   pending run and reports the ones it finds. The handoff itself does not migrate.
-- **Unsent.** A thread is unsent when it is open, its last message is from a human, and that
-  message's `createdAt` is later than the last handoff's `requestedAt` (or there is no handoff).
-  This is derived; nothing is written to threads.
+- **Unsent.** A thread is unsent when it is open, its last message is from a human, and either
+  the last handoff does not name its id or that message's `createdAt` is later than the handoff's
+  `requestedAt` (or there is no handoff). Thread ids are stable across supersession, so a second
+  review in the same repository cannot mark this one as sent. This is derived; nothing is written
+  to threads.
 - **Agent origin.** Agent-side CLI commands record the agent's pane in `.revue/agent.json`:
   `schemaVersion`, `host`, `paneKey`, `worktreeId`, `runId`, `recordedAt`. The commands are the
   top-level `revue prep` and `revue threads reply`, after they succeed. The record is not written

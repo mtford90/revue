@@ -100,6 +100,7 @@ export const createFeedbackController = ({
 				return await deliver({
 					host,
 					repositoryRoot,
+					runId,
 					handoffId: record.handoffId,
 					count,
 					sessionTarget,
@@ -128,6 +129,8 @@ type SessionTargetRef = { current: HostTerminal | null };
 type DeliveryInput = {
 	host: HostAdapter;
 	repositoryRoot: string;
+	/** The run this batch was requested against, which the recorded origin is matched to. */
+	runId: string;
 	handoffId: string;
 	count: number;
 	sessionTarget: SessionTargetRef;
@@ -137,6 +140,7 @@ type DeliveryInput = {
 const deliver = async ({
 	host,
 	repositoryRoot,
+	runId,
 	handoffId,
 	count,
 	sessionTarget,
@@ -146,11 +150,12 @@ const deliver = async ({
 	if (!terminals) return { kind: "queued", count };
 	forgetVanishedSessionTarget(sessionTarget, terminals);
 	if (forceChoose) return chooseOrQueued(terminals, count, handoffId);
-	const target = resolveTarget(
+	const target = resolveTarget({
 		terminals,
-		sessionTarget.current,
-		readAgentOrigin(repositoryRoot).origin,
-	);
+		sessionTarget: sessionTarget.current,
+		origin: readAgentOrigin(repositoryRoot).origin,
+		runId,
+	});
 	if (!target) return chooseOrQueued(terminals, count, handoffId);
 	if (!(await trySendPrompt(host, target.handle))) return { kind: "queued", count };
 	const outcome = delivered({ repositoryRoot, handoffId, count, target });
@@ -184,7 +189,7 @@ const delivered = ({
 	handoffId,
 	count,
 	target,
-}: Omit<DeliveryInput, "host" | "sessionTarget" | "forceChoose"> & {
+}: Omit<DeliveryInput, "host" | "runId" | "sessionTarget" | "forceChoose"> & {
 	target: HostTerminal;
 }): SendOutcome => {
 	const finalised = finaliseHandoff(repositoryRoot, handoffId, {
@@ -199,20 +204,26 @@ const delivered = ({
 
 /**
  * Where the nudge goes: the terminal the reviewer chose last, when the host still lists it; then
- * the pane the agent last worked in, when the host still lists it; then the one terminal left. A
- * run the origin does not share with this review is a weaker signal but not a wrong one — a single
- * origin is recorded at a time, so there is no better-matched pane to prefer over it, and the last
- * agent to work the review is still the one to wake.
+ * the pane the agent last worked in, when the host still lists it and it worked on this review;
+ * then the one terminal left. One origin is recorded at a time, so an origin carrying another
+ * review's run is a weak signal: it wakes that pane only when there is no other pane to wake, and
+ * the reviewer chooses whenever there is.
  */
-const resolveTarget = (
-	terminals: readonly HostTerminal[],
-	sessionTarget: HostTerminal | null,
-	origin: AgentOrigin | null,
-): HostTerminal | null => {
+const resolveTarget = ({
+	terminals,
+	sessionTarget,
+	origin,
+	runId,
+}: {
+	terminals: readonly HostTerminal[];
+	sessionTarget: HostTerminal | null;
+	origin: AgentOrigin | null;
+	runId: string;
+}): HostTerminal | null => {
 	const session = terminals.find((terminal) => terminal.paneKey === sessionTarget?.paneKey);
 	if (session) return session;
 	const recorded = terminals.find((terminal) => terminal.paneKey === origin?.paneKey);
-	if (recorded) return recorded;
+	if (recorded && origin?.runId === runId) return recorded;
 	return terminals.length === 1 ? (terminals[0] ?? null) : null;
 };
 

@@ -98,13 +98,18 @@ Send resolves a terminal to nudge in this order:
 
 1. The session target the reviewer chose in the picker this TUI session, if the host still lists
    it.
-2. The recorded agent origin, if the host still lists it.
+2. The recorded agent origin, if the host still lists it and its `runId` is the run this batch was
+   requested against.
 3. The sole remaining terminal, if exactly one other terminal exists.
 4. The picker, when more than one terminal remains and none of the above settled it.
 5. The clipboard, when there is no host at all.
 
 A session target the host no longer lists is forgotten rather than retried. A vanished session
 choice falls through the same order as if it had never been made.
+
+An origin recorded against another review is a weak signal, because one origin is recorded at a
+time. It wakes its pane at step 3, when there is no other pane to wake. Otherwise the reviewer
+picks, rather than Send interrupting the agent of a different review.
 
 ### The clipboard is the no-host path
 

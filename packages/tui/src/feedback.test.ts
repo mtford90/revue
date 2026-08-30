@@ -267,12 +267,31 @@ test("the nudge goes to the pane the agent last worked in, and the record says s
 	}
 });
 
-test("an origin recorded against another review still names the pane to wake", async () => {
+test("an origin recorded against another review leaves the choice to the reviewer", async () => {
 	const root = await scratchRepository();
 	try {
-		const { host, sent } = fakeHost({
-			terminals: [terminal("term_other"), terminal("term_agent")],
+		const candidates = [terminal("term_other"), terminal("term_agent")];
+		const { host, sent } = fakeHost({ terminals: candidates });
+		recordOrigin(root, "tab1:term_agent", "d".repeat(64));
+
+		const outcome = await hostControllerFor(root, [thread(1, 0)], host).send(refuseClipboard);
+
+		expect(outcome).toEqual({
+			kind: "choose",
+			count: 1,
+			handoffId: readHandoff(root).record?.handoffId ?? "",
+			candidates,
 		});
+		expect(sent).toHaveLength(0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("an origin recorded against another review still wakes the only pane there is", async () => {
+	const root = await scratchRepository();
+	try {
+		const { host, sent } = fakeHost({ terminals: [terminal("term_agent")] });
 		recordOrigin(root, "tab1:term_agent", "d".repeat(64));
 
 		const outcome = await hostControllerFor(root, [thread(1, 0)], host).send(refuseClipboard);

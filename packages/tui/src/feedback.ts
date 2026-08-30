@@ -4,6 +4,7 @@ import {
 	type AgentOrigin,
 	HANDOFF_DELIVERY_KIND,
 	HANDOFF_SCHEMA_VERSION,
+	type HandoffDelivery,
 	type HandoffRecord,
 	type ReviewThread,
 } from "@revue/types";
@@ -195,7 +196,7 @@ const delivered = ({
 }: Omit<DeliveryInput, "host" | "runId" | "sessionTarget" | "forceChoose"> & {
 	target: HostTerminal;
 }): SendOutcome => {
-	const finalised = finaliseHandoff(repositoryRoot, handoffId, {
+	const finalised = tryFinalise(repositoryRoot, handoffId, {
 		kind: HANDOFF_DELIVERY_KIND.DELIVERED,
 		host: "orca",
 		terminal: target.handle,
@@ -203,6 +204,20 @@ const delivered = ({
 	});
 	// A later Send has already replaced the record, and its own delivery owns the outcome now.
 	return finalised ? { kind: "delivered", count, title: target.title } : { kind: "queued", count };
+};
+
+/** The record is on disk with the feedback in it either way, so a rewrite that fails reads as a
+ * delivery that did not happen rather than as a Send the reviewer has to worry about. */
+const tryFinalise = (
+	repositoryRoot: string,
+	handoffId: string,
+	delivery: HandoffDelivery,
+): boolean => {
+	try {
+		return finaliseHandoff(repositoryRoot, handoffId, delivery);
+	} catch {
+		return false;
+	}
 };
 
 /**
@@ -257,5 +272,5 @@ const tryCopyPrompt = (
 	} catch {
 		return false;
 	}
-	return finaliseHandoff(repositoryRoot, handoffId, { kind: HANDOFF_DELIVERY_KIND.COPIED });
+	return tryFinalise(repositoryRoot, handoffId, { kind: HANDOFF_DELIVERY_KIND.COPIED });
 };

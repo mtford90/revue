@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handoffPath, readHandoff, recordAgentOrigin, writeHandoff } from "@revue/prep";
@@ -602,6 +602,29 @@ test("deliverTo with a stale handoffId neither nudges nor overwrites the newer r
 		expect(readHandoff(root).record).toEqual(newer);
 		expect(sent).toEqual([]);
 	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a finalisation that throws leaves the batch queued rather than failing the Send", async () => {
+	const root = await scratchRepository();
+	const revue = join(root, ".revue");
+	try {
+		const { host, sent } = fakeHost({
+			terminals: [terminal("term_only")],
+			// The record is written by now; the rewrite that follows the nudge cannot land.
+			send: async () => {
+				await chmod(revue, 0o500);
+				return true;
+			},
+		});
+
+		const outcome = await hostControllerFor(root, [thread(1, 0)], host).send(refuseClipboard);
+
+		expect(outcome).toEqual({ kind: "queued", count: 1 });
+		expect(sent).toHaveLength(1);
+	} finally {
+		await chmod(revue, 0o700).catch(() => {});
 		await rm(root, { recursive: true, force: true });
 	}
 });

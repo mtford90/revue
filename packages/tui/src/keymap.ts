@@ -194,7 +194,7 @@ const KEYMAP_DEF = [
 	},
 	{
 		id: "select-lines",
-		description: "Select lines from the review line cursor",
+		description: "Select lines from the review line cursor; again to stop",
 		keys: ["v"],
 		context: "page",
 		section: "Review",

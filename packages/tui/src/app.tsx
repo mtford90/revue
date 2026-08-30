@@ -3929,7 +3929,11 @@ export function App({
 		setReviewCursor({ kind: "line", line: next });
 		if (!lineSelectionAnchor) setPointerSelection(null);
 	}
-	function startLineSelection() {
+	function toggleLineSelection() {
+		if (lineSelectionAnchor) {
+			clearReviewSelection();
+			return;
+		}
 		if (cursorLine) {
 			setPointerSelection(null);
 			setLineSelectionAnchor(cursorLine);
@@ -5050,7 +5054,7 @@ export function App({
 				moveReviewCursorSide("additions");
 				break;
 			case "select-lines":
-				startLineSelection();
+				toggleLineSelection();
 				break;
 			case "open-editor":
 				void openLineInEditor();

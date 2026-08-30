@@ -4522,6 +4522,23 @@ test("double-clicking a quoted gutter uses excerpt authority", async () => {
 	]);
 });
 
+test("v toggles the line selection off again", async () => {
+	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
+		width: 180,
+		height: 34,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await settle(t);
+
+	await press(t, "v");
+	expect(statusLine(t)).toContain("j/k extend");
+
+	await press(t, "v");
+	expect(statusLine(t)).not.toContain("j/k extend");
+	expect(statusLine(t)).toContain("v select");
+});
+
 test("status hints describe cursor, selecting, and composer actions", async () => {
 	const t = await testRender(<App file={watchedChapters} diffFiles={watchedDiff} />, {
 		width: 180,

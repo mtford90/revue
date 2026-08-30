@@ -375,22 +375,26 @@ chapter, file, and key change. `x` toggles the chapter, `f` toggles the focused 
 the focused key change; `1`–`9` remain direct key-change shortcuts. Clicking chapter, file, or key-
 change content navigates without changing review state—only its checkbox toggles it.
 
+The same review action behaves identically wherever it appears. Completing a chapter marks and
+collapses all its files, then advances to the next unreviewed chapter; reopening it returns there,
+expands its files, and focuses the first. Completing a file collapses it and moves to the next
+unreviewed file or chapter; reopening it expands and focuses it. Key changes toggle in place.
+
 Most actions answer to several keys. `j`/`k` move the source-line cursor vertically; in split,
 `h`/`l` or `←`/`→` move to the same-row old/new authority or the nearest changed row on that side,
 while stacked ignores horizontal motion. `v` begins or extends a line range, `Enter` comments on that
-range, and `Escape` cancels it.
-`↑`/`↓` scroll exactly one
-visual row without moving the cursor (`Ctrl-n`/`Ctrl-p` and `Ctrl-e`/`Ctrl-k` are aliases) · `d`/`u`
-or `Ctrl-d`/`Ctrl-u` scroll by half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up`
-scroll by page · `g`/`G`, `Home`/`End`, or `<`/`>` jump to the top/bottom · `[`/`]` move between
-chapters · `{`/`}` or `F7`/`Shift-F7` focus key changes · `Tab`/`Shift-Tab` or `J`/`K` focus files ·
-`-`/`+` collapse/expand all diffs · `e` opens the cursor or selection's first current-side line in
-`$VISUAL`, falling back to `$EDITOR` (deleted-side lines refuse rather than guessing) · `a` jumps to
-the next unreviewed chapter · `w` opens Diff · `o` opens Comments · `p` cycles path display · `s`
-shows/hides the sidebar · `x` marks the chapter reviewed and `f` marks the focused file · `y` copies
-highlighted text · `Ctrl-y`/`Ctrl-g` copy an open thread's location/GitHub link · `F10` or `F9` opens
-the menu · `?` or `F1` toggles the keys surface · `Ctrl-r`/`F5` reloads · `q` quits · `Esc` dismisses the active interaction. The
-status bar names the few keys that matter where you are.
+range, and `Escape` cancels it. `↑`/`↓` scroll exactly one visual row without moving the cursor
+(`Ctrl-n`/`Ctrl-p` and `Ctrl-e`/`Ctrl-k` are aliases) · `d`/`u` or `Ctrl-d`/`Ctrl-u` scroll by
+half-page · `Space`/`b`, `Ctrl-f`/`Ctrl-b`, or `Page Down`/`Page Up` scroll by page · `g`/`G`,
+`Home`/`End`, or `<`/`>` jump to the top/bottom · `[`/`]` move between chapters · `{`/`}` or
+`F7`/`Shift-F7` focus key changes · `Tab`/`Shift-Tab` or `J`/`K` focus files · `-`/`+`
+collapse/expand all diffs · `e` opens the cursor or selection's first current-side line in `$VISUAL`,
+falling back to `$EDITOR` (deleted-side lines refuse rather than guessing) · `a` jumps to the next
+unreviewed chapter · `w` opens Diff · `o` opens Comments · `p` cycles path display · `s` shows/hides
+the sidebar · `x` marks the chapter reviewed and `f` marks the focused file · `y` copies highlighted
+text · `Ctrl-y`/`Ctrl-g` copy an open thread's location/GitHub link · `F10` or `F9` opens the menu ·
+`?` or `F1` toggles the keys surface · `Ctrl-r`/`F5` reloads · `q` quits · `Esc` dismisses the active
+interaction. The status bar names the few keys that matter where you are.
 
 `?` opens the keys surface: every action for the surface you are on under **Here**, everything that
 does not fire there dimmed under **Elsewhere** with the key that gets you to it. Type to filter by

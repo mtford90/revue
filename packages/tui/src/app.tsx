@@ -369,6 +369,28 @@ const emptyReviewPageState = () => ({
 	panelScrollTop: 0,
 });
 
+type ReviewPageState = ReturnType<typeof emptyReviewPageState>;
+
+const chapterReviewLayout = ({
+	state,
+	chapter,
+	reviewed,
+}: {
+	state: ReviewPageState;
+	chapter: Chapter;
+	reviewed: boolean;
+}): ReviewPageState => {
+	const paths = chapterFilePaths(chapter);
+	return {
+		...state,
+		selectedFile: reviewed ? state.selectedFile : 0,
+		selectedHunk: reviewed ? state.selectedHunk : 0,
+		collapsedFiles: reviewed
+			? [...new Set([...state.collapsedFiles, ...paths])]
+			: state.collapsedFiles.filter((path) => !paths.includes(path)),
+	};
+};
+
 /**
  * Excerpts sit in narration order rather than being pinned to the end of a chapter: the nth
  * citation follows the nth file section, and any citation past the last file closes the chapter.
@@ -590,7 +612,7 @@ function PageNavStrip({
 	width: number;
 	vs: ViewState;
 	onNavigatePage: (index: number) => void;
-	onToggleChapterReview: () => void;
+	onToggleChapterReview: (chapter: Chapter) => void;
 }) {
 	const theme = useTheme();
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
@@ -612,7 +634,7 @@ function PageNavStrip({
 					<text
 						flexShrink={0}
 						fg={chapterReviewed ? theme.badgeAdded : theme.muted}
-						onMouseDown={onToggleChapterReview}
+						onMouseDown={() => onToggleChapterReview(chapter)}
 					>
 						[{chapterReviewed ? "x" : " "}]{" "}
 					</text>
@@ -743,7 +765,6 @@ function ChapterPanel({
 	indexScrollRef,
 	scrollRef,
 	onToggleChapterReview,
-	onToggleIndexedChapterReview,
 	onToggleFileReview,
 	onToggleKeyChange,
 	onProseContextMenu,
@@ -769,8 +790,7 @@ function ChapterPanel({
 	onFocusKeyChange: (index: number) => void;
 	indexScrollRef: RefObject<ScrollBoxRenderable | null>;
 	scrollRef: RefObject<ScrollBoxRenderable | null>;
-	onToggleChapterReview: () => void;
-	onToggleIndexedChapterReview: (chapter: Chapter) => void;
+	onToggleChapterReview: (chapter: Chapter) => void;
 	onToggleFileReview: (path: string) => void;
 	onToggleKeyChange: (index: number) => void;
 	onProseContextMenu: (reference: ChapterReference, position: { x: number; y: number }) => void;
@@ -823,7 +843,7 @@ function ChapterPanel({
 					vs={vs}
 					maxRows={chapterIndexMaxRows(terminalHeight)}
 					onSelect={onNavigatePage}
-					onToggleReview={onToggleIndexedChapterReview}
+					onToggleReview={onToggleChapterReview}
 					scrollRef={indexScrollRef}
 				/>
 			) : null}
@@ -843,7 +863,7 @@ function ChapterPanel({
 								<text
 									flexShrink={0}
 									fg={chapterReviewed ? theme.badgeAdded : theme.muted}
-									onMouseDown={onToggleChapterReview}
+									onMouseDown={() => onToggleChapterReview(chapter)}
 								>
 									[{chapterReviewed ? "x" : " "}]{" "}
 								</text>
@@ -951,10 +971,12 @@ function PrologueChapters({
 	pages,
 	vs,
 	onSelectPage,
+	onToggleReview,
 }: {
 	pages: Page[];
 	vs: ViewState;
 	onSelectPage: (index: number) => void;
+	onToggleReview: (chapter: Chapter) => void;
 }) {
 	const theme = useTheme();
 	return pages.flatMap((page, index) =>
@@ -970,6 +992,10 @@ function PrologueChapters({
 						<text
 							flexShrink={0}
 							fg={isChapterReviewed(vs, page.chapter.id) ? theme.badgeAdded : theme.muted}
+							onMouseDown={(event) => {
+								event.stopPropagation();
+								onToggleReview(page.chapter);
+							}}
 						>
 							{`[${isChapterReviewed(vs, page.chapter.id) ? "x" : " "}] ${page.chapter.order}. `}
 						</text>
@@ -1013,6 +1039,7 @@ function PrologueView({
 	vs,
 	width,
 	onSelectPage,
+	onToggleChapterReview,
 	onSelectFocusArea,
 }: {
 	prologue: Prologue;
@@ -1020,6 +1047,7 @@ function PrologueView({
 	vs: ViewState;
 	width: number;
 	onSelectPage: (index: number) => void;
+	onToggleChapterReview: (chapter: Chapter) => void;
 	onSelectFocusArea: (locations: string[]) => void;
 }) {
 	const theme = useTheme();
@@ -1084,7 +1112,12 @@ function PrologueView({
 			{prologue.diagram ? <PrologueDiagram source={prologue.diagram} width={width} /> : null}
 
 			<PrologueSection title="Chapters" gap={0}>
-				<PrologueChapters pages={pages} vs={vs} onSelectPage={onSelectPage} />
+				<PrologueChapters
+					pages={pages}
+					vs={vs}
+					onSelectPage={onSelectPage}
+					onToggleReview={onToggleChapterReview}
+				/>
 			</PrologueSection>
 		</box>
 	);
@@ -3158,27 +3191,29 @@ export function App({
 		setPathDisplayState(next);
 		updatePreferences({ pathDisplay: next });
 	}
-	function saveCurrentSession(nextPageId = pageId(page)) {
-		const currentPageId = pageId(page);
-		const next: ReviewSessionState = {
-			...sessionRef.current,
-			pageId: nextPageId,
-			pages: {
-				...sessionRef.current.pages,
-				[currentPageId]: {
-					selectedFile,
-					selectedHunk: selectedHunkIndex,
-					selectedKeyChange,
-					collapsedFiles: [...collapsedFiles],
-					openExcerpts: [...openExcerpts],
-					foldedDiagrams: [...foldedDiagrams],
-					scrollTop: pageScroll.current?.scrollTop ?? 0,
-					panelScrollTop: panelScroll.current?.scrollTop ?? 0,
-				},
-			},
+	function activePageState(): ReviewPageState {
+		return {
+			selectedFile,
+			selectedHunk: selectedHunkIndex,
+			selectedKeyChange,
+			collapsedFiles: [...collapsedFiles],
+			openExcerpts: [...openExcerpts],
+			foldedDiagrams: [...foldedDiagrams],
+			scrollTop: pageScroll.current?.scrollTop ?? 0,
+			panelScrollTop: panelScroll.current?.scrollTop ?? 0,
 		};
+	}
+	function emitSession(next: ReviewSessionState) {
 		sessionRef.current = next;
 		onSessionStateChange?.(next);
+	}
+	function saveCurrentSession(nextPageId = pageId(page)) {
+		const currentPageId = pageId(page);
+		emitSession({
+			...sessionRef.current,
+			pageId: nextPageId,
+			pages: { ...sessionRef.current.pages, [currentPageId]: activePageState() },
+		});
 	}
 	function quit() {
 		saveCurrentSession();
@@ -4017,18 +4052,48 @@ export function App({
 		});
 		requestFileFocus();
 	}
-	function toggleChapterReview() {
-		if (!chapter) return;
-		const wasReviewed = isChapterReviewed(vs, chapter.id);
-		const next = toggleChapter(vs, chapter);
-		commit(next);
-		if (!wasReviewed) {
-			const target = nextUnreviewedChapter(chapters, next, chapter.order);
-			if (target) gotoChapter(target);
-		}
+	function setChapterReviewLayout({
+		targetChapter,
+		reviewed,
+		updateVisible = true,
+	}: {
+		targetChapter: Chapter;
+		reviewed: boolean;
+		updateVisible?: boolean;
+	}) {
+		const targetPageId = targetChapter.id;
+		const active = pageId(page) === targetPageId;
+		const previous = active
+			? activePageState()
+			: (sessionRef.current.pages[targetPageId] ?? emptyReviewPageState());
+		const nextPage = chapterReviewLayout({ state: previous, chapter: targetChapter, reviewed });
+		emitSession({
+			...sessionRef.current,
+			pages: { ...sessionRef.current.pages, [targetPageId]: nextPage },
+		});
+		if (!active || !updateVisible) return;
+		setCollapsedFiles(new Set(nextPage.collapsedFiles));
+		if (reviewed || !chapterFilePaths(targetChapter).length) return;
+		setSelectedFile(0);
+		setSelectedHunkIndex(0);
 	}
-	function toggleIndexedChapterReview(targetChapter: Chapter) {
-		commit(toggleChapter(vs, targetChapter));
+	function toggleChapterReview(targetChapter: Chapter) {
+		const wasReviewed = isChapterReviewed(vs, targetChapter.id);
+		const next = toggleChapter(vs, targetChapter);
+		commit(next);
+		if (wasReviewed) {
+			setChapterReviewLayout({ targetChapter, reviewed: false });
+			gotoChapter(targetChapter);
+			if (chapterFilePaths(targetChapter).length) requestFileFocus();
+			return;
+		}
+		const destination = nextUnreviewedChapter(chapters, next, targetChapter.order);
+		if (!destination) {
+			setChapterReviewLayout({ targetChapter, reviewed: true });
+			return;
+		}
+		gotoChapter(destination);
+		setChapterReviewLayout({ targetChapter, reviewed: true, updateVisible: false });
 	}
 	function toggleFileReview(path: string) {
 		if (!chapter) return;
@@ -4053,13 +4118,22 @@ export function App({
 			return;
 		}
 
-		setCollapsedFiles((currentCollapsed) => new Set(currentCollapsed).add(path));
 		if (isChapterReviewed(next, chapter.id)) {
-			const target = nextUnreviewedChapter(chapters, next, chapter.order);
-			if (target) gotoChapter(target);
+			const destination = nextUnreviewedChapter(chapters, next, chapter.order);
+			if (!destination) {
+				setChapterReviewLayout({ targetChapter: chapter, reviewed: true });
+				return;
+			}
+			gotoChapter(destination);
+			setChapterReviewLayout({
+				targetChapter: chapter,
+				reviewed: true,
+				updateVisible: false,
+			});
 			return;
 		}
 
+		setCollapsedFiles((currentCollapsed) => new Set(currentCollapsed).add(path));
 		const nextUnreviewed = paths
 			.map((candidate, index) => ({ candidate, index }))
 			.filter(({ candidate }) => !isFileReviewed(next, chapter.id, candidate))
@@ -4645,7 +4719,7 @@ export function App({
 				if (chapter) expandFiles();
 				break;
 			case "toggle-chapter-review":
-				if (chapter) toggleChapterReview();
+				if (chapter) toggleChapterReview(chapter);
 				break;
 			case "toggle-file-review": {
 				if (!chapter) break;
@@ -4830,7 +4904,6 @@ export function App({
 							indexScrollRef={indexScroll}
 							scrollRef={panelScroll}
 							onToggleChapterReview={toggleChapterReview}
-							onToggleIndexedChapterReview={toggleIndexedChapterReview}
 							onToggleFileReview={toggleFileReview}
 							onToggleKeyChange={toggleSelectedKeyChange}
 							onProseContextMenu={openProseContextMenu}
@@ -4886,6 +4959,7 @@ export function App({
 									vs={vs}
 									width={contentWidth}
 									onSelectPage={goto}
+									onToggleChapterReview={toggleChapterReview}
 									onSelectFocusArea={focusPrologueArea}
 								/>
 							) : null}

@@ -274,12 +274,19 @@ test("opens on the prologue with the chapter list and review progress", async ()
 	expect(frame).toContain("0/3 files"); // none reviewed yet
 });
 
-test("the chapter index checkbox toggles review while the title only navigates", async () => {
+test("a chapter checkbox completes and reopens the chapter consistently", async () => {
+	const diffFiles = await loadPatch(PATCH);
 	const seen: ViewState[] = [];
-	const t = await testRender(<App file={file} onViewStateChange={(next) => seen.push(next)} />, {
-		width: 130,
-		height: 32,
-	});
+	const sessions: ReviewSessionState[] = [];
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			onViewStateChange={(next) => seen.push(next)}
+			onSessionStateChange={(next) => sessions.push(next)}
+		/>,
+		{ width: 130, height: 32 },
+	);
 	await t.renderOnce();
 	const lines = t.captureCharFrame().split("\n");
 	const chapterY = lines.findIndex((line) => line.includes("1. Add a re"));
@@ -288,12 +295,21 @@ test("the chapter index checkbox toggles review while the title only navigates",
 	await click(t, chapterLine.indexOf("[ ]") + 1, chapterY);
 	await settle(t);
 	expect(seen.at(-1)?.chapters).toContain("chapter-1");
-	expect(statusLine(t)).toContain("Prologue");
+	expect(sessions.at(-1)?.pages["chapter-1"]?.collapsedFiles).toContain("src/lib/backoff.ts");
+	expect(statusLine(t)).toContain("Ch 2/3");
 
-	await click(t, chapterLine.indexOf("1. Add a re"), chapterY);
+	await press(t, "[");
+	expect(t.captureCharFrame()).toContain("[x]▶");
+	const reviewedLines = t.captureCharFrame().split("\n");
+	const reviewedY = reviewedLines.findIndex((line) => line.includes("1. Add a re"));
+	const reviewedLine = reviewedLines[reviewedY] ?? "";
+	await click(t, reviewedLine.indexOf("[x]") + 1, reviewedY);
 	await settle(t);
-	expect(seen).toHaveLength(1);
+
+	expect(seen.at(-1)?.chapters).not.toContain("chapter-1");
+	expect(sessions.at(-1)?.pages["chapter-1"]?.collapsedFiles).not.toContain("src/lib/backoff.ts");
 	expect(statusLine(t)).toContain("Ch 1/3");
+	expect(t.captureCharFrame()).toContain("[ ]▼");
 });
 
 const twelveChapters: RevueChaptersFile = {
@@ -558,14 +574,29 @@ test("the sidebar index walks back to the prologue from any chapter", async () =
 	expect(t.captureCharFrame()).toContain("Dashboards stay up during deploys now");
 });
 
-test("the prologue's chapter list opens the chapter it names", async () => {
-	const t = await testRender(<App file={file} />, { width: 110, height: 60 });
+test("the prologue chapter title navigates while its checkbox completes the chapter", async () => {
+	const seen: ViewState[] = [];
+	const t = await testRender(<App file={file} onViewStateChange={(next) => seen.push(next)} />, {
+		width: 110,
+		height: 60,
+	});
 	await t.renderOnce();
-	const lines = t.captureCharFrame().split("\n");
-	const entryY = lines.findLastIndex((line) => line.includes("Retry transient failures"));
+	let lines = t.captureCharFrame().split("\n");
+	let entryY = lines.findLastIndex((line) => line.includes("Retry transient failures"));
 	await click(t, (lines[entryY]?.indexOf("Retry transient") ?? -1) + 1, entryY);
 
 	expect(statusLine(t)).toContain("Ch 2/3");
+	expect(seen).toHaveLength(0);
+
+	await press(t, "[");
+	await press(t, "[");
+	lines = t.captureCharFrame().split("\n");
+	entryY = lines.findLastIndex((line) => line.includes("Retry transient failures"));
+	await click(t, (lines[entryY]?.indexOf("[ ]") ?? -1) + 1, entryY);
+	await settle(t);
+
+	expect(seen.at(-1)?.chapters).toContain("chapter-2");
+	expect(statusLine(t)).toContain("Ch 3/3");
 });
 
 test("a prologue focus area opens its matching review hint", async () => {
@@ -1100,18 +1131,31 @@ test("x marks a chapter reviewed, persists, and auto-advances", async () => {
 	expect(statusLine(t)).toContain("Ch 2/3"); // auto-advanced from page 2 to page 3 (next unreviewed)
 });
 
-test("f marks the selected file reviewed (which completes a single-file chapter)", async () => {
+test("f completes and collapses a file, while unchecking reopens and focuses it", async () => {
+	const diffFiles = await loadPatch(PATCH);
 	const seen: ViewState[] = [];
-	const t = await testRender(<App file={file} onViewStateChange={(n) => seen.push(n)} />, {
-		width: 110,
-		height: 32,
-	});
+	const t = await testRender(
+		<App file={file} diffFiles={diffFiles} onViewStateChange={(next) => seen.push(next)} />,
+		{ width: 110, height: 32 },
+	);
 	await t.renderOnce();
-	await nextChapter(t); // chapter 1 (one file)
-	await press(t, "f"); // mark that file reviewed
+	await nextChapter(t);
+	await press(t, "f");
+	await settle(t);
 
 	expect(seen.at(-1)?.files).toContain("chapter-1::src/lib/backoff.ts");
-	expect(seen.at(-1)?.chapters).toContain("chapter-1"); // all files reviewed -> chapter reviewed
+	expect(seen.at(-1)?.chapters).toContain("chapter-1");
+	expect(statusLine(t)).toContain("Ch 2/3");
+
+	await press(t, "[");
+	expect(t.captureCharFrame()).toContain("▸[x]▶");
+	await press(t, "f");
+	await settle(t);
+
+	expect(seen.at(-1)?.files).not.toContain("chapter-1::src/lib/backoff.ts");
+	expect(seen.at(-1)?.chapters).not.toContain("chapter-1");
+	expect(statusLine(t)).toContain("Ch 1/3");
+	expect(t.captureCharFrame()).toContain("▸[ ]▼");
 });
 
 test("key change content navigates while only its checkbox toggles review", async () => {

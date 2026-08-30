@@ -25,8 +25,11 @@ export type SendOutcome =
 	/** The choice the reviewer has yet to make: more than one terminal could be the target. */
 	| { kind: "choose"; count: number; handoffId: string; candidates: readonly HostTerminal[] }
 	| { kind: "delivered"; count: number; title: string }
-	| { kind: "copied"; count: number }
+	/** The prompt is on the clipboard: either no host exists, or the host could not reach a terminal. */
+	| { kind: "copied"; count: number; reason: CopyReason }
 	| { kind: "error"; message: string };
+
+export type CopyReason = "no-host" | "unreached";
 
 export type SendOptions = {
 	/** Forces the picker even when a session target or origin would otherwise settle it. */
@@ -36,14 +39,18 @@ export type SendOptions = {
 export type FeedbackController = {
 	/**
 	 * Write the unsent threads as one handoff. Reports what the reviewer should be told.
-	 * `copyPrompt` is the clipboard fallback used when there is no host to deliver to; it stands
+	 * `copyPrompt` is the clipboard fallback used when no terminal receives the prompt; it stands
 	 * in for a call the TUI makes because only it has a renderer to copy through.
 	 */
-	send(copyPrompt?: (text: string) => boolean, options?: SendOptions): Promise<SendOutcome>;
+	send(copyPrompt?: CopyPrompt, options?: SendOptions): Promise<SendOutcome>;
 	/** Delivers a queued handoff to the terminal the reviewer picked, guarded by `handoffId` so a
 	 * newer Send is never overwritten by a slower, older choice. The terminal becomes the session
 	 * target for later Sends. */
-	deliverTo(handoffId: string, terminal: HostTerminal): Promise<SendOutcome>;
+	deliverTo(
+		handoffId: string,
+		terminal: HostTerminal,
+		copyPrompt?: CopyPrompt,
+	): Promise<SendOutcome>;
 	/** Whether a host is present to deliver to, which is what gates the "another terminal" menu item. */
 	hasHost: boolean;
 };
@@ -56,6 +63,8 @@ export type FeedbackControllerInput = {
 	/** Absent outside a host that can type for the reviewer, which is where the clipboard takes over. */
 	host?: HostAdapter | null;
 };
+
+type CopyPrompt = (text: string) => boolean;
 
 const describe = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
@@ -79,10 +88,7 @@ export const createFeedbackController = ({
 	// not ask again while it is still there to answer.
 	const sessionTarget: SessionTargetRef = { current: null };
 	return {
-		async send(
-			copyPrompt?: (text: string) => boolean,
-			options?: SendOptions,
-		): Promise<SendOutcome> {
+		async send(copyPrompt?: CopyPrompt, options?: SendOptions): Promise<SendOutcome> {
 			// A damaged record reads as absent, which sends the whole open conversation again. That is
 			// the safe way round: the agent re-reads feedback rather than never hearing it.
 			const previous = readHandoff(repositoryRoot).record;
@@ -94,32 +100,48 @@ export const createFeedbackController = ({
 			} catch (error) {
 				return { kind: "error", message: describe(error) };
 			}
-			// A host owns delivery outright. The clipboard is for a reviewer nothing can type for, not
-			// a second attempt after the host has declined.
-			const count = unsent.length;
-			if (host) {
-				return await deliver({
-					host,
-					repositoryRoot,
-					runId,
-					handoffId: record.handoffId,
-					count,
-					sessionTarget,
-					forceChoose: options?.choose ?? false,
-				});
-			}
-			return tryCopyPrompt(repositoryRoot, record.handoffId, copyPrompt)
-				? { kind: "copied", count }
-				: { kind: "queued", count };
+			const fallback = {
+				repositoryRoot,
+				handoffId: record.handoffId,
+				count: unsent.length,
+				copyPrompt,
+			};
+			if (!host) return copiedOrQueued({ ...fallback, reason: "no-host" });
+			const outcome = await deliver({
+				host,
+				repositoryRoot,
+				runId,
+				handoffId: record.handoffId,
+				count: unsent.length,
+				sessionTarget,
+				forceChoose: options?.choose ?? false,
+			});
+			// A host that reached nobody leaves the reviewer holding the prompt, so the manual
+			// path is always there; a choice still to make is not a failure.
+			return outcome.kind === "queued"
+				? copiedOrQueued({ ...fallback, reason: "unreached" })
+				: outcome;
 		},
-		async deliverTo(handoffId: string, terminal: HostTerminal): Promise<SendOutcome> {
+		async deliverTo(
+			handoffId: string,
+			terminal: HostTerminal,
+			copyPrompt?: CopyPrompt,
+		): Promise<SendOutcome> {
 			if (!host) return { kind: "queued", count: 0 };
 			const current = readHandoff(repositoryRoot).record;
 			// A newer Send replaced the record while the picker was open. That Send owns delivery
 			// now, so this choice neither nudges anyone nor claims a batch of its own.
 			if (current?.handoffId !== handoffId) return { kind: "queued", count: 0 };
 			const count = current.threadIds.length;
-			if (!(await trySendPrompt(host, terminal.handle))) return { kind: "queued", count };
+			if (!(await trySendPrompt(host, terminal.handle))) {
+				return copiedOrQueued({
+					repositoryRoot,
+					handoffId,
+					count,
+					copyPrompt,
+					reason: "unreached",
+				});
+			}
 			const outcome = delivered({ repositoryRoot, handoffId, count, target: terminal });
 			if (outcome.kind === "delivered") sessionTarget.current = terminal;
 			return outcome;
@@ -261,10 +283,27 @@ const trySendPrompt = async (host: HostAdapter, handle: string): Promise<boolean
 	}
 };
 
+const copiedOrQueued = ({
+	repositoryRoot,
+	handoffId,
+	count,
+	copyPrompt,
+	reason,
+}: {
+	repositoryRoot: string;
+	handoffId: string;
+	count: number;
+	copyPrompt?: CopyPrompt;
+	reason: CopyReason;
+}): SendOutcome =>
+	tryCopyPrompt(repositoryRoot, handoffId, copyPrompt)
+		? { kind: "copied", count, reason }
+		: { kind: "queued", count };
+
 const tryCopyPrompt = (
 	repositoryRoot: string,
 	handoffId: string,
-	copyPrompt?: (text: string) => boolean,
+	copyPrompt?: CopyPrompt,
 ): boolean => {
 	if (!copyPrompt) return false;
 	try {

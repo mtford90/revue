@@ -10,7 +10,7 @@ Status: done
 
 The thread-count slot in the status bar becomes one state-driven slot; nothing is added beside
 it. States: `3 threads` (nothing unsent, no handoff); `3 threads · 2 unsent`; `3 threads · sent ✓`
-(delivered) or `3 threads · sent · queued`. Narrow width keeps only the state half; tiny width
+(delivered) or `3 threads · copied ⧉` (copied) or `3 threads · not sent ⚠` (queued). Narrow width keeps only the state half; tiny width
 drops the slot as today. The slot reads the handoff through the run watcher, extended with the
 handoff path, so it reflects the file and not memory.
 

@@ -53,15 +53,15 @@ describe("threadsSlotText", () => {
 		);
 	});
 
-	test("a delivered handoff reads as sent, a queued or copied one names the fallback", () => {
+	test("a delivered handoff reads as sent, a copied one as copied, a queued one as not sent", () => {
 		expect(threadsSlotText({ open: 3, unsent: 0, sent: "delivered" }, { narrow: false })).toBe(
 			"3 threads · sent ✓",
 		);
 		expect(threadsSlotText({ open: 3, unsent: 0, sent: "queued" }, { narrow: false })).toBe(
-			"3 threads · sent · queued",
+			"3 threads · not sent ⚠",
 		);
 		expect(threadsSlotText({ open: 3, unsent: 0, sent: "copied" }, { narrow: false })).toBe(
-			"3 threads · sent · queued",
+			"3 threads · copied ⧉",
 		);
 	});
 
@@ -71,7 +71,7 @@ describe("threadsSlotText", () => {
 			"sent ✓",
 		);
 		expect(threadsSlotText({ open: 3, unsent: 0, sent: "queued" }, { narrow: true })).toBe(
-			"sent · queued",
+			"not sent ⚠",
 		);
 		expect(threadsSlotText({ open: 3, unsent: 0, sent: null }, { narrow: true })).toBe("3 threads");
 	});

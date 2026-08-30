@@ -60,6 +60,10 @@ export type ThreadsSlotState = {
 	sent: "delivered" | "queued" | "copied" | null;
 };
 
+/** Delivered means the agent was told; copied means the reviewer holds the prompt; queued means
+ * nobody has been told yet. */
+const SENT_SUFFIX = { delivered: "sent ✓", copied: "copied ⧉", queued: "not sent ⚠" } as const;
+
 const threadWord = (open: number) => `${open} ${open === 1 ? "thread" : "threads"}`;
 
 /**
@@ -75,7 +79,7 @@ export const threadsSlotText = (
 		return narrow ? suffix : `${threadWord(threads.open)} · ${suffix}`;
 	}
 	if (threads.sent) {
-		const suffix = threads.sent === "delivered" ? "sent ✓" : "sent · queued";
+		const suffix = SENT_SUFFIX[threads.sent];
 		return narrow ? suffix : `${threadWord(threads.open)} · ${suffix}`;
 	}
 	if (threads.open > 0) return threadWord(threads.open);

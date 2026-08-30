@@ -12,7 +12,7 @@ The reviewer presses `S` on any surface, or picks "Send feedback to agent" from 
 Revue collects the unsent threads (open, a human spoke last, that message newer than the last
 handoff) and writes one handoff record to `.revue/handoff.json`: `handoffId` (UUID),
 `requestedAt`, `runId`, `threadIds`, `delivery: queued`. The write is atomic and under the thread
-store lock. A notice says "Queued for polling (N threads)", or "Nothing to send" when the unsent
+store lock. A notice says "Saved, but not sent — tell your agent to run revue status (N threads)", or "Nothing to send" when the unsent
 set is empty. Nothing is delivered yet; this slice is the durable path only.
 
 `revue status` gains `handoff`: the record plus `resolvedThreadIds`, the ids found on the current

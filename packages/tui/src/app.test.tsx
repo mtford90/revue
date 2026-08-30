@@ -4570,12 +4570,16 @@ test("S sends from the page and from Comments, and leaves s toggling the sidebar
 
 	await press(t, "S");
 	expect(feedback.sends()).toBe(1);
-	expect(statusLine(t)).toContain("Queued for polling (2 threads)");
+	expect(statusLine(t)).toContain(
+		"Saved, but not sent — tell your agent to run revue status (2 threads)",
+	);
 
 	await press(t, "o"); // the Comments surface, where Send must still reach the agent
 	await press(t, "S");
 	expect(feedback.sends()).toBe(2);
-	expect(statusLine(t)).toContain("Queued for polling (1 thread)");
+	expect(statusLine(t)).toContain(
+		"Saved, but not sent — tell your agent to run revue status (1 thread)",
+	);
 });
 
 test("the File menu sends the same feedback as the key", async () => {
@@ -4591,7 +4595,9 @@ test("the File menu sends the same feedback as the key", async () => {
 	await press(t, "RETURN");
 
 	expect(feedback.sends()).toBe(1);
-	expect(statusLine(t)).toContain("Queued for polling (3 threads)");
+	expect(statusLine(t)).toContain(
+		"Saved, but not sent — tell your agent to run revue status (3 threads)",
+	);
 });
 
 test("Send says when there is nothing to send and reports a record it could not write", async () => {
@@ -4622,18 +4628,29 @@ test("Send names the terminal it delivered the nudge to", async () => {
 	});
 	await t.renderOnce();
 	await press(t, "S");
-	expect(statusLine(t)).toContain("Delivered to claude — agent (2 threads)");
+	expect(statusLine(t)).toContain("Sent to claude — agent (2 threads)");
 });
 
-test("Send reports a copied prompt outside a host", async () => {
-	const feedback = fakeFeedback({ kind: "copied", count: 2 });
-	const t = await testRender(<App file={file} feedback={feedback.controller} />, {
+test("Send says the prompt is copied, and why, outside a host or after a host failed", async () => {
+	const plain = fakeFeedback({ kind: "copied", count: 2, reason: "no-host" });
+	const t = await testRender(<App file={file} feedback={plain.controller} />, {
 		width: 130,
 		height: 32,
 	});
 	await t.renderOnce();
 	await press(t, "S");
-	expect(statusLine(t)).toContain("Queued for polling — prompt copied (2 threads)");
+	expect(statusLine(t)).toContain("Saved — prompt copied, paste it into your agent (2 threads)");
+
+	const unreached = fakeFeedback({ kind: "copied", count: 2, reason: "unreached" });
+	const failed = await testRender(<App file={file} feedback={unreached.controller} />, {
+		width: 130,
+		height: 32,
+	});
+	await failed.renderOnce();
+	await press(failed, "S");
+	expect(statusLine(failed)).toContain(
+		"Saved, but no terminal reached — prompt copied, paste it into your agent (2 threads)",
+	);
 });
 
 // ── The agent terminal picker ───────────────────────────────────────────────
@@ -4666,7 +4683,7 @@ test("a choose outcome opens the picker, and Enter delivers to the selection", a
 
 	await press(t, "RETURN");
 	expect(feedback.delivered).toEqual([{ handoffId: "handoff-1", terminal: claude }]);
-	expect(statusLine(t)).toContain("Delivered to claude — agent (1 thread)");
+	expect(statusLine(t)).toContain("Sent to claude — agent (1 thread)");
 });
 
 test("a batch a newer Send replaced reports itself as already sent", async () => {
@@ -4709,7 +4726,9 @@ test("Escape leaves the picker's record queued", async () => {
 	await press(t, "ESCAPE");
 	expect(t.captureCharFrame()).not.toContain("claude — agent");
 	expect(feedback.delivered).toEqual([]);
-	expect(statusLine(t)).toContain("Queued for polling (2 threads)");
+	expect(statusLine(t)).toContain(
+		"Saved, but not sent — tell your agent to run revue status (2 threads)",
+	);
 });
 
 test("the File menu opens the picker even with an origin live", async () => {
@@ -4791,7 +4810,7 @@ test("the thread slot names unsent feedback, a sent handoff, and falls back to t
 		}),
 	);
 	await driver.emit(t, { kind: "handoff" });
-	expect(statusLine(t)).toContain("1 thread · sent · queued");
+	expect(statusLine(t)).toContain("1 thread · not sent ⚠");
 
 	reader.set(
 		handoffRecord({
@@ -4930,5 +4949,7 @@ test("a second Send while one is in flight shows Sending… and writes no second
 	await act(async () => {
 		await t.renderOnce();
 	});
-	expect(statusLine(t)).toContain("Queued for polling (1 thread)");
+	expect(statusLine(t)).toContain(
+		"Saved, but not sent — tell your agent to run revue status (1 thread)",
+	);
 });

@@ -134,7 +134,7 @@ test("a successful copy rewrites the record as copied and reports copied", async
 		};
 
 		const outcome = await controllerFor(root, threads).send(copyPrompt);
-		expect(outcome).toEqual({ kind: "copied", count: 2 });
+		expect(outcome).toEqual({ kind: "copied", count: 2, reason: "no-host" });
 		expect(readHandoff(root).record).toMatchObject({ delivery: { kind: "copied" } });
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -334,25 +334,26 @@ test("with no origin and one terminal, that terminal is the agent", async () => 
 	}
 });
 
-test("a host that cannot list its terminals leaves the batch queued, not copied", async () => {
+test("a host that cannot list its terminals hands the prompt to the clipboard", async () => {
 	const root = await scratchRepository();
 	const clipboard = watchedClipboard();
 	try {
 		const { host, sent } = fakeHost({ terminals: null });
 
 		expect(await hostControllerFor(root, [thread(1, 0)], host).send(clipboard.copy)).toEqual({
-			kind: "queued",
+			kind: "copied",
 			count: 1,
+			reason: "unreached",
 		});
 		expect(sent).toHaveLength(0);
-		expect(readHandoff(root).record?.delivery).toEqual({ kind: "queued" });
-		expect(clipboard.copies).toEqual([]);
+		expect(readHandoff(root).record?.delivery).toEqual({ kind: "copied" });
+		expect(clipboard.copies).toEqual([WAKE_UP_PROMPT]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
-test("a nudge the host refuses leaves the batch queued", async () => {
+test("a nudge the host refuses hands the prompt to the clipboard", async () => {
 	const root = await scratchRepository();
 	const clipboard = watchedClipboard();
 	try {
@@ -362,15 +363,15 @@ test("a nudge the host refuses leaves the batch queued", async () => {
 			clipboard.copy,
 		);
 
-		expect(outcome).toEqual({ kind: "queued", count: 1 });
-		expect(readHandoff(root).record?.delivery).toEqual({ kind: "queued" });
-		expect(clipboard.copies).toEqual([]);
+		expect(outcome).toEqual({ kind: "copied", count: 1, reason: "unreached" });
+		expect(readHandoff(root).record?.delivery).toEqual({ kind: "copied" });
+		expect(clipboard.copies).toEqual([WAKE_UP_PROMPT]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
-test("a host that throws mid-nudge leaves the batch queued", async () => {
+test("a host that throws mid-nudge hands the prompt to the clipboard", async () => {
 	const root = await scratchRepository();
 	const clipboard = watchedClipboard();
 	try {
@@ -382,11 +383,28 @@ test("a host that throws mid-nudge leaves the batch queued", async () => {
 		});
 
 		expect(await hostControllerFor(root, [thread(1, 0)], host).send(clipboard.copy)).toEqual({
-			kind: "queued",
+			kind: "copied",
 			count: 1,
+			reason: "unreached",
 		});
+		expect(readHandoff(root).record?.delivery).toEqual({ kind: "copied" });
+		expect(clipboard.copies).toEqual([WAKE_UP_PROMPT]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a host failure with no clipboard to fall back on leaves the batch queued", async () => {
+	const root = await scratchRepository();
+	try {
+		const refused = fakeHost({ terminals: [terminal("term_only")], send: () => false });
+
+		const outcome = await hostControllerFor(root, [thread(1, 0)], refused.host).send(
+			refuseClipboard,
+		);
+
+		expect(outcome).toEqual({ kind: "queued", count: 1 });
 		expect(readHandoff(root).record?.delivery).toEqual({ kind: "queued" });
-		expect(clipboard.copies).toEqual([]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -601,6 +619,31 @@ test("deliverTo with a stale handoffId neither nudges nor overwrites the newer r
 		expect(outcome).toEqual({ kind: "queued", count: 0 });
 		expect(readHandoff(root).record).toEqual(newer);
 		expect(sent).toEqual([]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a picked terminal the host cannot reach hands the prompt to the clipboard", async () => {
+	const root = await scratchRepository();
+	const clipboard = watchedClipboard();
+	try {
+		const candidates = [terminal("term_a"), terminal("term_b")];
+		const { host } = fakeHost({ terminals: candidates, send: () => false });
+		const controller = hostControllerFor(root, [thread(1, 0)], host);
+		const choice = await controller.send(refuseClipboard);
+		expect(choice.kind).toBe("choose");
+		const handoffId = readHandoff(root).record?.handoffId ?? "";
+
+		const outcome = await controller.deliverTo(
+			handoffId,
+			candidates[1] as HostTerminal,
+			clipboard.copy,
+		);
+
+		expect(outcome).toEqual({ kind: "copied", count: 1, reason: "unreached" });
+		expect(readHandoff(root).record?.delivery).toEqual({ kind: "copied" });
+		expect(clipboard.copies).toEqual([WAKE_UP_PROMPT]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

@@ -15,7 +15,7 @@ timeout), removes the TUI's own pane, sanitises titles, and sends text plus Ente
 The controller resolves the target: the recorded origin when it is in the list, with a matching
 `runId` preferred; otherwise the sole remaining terminal. It sends the one-line wake-up prompt,
 then rewrites the record as `delivered` with host, handle, and title — under the lock, and only
-when the file still holds the same `handoffId`. The notice reads "Delivered to <title> (N
+when the file still holds the same `handoffId`. The notice reads "Sent to <title> (N
 threads)". A list failure, a send failure, or more than one candidate with no origin leaves the
 record `queued` with the queued notice; the picker comes in the next slice.
 

@@ -32,7 +32,8 @@ agent. The first host is Orca. The target is the terminal of the agent that last
 work on this review. Revue records that terminal on the agent side, when the agent runs
 `revue prep` or `revue threads reply`. When that terminal is gone, Revue shows a picker of the
 other terminals in the worktree. When there is no compatible host, Revue copies the wake-up prompt
-to the clipboard, and the reviewer pastes it into the agent by hand.
+to the clipboard, and the reviewer pastes it into the agent by hand. The same happens when a host
+is present but reaches no terminal, so the reviewer always has a manual path.
 
 One slot in the status bar shows the state of the feedback: how many threads are unsent, or that
 the last batch was sent and whether it was delivered or queued. A notice tells the reviewer the
@@ -82,7 +83,7 @@ result of each Send.
 17. As a reviewer, I want a vanished session choice to fall through to the recorded origin and then
     to the picker, so that a closed terminal does not strand my feedback.
 18. As a reviewer, I want the wake-up prompt copied to the clipboard when no host can deliver it,
-    so that I can paste it into the agent by hand.
+    or when the host reached no terminal, so that I can paste it into the agent by hand.
 19. As a reviewer, I want a failed Orca delivery, a failed terminal list, or a failed clipboard
     copy to fall back to queued with no error dialog, so that a host problem does not stop my
     review.
@@ -190,8 +191,8 @@ result of each Send.
 - **Target resolution**, in order: the session target chosen in the picker, when it is still in
   the terminal list; the recorded origin, when it is in the list, with a matching `runId`
   preferred over a mismatched one; the sole remaining terminal; the picker, when Orca has more
-  than one other terminal; the clipboard, when there is no host. A vanished session target is
-  forgotten.
+  than one other terminal; the clipboard, when there is no host or the host reached no terminal.
+  A vanished session target is forgotten.
 - **Picker.** An overlay like the theme picker. It lists sanitised terminal titles, most recent
   output first. Escape closes it and leaves the record `queued`.
 - **Wake-up prompt.** One line: `Review feedback is waiting in revue: run \`revue status --json\`
@@ -207,13 +208,18 @@ result of each Send.
   another terminal…", which opens the picker.
 - **Status bar slot.** The existing thread-count slot becomes one state-driven slot; nothing is
   added beside it. States: `3 threads` (nothing unsent, no handoff); `3 threads · 2 unsent`
-  (something unsent); `3 threads · sent ✓` or `3 threads · sent · queued` (a handoff exists and
-  nothing is unsent since it). Narrow width keeps only the state half (`2 unsent`, `sent ✓`);
+  (something unsent); `3 threads · sent ✓`, `3 threads · copied ⧉`, or `3 threads · not sent ⚠`
+  (a handoff exists and nothing is unsent since it; delivered, copied, or queued). Narrow width
+  keeps only the state half (`2 unsent`, `sent ✓`);
   tiny width drops the slot as today. The slot reads the handoff through the existing run watcher
   extended with the handoff path, so the TUI reflects the file, not memory.
 - **Footer hint.** `S send` appears in the footer hints while unsent > 0.
-- **Notices.** The existing timed notice shows "Delivered to <title> (N threads)", "Queued for
-  polling (N threads)", "Queued for polling — prompt copied (N threads)", or "Nothing to send".
+- **Notices.** The existing timed notice tells the reviewer whether the agent was told or what to
+  do themselves: "Sent to <title> (N threads)"; "Saved — prompt copied, paste it into your agent
+  (N threads)" with no host; "Saved, but no terminal reached — prompt copied, paste it into your
+  agent (N threads)" when a host reached nobody; "Saved, but not sent — tell your agent to run
+  revue status (N threads)" when the clipboard failed too or the picker was dismissed; or
+  "Nothing to send". "Queued" and "polling" never appear in the TUI.
   After a comment is posted, the notice reads "Comment added — S sends it to the agent".
 - **In-flight guard.** While a Send awaits the host, further presses show "Sending…" and do
   nothing.

@@ -102,7 +102,7 @@ Send resolves a terminal to nudge in this order:
    requested against.
 3. The sole remaining terminal, if exactly one other terminal exists.
 4. The picker, when more than one terminal remains and none of the above settled it.
-5. The clipboard, when there is no host at all.
+5. The clipboard, when there is no host at all, or when the host reached no terminal.
 
 A session target the host no longer lists is forgotten rather than retried. A vanished session
 choice falls through the same order as if it had never been made.
@@ -111,15 +111,19 @@ An origin recorded against another review is a weak signal, because one origin i
 time. It wakes its pane at step 3, when there is no other pane to wake. Otherwise the reviewer
 picks, rather than Send interrupting the agent of a different review.
 
-### The clipboard is the no-host path
+### The clipboard is the manual path, and it is always there
 
-Revue copies the wake-up prompt to the clipboard when it detects no host at all. The reviewer pastes
-it into the agent by hand. This keeps Send working in a plain terminal exactly as it works under
-Orca; the record on disk is the same either way, and the clipboard is only a courtesy on top of it.
+Revue copies the wake-up prompt to the clipboard when it detects no host at all, and again when a
+host is present but reaches nobody — no terminals, a refused nudge, no answer, or a picked
+terminal that fails. The reviewer pastes it into the agent by hand. The record on disk is the same
+either way; the clipboard is the courtesy that stops a failed delivery from being a dead end. A
+choice the reviewer has yet to make (the picker) is not a failure, so nothing is copied for it.
 
-A host that is present owns delivery outright. When it declines — no terminals, a refused nudge, or
-no answer — the batch stays queued and nothing is copied. The clipboard is for a reviewer no host
-can type for, not a second attempt after a host has said no.
+The reviewer is told which case they are in. The notice says the agent was told ("Sent to
+<title>"), or what to do themselves ("Saved — prompt copied, paste it into your agent"; "Saved,
+but no terminal reached — prompt copied…"; "Saved, but not sent — tell your agent to run revue
+status"). The status-bar slot reads `sent ✓`, `copied ⧉`, or `not sent ⚠`. The words "queued" and
+"polling" belong to the record and the agent, not to the reviewer.
 
 ## Consequences
 

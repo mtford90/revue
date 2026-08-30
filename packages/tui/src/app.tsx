@@ -1848,20 +1848,30 @@ function SupersedeBanner({ summary, reloadKey }: { summary: string; reloadKey: s
 const THREAD_COMPOSER_ID = "inline-thread-composer";
 const COPY_NOTICE_MS = 2_500;
 
-/** What the reviewer is told about a Send. Nothing unsent is a fact, not a failure. */
+/**
+ * What the reviewer is told about a Send: whether the agent has been told, or what they must do
+ * themselves. Nothing unsent is a fact, not a failure.
+ */
 const sendNotice = (outcome: SendOutcome): StatusNotice => {
 	if (outcome.kind === "error") return { text: outcome.message, tone: "error" };
 	if (outcome.kind === "nothing") return { text: "Nothing to send", tone: "success" };
 	const threads = `${outcome.count} thread${outcome.count === 1 ? "" : "s"}`;
 	if (outcome.kind === "delivered") {
-		return { text: `Delivered to ${outcome.title} (${threads})`, tone: "success" };
+		return { text: `Sent to ${outcome.title} (${threads})`, tone: "success" };
 	}
 	if (outcome.kind === "copied") {
-		return { text: `Queued for polling — prompt copied (${threads})`, tone: "success" };
+		const why = outcome.reason === "unreached" ? "Saved, but no terminal reached" : "Saved";
+		return {
+			text: `${why} — prompt copied, paste it into your agent (${threads})`,
+			tone: "success",
+		};
 	}
 	// Nothing is queued under this batch: a newer Send replaced it before the choice landed.
 	if (outcome.count === 0) return { text: "Feedback already sent", tone: "success" };
-	return { text: `Queued for polling (${threads})`, tone: "success" };
+	return {
+		text: `Saved, but not sent — tell your agent to run revue status (${threads})`,
+		tone: "success",
+	};
 };
 const SELECTION_FLASH_MS = 150;
 
@@ -3295,7 +3305,9 @@ export function App({
 		const terminal = picker?.candidates[index];
 		if (!picker || !terminal) return;
 		setAgentPicker(null);
-		const outcome = (await feedback?.deliverTo(picker.handoffId, terminal)) ?? {
+		const outcome = (await feedback?.deliverTo(picker.handoffId, terminal, (text) =>
+			copyToClipboard(renderer, text),
+		)) ?? {
 			kind: "queued" as const,
 			count: picker.count,
 		};

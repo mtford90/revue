@@ -10,7 +10,7 @@ Status: done
 
 In a plain terminal with no compatible host, Send copies the one-line wake-up prompt to the
 clipboard (the existing local-plus-OSC-52 copy), rewrites the record as `copied`, and shows
-"Queued for polling — prompt copied (N threads)". The reviewer pastes the prompt into the agent
+"Saved — prompt copied, paste it into your agent (N threads)"; a host that reached no terminal copies too, with "Saved, but no terminal reached — prompt copied, paste it into your agent (N threads)". The reviewer pastes the prompt into the agent
 by hand. When the copy reports failure the record stays `queued` and the notice says so.
 
 ## Acceptance criteria

@@ -11,7 +11,9 @@ All notable changes to Revue are documented here. Release notes are grouped from
 * add coherent keyboard review workflow ([e830e34](https://github.com/mtford90/revue/commit/e830e34874c5c85b17fbad13306bc38fd865bad4))
 * add file-scoped patch review selections ([507d53f](https://github.com/mtford90/revue/commit/507d53f816ce7f40cb9a3fde4710a9eebbcc2dec))
 * add pane-aware review navigation ([32a1c3e](https://github.com/mtford90/revue/commit/32a1c3e095a2cd6e570f443238b2b96b2d3b2b3b))
-* tell the reviewer what a Send did, and copy the prompt when a host reaches nobody ([c011f76](https://github.com/mtford90/revue/commit/c011f76d7719acd13658c530c591adedf75d4cd2))
+* send unsent review feedback to the agent, with Orca delivery, terminal selection, and clipboard fallback ([7f35a2c](https://github.com/mtford90/revue/commit/7f35a2c394613ef4fccc5d27462438617386e62e))
+* let agents wait for review handoffs with `revue status --wait` ([4ae264e](https://github.com/mtford90/revue/commit/4ae264e65a7d9db02b7f5aa8348ef2ff8f47ec83))
+* record the originating agent terminal for later feedback delivery ([84291c3](https://github.com/mtford90/revue/commit/84291c3d8724bb617c1a6d0cb19e29b7a1345156))
 
 
 ### Bug Fixes

@@ -1,5 +1,7 @@
 # Revuediff reference
 
+Return to the [Revue documentation index](README.md).
+
 Revuediff is the standalone ANSI diff formatter and downstream pager. It shares the headless Patch
 engine, syntax highlighting, wrapping, and themes with narrative Revue, but it does not start
 OpenTUI or read chapters, prepared runs, threads, `~/.revue`, or Revue preferences. The `revue`

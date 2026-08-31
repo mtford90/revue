@@ -150,7 +150,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   disk. A cited file need not appear in the diff — quoting the untouched caller is the point. Folded
   to a single band by default, opens in place, reads as scenery rather than work, contributes
   nothing to review progress, and accepts comments on its lines, because a citation is pinned
-  narration rather than an ad-hoc reveal. Quoted lines are currently rendered unhighlighted.
+  narration rather than an ad-hoc reveal. Quoted lines use the active syntax theme.
 - **Coverage** — every prepared review unit must appear in exactly one chapter: no omissions, no
   duplicates. `revue show --check` reports the narrated count for every run.
 - **Selection** — a feedback-neutral, non-empty list of side-aware ranges in one file. Normal
@@ -255,9 +255,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   Shiki theme highlighted source uses. Derivation enforces WCAG contrast floors, so a theme stays
   readable whatever surface it lands on. Selection is the reviewer's, not the run's: `--theme`
   names one for a session, the in-app picker previews and accepts one, and the accepted id persists
-  machine-wide to `~/.revue/preferences.json` with the reviewer's layout choices. Without a named
-  or remembered theme Revue uses `ayu-dark`; explicit `auto` asks the terminal to choose between
-  `ayu-light` and `ayu-dark`. Transparent mode drops the neutral surfaces while keeping diff tints.
+  machine-wide to `~/.revue/preferences.json` with the reviewer's layout choices. Without a pinned
+  theme Revue follows the terminal, using `ayu-light` or `ayu-dark` for the reported appearance.
+  A terminal that reports no appearance uses the dark half. Explicit `auto` restores this behaviour.
+  Transparent mode drops the neutral surfaces while keeping diff tints.
   Reviewers can also author custom themes as derivation-input files under `~/.revue/themes/`,
   either `extends`-ing a bundled theme or supplying their own background/foreground, with
   `overrides` pinning individual colour slots verbatim after derivation; a custom id matching a
@@ -361,9 +362,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   and the ASCII layout live in `@revue/diff` beside the rest of the visual plan, so a diagram block
   says whether it holds a drawing or source and every adapter renders that decision identically.
   The subset is deliberately narrow and the fallback is a designed path: nothing is half-drawn.
-- **Agents never launch the TUI.** An agent validates with `revue show "$RUN" --check` and hands
-  the human the exact `revue show` command for their own terminal; the TUI cannot run inside an
-  agent harness, and the skill forbids suggesting otherwise.
+- **Agents never run the TUI inside their own process.** An agent validates with
+  `revue show "$RUN" --check`, then uses a real interactive terminal. A host such as Orca can let
+  the agent create that terminal and run `revue show` there. Otherwise, the agent gives the human
+  the exact command to run. The skill never treats an agent shell tool as an interactive terminal.
 
 ## Open questions
 

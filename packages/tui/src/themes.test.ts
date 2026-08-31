@@ -337,11 +337,11 @@ test("a missing preferred custom theme id resolves to the default", () => {
 	expect(resolveTheme("does-not-exist", null, []).id).toBe(DEFAULT_DARK_THEME_ID);
 });
 
-test("the guide's custom-theme worked example parses cleanly through the real loader", async () => {
-	const guide = await readFile(join(import.meta.dir, "../../../docs/guide.md"), "utf8");
+test("the configuration guide's custom-theme example parses through the real loader", async () => {
+	const guide = await readFile(join(import.meta.dir, "../../../docs/configuration.md"), "utf8");
 	const match = guide.match(/```jsonc\n\/\/ ~\/\.revue\/themes\/my-ayu\.json\n([\s\S]*?)```/);
 	const worked = match?.[1];
-	if (!worked) throw new Error("guide.md's my-ayu.json worked example was not found");
+	if (!worked) throw new Error("configuration.md's my-ayu.json example was not found");
 
 	const { theme, issues } = parseCustomTheme("my-ayu", worked);
 	expect(issues).toEqual([]);

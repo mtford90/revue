@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Revue</h1>
-  <p>Narrative code review in your terminal.</p>
+  <p>Narrated code reviews in your terminal.</p>
 </div>
 
 <p align="center">
@@ -10,34 +10,34 @@
   <a href="https://github.com/mtford90/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-mtford90%2Ftap-orange?logo=homebrew&logoColor=white" alt="Homebrew"></a>
 </p>
 
-<img width="1518" height="1155" alt="CleanShot 2026-08-04 at 16 47 02" src="https://github.com/user-attachments/assets/836d541a-43ab-43ec-87b4-4c753b5cf294" />
+<img width="1518" height="1155" alt="Revue showing a narrated code review chapter and its diff" src="https://github.com/user-attachments/assets/836d541a-43ab-43ec-87b4-4c753b5cf294" />
 
 ## What it is
 
-A terminal-based code review tool that organises large code changes into ordered, narrated chunks for easier consumption
+A terminal-based code review tool that organises large code changes into ordered, narrated chapters.
 
-Think of it as a guided tour of a change, as opposed to the wall of files you often see in a pull request (especially these days!)
+Think of it as a guided tour of a change instead of the wall of files you often see in a pull request, especially these days.
 
-Using the `/revue` skill, your agent of choice can generate and launch a tour in a new terminal session, or else give you the command to launch it
+Using the `/revue` skill, your agent generates the tour. Hosts such as Orca can launch it in a new terminal. Other hosts give you the command to run.
 
-You can then walk through the change, checking each item off but also - optionally - leaving inline comments that you can return to your agent. Your agent can also respond, creating a natural back & forth.
+You can walk through the change, check each item off, and leave inline comments for your agent. Your agent can reply, which creates a natural back-and-forth.
 
-If you don't need a narrative, `revue diff` makes available the same powerful diff viewer for any change but without the narration.
+If you do not need a narrative, `revue diff` provides the same diff viewer without narration.
 
-## Why...?
+## Why?
 
-In this brave new agentic era, I found myself drifting further from the code. This is my attempt to pull myself back in somewhat - to lighten the load - not to read every line but to focus on what's important.
+In this brave new agentic era, I found myself drifting further from the code. This is my attempt to pull myself back in somewhat, lighten the load, and focus on what is important.
 
-Why in the terminal and not in a UI? Well it's where I interact with my agents, in a multiplexer and I prefer not to leave it!
+Why use the terminal instead of a web UI? It is where I interact with my agents, usually in a multiplexer, and I prefer not to leave it.
 
 ## What it is not
 
-Revue is not...
+Revue is not:
 
-- **...an agent that reviews for you.** The agent writes the narrative; *you* read the code and leave the comments.
-- **...a `git diff` / delta pager.** Revue is a full-screen reviewer, not something you pipe diffs through (although I've made the pager that powers revue available seperately in case you like it, and would like to use it as a pager elsewhere in your workflow)
-- **...a hosted review service.** Runs and threads are local files beside your repo
-- **...a web UI or a GitHub PR replacement.** all review happens in your terminal, right where you work
+- **An agent that reviews for you.** The agent writes the narrative. *You* read the code and leave the comments.
+- **A `git diff` or delta pager.** Revue is a full-screen reviewer, not something you pipe diffs through.
+- **A hosted review service.** Runs and threads are local files beside your repo.
+- **A web UI or GitHub PR replacement.** All review happens in your terminal, where you work.
 
 ## Install
 
@@ -45,7 +45,7 @@ Revue is not...
 brew install mtford90/tap/revue
 ```
 
-Or without Homebrew - grabs the right executable, checks the checksum, and installs to `~/.local/bin`:
+Without Homebrew, this command gets the correct executable, checks its checksum, and installs it to `~/.local/bin`:
 
 ```bash
 curl -fsSL https://revue.mtford.co.uk/install.sh | sh
@@ -70,14 +70,14 @@ In Claude Code, Codex, or any agent with the skill installed:
 ```text
 > /revue this branch against main
 
-Review's ready - run this in your terminal:
+Review's ready. Run this in your terminal:
 
 revue show .revue/runs/a1b2c3d4e5f6
 ```
 
 ### Just the diff (`revue diff`)
 
-No narration. You still get the nice diffs, inline comments, review progress etc.
+No narration. You still get the diffs, inline comments, and review progress.
 
 ```bash
 revue diff                 # local changes if any, else HEAD vs main/master
@@ -86,18 +86,22 @@ revue diff main..HEAD      # those endpoints compared directly
 revue diff --ref work      # staged + unstaged vs the last commit
 revue diff --ref staged    # staged only
 revue diff --ref unstaged  # unstaged only
-revue diff --pr 123        # a GitHub PR (number or URL; needs `gh`)
+revue diff --pr 123        # a GitHub PR number or URL
 ```
+
+## Documentation
+
+Read the [Revue documentation](docs/README.md) for navigation, narration, feedback, continuation, configuration, and troubleshooting.
 
 ## More
 
-This repo also ships **Revuediff**, a separate ANSI diff pager for Git and Lazygit - see [`docs/revuediff.md`](docs/revuediff.md).
+This repo also ships **Revuediff**, a separate ANSI diff pager for Git and Lazygit. See [`docs/revuediff.md`](docs/revuediff.md).
 
 ## Credits
 
-Built with [@pierre/diffs](https://github.com/pierrecomputer/diffs), renderer concepts adapted from [hunk](https://github.com/modem-dev/hunk) (MIT), and the narrative model + skill from [stage-cli](https://github.com/ReviewStage/stage-cli) (MIT). All awesome projects/
+Built with [@pierre/diffs](https://github.com/pierrecomputer/diffs), renderer concepts adapted from [hunk](https://github.com/modem-dev/hunk) (MIT), and the narrative model and skill from [stage-cli](https://github.com/ReviewStage/stage-cli) (MIT). All are awesome projects.
 
 ## Licence
 
-MIT - see [`LICENSE`](LICENSE). Adapted material is credited in the `THIRD_PARTY_NOTICES.md` files beside the packages that adapt it, and release archives also carry `BUNDLED_LICENSES.md` with the licence of every dependency compiled into the executable.
+MIT. See [`LICENSE`](LICENSE). Adapted material is credited in the `THIRD_PARTY_NOTICES.md` files beside the packages that adapt it. Release archives also contain `BUNDLED_LICENSES.md` with the licence of each compiled dependency.
 

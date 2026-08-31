@@ -109,9 +109,9 @@ patterns and omissions. Git's standard exclusions (`.gitignore`, `.git/info/excl
 
 When the user wants a quick look without narration, skip this skill's chapter steps entirely:
 `revue diff [scope…]` accepts the same scope forms as prep and opens the result immediately as a
-flat file-by-file diff — no chapters. It launches the full-screen TUI, so like `revue show` it is
-a command to hand to the user, never one to run yourself. It prints the run directory to stderr,
-so review threads (Step 8) can still be targeted against it.
+flat file-by-file diff with no chapters. It launches the full-screen TUI, so follow Step 7's
+terminal handoff rules. Never run it through the agent's shell tool. It prints the run directory
+to stderr, so review threads (Step 8) can still be targeted against it.
 
 If prep exits non-zero, relay its error and stop. Do not edit `run.json`, `diff.patch`, `hunks.txt`,
 `delta.json`, or `blobs/`; they are prep's record of the run, and yours to read only.
@@ -386,17 +386,21 @@ A run with no `chapters.json` opens as a flat file-by-file diff rather than erro
 chapters file is not caught here; confirm Step 5 wrote it before treating a flat display as
 intentional.
 
-The reviewer itself is a full-screen TUI and cannot run inside an agent harness — not through
-your shell tool, and not through an inline-shell prefix like Claude Code's `!`. Never launch
-`revue show "$RUN"` yourself and never suggest launching it that way. Once `--check` passes, hand
-the user the exact command to run in their own terminal:
+The reviewer is a full-screen TUI. Never run it inside the agent's own process, through the
+shell tool, or through an inline-shell prefix such as Claude Code's `!`. Once `--check` passes,
+choose one of these handoff paths:
 
-```
-revue show <run-directory>
-```
+- If the host provides a documented way to create a real interactive terminal, use it to run
+  `revue show <run-directory>` in the current worktree. Orca is one such host. Do not guess a host
+  command or treat the agent's shell tool as an interactive terminal.
+- Otherwise, give the user the exact command to run in their terminal:
 
-Show accepts `--theme <name>`, `--theme auto`, `--theme list`, and `--transparent-bg`; without a
-flag it uses the reviewer's remembered theme.
+  ```
+  revue show <run-directory>
+  ```
+
+Show accepts `--theme <name>`, `--theme auto`, `--theme list`, and `--transparent-bg`. Without a
+flag, it uses the reviewer's remembered theme.
 
 ## Step 8 — Responding to review feedback
 
@@ -420,9 +424,10 @@ revue status --json
 ```
 
 Status reports the repository's own review state. `activeRun` is the newest narrated run, with its
-directory and the `prepArgs` that reproduce its scope. `pendingRun` is a newer run that supersedes
-it and has no narration yet, with counts of what its delta carried, marked stale, and left to
-narrate. `threads` counts the open threads, split into those **awaiting the agent** (a human spoke
+directory, scope, and the `prepArgs` that reproduce that scope when possible. A PR run has null
+`prepArgs` because its recorded head label is not a reusable Git ref. `pendingRun` is a newer run
+that supersedes the active run and has no narration yet, with counts of what its delta carried,
+marked stale, and left to narrate. `threads` counts the open threads, split into those **awaiting the agent** (a human spoke
 last) and those **awaiting the reviewer** (an agent did), plus dealt-with and orphaned. `drift` says
 whether re-prepping that scope would now capture different code than the run pinned. Without
 `--json` the same state prints for a human; a repository with no runs says so and exits 0.
@@ -553,11 +558,22 @@ only once it is committed on the reviewed branch. Whether and when to commit is 
 the repository's convention — this skill takes no position on it. Read the active run's scope from
 `revue status` and make sure the code you changed is inside that scope before re-prepping.
 
-**1. Re-prep the same scope.** Pass the `prepArgs` status printed, verbatim:
+**1. Re-prep the same scope.** Pass non-null `prepArgs` from status verbatim:
 
 ```bash
 RUN=$(revue prep --ref work --base master)   # whatever prepArgs status printed
 ```
+
+A PR run has null `prepArgs`. Re-run it with the original PR number or URL and the recorded base:
+
+```bash
+RUN=$(revue prep --pr 123 --base main)
+RUN=$(revue prep --pr https://github.com/owner/repo/pull/123 --base main)
+```
+
+For an origin PR, `scope.head` uses `pull/<number>/head`. For an external PR, it uses
+`<owner>/<repo>#<number>`. Use that label to recover the original number or URL. Do not treat the
+label itself as a Git ref.
 
 Lineage is automatic: prep finds the narrated run of that scope, records the supersession, carries
 the untouched chapters forward, moves the threads across, and prints the three supersession lines
@@ -692,10 +708,9 @@ Key grammar for a value:
 - an uppercase letter for a shifted character: `G` (not `shift+g` — Revue expands the alias itself)
 - `shift+` prefix only over a named/special key: `shift+tab`
 
-Reserved, never valid in a value: `escape`, the raw `[` and `]` characters (chord prefixes for
-page navigation), and the digits `1`–`9` (direct key-change shortcuts). Chord actions (page
-navigation) are fixed and cannot appear as keys in the file at all — they're omitted from
-`init`'s template.
+Reserved, never valid in a value: `escape` and the digits `1`–`9` (direct key-change shortcuts).
+The raw `[` and `]` characters are ordinary bindable keys. Page navigation can be remapped like
+any other action.
 
 Validation is lenient and per-entry: a malformed file (bad JSON) falls back to the full defaults
 with one warning; within a well-formed file, an unknown action id, an invalid key, a reserved key,

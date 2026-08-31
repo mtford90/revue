@@ -2,6 +2,37 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.11.0](https://github.com/mtford90/revue/compare/v0.10.0...v0.11.0) (2026-08-31)
+
+
+### Features
+
+* act on the focused thread by key and by mouse ([0c877f1](https://github.com/mtford90/revue/commit/0c877f1ae392ef7506cbe3309d87cd55d6883fee))
+* add coherent keyboard review workflow ([e830e34](https://github.com/mtford90/revue/commit/e830e34874c5c85b17fbad13306bc38fd865bad4))
+* add file-scoped patch review selections ([507d53f](https://github.com/mtford90/revue/commit/507d53f816ce7f40cb9a3fde4710a9eebbcc2dec))
+* add pane-aware review navigation ([32a1c3e](https://github.com/mtford90/revue/commit/32a1c3e095a2cd6e570f443238b2b96b2d3b2b3b))
+* send unsent review feedback to the agent, with Orca delivery, terminal selection, and clipboard fallback ([7f35a2c](https://github.com/mtford90/revue/commit/7f35a2c394613ef4fccc5d27462438617386e62e))
+* let agents wait for review handoffs with `revue status --wait` ([4ae264e](https://github.com/mtford90/revue/commit/4ae264e65a7d9db02b7f5aa8348ef2ff8f47ec83))
+* record the originating agent terminal for later feedback delivery ([84291c3](https://github.com/mtford90/revue/commit/84291c3d8724bb617c1a6d0cb19e29b7a1345156))
+
+
+### Bug Fixes
+
+* back the handoff waiter with a slow poll ([e4e5481](https://github.com/mtford90/revue/commit/e4e54814d264d930c7b0237f049e62efae114275))
+* clear selections when hiding their source ([e042964](https://github.com/mtford90/revue/commit/e0429649efd2c415a70f88c5c5f36ef539138988))
+* close final patch selection gate findings ([246d659](https://github.com/mtford90/revue/commit/246d659909bcd8895dd28f77a7a281fd894a6147))
+* focus a thread as soon as it is saved, and mark the focused card ([b256a9b](https://github.com/mtford90/revue/commit/b256a9bfe70d444dd19f58f5a1286bc440060432))
+* harden keyboard review workflow ([6bb31e8](https://github.com/mtford90/revue/commit/6bb31e8374c86e0afcbfe2e43e529b967bdcda26))
+* harden selection and thread persistence ([a44c81c](https://github.com/mtford90/revue/commit/a44c81cd7951344824e29ff94b89005b9f24de9a))
+* let v toggle the line selection off again ([ffa003c](https://github.com/mtford90/revue/commit/ffa003c21e8f46f5e77f10183b1574647e246be7))
+* make review line movement layout independent ([5c95325](https://github.com/mtford90/revue/commit/5c95325161d9aab683fce9741c6a1737b51fe776))
+* preserve context-row cursor navigation ([0fccb4c](https://github.com/mtford90/revue/commit/0fccb4cc970744fa8437bc797f65bff523d94563))
+* preserve minimal reveal and local drag previews ([84ccb08](https://github.com/mtford90/revue/commit/84ccb080560f079a6952cb0a4b0cb46e57e24996))
+* refine keyboard focus navigation ([46bb367](https://github.com/mtford90/revue/commit/46bb367cad97e2a233bfadfe8f0a005c868fe5df))
+* scope range gestures to each renderer ([a43d7c3](https://github.com/mtford90/revue/commit/a43d7c386791168ef75c43d5b757193964cab037))
+* toggle chapters from the sidebar index ([f190c3d](https://github.com/mtford90/revue/commit/f190c3dc06d16734447b1054ae252c0c1b7088d3))
+* unify chapter review transitions across every entry point ([fd59567](https://github.com/mtford90/revue/commit/fd59567abccb6c1683790f0ecf8ddd560f65097b))
+
 ## [0.10.0](https://github.com/mtford90/revue/compare/v0.9.0...v0.10.0) (2026-08-20)
 
 

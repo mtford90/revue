@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { RGBA } from "@opentui/core";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
@@ -51,10 +51,28 @@ const testRender = async (...args: Parameters<typeof renderOpenTui>) => {
 	return result;
 };
 
+const realSetInterval = globalThis.setInterval;
+const disabledSetInterval = ((handler: TimerHandler, timeout?: number) => {
+	const timer = realSetInterval(handler, timeout);
+	clearInterval(timer);
+	return timer;
+}) as typeof setInterval;
+let restoreIntervals = () => {};
+
+// Viewport polling has its own real-timer suite; these component tests drive updates explicitly.
+beforeEach(() => {
+	const interval = spyOn(globalThis, "setInterval").mockImplementation(disabledSetInterval);
+	restoreIntervals = () => interval.mockRestore();
+});
+
 afterEach(async () => {
-	for (const renderer of activeRenderers.splice(0)) {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		await act(async () => renderer.destroy());
+	try {
+		for (const renderer of activeRenderers.splice(0)) {
+			(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+			await act(async () => renderer.destroy());
+		}
+	} finally {
+		restoreIntervals();
 	}
 });
 

@@ -23,13 +23,36 @@ esac
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 
-resolve_latest_tag() {
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# Resolve the tag via the unauthenticated releases/latest redirect first (no rate limit);
+# only fall back to the paged API (which is rate-limited) if that yields no usable tag.
+resolve_latest_tag_via_redirect() {
+	url="https://github.com/$repo/releases/latest"
+	location="$(curl -sSL -o /dev/null -w '%{url_effective}' "$url")" || return 1
+	tag="${location##*/releases/tag/}"
+	case "$tag" in
+	revuediff-v[0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$tag" ;;
+	*) return 1 ;;
+	esac
+}
+
+resolve_latest_tag_via_api() {
 	page=1
 	while :; do
-		body="$(
-			curl -fsSL -H 'Accept: application/vnd.github+json' \
-				"https://api.github.com/repos/$repo/releases?per_page=100&page=$page"
-		)"
+		url="https://api.github.com/repos/$repo/releases?per_page=100&page=$page"
+		if [ -n "${GITHUB_TOKEN:-}" ]; then
+			status="$(curl -sSL -o "$tmp/api-page.json" -w '%{http_code}' -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GITHUB_TOKEN" "$url")"
+		else
+			status="$(curl -sSL -o "$tmp/api-page.json" -w '%{http_code}' -H 'Accept: application/vnd.github+json' "$url")"
+		fi
+		case "$status" in
+		2??) ;;
+		403) fail "GitHub API rate limit exceeded fetching $url (HTTP 403) — try again later or set GITHUB_TOKEN" ;;
+		*) fail "failed to fetch $url (HTTP $status)" ;;
+		esac
+		body="$(cat "$tmp/api-page.json")"
 		tag="$(
 			printf '%s\n' "$body" | awk '
 				/^  \{/ { tag = ""; stable = 0; draft = 0 }
@@ -54,7 +77,7 @@ resolve_latest_tag() {
 	done
 }
 
-tag="$(resolve_latest_tag)" || fail "could not determine the latest stable Revuediff release"
+tag="$(resolve_latest_tag_via_redirect)" || tag="$(resolve_latest_tag_via_api)" || fail "could not determine the latest stable Revuediff release"
 case "$tag" in
 revuediff-v[0-9]*.[0-9]*.[0-9]*) ;;
 *) fail "could not determine the latest stable Revuediff release" ;;
@@ -62,8 +85,6 @@ esac
 
 archive="$tag-$target.tar.gz"
 base="https://github.com/$repo/releases/download/$tag"
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
 
 echo "downloading $tag ($target)…"
 curl -fsSL -o "$tmp/$archive" "$base/$archive"

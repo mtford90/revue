@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/mtford90/revue/compare/revuediff-v0.3.0...revuediff-v0.4.0) (2026-09-04)
+
+
+### Features
+
+* add file-scoped patch review selections ([507d53f](https://github.com/mtford90/revue/commit/507d53f816ce7f40cb9a3fde4710a9eebbcc2dec))
+* add pane-aware review navigation ([32a1c3e](https://github.com/mtford90/revue/commit/32a1c3e095a2cd6e570f443238b2b96b2d3b2b3b))
+
+
+### Bug Fixes
+
+* **diff:** reset grammar state at every hunk boundary ([7b228a8](https://github.com/mtford90/revue/commit/7b228a8b5021eed0d5823b33aa8bd141ec4fed38))
+* harden keyboard review workflow ([6bb31e8](https://github.com/mtford90/revue/commit/6bb31e8374c86e0afcbfe2e43e529b967bdcda26))
+* harden selection and thread persistence ([a44c81c](https://github.com/mtford90/revue/commit/a44c81cd7951344824e29ff94b89005b9f24de9a))
+* **install:** resolve latest release via redirect to avoid GitHub API rate limit ([#24](https://github.com/mtford90/revue/issues/24)) ([67ee070](https://github.com/mtford90/revue/commit/67ee0709347e725aa5ec9688795d324d2c08e432))
+* refine keyboard focus navigation ([46bb367](https://github.com/mtford90/revue/commit/46bb367cad97e2a233bfadfe8f0a005c868fe5df))
+
 ## [0.3.0](https://github.com/mtford90/revue/compare/revuediff-v0.2.0...revuediff-v0.3.0) (2026-08-20)
 
 

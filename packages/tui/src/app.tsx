@@ -3801,6 +3801,12 @@ export function App({
 		if (selection.ranges.length !== 1) return "selection spans multiple patch ranges";
 		return permalinkBlocker({ context: permalinks, side: selection.ranges[0].side });
 	}
+	function selectionEditorBlocker(selection: DiffSelection): string | null {
+		if (!onOpenEditor) return "unavailable";
+		if (!selection.ranges.some((range) => range.side === "additions"))
+			return "no current-side line";
+		return null;
+	}
 	/** The text the reader dragged over, which OpenTUI tracks separately from the gutter's range. */
 	function highlightedText() {
 		return renderer.getSelection()?.getSelectedText() || null;
@@ -4749,7 +4755,7 @@ export function App({
 					},
 					copyLocation: () => copySelectionLocation(contextMenu.selection),
 					copyLink: () => copySelectionLink(contextMenu.selection),
-					editorBlocker: onOpenEditor ? null : "unavailable",
+					editorBlocker: selectionEditorBlocker(contextMenu.selection),
 					openEditor: () => void openLineInEditor(contextMenu.selection),
 					comment: () =>
 						contextMenu.anchorKind === THREAD_ANCHOR_KIND.EXCERPT

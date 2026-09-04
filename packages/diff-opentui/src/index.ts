@@ -18,6 +18,9 @@ export {
 	type DiffFileHeaderProps,
 	ExcerptBlock,
 	type ExpandDirection,
+	FILE_STATUS_TAG_WIDTH,
+	type FileStatus,
+	FileStatusTag,
 	useResolvedInlineAttachmentPlacement,
 } from "./components.tsx";
 export { decorationAnchorId } from "./ids.ts";

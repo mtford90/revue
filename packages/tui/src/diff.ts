@@ -7,7 +7,7 @@ import {
 	type QuotedCode,
 	rangeToHunkIndex,
 } from "@revue/diff";
-import type { Chapter, LineRef, RunContextFile } from "@revue/types";
+import type { Chapter, LineRef, RunContextFile, RunFile } from "@revue/types";
 
 // Bridges a chapters file to Revue's renderer: a chapter cites hunks by
 // `(filePath, oldStart)`; Pierre parses a unified diff into files whose
@@ -81,17 +81,37 @@ export function hunkIndexForLineRef(file: DiffFileInput, ref: LineRef): number {
 	return rangeToHunkIndex(file, ref);
 }
 
-export interface FileStat {
-	additions: number;
-	deletions: number;
-}
+export type FileStat = Pick<RunFile, "additions" | "deletions" | "status">;
+export type RunFileStat = FileStat & Pick<RunFile, "path">;
 
-/** Per-path add/delete counts from a parsed patch, for the chapter file list. */
-export function statsByPath(files: DiffFile[]): Map<string, FileStat> {
+export const statusForDiffFile = (file: DiffFileInput): RunFile["status"] => {
+	if (file.metadata.type === "new") return "added";
+	if (file.metadata.type === "deleted") return "deleted";
+	if (file.metadata.type === "rename-pure" || file.metadata.type === "rename-changed") {
+		return "renamed";
+	}
+	return "modified";
+};
+
+/** Per-path file summaries, with exact immutable-run statuses when available. */
+export function statsByPath(
+	files: DiffFile[],
+	runFiles: readonly RunFileStat[] = [],
+): Map<string, FileStat> {
 	const map = new Map<string, FileStat>();
-	for (const f of files) {
-		const path = f.path ?? f.metadata.name;
-		map.set(path, { additions: f.stats.additions, deletions: f.stats.deletions });
+	for (const file of files) {
+		map.set(file.path, {
+			additions: file.stats.additions,
+			deletions: file.stats.deletions,
+			status: statusForDiffFile(file),
+		});
+	}
+	for (const file of runFiles) {
+		map.set(file.path, {
+			additions: file.additions,
+			deletions: file.deletions,
+			status: file.status,
+		});
 	}
 	return map;
 }

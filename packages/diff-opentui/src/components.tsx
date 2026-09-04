@@ -1416,8 +1416,40 @@ export function ExcerptBlock({
 	);
 }
 
+const FILE_STATUS_TAGS = {
+	added: { label: "ADD", color: "badgeAdded" },
+	copied: { label: "COPY", color: "badgeAdded" },
+	deleted: { label: "DEL", color: "badgeRemoved" },
+	modified: { label: "MOD", color: "badgeModified" },
+	"mode-changed": { label: "MODE", color: "badgeModified" },
+	renamed: { label: "REN", color: "badgeNeutral" },
+} as const;
+
+export type FileStatus = keyof typeof FILE_STATUS_TAGS;
+export const FILE_STATUS_TAG_WIDTH = 7;
+
+export function FileStatusTag({
+	status,
+	theme,
+	onSelect,
+}: {
+	status: FileStatus;
+	theme: Theme;
+	onSelect?: () => void;
+}) {
+	const tag = FILE_STATUS_TAGS[status];
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI text exposes pointer handlers without DOM roles.
+		<text flexShrink={0} wrapMode="none" fg={theme.muted} onMouseDown={onSelect}>
+			[<span fg={theme[tag.color]}>{tag.label}</span>
+			{`]${" ".repeat(5 - tag.label.length)}`}
+		</text>
+	);
+}
+
 export interface DiffFileHeaderProps {
 	file: DiffFileInput;
+	status: FileStatus;
 	width: number;
 	theme: Theme;
 	formatPath?: (path: string, width: number) => string;
@@ -1425,22 +1457,23 @@ export interface DiffFileHeaderProps {
 }
 
 /** Compact path and stats row used inside Revue's existing collapse shell. */
-export function DiffFileHeader({ file, width, theme, formatPath, onSelect }: DiffFileHeaderProps) {
+export function DiffFileHeader({
+	file,
+	status,
+	width,
+	theme,
+	formatPath,
+	onSelect,
+}: DiffFileHeaderProps) {
 	const normalized = useMemo(() => createDiffFile(file), [file]);
-	const state =
-		normalized.metadata.type === "new"
-			? " (new)"
-			: normalized.metadata.type === "deleted"
-				? " (deleted)"
-				: "";
 	const fullPath =
 		normalized.previousPath && normalized.previousPath !== normalized.path
 			? `${normalized.previousPath} -> ${normalized.path}`
 			: normalized.path;
-	const statsWidth = `+${normalized.stats.additions} -${normalized.stats.deletions} `.length + 2;
-	const path = formatPath
-		? formatPath(fullPath, Math.max(1, width - statsWidth - state.length))
-		: fullPath;
+	const statsWidth = `+${normalized.stats.additions} -${normalized.stats.deletions} `.length + 1;
+	const showStats = width >= 1 + FILE_STATUS_TAG_WIDTH + 1 + statsWidth;
+	const pathWidth = Math.max(1, width - 1 - FILE_STATUS_TAG_WIDTH - (showStats ? statsWidth : 0));
+	const path = formatPath ? formatPath(fullPath, pathWidth) : fullPath;
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI boxes expose pointer handlers without DOM roles.
 		<box
@@ -1448,20 +1481,21 @@ export function DiffFileHeader({ file, width, theme, formatPath, onSelect }: Dif
 			height={1}
 			paddingLeft={1}
 			flexDirection="row"
-			justifyContent="space-between"
 			backgroundColor={theme.panel}
 			onMouseUp={onSelect}
 		>
-			<text fg={theme.text} wrapMode="none" flexShrink={1} minWidth={0} truncate>
+			<FileStatusTag status={status} theme={theme} />
+			<text fg={theme.text} wrapMode="none" flexGrow={1} flexShrink={1} minWidth={0} truncate>
 				{sanitizeTerminalLine(path).replaceAll("\t", "  ")}
-				<span fg={theme.muted}>{state}</span>
 			</text>
-			<text wrapMode="none" flexShrink={0} paddingLeft={1}>
-				<span fg={theme.badgeAdded}>+{normalized.stats.additions}</span>
-				<span fg={theme.muted}> </span>
-				<span fg={theme.badgeRemoved}>-{normalized.stats.deletions}</span>
-				<span> </span>
-			</text>
+			{showStats ? (
+				<text wrapMode="none" flexShrink={0} paddingLeft={1}>
+					<span fg={theme.badgeAdded}>+{normalized.stats.additions}</span>
+					<span fg={theme.muted}> </span>
+					<span fg={theme.badgeRemoved}>-{normalized.stats.deletions}</span>
+					<span> </span>
+				</text>
+			) : null}
 		</box>
 	);
 }

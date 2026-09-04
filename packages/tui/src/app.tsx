@@ -46,6 +46,8 @@ import {
 	diffRangeWithin,
 	ExcerptBlock,
 	type ExpandDirection,
+	FILE_STATUS_TAG_WIDTH,
+	FileStatusTag,
 	OPENTUI_DIFF_CHROME,
 	useResolvedInlineAttachmentPlacement,
 } from "@revue/diff-opentui";
@@ -99,8 +101,10 @@ import {
 	type ChapterDiffFile,
 	contextQuotations,
 	type FileStat,
+	type RunFileStat,
 	selectChapterFiles,
 	statsByPath,
+	statusForDiffFile,
 } from "./diff.ts";
 import { type EditorOpenResult, openReviewLineInEditor } from "./editor.ts";
 import {
@@ -1133,11 +1137,26 @@ function PrologueView({
 
 // ── Chapter file list (review state belongs to Revue's shell) ─────────────────
 const FILE_ROW_CHROME = 5; // marker column plus "[x] "
+const MIN_FILE_ROW_PATH_WIDTH = 4;
 
-const fileRowLabelWidth = (width: number, stat: FileStat | undefined): number => {
-	const statsWidth = stat ? `+${stat.additions} -${stat.deletions}`.length + 1 : 0;
-	return Math.max(1, width - FILE_ROW_CHROME - statsWidth);
-};
+const fileRowStatWidth = (stat: FileStat): number =>
+	`+${stat.additions} -${stat.deletions}`.length + 1;
+
+const fileRowShowsStats = (width: number, stat: FileStat | undefined): boolean =>
+	Boolean(
+		stat &&
+			width >=
+				FILE_ROW_CHROME + FILE_STATUS_TAG_WIDTH + MIN_FILE_ROW_PATH_WIDTH + fileRowStatWidth(stat),
+	);
+
+const fileRowLabelWidth = (width: number, stat: FileStat | undefined): number =>
+	Math.max(
+		1,
+		width -
+			FILE_ROW_CHROME -
+			FILE_STATUS_TAG_WIDTH -
+			(stat && fileRowShowsStats(width, stat) ? fileRowStatWidth(stat) : 0),
+	);
 
 function FileRow({
 	path,
@@ -1145,6 +1164,7 @@ function FileRow({
 	done,
 	active,
 	stat,
+	showStats,
 	onSelect,
 	onToggleReview,
 }: {
@@ -1153,6 +1173,7 @@ function FileRow({
 	done: boolean;
 	active: boolean;
 	stat: FileStat | undefined;
+	showStats: boolean;
 	onSelect: () => void;
 	onToggleReview: (path: string) => void;
 }) {
@@ -1169,6 +1190,11 @@ function FileRow({
 			>
 				{`[${done ? "x" : " "}] `}
 			</text>
+			{stat ? (
+				<FileStatusTag status={stat.status} theme={theme} onSelect={onSelect} />
+			) : (
+				<text flexShrink={0}>{" ".repeat(FILE_STATUS_TAG_WIDTH)}</text>
+			)}
 			<text
 				flexGrow={1}
 				flexShrink={1}
@@ -1180,7 +1206,7 @@ function FileRow({
 			>
 				{label}
 			</text>
-			{stat ? (
+			{showStats && stat ? (
 				<text flexShrink={0} paddingLeft={1}>
 					<span fg={theme.badgeAdded}>+{stat.additions}</span>
 					<span> </span>
@@ -1234,12 +1260,12 @@ function FileList({
 				if (row.kind === "dir") {
 					return (
 						<text key={`dir:${row.depth}:${row.label}`} fg={theme.muted} wrapMode="none" truncate>
-							{`     ${indent}${row.label}`}
+							{`${" ".repeat(FILE_ROW_CHROME + FILE_STATUS_TAG_WIDTH)}${indent}${row.label}`}
 						</text>
 					);
 				}
-				const index = paths.indexOf(row.path);
 				const stat = stats.get(row.path);
+				const index = paths.indexOf(row.path);
 				const bare = `${indent}${row.label}`;
 				const label =
 					pathDisplay === "smart"
@@ -1253,6 +1279,7 @@ function FileList({
 						done={isFileReviewed(vs, chapter.id, row.path)}
 						active={index === selected}
 						stat={stat}
+						showStats={fileRowShowsStats(width, stat)}
 						onSelect={() => onSelect(index)}
 						onToggleReview={onToggleReview}
 					/>
@@ -2144,6 +2171,7 @@ function ChapterView({
 	windowPlan,
 	width,
 	vs,
+	stats,
 	pathDisplay,
 	selectedFile,
 	selectedHunkIndex,
@@ -2191,6 +2219,7 @@ function ChapterView({
 	windowPlan: WindowPlanItem[];
 	width: number;
 	vs: ViewState;
+	stats: Map<string, FileStat>;
 	pathDisplay: PathDisplayMode;
 	selectedFile: number;
 	selectedHunkIndex: number;
@@ -2344,6 +2373,7 @@ function ChapterView({
 				}
 				const diffFile = filesByPath.get(path);
 				if (!diffFile) return null;
+				const status = stats.get(path)?.status ?? statusForDiffFile(diffFile);
 				const fileIndex = paths.indexOf(path);
 				const focused = fileIndex === selectedFile;
 				if (kind === "sep") {
@@ -2384,6 +2414,7 @@ function ChapterView({
 							<box flexGrow={1} minWidth={0}>
 								<DiffFileHeader
 									file={diffFile}
+									status={status}
 									theme={diffTheme}
 									width={Math.max(1, width - 7)}
 									formatPath={headerPathFormatter(pathDisplay)}
@@ -2661,6 +2692,7 @@ export function App({
 	context = null,
 	omittedNotice = null,
 	diffFiles = null,
+	runFiles = [],
 	loadFileLines,
 	initialViewState = emptyViewState(),
 	initialSessionState = { pages: {} },
@@ -2703,6 +2735,8 @@ export function App({
 	 */
 	omittedNotice?: string | null;
 	diffFiles?: DiffFile[] | null;
+	/** Exact file status summaries from the immutable run. */
+	runFiles?: readonly RunFileStat[];
 	/** The pinned new-side blob for a path, split into lines; null when unavailable. */
 	loadFileLines?: (path: string) => Promise<string[] | null>;
 	initialViewState?: ViewState;
@@ -2930,7 +2964,7 @@ export function App({
 	const keymapSurface: KeymapSurface = page?.kind === "comments" ? "comments" : "page";
 	const chapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	const interlude = chapter ? isInterlude(chapter) : false;
-	const stats = diffFiles ? statsByPath(diffFiles) : new Map<string, FileStat>();
+	const stats = statsByPath(diffFiles ?? [], runFiles);
 	// Highlighting a file under a new syntax theme is asynchronous, so the diff keeps the last
 	// prepared colours until the new ones exist rather than dropping back to unhighlighted text.
 	const [preparedSyntaxTheme, setPreparedSyntaxTheme] = useState(
@@ -5418,6 +5452,7 @@ export function App({
 									onActivateExcerptRange={commentOnExcerptRange}
 									onExcerptRangeContextMenu={openExcerptContextMenu}
 									vs={vs}
+									stats={stats}
 									pathDisplay={pathDisplay}
 									selectedFile={selectedFile}
 									selectedHunkIndex={selectedHunkIndex}
@@ -5569,6 +5604,8 @@ export async function runApp(
 		/** What an ignore rule kept out of the prepared run, if anything. */
 		omittedNotice?: string | null;
 		diffFiles?: DiffFile[] | null;
+		/** Exact file status summaries from the immutable run. */
+		runFiles?: readonly RunFileStat[];
 		loadFileLines?: (path: string) => Promise<string[] | null>;
 		/** Root of the reviewed worktree; editor paths are resolved only from here. */
 		repositoryRoot?: string | null;
@@ -5626,6 +5663,7 @@ export async function runApp(
 				file={file}
 				context={options.context ?? null}
 				diffFiles={options.diffFiles ?? null}
+				runFiles={options.runFiles}
 				loadFileLines={options.loadFileLines}
 				initialViewState={options.initialViewState}
 				initialSessionState={options.initialSessionState}

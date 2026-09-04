@@ -138,7 +138,7 @@ test("Tab centres an off-screen file whose rows are unmounted", async () => {
 	await settleWindow(t);
 	const frame = t.captureCharFrame();
 	const rows = frame.split("\n");
-	const headerRow = rows.findIndex((row) => row.includes(`▼ src/f${FILE_COUNT - 1}.txt`));
+	const headerRow = rows.findIndex((row) => row.includes(`▼ [MOD]  src/f${FILE_COUNT - 1}.txt`));
 	expect(Math.abs(headerRow - rows.length / 2)).toBeLessThanOrEqual(3);
 	expect(frame).toContain(`line 1 of f${FILE_COUNT - 1}`);
 });
@@ -152,7 +152,7 @@ test("Tab preserves the viewport when the next file is already visible", async (
 	await t.renderOnce();
 	const before = t.captureCharFrame().split("\n");
 	const firstLineRow = before.findIndex((row) => row.includes("line 1 of f0"));
-	expect(before.join("\n")).toContain("▼ src/f1.txt");
+	expect(before.join("\n")).toContain("▼ [MOD]  src/f1.txt");
 
 	await press(t, "\t");
 	await settleWindow(t);

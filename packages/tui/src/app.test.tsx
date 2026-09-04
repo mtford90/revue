@@ -512,7 +512,7 @@ test("reopening restores the page, collapsed files, scroll, and reviewer setting
 
 	const reopened = t.captureCharFrame();
 	expect(statusLine(t)).toContain("Ch 2/3");
-	expect(reopened).toContain("▶ src/lib/apiClient.ts");
+	expect(reopened).toContain("▶ [MOD]  src/lib/apiClient.ts");
 	expect(reopened).not.toContain("Chapters (3)");
 
 	await press(t, "s");
@@ -1234,7 +1234,7 @@ test("key change content navigates while only its checkbox toggles review", asyn
 	await click(t, questionX, keyChangeY);
 	expect(seen).toHaveLength(0);
 	const focusedFrame = t.captureCharFrame();
-	expect(focusedFrame).toContain("▸[ ]▼ src/lib/apiClient.ts");
+	expect(focusedFrame).toContain("▸[ ]▼ [MOD]  src/lib/apiClient.ts");
 	expect(focusedFrame.split("\n").find((line) => line.includes("return fetch"))).toContain("▌");
 	expect(focusedFrame.split("\n").find((line) => line.includes("attempt += 1"))).not.toContain("▌");
 

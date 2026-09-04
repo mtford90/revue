@@ -834,10 +834,13 @@ rename to new.ts
 	expect(body.captureCharFrame()).toContain("Binary file differs.");
 	expect(body.captureCharFrame()).not.toContain("No changes.");
 
-	const header = await testRender(<DiffFileHeader file={rename} theme={theme} width={50} />, {
-		width: 50,
-		height: 2,
-	});
+	const header = await testRender(
+		<DiffFileHeader file={rename} status="renamed" theme={theme} width={50} />,
+		{
+			width: 50,
+			height: 2,
+		},
+	);
 	await header.renderOnce();
 	expect(header.captureCharFrame()).toContain("old.ts -> new.ts");
 

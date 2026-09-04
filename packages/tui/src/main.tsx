@@ -1069,6 +1069,7 @@ async function showRun(
 			context: run.context,
 			omittedNotice: omissionNotice(run.manifest),
 			diffFiles,
+			runFiles: run.manifest.files,
 			syntaxWarning,
 			initialNotice: notice,
 			loadFileLines,

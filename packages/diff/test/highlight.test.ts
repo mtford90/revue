@@ -93,3 +93,43 @@ test("quoted code has no colours until something has been prepared for it", () =
 	expect(quotedLineSpans(quotation, "catppuccin-mocha")).toBeUndefined();
 	expect(quotedLineSpans(quotation, undefined)).toBeUndefined();
 });
+
+// A patch's hunks are discontiguous, so grammar state at the end of one must not leak into the
+// next: a hunk that ends inside a comment or string would otherwise colour everything after it.
+const hunkLeakPatch = `diff --git a/example.ts b/example.ts
+--- a/example.ts
++++ b/example.ts
+@@ -1,3 +1,3 @@
+ export const first = 1;
+-/* an old note
++/* a new note
+    that continues
+@@ -40,3 +40,3 @@
+ export const second = 2;
+-const answer = 41;
++const answer: number = 42;
+ export const third = 3;
+`;
+
+const coloursOf = (spans: readonly { fg?: string }[] | undefined) =>
+	new Set((spans ?? []).map((span) => span.fg).filter(Boolean)).size;
+
+for (const engine of ["syntect", "shiki"] as const) {
+	test(`${engine}: a hunk ending inside a comment leaves the next hunk coloured`, async () => {
+		process.env.REVUE_SYNTAX_ENGINE = engine;
+		const [file] = parsePatch(hunkLeakPatch);
+		if (!file) throw new Error("missing source fixture");
+		const secondHunk = file.metadata.hunks[1];
+		if (!secondHunk) throw new Error("fixture needs two hunks");
+
+		await prepareSyntaxHighlighting([file], "catppuccin-mocha");
+		const highlighted = highlightedLines(file, "catppuccin-mocha");
+		const additions = highlighted?.additions ?? [];
+		const deletions = highlighted?.deletions ?? [];
+
+		expect(additions).toHaveLength(file.metadata.additionLines.length);
+		expect(coloursOf(additions[secondHunk.additionLineIndex])).toBeGreaterThan(1);
+		expect(coloursOf(additions[secondHunk.additionLineIndex + 1])).toBeGreaterThan(1);
+		expect(coloursOf(deletions[secondHunk.deletionLineIndex])).toBeGreaterThan(1);
+	});
+}

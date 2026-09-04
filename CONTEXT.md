@@ -67,8 +67,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   explicit metadata review unit with `oldStart: 0`.
 - **Key change** — a severity-tagged judgment-call *question* for a human reviewer (not code, not a
   changelog line), anchored to tight `lineRefs`. Empty when nothing needs human input. Severity is
-  explicit on the question so its inline chapter tag and exact diff-range tint cannot drift from
-  broad prologue guidance.
+  explicit on the question so its inline chapter tag cannot drift from broad prologue guidance. The
+  selected question's exact diff range takes its side's focused tint rather than a severity colour:
+  red in a diff can only ever mean a deletion, so an all-new file stays green.
 - **Line ref** — `(filePath, side, startLine, endLine)`. `side` is `additions` (new-side line
   numbers) or `deletions` (old-side).
 - **Thread** — the official mutable feedback aggregate, independently identified and anchored by one
@@ -130,8 +131,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   and marked rather than hidden). Internally Diff — and any chapterless run — is one synthetic
   chapter covering every hunk, so all features work identically there.
 - **Patch** — the one authoritative code representation: a line-numbered review surface over the
-  run's pinned patch. Key-change anchors navigate and carry severity-tinted exact ranges by source
-  line number.
+  run's pinned patch. Key-change anchors navigate and highlight exact ranges by source line number.
 - **File display** — All (the default chapter stream) or Focused (only the selected file). The
   reviewer moves the focused surface through the chapter with file navigation. It persists
   machine-wide as a reviewer preference rather than per-run state.

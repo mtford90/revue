@@ -2,6 +2,15 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.11.1](https://github.com/mtford90/revue/compare/v0.11.0...v0.11.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **diff:** reset grammar state at every hunk boundary ([7b228a8](https://github.com/mtford90/revue/commit/7b228a8b5021eed0d5823b33aa8bd141ec4fed38))
+* **install:** resolve latest release via redirect to avoid GitHub API rate limit ([#24](https://github.com/mtford90/revue/issues/24)) ([67ee070](https://github.com/mtford90/revue/commit/67ee0709347e725aa5ec9688795d324d2c08e432))
+* **tui:** stop painting high-severity key changes as deletions ([6742057](https://github.com/mtford90/revue/commit/6742057b039b60cac148c3af6e7851a7a0d37f9a))
+
 ## [0.11.0](https://github.com/mtford90/revue/compare/v0.10.0...v0.11.0) (2026-08-31)
 
 

@@ -174,13 +174,13 @@ A file can have no textual hunk. Pure renames, mode changes, and empty files use
 
 Drag across source text to highlight it. Press `y` to copy the text.
 
-Right-click a review line or an active range to open the action menu. The menu can copy a location, copy a GitHub link, or start a comment.
+Right-click a review line or an active range to open the action menu. The menu can copy a location, copy a GitHub link, start a comment, or open the line in your editor.
 
 A location copy includes every selected range. A GitHub link needs exactly one range and a `github.com` origin remote. The selected side must also exist in a commit. New-side links are not available for unstaged working-tree content.
 
 You can also select narration text with the pointer. Revue can copy the text alone or include its chapter reference.
 
-Press `e` to open the first selected new-side line in `$VISUAL` or `$EDITOR`. Revue refuses deleted-side lines and files outside the reviewed worktree. See [Troubleshooting](troubleshooting.md) for editor and clipboard details.
+Press `e` to open the first selected new-side line in `$VISUAL` or `$EDITOR`. The action menu runs the same action on the clicked line or range. Revue refuses deleted-side lines and files outside the reviewed worktree, and the menu entry is disabled when the selection has no new-side line. See [Troubleshooting](troubleshooting.md) for editor and clipboard details.
 
 ## Leave comments
 

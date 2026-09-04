@@ -72,7 +72,7 @@ Read [Continue a review](continuing.md) for the complete process.
 
 ## Revue cannot open the editor
 
-Pressing `e` opens the first selected additions-side line.
+Pressing `e` opens the first selected additions-side line. The action menu's "Open in editor" entry uses the same action on the clicked line or range.
 
 Revue selects the editor in this order:
 

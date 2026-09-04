@@ -2549,6 +2549,7 @@ const buildRangeMenu = ({
 	copyText,
 	copyLocation,
 	copyLink,
+	openEditor,
 	comment,
 	keymap = KEYMAP,
 }: {
@@ -2557,6 +2558,7 @@ const buildRangeMenu = ({
 	copyText: () => void;
 	copyLocation: () => void;
 	copyLink: () => void;
+	openEditor: () => void;
 	comment: () => void;
 	keymap?: readonly KeymapAction[];
 }): MenuEntry[] => [
@@ -2581,6 +2583,12 @@ const buildRangeMenu = ({
 	},
 	{ kind: "separator", id: "copy" },
 	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
+	{
+		kind: "item",
+		label: "Open in editor",
+		hint: keymapHint("open-editor", keymap),
+		action: openEditor,
+	},
 ];
 
 const noVerb = () => undefined;
@@ -4739,6 +4747,7 @@ export function App({
 					},
 					copyLocation: () => copySelectionLocation(contextMenu.selection),
 					copyLink: () => copySelectionLink(contextMenu.selection),
+					openEditor: () => void openLineInEditor(),
 					comment: () =>
 						contextMenu.anchorKind === THREAD_ANCHOR_KIND.EXCERPT
 							? commentOnExcerptRange(contextMenu.range)

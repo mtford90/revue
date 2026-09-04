@@ -2549,6 +2549,8 @@ const buildRangeMenu = ({
 	copyText,
 	copyLocation,
 	copyLink,
+	editorBlocker,
+	openEditor,
 	comment,
 	keymap = KEYMAP,
 }: {
@@ -2557,6 +2559,8 @@ const buildRangeMenu = ({
 	copyText: () => void;
 	copyLocation: () => void;
 	copyLink: () => void;
+	editorBlocker: string | null;
+	openEditor: () => void;
 	comment: () => void;
 	keymap?: readonly KeymapAction[];
 }): MenuEntry[] => [
@@ -2581,6 +2585,13 @@ const buildRangeMenu = ({
 	},
 	{ kind: "separator", id: "copy" },
 	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
+	{
+		kind: "item",
+		label: editorBlocker ? `Open in editor (${editorBlocker})` : "Open in editor",
+		hint: keymapHint("open-editor", keymap),
+		disabled: Boolean(editorBlocker),
+		action: openEditor,
+	},
 ];
 
 const noVerb = () => undefined;
@@ -3790,6 +3801,12 @@ export function App({
 		if (selection.ranges.length !== 1) return "selection spans multiple patch ranges";
 		return permalinkBlocker({ context: permalinks, side: selection.ranges[0].side });
 	}
+	function selectionEditorBlocker(selection: DiffSelection): string | null {
+		if (!onOpenEditor) return "unavailable";
+		if (!selection.ranges.some((range) => range.side === "additions"))
+			return "no current-side line";
+		return null;
+	}
 	/** The text the reader dragged over, which OpenTUI tracks separately from the gutter's range. */
 	function highlightedText() {
 		return renderer.getSelection()?.getSelectedText() || null;
@@ -3932,8 +3949,7 @@ export function App({
 			setLineSelectionAnchor(cursorLine);
 		}
 	}
-	async function openLineInEditor() {
-		const selected = lineSelection ?? pointerSelection;
+	async function openLineInEditor(selected = lineSelection ?? pointerSelection) {
 		const selectedAddition = selected?.ranges.find((range) => range.side === "additions");
 		const target = selectedAddition
 			? diffRangeForSelectionRange(selected?.filePath ?? "", selectedAddition)
@@ -4739,6 +4755,8 @@ export function App({
 					},
 					copyLocation: () => copySelectionLocation(contextMenu.selection),
 					copyLink: () => copySelectionLink(contextMenu.selection),
+					editorBlocker: selectionEditorBlocker(contextMenu.selection),
+					openEditor: () => void openLineInEditor(contextMenu.selection),
 					comment: () =>
 						contextMenu.anchorKind === THREAD_ANCHOR_KIND.EXCERPT
 							? commentOnExcerptRange(contextMenu.range)

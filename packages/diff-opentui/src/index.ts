@@ -21,6 +21,7 @@ export {
 	FILE_STATUS_TAG_WIDTH,
 	type FileStatus,
 	FileStatusTag,
+	MIN_FILE_PATH_WIDTH,
 	useResolvedInlineAttachmentPlacement,
 } from "./components.tsx";
 export { decorationAnchorId } from "./ids.ts";

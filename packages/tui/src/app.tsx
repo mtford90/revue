@@ -48,6 +48,7 @@ import {
 	type ExpandDirection,
 	FILE_STATUS_TAG_WIDTH,
 	FileStatusTag,
+	MIN_FILE_PATH_WIDTH,
 	OPENTUI_DIFF_CHROME,
 	useResolvedInlineAttachmentPlacement,
 } from "@revue/diff-opentui";
@@ -1137,7 +1138,6 @@ function PrologueView({
 
 // ── Chapter file list (review state belongs to Revue's shell) ─────────────────
 const FILE_ROW_CHROME = 5; // marker column plus "[x] "
-const MIN_FILE_ROW_PATH_WIDTH = 4;
 
 const fileRowStatWidth = (stat: FileStat): number =>
 	`+${stat.additions} -${stat.deletions}`.length + 1;
@@ -1146,7 +1146,7 @@ const fileRowShowsStats = (width: number, stat: FileStat | undefined): boolean =
 	Boolean(
 		stat &&
 			width >=
-				FILE_ROW_CHROME + FILE_STATUS_TAG_WIDTH + MIN_FILE_ROW_PATH_WIDTH + fileRowStatWidth(stat),
+				FILE_ROW_CHROME + FILE_STATUS_TAG_WIDTH + MIN_FILE_PATH_WIDTH + fileRowStatWidth(stat),
 	);
 
 const fileRowLabelWidth = (width: number, stat: FileStat | undefined): number =>

@@ -1427,6 +1427,7 @@ const FILE_STATUS_TAGS = {
 
 export type FileStatus = keyof typeof FILE_STATUS_TAGS;
 export const FILE_STATUS_TAG_WIDTH = 7;
+export const MIN_FILE_PATH_WIDTH = 4;
 
 export function FileStatusTag({
 	status,
@@ -1471,7 +1472,7 @@ export function DiffFileHeader({
 			? `${normalized.previousPath} -> ${normalized.path}`
 			: normalized.path;
 	const statsWidth = `+${normalized.stats.additions} -${normalized.stats.deletions} `.length + 1;
-	const showStats = width >= 1 + FILE_STATUS_TAG_WIDTH + 1 + statsWidth;
+	const showStats = width >= 1 + FILE_STATUS_TAG_WIDTH + MIN_FILE_PATH_WIDTH + statsWidth;
 	const pathWidth = Math.max(1, width - 1 - FILE_STATUS_TAG_WIDTH - (showStats ? statsWidth : 0));
 	const path = formatPath ? formatPath(fullPath, pathWidth) : fullPath;
 	return (

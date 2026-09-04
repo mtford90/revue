@@ -514,3 +514,88 @@ test("patch ranges remap atomically and orphan when any segment disappears", asy
 	expect(stillOrphaned?.migratedFrom).toBe(second.manifest.runId);
 	expect(stillOrphaned?.anchor).toEqual(anchor);
 });
+
+/** A file whose review unit is one long added block, as a regenerated implementation produces. */
+const withBlock = (block: readonly string[]): string =>
+	`${numbered("service", 6)}${block.map((line) => `${line}\n`).join("")}`;
+
+const ALPHA = ["alpha one", "alpha two", "alpha three", "alpha four"];
+const BETA = [
+	"beta one",
+	"beta two",
+	"beta three",
+	"beta four",
+	"beta five",
+	"beta six",
+	"beta seven",
+	"beta eight",
+];
+
+test("a carried anchor whose code the change deleted is orphaned, not re-aimed at what replaced it", async () => {
+	const root = await repository({ "src/service.ts": numbered("service", 6) });
+	await write(root, "src/service.ts", withBlock([...ALPHA, ...BETA]));
+	await commit(root, "Add both helpers");
+	const first = await prepareRun(["main", "HEAD"], root);
+	await narrate(first, [
+		chapter({ id: "service", order: 1, hunkRefs: [{ filePath: "src/service.ts", oldStart: 4 }] }),
+	]);
+	const anchor: ThreadAnchor = {
+		kind: THREAD_ANCHOR_KIND.PATCH,
+		filePath: "src/service.ts",
+		ranges: [{ oldStart: 4, side: "additions", startLine: 7, endLine: 10 }],
+	};
+	seedThreads(root, first.manifest.runId, [
+		feedback({
+			index: 1,
+			runId: first.manifest.runId,
+			anchor,
+			body: "Fold this into the other one",
+		}),
+	]);
+
+	// The agent answers by deleting the block the thread was written on. What now occupies those
+	// line numbers is the helper that survived, which the thread never had anything to say about.
+	await write(root, "src/service.ts", withBlock(BETA));
+	await commit(root, "Fold alpha into beta");
+	const second = await prepareRun(["main", "HEAD"], root);
+
+	const [carried] = storedThreads(root, second.manifest.runId);
+	expect(await anchoredLine(second, "src/service.ts", 7)).toBe("beta one");
+	expect(carried?.migrationOrphaned).toBe(true);
+	expect(carried?.anchor).toEqual(anchor);
+});
+
+test("a carried anchor follows its code when the change only moved it inside the unit", async () => {
+	const root = await repository({ "src/service.ts": numbered("service", 6) });
+	await write(root, "src/service.ts", withBlock([...ALPHA, ...BETA]));
+	await commit(root, "Add both helpers");
+	const first = await prepareRun(["main", "HEAD"], root);
+	await narrate(first, [
+		chapter({ id: "service", order: 1, hunkRefs: [{ filePath: "src/service.ts", oldStart: 4 }] }),
+	]);
+	seedThreads(root, first.manifest.runId, [
+		feedback({
+			index: 1,
+			runId: first.manifest.runId,
+			anchor: {
+				kind: THREAD_ANCHOR_KIND.PATCH,
+				filePath: "src/service.ts",
+				ranges: [{ oldStart: 4, side: "additions", startLine: 7, endLine: 10 }],
+			},
+			body: "Name the first two the same way",
+		}),
+	]);
+
+	await write(root, "src/service.ts", withBlock(["gamma one", "gamma two", ...ALPHA, ...BETA]));
+	await commit(root, "Introduce a helper above alpha");
+	const second = await prepareRun(["main", "HEAD"], root);
+
+	const [carried] = storedThreads(root, second.manifest.runId);
+	expect(carried?.migrationOrphaned).toBeUndefined();
+	expect(carried?.anchor).toEqual({
+		kind: THREAD_ANCHOR_KIND.PATCH,
+		filePath: "src/service.ts",
+		ranges: [{ oldStart: 4, side: "additions", startLine: 9, endLine: 12 }],
+	});
+	expect(await anchoredLine(second, "src/service.ts", 9)).toBe("alpha one");
+});

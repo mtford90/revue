@@ -136,7 +136,7 @@ export const reviewThreadSchema = z
 		 * so a hunk anchor the new run no longer holds is orphaned instead of treated as corruption.
 		 */
 		migratedFrom: runIdSchema.optional(),
-		/** Prep could not remap every segment of an atomic patch selection. */
+		/** Prep could not find the code this carried anchor was written on anywhere in the run. */
 		migrationOrphaned: z.literal(true).optional(),
 		status: z.enum(THREAD_STATUS),
 		createdAt: z.iso.datetime(),
@@ -145,12 +145,12 @@ export const reviewThreadSchema = z
 	.superRefine((thread, context) => {
 		if (
 			thread.migrationOrphaned &&
-			(thread.anchor.kind !== THREAD_ANCHOR_KIND.PATCH || !thread.migratedFrom)
+			(thread.anchor.kind === THREAD_ANCHOR_KIND.EXCERPT || !thread.migratedFrom)
 		) {
 			context.addIssue({
 				code: "custom",
 				path: ["migrationOrphaned"],
-				message: "migrationOrphaned requires a migrated patch anchor",
+				message: "migrationOrphaned requires a migrated patch or hunk anchor",
 			});
 		}
 		if (thread.messages[0]?.createdAt !== thread.createdAt) {

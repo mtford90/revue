@@ -963,7 +963,7 @@ async function showRun(
 
 	let run: Awaited<ReturnType<typeof loadReviewRun>>;
 	try {
-		run = await loadReviewRun(directory);
+		run = await loadReviewRun(directory, { checkCitations: options.check === true });
 	} catch (error) {
 		if (
 			error instanceof ChaptersFileError ||

@@ -59,7 +59,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   structural. For a localised fix it narrates the fix hunks and cites the **threads** that prompted
   them; after a structural rework it shrinks to an orientation note naming the chapters to re-read,
   which needs no hunks at all. `revue show --check` requires exactly one, ending the narration, of
-  every run that inherited narration, and holds its thread citations to feedback the run has. It is
+  every run that inherited narration, and holds its thread citations to feedback the run has —
+  there and nowhere else, because the reviewer deletes a cited thread whenever they please and no
+  command that merely reads a run may refuse to run over a citation that has gone stale. It is
   new by definition, so it always presents unread.
 - **Hunk reference (`hunkRef`)** — `(filePath, oldStart)`. The stable identity of a review unit; the
   agent copies these from `hunks.txt` rather than inventing them. Textual hunks use their pre-image
@@ -89,11 +91,16 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Carried thread** — a thread prep moved onto a run from the run it **supersedes**, open and
   dealt-with alike, so the conversation and its history stay with the code rather than stranding on
   a dead run. Threads move rather than copy — the superseded run is left with none — and keep their
-  identity, status, and every message, gaining only a note of the run they came from. Hunk anchors
-  are re-mapped through the run delta's unit matching: a unit that came through with its content
-  intact shifts exactly, one the change rewrote keeps the offset it was commented at, and an anchor
-  no unit of the new run can hold is orphaned rather than fatal, because supersession legitimately
-  deletes code. That leniency is the carried thread's alone; an anchor written against the run it
+  identity, status, and every message, gaining only a note of the run they came from. Hunk and patch
+  anchors are re-mapped through the run delta's unit matching, and then **followed by their
+  content**: a unit that came through intact shifts exactly, while inside a unit the change rewrote
+  the anchor takes the shifted position only when the same lines are still there, else the same
+  lines wherever else in the file they went, else the shifted position when the lines framing it
+  survived and so the fix answered the comment in place. An anchor whose code the new run does not
+  have anywhere is **orphaned** rather than fatal, because supersession legitimately deletes code,
+  and orphaning is deliberately preferred to pinning the reviewer's words on whatever now occupies
+  those line numbers. Orphaning is sticky: coordinates that become remappable again in a later run
+  never revive it. That leniency is the carried thread's alone; an anchor written against the run it
   names can only stop resolving through corruption. Excerpt anchors are re-resolved against the new
   run's frozen context and orphan exactly as they always have.
 - **Thread message** — one independently identified root message or reply containing a terminal-safe
@@ -305,6 +312,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **We build the review shell ourselves — by design.** Chapter navigation, file list, review state,
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
+- **Carried anchors follow their content, or orphan.** See `docs/adr/0021`, which extends ADRs 0018
+  and 0020. Position corroborates a carried anchor; it never establishes one, because a review unit
+  is a whole hunk and a rewrite can leave unrelated code at the same numbers.
 - **File-scoped patch selections preserve old anchors.** See `docs/adr/0020`, which extends ADRs
   0004, 0007 and 0018. New TUI diff feedback uses a non-empty multi-range `patch` anchor; old `hunk`
   and `excerpt` data and CLI creation syntax retain their meaning. Patch ranges validate

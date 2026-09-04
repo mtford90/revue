@@ -138,9 +138,14 @@ Prep moves open and resolved threads from the superseded run to the new run. It 
 Revue remaps each anchor through the same unit matching that powers `revue delta`:
 
 - unchanged code follows its new location;
-- rewritten code keeps the comment offset when the new unit can hold it;
-- deleted code becomes orphaned;
-- excerpt anchors resolve against the new frozen context.
+- rewritten code keeps the comment when the same lines are still there, or when the lines around the
+  comment did not change and the fix thus rewrote the commented lines in place;
+- moved code takes the comment with it, anywhere in the same file;
+- deleted code becomes orphaned.
+
+An anchor becomes orphaned when the run does not have its code anywhere. Revue does not move the
+comment to the code that now occupies those line numbers. Excerpt anchors resolve against the new
+frozen context, as before.
 
 Orphaned threads remain visible in Comments. Revue never removes feedback because a new narration cannot place it.
 

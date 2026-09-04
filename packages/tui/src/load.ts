@@ -42,14 +42,26 @@ const runThreads = (run: PreparedRun): ReviewThread[] | null => {
 	}
 };
 
-export async function loadReviewRun(directory: string): Promise<ReviewRun> {
+/**
+ * A citation of a thread the run does not have is drift in the narration, not damage to the run:
+ * the reviewer deletes threads whenever they please, long after an agent cited one. So it is
+ * checked where narration is validated and nowhere else, because no command that merely reads a
+ * run — least of all one listing the feedback that is still there — may refuse to run over it.
+ */
+export type ReviewRunLoad = { checkCitations?: boolean };
+
+export async function loadReviewRun(
+	directory: string,
+	{ checkCitations = false }: ReviewRunLoad = {},
+): Promise<ReviewRun> {
 	const prepared = await loadPreparedRun(directory);
 	const path = join(directory, "chapters.json");
 	const chapters = existsSync(path) ? await loadChaptersFile(path) : null;
 	const context = await loadRunContext(prepared);
 	const delta = await loadRunDelta(prepared);
 	if (chapters) {
-		validateReviewCoverage(prepared, chapters, context, { delta, threads: runThreads(prepared) });
+		const threads = checkCitations ? runThreads(prepared) : null;
+		validateReviewCoverage(prepared, chapters, context, { delta, threads });
 	}
 	return { ...prepared, chapters, context, delta };
 }

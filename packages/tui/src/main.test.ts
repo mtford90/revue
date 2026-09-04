@@ -1785,3 +1785,34 @@ test("an unwritable .revue directory warns on stderr and the command still exits
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("a narration citing a deleted thread still lists, and only --check calls it out", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-dangling-citation-"));
+	try {
+		const reviewRun = await copySampleRun(root);
+		const chaptersPath = join(reviewRun, "chapters.json");
+		const chapters = await Bun.file(chaptersPath).json();
+		const missing = randomUUID();
+		await writeFile(
+			chaptersPath,
+			`${JSON.stringify({
+				...chapters,
+				chapters: chapters.chapters.map((chapter: { id: string }, index: number) =>
+					index === 0 ? { ...chapter, threadRefs: [missing] } : chapter,
+				),
+			})}\n`,
+		);
+
+		// The reviewer deleting a thread an agent cited is drift in the narration, never a reason to
+		// refuse to read the feedback that is still there.
+		const listed = await run(root, ["threads", "list", reviewRun, "--json"]);
+		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(listed.stdout)).toMatchObject({ threads: [] });
+
+		const checked = await run(root, ["show", reviewRun, "--check"]);
+		expect(checked.exitCode).toBe(1);
+		expect(checked.stderr).toContain(`references thread ${missing}`);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

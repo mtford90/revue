@@ -1724,7 +1724,13 @@ const threadLocation = (thread: ReviewThread) => {
 };
 
 /** The narration stopped quoting this thread's code; it is kept and shown, never pruned. */
-const ORPHANED_THREAD_NOTE = " · no longer quoted";
+const ORPHANED_EXCERPT_NOTE = " · no longer quoted";
+
+/** A carried anchor whose code the superseding run does not have; the thread is detached, not moved. */
+const ORPHANED_ANCHOR_NOTE = " · code removed";
+
+const orphanedNote = (thread: ReviewThread): string =>
+	isExcerptAnchor(thread.anchor) ? ORPHANED_EXCERPT_NOTE : ORPHANED_ANCHOR_NOTE;
 
 /** The send column, padded so the locations below it still line up when a row has nothing to say. */
 const SEND_STATE_LABEL: Record<"unsent" | "sent", string> = {
@@ -1787,7 +1793,7 @@ function CommentRow({
 			</text>
 			{orphaned ? (
 				<text flexShrink={0} wrapMode="none" fg={theme.badgeModified}>
-					{ORPHANED_THREAD_NOTE}
+					{orphanedNote(thread)}
 				</text>
 			) : null}
 			<text flexShrink={0} fg={theme.muted}>{` ${root?.author.name ?? ""} `}</text>

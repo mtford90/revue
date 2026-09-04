@@ -2549,6 +2549,7 @@ const buildRangeMenu = ({
 	copyText,
 	copyLocation,
 	copyLink,
+	editorBlocker,
 	openEditor,
 	comment,
 	keymap = KEYMAP,
@@ -2558,6 +2559,7 @@ const buildRangeMenu = ({
 	copyText: () => void;
 	copyLocation: () => void;
 	copyLink: () => void;
+	editorBlocker: string | null;
 	openEditor: () => void;
 	comment: () => void;
 	keymap?: readonly KeymapAction[];
@@ -2585,8 +2587,9 @@ const buildRangeMenu = ({
 	{ kind: "item", label: "Comment on selection", hint: "Enter", action: comment },
 	{
 		kind: "item",
-		label: "Open in editor",
+		label: editorBlocker ? `Open in editor (${editorBlocker})` : "Open in editor",
 		hint: keymapHint("open-editor", keymap),
+		disabled: Boolean(editorBlocker),
 		action: openEditor,
 	},
 ];
@@ -3940,8 +3943,7 @@ export function App({
 			setLineSelectionAnchor(cursorLine);
 		}
 	}
-	async function openLineInEditor() {
-		const selected = lineSelection ?? pointerSelection;
+	async function openLineInEditor(selected = lineSelection ?? pointerSelection) {
 		const selectedAddition = selected?.ranges.find((range) => range.side === "additions");
 		const target = selectedAddition
 			? diffRangeForSelectionRange(selected?.filePath ?? "", selectedAddition)
@@ -4747,7 +4749,8 @@ export function App({
 					},
 					copyLocation: () => copySelectionLocation(contextMenu.selection),
 					copyLink: () => copySelectionLink(contextMenu.selection),
-					openEditor: () => void openLineInEditor(),
+					editorBlocker: onOpenEditor ? null : "unavailable",
+					openEditor: () => void openLineInEditor(contextMenu.selection),
 					comment: () =>
 						contextMenu.anchorKind === THREAD_ANCHOR_KIND.EXCERPT
 							? commentOnExcerptRange(contextMenu.range)

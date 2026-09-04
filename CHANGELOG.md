@@ -2,6 +2,14 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.12.0](https://github.com/mtford90/revue/compare/v0.11.1...v0.12.0) (2026-09-04)
+
+
+### Features
+
+* **tui:** add open-in-editor to diff context menu ([3baa591](https://github.com/mtford90/revue/commit/3baa59164295cc517b9dd44807a7dd6fdffbcbd8))
+* **tui:** add open-in-editor to the diff context menu ([0cf45b2](https://github.com/mtford90/revue/commit/0cf45b2760a9d8783dcd71d855ef5e3ad2f9e2d2))
+
 ## [0.11.1](https://github.com/mtford90/revue/compare/v0.11.0...v0.11.1) (2026-09-04)
 
 

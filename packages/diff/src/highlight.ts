@@ -18,25 +18,50 @@ type NativeHighlighter = {
 };
 
 /**
- * What the backends actually colour. A parsed file contributes both its sides; quoted code
- * contributes one. `id` is the array whose identity keys the cache, held apart from `additions`
- * because quoted lines are re-ended before tokenising and must still be found by the caller's
- * own array.
+ * One contiguous run of source on each side, tokenised as its own document. Hunks are
+ * discontiguous, so grammar state must not carry from the end of one into the start of the next:
+ * a hunk ending inside a comment or string would otherwise colour everything after it as one.
+ */
+type HighlightDocument = {
+	deletionIndex: number;
+	deletions: readonly string[];
+	additionIndex: number;
+	additions: readonly string[];
+};
+
+/**
+ * What the backends actually colour. A parsed file contributes one document per hunk; quoted code
+ * contributes one document. `id` is the array whose identity keys the cache, held apart from the
+ * documents because quoted lines are re-ended before tokenising and must still be found by the
+ * caller's own array.
  */
 type HighlightSubject = {
 	id: readonly string[];
 	path: string;
 	language: string;
-	deletions: readonly string[];
-	additions: readonly string[];
+	deletionCount: number;
+	additionCount: number;
+	documents: readonly HighlightDocument[];
 };
 
 const fileSubject = (file: DiffFile): HighlightSubject => ({
 	id: file.metadata.additionLines,
 	path: file.path ?? file.metadata.name,
 	language: file.language,
-	deletions: file.metadata.deletionLines,
-	additions: file.metadata.additionLines,
+	deletionCount: file.metadata.deletionLines.length,
+	additionCount: file.metadata.additionLines.length,
+	documents: file.metadata.hunks.map((hunk) => ({
+		deletionIndex: hunk.deletionLineIndex,
+		deletions: file.metadata.deletionLines.slice(
+			hunk.deletionLineIndex,
+			hunk.deletionLineIndex + hunk.deletionCount,
+		),
+		additionIndex: hunk.additionLineIndex,
+		additions: file.metadata.additionLines.slice(
+			hunk.additionLineIndex,
+			hunk.additionLineIndex + hunk.additionCount,
+		),
+	})),
 });
 
 /** A range of unchanged code a narration quotes. It belongs to no patch, so its path names its grammar. */
@@ -48,8 +73,16 @@ const quotationSubject = ({ path, lines }: QuotedCode): HighlightSubject => ({
 	id: lines,
 	path,
 	language: inferLanguage(path),
-	deletions: [],
-	additions: lines.map((line) => `${line}\n`),
+	deletionCount: 0,
+	additionCount: lines.length,
+	documents: [
+		{
+			deletionIndex: 0,
+			deletions: [],
+			additionIndex: 0,
+			additions: lines.map((line) => `${line}\n`),
+		},
+	],
 });
 
 export interface HighlightedLines {
@@ -165,35 +198,57 @@ async function prepareShiki(
 		const key = cacheKey(syntaxTheme, "shiki");
 		if (cached.has(key)) continue;
 		try {
-			cached.set(key, {
-				// Each side is tokenised as one document so multiline grammars retain state.
-				deletions: await highlightWithShiki(subject.deletions, subject.language, syntaxTheme),
-				additions: await highlightWithShiki(subject.additions, subject.language, syntaxTheme),
-			});
+			const highlighted: HighlightedLines[] = [];
+			for (const document of subject.documents) {
+				highlighted.push({
+					// Each side of a hunk is one document so multiline grammars retain state within it.
+					deletions: await highlightWithShiki(document.deletions, subject.language, syntaxTheme),
+					additions: await highlightWithShiki(document.additions, subject.language, syntaxTheme),
+				});
+			}
+			cached.set(key, assemble(subject, highlighted));
 		} catch {
 			cached.set(key, { deletions: [], additions: [] });
 		}
 	}
 }
 
+/** Place each document's spans at its hunk's offset; a line no document covers stays plain. */
+const assemble = (
+	subject: HighlightSubject,
+	highlighted: readonly HighlightedLines[],
+): HighlightedLines => {
+	const deletions: RenderSpan[][] = Array.from({ length: subject.deletionCount }, () => []);
+	const additions: RenderSpan[][] = Array.from({ length: subject.additionCount }, () => []);
+	for (const [index, document] of subject.documents.entries()) {
+		const spans = highlighted[index];
+		if (!spans) throw new Error("highlighter returned a missing document");
+		spans.deletions.forEach((line, offset) => {
+			deletions[document.deletionIndex + offset] = line;
+		});
+		spans.additions.forEach((line, offset) => {
+			additions[document.additionIndex + offset] = line;
+		});
+	}
+	return { deletions, additions };
+};
+
 function prepareSyntect(subjects: readonly HighlightSubject[], syntaxTheme: string): boolean {
 	const native = loadNative();
 	if (!native) return false;
 	const response = native.highlight({
 		theme: syntaxTheme,
-		files: subjects.map(({ path, language, deletions, additions }) => ({
-			path,
-			language,
-			deletions,
-			additions,
-		})),
+		files: subjects.flatMap(({ path, language, documents }) =>
+			documents.map(({ deletions, additions }) => ({ path, language, deletions, additions })),
+		),
 	});
-	if (response.files.length !== subjects.length)
-		throw new Error("native highlighter returned an incomplete result");
-	for (const [index, subject] of subjects.entries()) {
-		const highlighted = response.files[index];
-		if (!highlighted) throw new Error("native highlighter returned a missing file");
-		highlightsFor(subject.id).set(cacheKey(syntaxTheme, "syntect"), highlighted);
+	let next = 0;
+	for (const subject of subjects) {
+		const highlighted = response.files.slice(next, next + subject.documents.length);
+		next += subject.documents.length;
+		if (highlighted.length !== subject.documents.length)
+			throw new Error("native highlighter returned an incomplete result");
+		highlightsFor(subject.id).set(cacheKey(syntaxTheme, "syntect"), assemble(subject, highlighted));
 	}
 	return true;
 }

@@ -178,13 +178,7 @@ import {
 	sourceRangeFor,
 } from "./sourceLink.ts";
 import { StatusBar, type StatusNotice } from "./statusBar.tsx";
-import {
-	complexityColor,
-	severityBackgroundColor,
-	severityColor,
-	ThemeProvider,
-	useTheme,
-} from "./theme.ts";
+import { complexityColor, severityColor, ThemeProvider, useTheme } from "./theme.ts";
 import { ThemePicker, ThemePickerBackdrop } from "./themePicker.tsx";
 import { mergeCustomThemes, type ThemeIssue } from "./themes.ts";
 import {
@@ -2259,11 +2253,10 @@ function ChapterView({
 				...ref,
 				id: `${focusedDecorationId}:${refIndex}`,
 				focusId: focusedDecorationId,
-				backgroundColor: severityBackgroundColor(theme, keyChange?.severity),
 				showGutterMarker: false,
 			})),
 		];
-	}, [chapter, selectedKeyChange, focusedDecorationId, keyboardCursor, theme]);
+	}, [chapter, selectedKeyChange, focusedDecorationId, keyboardCursor]);
 	const mountThread = (thread: ReviewThread): DiffInlineAttachment => {
 		const placement = selectionAttachmentPlacement(selectionForAnchor(thread.anchor));
 		return {

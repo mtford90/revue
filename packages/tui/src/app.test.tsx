@@ -4454,7 +4454,7 @@ test("a standing pointer selection reports selected actions, not keyboard extens
 	expect(statusLine(t)).not.toContain("j/k extend");
 });
 
-test("saved patch threads preserve key-change severity and intraline styling", async () => {
+test("saved patch threads preserve the key-change tint and intraline styling", async () => {
 	const chapters = RevueChaptersFileSchema.parse({
 		chapters: [
 			{
@@ -4499,10 +4499,44 @@ test("saved patch threads preserve key-change severity and intraline styling", a
 	const betaSpan = betaSpans.find((span) => span.text.includes("beta"));
 	expect(
 		betaSpans.some(
-			(span) => span.bg?.toString() === RGBA.fromHex(resolved.removedContentBg).toString(),
+			(span) => span.bg?.toString() === RGBA.fromHex(resolved.addedContentBg).toString(),
 		),
 	).toBe(true);
 	expect(betaSpan?.bg?.toString()).toBe(RGBA.fromHex(resolved.addedEmphasisBg).toString());
+});
+
+test("a high-severity key change on an added file keeps its lines green", async () => {
+	const chapters = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				...streamChapters.chapters[0],
+				keyChanges: [
+					{
+						content: "Is the second line right?",
+						severity: "high",
+						lineRefs: [{ filePath: "a.ts", side: "additions", startLine: 2, endLine: 3 }],
+					},
+				],
+			},
+		],
+	});
+	const t = await testRender(<App file={chapters} diffFiles={streamDiff} />, {
+		width: 120,
+		height: 40,
+		kittyKeyboard: true,
+	});
+	await t.renderOnce();
+	await settle(t);
+
+	const resolved = resolveTheme(undefined);
+	const deletionTint = RGBA.fromHex(resolved.removedContentBg).toString();
+	const additionTint = RGBA.fromHex(resolved.addedContentBg).toString();
+	const backgroundsOf = (needle: string) =>
+		(t.captureSpans().lines[rowOf(t, needle)]?.spans ?? []).map((span) => span.bg?.toString());
+	expect(backgroundsOf("a-line-2")).toContain(additionTint);
+	for (const line of ["a-line-1", "a-line-2", "a-line-3"]) {
+		expect(backgroundsOf(line)).not.toContain(deletionTint);
+	}
 });
 
 test("collapsed source does not advertise source-review actions", async () => {

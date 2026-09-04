@@ -14,12 +14,6 @@ export const severityColor = (theme: Theme, severity: string | undefined): strin
 	return theme.badgeAdded;
 };
 
-export const severityBackgroundColor = (theme: Theme, severity: string | undefined): string => {
-	if (severity === "critical" || severity === "high") return theme.removedContentBg;
-	if (severity === "medium") return theme.selectedHunk;
-	return theme.addedContentBg;
-};
-
 export const complexityColor = (theme: Theme, level: string): string => {
 	if (level === "low") return theme.badgeAdded;
 	if (level === "medium") return theme.badgeModified;

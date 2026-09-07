@@ -411,8 +411,10 @@ the revue skill's "Responding to review feedback" step. That is this step. The r
 exists, so never start it by preparing a fresh run: that discards the narration the reviewer has
 been reading and the marks recording how far they got.
 
-One pass answers everything at once — orient, read every thread, make the changes you agree with,
-reply to all of them, report in chat, and regenerate the review a single time at the end.
+One pass answers everything at once — orient, read every thread, reply to all of them, and report
+in chat. Code changes wait for the reviewer's go-ahead: a reply is a proposal until the comment or
+the reviewer's answer tells you to act. Then make the agreed changes and regenerate the review a
+single time at the end.
 
 ### Orient from disk
 
@@ -490,9 +492,12 @@ was written against is gone.
 Judge every comment on its merits, the way a colleague would. A review comment is an argument, not a
 work order.
 
-**Clear, and you agree.** Make the change, then reply on the thread describing it. The reviewer
-reads the reply beside the code, so name what moved and why that answers them, not that you
-complied.
+**Clear, and you agree.** Change nothing yet. Reply with what you intend to change — which lines,
+the shape of the change, and why that answers them — and wait for the go-ahead. Start the reply
+with `Proposed:` so the reviewer can tell a plan from a done fix. Once they say go, in the thread or
+in chat, make the change and reply again naming what moved. The one exception is a comment that is
+itself an explicit instruction ("rename this to `retryCap`", "delete this branch", "use the helper
+here"): that is the go-ahead, so make the change and reply describing it.
 
 **Clear, and you disagree.** Change nothing. Reply with the counter-argument: what the comment
 assumes, what following it would cost, what you would do instead. Then raise it in the chat report
@@ -524,13 +529,15 @@ for a fix. An open thread whose last message is yours is exactly how they see "r
 
 ### Report the pass in chat
 
-Finish with one message to the user: what you fixed, where you pushed back, and what needs their
-call, with the open questions numbered so they can answer by number.
+Finish with one message to the user: what you propose to change, what you changed on instruction,
+where you pushed back, and what needs their call, with the open questions numbered so they can
+answer by number.
 
 ```
-Fixed 4, pushed back on 2, 3 need your call.
+Proposed 4, changed 1 on instruction, pushed back on 2, 3 need your call.
 
-Fixed: retry cap, the org-id thread on api.ts, two naming comments.
+Proposed: retry cap to 5s, the org-id thread on api.ts, two naming comments.
+Changed: the rename you asked for on api.ts.
 Pushed back: the suggested cache (it breaks the multi-org invariant) and moving the
 guard into the caller.
 
@@ -542,11 +549,25 @@ Your call:
 Chat and threads must tell the same story — a reviewer who reads only one of the two cannot end up
 with a different picture of what happened.
 
+### Wait for the go-ahead
+
+A proposal is not a change. Block for the reviewer's answer rather than acting on your own reading:
+
+```bash
+revue status --wait --since <handoffId>
+```
+
+The go-ahead arrives as a reply on the thread, delivered by their next Send, or as a line in chat
+("go ahead", "do 1 and 3, not 2"). Act on every proposal they accepted, reply on each of those
+threads naming what moved, and leave a declined proposal as it is with a short acknowledgement. A
+pass whose every thread was a question or a pushback has nothing to wait for.
+
 ### Regenerate the review, once, at the end of the pass
 
 If the pass changed no code — every thread answered, nothing edited — stop here. There is nothing to
 re-narrate, and prepping a run to prove it only hands the reviewer a superseding run to reload for
-no reason.
+no reason. That includes the proposal round: regenerate only after the go-ahead has turned
+proposals into changes.
 
 Otherwise regenerate once for the whole pass, never once per fix: the reviewer gets one coherent run
 describing where the code ended up, instead of a stream of half-answered ones.

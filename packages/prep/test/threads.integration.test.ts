@@ -347,6 +347,110 @@ test("feedback follows the code onto the run that continues the review", async (
 	expect(second.manifest.files.map((file) => file.path)).not.toContain("src/gamma.ts");
 });
 
+/**
+ * The shape of the reported fault: a narrated run with feedback, then a prep the agent never
+ * narrated, which is where the feedback now sits.
+ */
+const pendingReview = async () => {
+	const root = await repository({
+		"src/alpha.ts": numbered("alpha", 20),
+		"src/beta.ts": numbered("beta", 20),
+	});
+	await write(root, "src/alpha.ts", replaceLine(numbered("alpha", 20), 5, "alpha line five"));
+	await write(root, "src/beta.ts", replaceLine(numbered("beta", 20), 5, "beta line five"));
+	await commit(root, "Feature work");
+	const narrated = await prepareRun(["main", "HEAD"], root);
+	await narrate(narrated, [
+		chapter({ id: "alpha", order: 1, hunkRefs: [{ filePath: "src/alpha.ts", oldStart: 2 }] }),
+		chapter({ id: "beta", order: 2, hunkRefs: [{ filePath: "src/beta.ts", oldStart: 2 }] }),
+	]);
+	const onAlpha = feedback({
+		index: 1,
+		runId: narrated.manifest.runId,
+		anchor: anchoredAt("src/alpha.ts", 2, 5),
+		body: "Why five?",
+	});
+	seedThreads(root, narrated.manifest.runId, [onAlpha]);
+	await write(root, "src/beta.ts", replaceLine(numbered("beta", 20), 5, "beta line 5, fixed"));
+	await commit(root, "Fix beta");
+	const pending = await prepareRun(["main", "HEAD"], root);
+	expect(storedThreads(root, pending.manifest.runId).map((thread) => thread.id)).toEqual([
+		onAlpha.id,
+	]);
+	return { root, narrated, pending, onAlpha };
+};
+
+test("feedback left on a pending run follows the next prep of the review", async () => {
+	const { root, narrated, pending, onAlpha } = await pendingReview();
+	await write(
+		root,
+		"src/beta.ts",
+		replaceLine(numbered("beta", 20), 5, "beta line 5, fixed twice"),
+	);
+	await commit(root, "Fix beta again");
+
+	const latest = await prepareRun(["main", "HEAD"], root);
+
+	// The narrated run is still the one this continues, so its untouched chapter carries...
+	expect(latest.manifest.supersedes).toBe(narrated.manifest.runId);
+	expect((await loadRunDelta(latest))?.carried.map((entry) => entry.id)).toEqual(["alpha"]);
+	// ...and the feedback comes along from the pending run it was left on, in one conversation.
+	expect(storedThreads(root, narrated.manifest.runId)).toEqual([]);
+	expect(storedThreads(root, pending.manifest.runId)).toEqual([]);
+	const [carried] = storedThreads(root, latest.manifest.runId);
+	expect(carried?.id).toBe(onAlpha.id);
+	expect(carried?.migratedFrom).toBe(pending.manifest.runId);
+	expect(carried?.anchor).toEqual(onAlpha.anchor);
+	expect(latest.warnings).toEqual([]);
+});
+
+test("--carry-from a pending run continues the narrated run before it", async () => {
+	const { root, narrated, pending, onAlpha } = await pendingReview();
+	await write(
+		root,
+		"src/beta.ts",
+		replaceLine(numbered("beta", 20), 5, "beta line 5, fixed twice"),
+	);
+	await commit(root, "Fix beta again");
+
+	const latest = await prepareRun(["main", "HEAD", "--carry-from", pending.manifest.runId], root);
+
+	expect(latest.manifest.supersedes).toBe(narrated.manifest.runId);
+	expect((await loadRunDelta(latest))?.carried.map((entry) => entry.id)).toEqual(["alpha"]);
+	expect(storedThreads(root, latest.manifest.runId).map((thread) => thread.migratedFrom)).toEqual([
+		pending.manifest.runId,
+	]);
+	expect(storedThreads(root, latest.manifest.runId)[0]?.id).toBe(onAlpha.id);
+	expect(latest.warnings).toEqual([expect.stringContaining("continues its narrated ancestor")]);
+});
+
+test("prep says when it strands feedback and when every read mark starts over", async () => {
+	const { root, narrated, pending } = await pendingReview();
+	await write(
+		root,
+		"src/alpha.ts",
+		replaceLine(numbered("alpha", 20), 5, "alpha line 5, rewritten"),
+	);
+	await commit(root, "Rewrite alpha");
+
+	const fresh = await prepareRun(["main", "HEAD", "--no-carry"], root);
+	expect(fresh.manifest.supersedes).toBeUndefined();
+	expect(fresh.warnings).toEqual([
+		`1 open thread on run ${pending.manifest.runId.slice(0, 12)} do not follow this run; pass --carry-from ${pending.manifest.runId} to move them`,
+	]);
+
+	await write(root, "src/beta.ts", replaceLine(numbered("beta", 20), 5, "beta line 5, rewritten"));
+	await commit(root, "Rewrite beta");
+	const rewritten = await prepareRun(["main", "HEAD"], root);
+	expect(rewritten.manifest.supersedes).toBe(narrated.manifest.runId);
+	expect(rewritten.warnings).toEqual([
+		`none of the 2 chapters of ${narrated.manifest.runId.slice(0, 12)} carried forward: every read mark on that run starts over`,
+	]);
+	expect(
+		storedThreads(root, rewritten.manifest.runId).map((thread) => thread.migratedFrom),
+	).toEqual([pending.manifest.runId]);
+});
+
 test("an anchor whose lines moved beneath it is re-mapped onto the same code", async () => {
 	const root = await repository({ "src/app.ts": numbered("app", 30) });
 	await write(root, "src/app.ts", replaceLine(numbered("app", 30), 25, "app line twenty-five"));

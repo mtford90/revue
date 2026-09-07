@@ -68,7 +68,7 @@ The run key hashes the parsed chapters. Reviewer progress is keyed by the run ke
 - The agent's work after a fix is short: copy carried chapters, rewrite stale chapters, narrate new units, write the epilogue.
 - Reviewer progress survives on carried chapters ([the run key still changes; a seed carries the marks](#schema-fields-and-the-run-key)).
 - `revue diff` and bare `revue` also prep. They pay a predecessor load when lineage resolves. Watch this cost on large runs.
-- A prep with no narration afterwards leaves a pending run. The next prep supersedes the last narrated run, not the pending one. Threads on the pending run strand there. This is a known gap.
+- A prep with no narration afterwards leaves a pending run. The next prep supersedes the last narrated run, not the pending one. Since 2026-09-07 prep also moves the threads left on every pending run of that lineage onto the new run, and `--carry-from` a pending run resolves to the narrated run before it.
 - A renamed file yields new units and stale chapters. The delta matches files by path only.
 - Superseded runs accumulate in `.revue/runs/`. Garbage collection is a separate product decision.
 

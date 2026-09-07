@@ -10,11 +10,10 @@ import { type CarryRequest, PrepArgumentError } from "./scope.ts";
 
 // A review is iterative: the run prepared after the agent changed code continues the narrated run
 // the reviewer read. Only a narrated predecessor is auto-selected, because carrying forward
-// chapters is the whole point of the link.
+// chapters is the whole point of the link. Runs prepared after it and never narrated are pending
+// continuations of the same review, and the feedback that moved onto them moves on again.
 
 const RUN_ID_PATTERN = /^[0-9a-f]{64}$/;
-
-type Candidate = { runId: string; createdAt: string };
 
 export type ResolveSupersedesInput = {
 	runsDirectory: string;
@@ -75,36 +74,110 @@ export async function readRunRecords(runsDirectory: string): Promise<RunRecord[]
 		);
 }
 
-const narratedCandidates = async (runsDirectory: string, key: string): Promise<Candidate[]> =>
-	(await readRunRecords(runsDirectory))
-		.filter(
-			({ manifest, narrated }) => narrated && scopeKey(manifest.scope, manifest.ignore) === key,
-		)
-		.map(({ manifest }) => ({ runId: manifest.runId, createdAt: manifest.createdAt }));
+const shortId = (runId: string): string => runId.slice(0, 12);
 
-const explicitPredecessor = async (runsDirectory: string, runId: string): Promise<string> => {
-	const manifest = await readManifest(join(runsDirectory, runId));
-	if (!manifest) {
+/**
+ * The run and its ancestors up to and including the first narrated one, nearest first. An
+ * unnarrated run is a pending continuation of that narrated run, so this is the chain feedback
+ * has to be gathered along.
+ */
+const chainFrom = (byId: ReadonlyMap<string, RunRecord>, runId: string): RunRecord[] => {
+	const record = byId.get(runId);
+	if (!record) return [];
+	if (record.narrated) return [record];
+	const parent = record.manifest.supersedes;
+	const rest = parent && parent !== runId ? chainFrom(byId, parent) : [];
+	return [record, ...rest];
+};
+
+/** The runs prepared after `anchor` that nobody narrated, oldest first: feedback strands there. */
+const pendingDescendants = (records: readonly RunRecord[], anchor: string): RunRecord[] => {
+	const byId = new Map(records.map((record) => [record.manifest.runId, record]));
+	return records
+		.filter(
+			(record) =>
+				!record.narrated &&
+				record.manifest.runId !== anchor &&
+				chainFrom(byId, record.manifest.runId).some((link) => link.manifest.runId === anchor),
+		)
+		.reverse();
+};
+
+/** How a newly prepared run continues the review before it, or starts a fresh one. */
+export type ResolvedLineage = {
+	/** The run recorded as superseded, or undefined when this run starts a fresh lineage. */
+	supersedes: string | undefined;
+	/** Every run whose feedback moves onto the new run: the predecessor and the pending runs after it. */
+	threadSources: string[];
+	/** Carry decisions that cost the reviewer something, for prep to say out loud. */
+	notes: string[];
+};
+
+const fresh: ResolvedLineage = { supersedes: undefined, threadSources: [], notes: [] };
+
+const continuing = (records: readonly RunRecord[], predecessor: RunRecord): ResolvedLineage => {
+	const runId = predecessor.manifest.runId;
+	return {
+		supersedes: runId,
+		threadSources: [
+			runId,
+			...pendingDescendants(records, runId).map((record) => record.manifest.runId),
+		],
+		notes: [],
+	};
+};
+
+/**
+ * `--carry-from` may name a pending run, because that is where the last prep left the feedback.
+ * Chapters can only come from a narrated run, so the lineage chains through the pending run to the
+ * narrated run it continues, and the feedback on every run in between comes along.
+ */
+const explicitLineage = (records: readonly RunRecord[], runId: string): ResolvedLineage => {
+	const byId = new Map(records.map((record) => [record.manifest.runId, record]));
+	const named = byId.get(runId);
+	if (!named) {
 		throw new PrepArgumentError(
 			`--carry-from names a run this repository has no record of: ${runId}`,
 		);
 	}
-	return manifest.runId;
+	if (named.narrated) return continuing(records, named);
+	const ancestor = chainFrom(byId, runId).find((record) => record.narrated);
+	if (!ancestor) {
+		return {
+			...continuing(records, named),
+			notes: [
+				`--carry-from ${shortId(runId)} was never narrated and continues no narrated run: no chapters carry forward, so every read mark starts over`,
+			],
+		};
+	}
+	return {
+		...continuing(records, ancestor),
+		notes: [
+			`--carry-from ${shortId(runId)} is not narrated: this run continues its narrated ancestor ${shortId(ancestor.manifest.runId)} and takes the feedback left on ${shortId(runId)}`,
+		],
+	};
 };
 
-/** The run a newly prepared run supersedes, or undefined when it starts a fresh lineage. */
-export async function resolveSupersedes({
+/** The lineage a newly prepared run records, resolved from the runs already on disk. */
+export async function resolveLineage({
 	runsDirectory,
 	scope,
 	ignore,
 	carry,
-}: ResolveSupersedesInput): Promise<string | undefined> {
-	if (carry.kind === "none") return undefined;
-	if (carry.kind === "explicit") return explicitPredecessor(runsDirectory, carry.runId);
-	const candidates = await narratedCandidates(runsDirectory, scopeKey(scope, ignore));
-	const mostRecent = candidates.sort(
-		(left, right) =>
-			right.createdAt.localeCompare(left.createdAt) || right.runId.localeCompare(left.runId),
-	)[0];
-	return mostRecent?.runId;
+}: ResolveSupersedesInput): Promise<ResolvedLineage> {
+	if (carry.kind === "none") return fresh;
+	const records = await readRunRecords(runsDirectory);
+	if (carry.kind === "explicit") return explicitLineage(records, carry.runId);
+	const key = scopeKey(scope, ignore);
+	const narrated = records.find(
+		({ manifest, narrated }) => narrated && scopeKey(manifest.scope, manifest.ignore) === key,
+	);
+	return narrated ? continuing(records, narrated) : fresh;
+}
+
+/** The run a newly prepared run supersedes, or undefined when it starts a fresh lineage. */
+export async function resolveSupersedes(
+	input: ResolveSupersedesInput,
+): Promise<string | undefined> {
+	return (await resolveLineage(input)).supersedes;
 }

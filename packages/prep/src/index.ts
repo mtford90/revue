@@ -52,8 +52,14 @@ export {
 	readHandoff,
 	writeHandoff,
 } from "./handoff.ts";
-export { type RunRecord, readRunRecords, resolveSupersedes } from "./lineage.ts";
-export { PrepError, prepareRun, previewRunId } from "./prep.ts";
+export {
+	type ResolvedLineage,
+	type RunRecord,
+	readRunRecords,
+	resolveLineage,
+	resolveSupersedes,
+} from "./lineage.ts";
+export { type PreparedRunOutcome, PrepError, prepareRun, previewRunId } from "./prep.ts";
 export {
 	type CarryRequest,
 	PrepArgumentError,

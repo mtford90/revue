@@ -90,7 +90,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   an anchor.
 - **Carried thread** — a thread prep moved onto a run from the run it **supersedes**, open and
   dealt-with alike, so the conversation and its history stay with the code rather than stranding on
-  a dead run. Threads move rather than copy — the superseded run is left with none — and keep their
+  a dead run. Feedback left on a **pending run** (one prepared after the narrated run and never
+  narrated) moves on again with the next prep, since threads follow the newest run of a lineage
+  while chapters can only come from a narrated one; `--carry-from` a pending run continues the
+  narrated run before it. Prep warns about every open thread it leaves behind. Threads move rather than copy — the superseded run is left with none — and keep their
   identity, status, and every message, gaining only a note of the run they came from. Hunk and patch
   anchors are re-mapped through the run delta's unit matching, and then **followed by their
   content**: a unit that came through intact shifts exactly, while inside a unit the change rewrote

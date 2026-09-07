@@ -114,7 +114,11 @@ test("--carry-from names the predecessor and --no-carry suppresses lineage", asy
 	await revise(root, 4);
 	const fresh = await prepareRun(["main", "HEAD", "--no-carry"], root);
 
-	expect(forced.manifest.supersedes).toBe(unnarrated.manifest.runId);
+	// A pending run holds no narration, so carrying from it continues the narrated run before it.
+	expect(forced.manifest.supersedes).toBe(narrated.manifest.runId);
+	expect(forced.warnings).toEqual([
+		`--carry-from ${unnarrated.manifest.runId.slice(0, 12)} is not narrated: this run continues its narrated ancestor ${narrated.manifest.runId.slice(0, 12)} and takes the feedback left on ${unnarrated.manifest.runId.slice(0, 12)}`,
+	]);
 	expect(fresh.manifest.supersedes).toBeUndefined();
 	expect(prepareRun(["main", "HEAD", "--carry-from", "b".repeat(64)], root)).rejects.toThrow(
 		"--carry-from names a run this repository has no record of",
@@ -132,4 +136,21 @@ test("an unchanged scope dedupes to the identical run without recording self-lin
 	expect(again.directory).toBe(first.directory);
 	expect(again.manifest.runId).toBe(first.manifest.runId);
 	expect(again.manifest.supersedes).toBeUndefined();
+});
+
+test("--carry-from a run with no narrated ancestor carries feedback alone and says so", async () => {
+	const root = await repository();
+	await revise(root, 1);
+	const unnarrated = await prepareRun(["main", "HEAD"], root);
+	await revise(root, 2);
+
+	const forced = await prepareRun(
+		["main", "HEAD", "--carry-from", unnarrated.manifest.runId],
+		root,
+	);
+
+	expect(forced.manifest.supersedes).toBe(unnarrated.manifest.runId);
+	expect(forced.warnings).toEqual([
+		`--carry-from ${unnarrated.manifest.runId.slice(0, 12)} was never narrated and continues no narrated run: no chapters carry forward, so every read mark starts over`,
+	]);
 });

@@ -354,59 +354,89 @@ const filesByPath = (patch: string): ReadonlyMap<string, DiffFile> => {
 	return files;
 };
 
-const withoutRun = (runs: ThreadStoreFile["runs"], runId: string): ThreadStoreFile["runs"] =>
-	Object.fromEntries(Object.entries(runs).filter(([key]) => key !== runId));
+const withoutRuns = (
+	runs: ThreadStoreFile["runs"],
+	runIds: ReadonlySet<string>,
+): ThreadStoreFile["runs"] =>
+	Object.fromEntries(Object.entries(runs).filter(([key]) => !runIds.has(key)));
 
 export type ThreadMigrationInput = {
 	run: PreparedRun;
 	runsDirectory: string;
 	threadsPath: string;
+	/**
+	 * The runs whose feedback moves onto this one. Defaults to the run it supersedes; a lineage
+	 * that chained through pending runs names each of them, because the feedback moved onto the
+	 * pending run the last time prep ran.
+	 */
+	sources?: readonly string[];
 };
 
-/** What a superseding run took over from the run it continues. */
+/** What a superseding run took over from the runs it continues. */
 export type ThreadMigration = {
 	runId: string;
-	supersedes: string;
+	/** The runs feedback was actually moved from, oldest first. */
+	sources: string[];
 	carried: ReviewThread[];
 };
 
+const carryContextFor = async (
+	run: PreparedRun,
+	runsDirectory: string,
+	source: string,
+): Promise<CarryContext> => {
+	const predecessor = await loadPreparedRun(join(runsDirectory, source));
+	return {
+		matches: matchReviewUnits(predecessor, run),
+		previousFiles: filesByPath(predecessor.patch),
+		currentFiles: filesByPath(run.patch),
+	};
+};
+
 /**
- * Move the superseded run's feedback onto the run that continues it, anchors and all. Threads are
- * moved rather than copied because a thread is one conversation about code that has moved on:
+ * Move the superseded runs' feedback onto the run that continues them, anchors and all. Threads
+ * are moved rather than copied because a thread is one conversation about code that has moved on:
  * leaving a second copy on the dead run would let the two halves answer each other differently.
  * Nothing is dropped, whatever became of the code, and a re-prep that dedupes onto an already
- * migrated run finds nothing left to move.
+ * migrated run finds nothing left to move. Each source's anchors are re-mapped against that source,
+ * since a thread left on a pending run is written in that run's coordinates.
  */
 export async function migrateSupersededThreads({
 	run,
 	runsDirectory,
 	threadsPath,
+	sources,
 }: ThreadMigrationInput): Promise<ThreadMigration | null> {
 	const { runId, supersedes } = run.manifest;
 	if (!supersedes) return null;
-	const predecessor = await loadPreparedRun(join(runsDirectory, supersedes));
-	const context: CarryContext = {
-		matches: matchReviewUnits(predecessor, run),
-		previousFiles: filesByPath(predecessor.patch),
-		currentFiles: filesByPath(run.patch),
-	};
+	const wanted = (sources ?? [supersedes]).filter((source) => source !== runId);
+	if (!wanted.length) return null;
+	const contexts = new Map(
+		await Promise.all(
+			wanted.map(
+				async (source) => [source, await carryContextFor(run, runsDirectory, source)] as const,
+			),
+		),
+	);
 	return withThreadStoreLock(threadsPath, () => {
 		const store = readThreadStoreFile(threadsPath);
-		const pending = store.runs[supersedes] ?? [];
-		if (!pending.length) return null;
+		const moved = wanted.filter((source) => (store.runs[source] ?? []).length > 0);
+		if (!moved.length) return null;
 		const settled = store.runs[runId] ?? [];
 		const known = new Set(settled.map((thread) => thread.id));
-		const carried = pending
-			.filter((thread) => !known.has(thread.id))
-			.map((thread) => carriedThread(thread, runId, context));
+		const carried = moved.flatMap((source) =>
+			(store.runs[source] ?? [])
+				.filter((thread) => !known.has(thread.id))
+				.map((thread) => carriedThread(thread, runId, contexts.get(source) as CarryContext)),
+		);
 		persistThreadStoreFile(threadsPath, {
 			...store,
 			runs: {
-				...withoutRun(store.runs, supersedes),
+				...withoutRuns(store.runs, new Set(moved)),
 				[runId]: sortThreads([...settled, ...carried]),
 			},
 		});
-		return { runId, supersedes, carried };
+		return { runId, sources: moved, carried };
 	});
 }
 

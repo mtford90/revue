@@ -96,6 +96,8 @@ The command prints JSON. It does not compare the worktree again.
 
 When `revue status` reports a pending run, the agent continues that run instead of preparing another one.
 
+If the agent preps again instead, the new run still continues the last narrated run. Prep chains through the pending runs: the narrated run supplies the chapters, and the feedback that moved onto each pending run moves on again. `--carry-from` accepts a pending run and resolves the same way.
+
 The agent follows this sequence:
 
 1. read `revue status --json`;
@@ -184,6 +186,8 @@ Use an explicit predecessor when automatic detection selects the wrong run:
 ```bash
 revue prep <scope> --carry-from <run-id>
 ```
+
+Prep prints a warning when a choice costs the reviewer something: open threads on a run this run does not continue, a carried thread whose code is gone, or a narrated predecessor of which no chapter carried, which resets every read mark.
 
 Start a new review without inherited chapters, threads, or progress when that is intentional:
 

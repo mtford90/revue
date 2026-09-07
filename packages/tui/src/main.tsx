@@ -153,8 +153,11 @@ const PREP_HELP = `usage: revue prep [main | main feature | main..feature | main
 
 A new run records the most recent narrated run of the same scope in supersedes,
 carries forward every chapter the change did not touch, and writes the worklist
-for the rest to delta.json. --carry-from names that predecessor explicitly;
---no-carry starts a fresh review.`;
+for the rest to delta.json. Feedback left on runs prepared after that one and
+never narrated moves onto the new run as well. --carry-from names the predecessor
+explicitly; naming a run nobody narrated continues the narrated run before it.
+--no-carry starts a fresh review. Prep warns when feedback is left behind or no
+chapter carries.`;
 
 const DELTA_HELP = `usage: revue delta <run-directory>
 
@@ -282,6 +285,7 @@ async function cmdPrep(args: string[]): Promise<number> {
 		process.stderr.write(`${prepSummary(run)}\n`);
 		const delta = await loadRunDelta(run);
 		if (delta) process.stderr.write(`${deltaSummary(run.directory, delta)}\n`);
+		for (const warning of run.warnings) process.stderr.write(`warning: ${warning}\n`);
 		if (showIgnored) process.stderr.write(`${ignoredDetails(run)}\n`);
 		process.stdout.write(`${run.directory}\n`);
 		return 0;

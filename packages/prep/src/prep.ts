@@ -3,10 +3,12 @@ import {
 	RUN_ENDPOINT_KIND,
 	RUN_FILE_STATUS,
 	RUN_SCHEMA_VERSION,
+	type RunDeltaFile,
 	type RunFile,
 	type RunIgnoreInputs,
 	type RunManifestContent,
 	type RunScope,
+	THREAD_STATUS,
 } from "@revue/types";
 import {
 	defaultRunsDirectory,
@@ -29,9 +31,14 @@ import {
 	type SnapshotSource,
 	verifyRawCapture,
 } from "./git.ts";
-import { resolveSupersedes } from "./lineage.ts";
+import { type ResolvedLineage, resolveLineage } from "./lineage.ts";
 import { type CarryRequest, parseScopeRequest } from "./scope.ts";
-import { migrateSupersededThreads, threadStorePath } from "./threads.ts";
+import {
+	migrateSupersededThreads,
+	readThreadStoreFile,
+	type ThreadMigration,
+	threadStorePath,
+} from "./threads.ts";
 
 export class PrepError extends Error {}
 
@@ -266,26 +273,100 @@ export async function previewRunId(args: string[], directory?: string): Promise<
 	return preparedRunId({ content, patch, hunks });
 }
 
-export async function prepareRun(args: string[], directory?: string): Promise<PreparedRun> {
+/** A prepared run and what prep has to say about the review it did or did not continue. */
+export type PreparedRunOutcome = PreparedRun & {
+	/** Carry decisions that cost the reviewer feedback or read marks, printed by the CLI. */
+	warnings: string[];
+};
+
+const shortId = (runId: string): string => runId.slice(0, 12);
+
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/** Nothing of a narrated predecessor came through: the reviewer's every read mark starts over. */
+const narrationWarnings = (delta: RunDeltaFile | null): string[] => {
+	if (!delta) return [];
+	const narrated = delta.carried.length + delta.stale.length;
+	if (!narrated || delta.carried.length) return [];
+	return [
+		`none of the ${plural(narrated, "chapter")} of ${shortId(delta.supersedes)} carried forward: every read mark on that run starts over`,
+	];
+};
+
+const orphanWarnings = (migration: ThreadMigration | null): string[] => {
+	const orphaned = migration?.carried.filter((thread) => thread.migrationOrphaned).length ?? 0;
+	return orphaned
+		? [
+				`${plural(orphaned, "carried thread")} point at code this run no longer has; they are listed as orphaned`,
+			]
+		: [];
+};
+
+/**
+ * Feedback on a run this lineage does not continue stays where it is. A fresh lineage, a
+ * `--no-carry`, or a scope that matched no narrated run each strand it silently otherwise.
+ */
+const strandedWarnings = (
+	threadsPath: string,
+	runId: string,
+	moved: ReadonlySet<string>,
+): string[] => {
+	try {
+		return Object.entries(readThreadStoreFile(threadsPath).runs)
+			.filter(([source]) => source !== runId && !moved.has(source))
+			.flatMap(([source, threads]) => {
+				const open = threads.filter((thread) => thread.status === THREAD_STATUS.OPEN).length;
+				return open
+					? [
+							`${plural(open, "open thread")} on run ${shortId(source)} do not follow this run; pass --carry-from ${source} to move them`,
+						]
+					: [];
+			});
+	} catch {
+		return [];
+	}
+};
+
+const carryWarnings = (args: {
+	run: PreparedRun;
+	lineage: ResolvedLineage;
+	delta: RunDeltaFile | null;
+	migration: ThreadMigration | null;
+	threadsPath: string;
+}): string[] => [
+	...args.lineage.notes,
+	...narrationWarnings(args.delta),
+	...orphanWarnings(args.migration),
+	...strandedWarnings(
+		args.threadsPath,
+		args.run.manifest.runId,
+		new Set([args.run.manifest.runId, ...args.lineage.threadSources]),
+	),
+];
+
+export async function prepareRun(args: string[], directory?: string): Promise<PreparedRunOutcome> {
 	const { repositoryRoot, content, patch, hunks, blobs, carry } = await prepareContent(
 		args,
 		directory,
 	);
 	const { scope, ignore } = content;
 	const runsDirectory = defaultRunsDirectory(repositoryRoot);
+	const lineage = await resolveLineage({ runsDirectory, scope, ignore, carry });
 	const run = await writePreparedRun({
 		runsDirectory,
 		content,
 		patch,
 		hunks,
 		blobs,
-		supersedes: await resolveSupersedes({ runsDirectory, scope, ignore, carry }),
+		supersedes: lineage.supersedes,
 	});
-	await recordRunDelta(run, runsDirectory);
-	await migrateSupersededThreads({
+	const delta = await recordRunDelta(run, runsDirectory);
+	const threadsPath = threadStorePath(repositoryRoot);
+	const migration = await migrateSupersededThreads({
 		run,
 		runsDirectory,
-		threadsPath: threadStorePath(repositoryRoot),
+		threadsPath,
+		sources: lineage.threadSources,
 	});
-	return run;
+	return { ...run, warnings: carryWarnings({ run, lineage, delta, migration, threadsPath }) };
 }

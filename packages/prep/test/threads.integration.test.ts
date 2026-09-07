@@ -527,15 +527,16 @@ test("a thread on revealed context follows the pinned file, and orphans when the
 		chapter({ id: "alpha", order: 1, hunkRefs: [{ filePath: "src/alpha.ts", oldStart: 27 }] }),
 		chapter({ id: "beta", order: 2, hunkRefs: [{ filePath: "src/beta.ts", oldStart: 1 }] }),
 	]);
+	const contextAnchor = (startLine: number, endLine: number): ThreadAnchor => ({
+		kind: THREAD_ANCHOR_KIND.CONTEXT,
+		filePath: "src/alpha.ts",
+		startLine,
+		endLine,
+	});
 	const onContext = feedback({
 		index: 1,
 		runId: first.manifest.runId,
-		anchor: {
-			kind: THREAD_ANCHOR_KIND.CONTEXT,
-			filePath: "src/alpha.ts",
-			startLine: 5,
-			endLine: 6,
-		},
+		anchor: contextAnchor(5, 6),
 		body: "These unchanged lines look wrong too.",
 	});
 	seedThreads(root, first.manifest.runId, [onContext]);
@@ -549,7 +550,7 @@ test("a thread on revealed context follows the pinned file, and orphans when the
 	await commit(root, "Add a header");
 	const second = await prepareRun(["main", "HEAD"], root);
 	const [shifted] = storedThreads(root, second.manifest.runId);
-	expect(shifted?.anchor).toEqual({ ...onContext.anchor, startLine: 7, endLine: 8 });
+	expect(shifted?.anchor).toEqual(contextAnchor(7, 8));
 	expect(shifted?.migrationOrphaned).toBeUndefined();
 
 	// Reverting the file takes it out of the run: the thread stays, detached, where it was written.
@@ -557,7 +558,7 @@ test("a thread on revealed context follows the pinned file, and orphans when the
 	await commit(root, "Revert alpha");
 	const third = await prepareRun(["main", "HEAD"], root);
 	const [orphaned] = storedThreads(root, third.manifest.runId);
-	expect(orphaned?.anchor).toEqual({ ...onContext.anchor, startLine: 7, endLine: 8 });
+	expect(orphaned?.anchor).toEqual(contextAnchor(7, 8));
 	expect(orphaned?.migrationOrphaned).toBe(true);
 	expect(third.warnings).toEqual([
 		"1 carried thread point at code this run no longer has; they are listed as orphaned",

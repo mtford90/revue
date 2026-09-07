@@ -587,7 +587,9 @@ const threadAnchorFrom = (options: CommandOptions): ThreadAnchor => {
 	if (kind !== THREAD_ANCHOR_KIND.HUNK) {
 		for (const rejected of ["--old-start", "--side"]) {
 			if (options.values.has(rejected)) {
-				throw new Error(`${rejected} does not apply to a ${kind} anchor`);
+				throw new Error(
+					`${rejected} does not apply to ${kind === THREAD_ANCHOR_KIND.EXCERPT ? "an excerpt" : "a context"} anchor`,
+				);
 			}
 		}
 		return {

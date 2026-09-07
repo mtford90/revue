@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { CONTEXT_HUNK_OLD_START, parsePatch } from "@revue/diff";
+import {
+	CONTEXT_HUNK_OLD_START,
+	type DiffLineRange,
+	type DiffSelectionRange,
+	parsePatch,
+} from "@revue/diff";
 import { type Chapter, THREAD_ANCHOR_KIND } from "@revue/types";
 import {
 	chapterOwnsContextAnchor,
@@ -37,7 +42,7 @@ const diffFiles = parsePatch(PATCH);
 const hunks = diffFiles[0]?.metadata.hunks ?? [];
 const resolve = gitRangeResolver(diffFiles, "sample.txt");
 
-const context = (line: number) => ({
+const context = (line: number): DiffLineRange => ({
 	filePath: "sample.txt",
 	hunkOldStart: CONTEXT_HUNK_OLD_START,
 	side: "additions",
@@ -67,13 +72,18 @@ test("a revealed old-side line names the same new-side line, shifted by the hunk
 });
 
 test("a selection is context only when every range is revealed context", () => {
-	const revealed = {
+	const revealed: DiffSelectionRange = {
 		oldStart: CONTEXT_HUNK_OLD_START,
 		side: "additions",
 		startLine: 30,
 		endLine: 31,
 	};
-	const changed = { oldStart: 18, side: "additions", startLine: 21, endLine: 21 };
+	const changed: DiffSelectionRange = {
+		oldStart: 18,
+		side: "additions",
+		startLine: 21,
+		endLine: 21,
+	};
 	const filePath = "sample.txt";
 	expect(contextSelectionKind({ filePath, ranges: [changed] })).toBe("patch");
 	expect(contextSelectionKind({ filePath, ranges: [revealed] })).toBe("context");

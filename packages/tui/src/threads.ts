@@ -410,12 +410,12 @@ export function validateThreadsForRun(
 			continue;
 		}
 		if (thread.migrationOrphaned) {
-			if (!isPatchAnchor(thread.anchor) || !thread.migratedFrom) {
-				throw staleAnchor(thread, "migrationOrphaned requires a migrated patch anchor");
+			if (!thread.migratedFrom) {
+				throw staleAnchor(thread, "migrationOrphaned requires a migrated patch or hunk anchor");
 			}
 			orphaned.push({
 				thread,
-				reason: "this atomic patch selection could not be fully remapped from a superseded run",
+				reason: "the code this thread was written on is not in the run that superseded it",
 			});
 			continue;
 		}

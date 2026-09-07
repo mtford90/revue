@@ -6,7 +6,9 @@ import {
 	emptyThreadStoreFile,
 	isExcerptAnchor,
 	isPatchAnchor,
+	type PatchThreadAnchor,
 	type PatchThreadRange,
+	REVIEW_UNIT_STATUS,
 	type ReviewThread,
 	type ThreadAnchor,
 	type ThreadStoreFile,
@@ -132,77 +134,207 @@ export function persistThreadStoreFile(path: string, file: ThreadStoreFile): voi
 	}
 }
 
+/** The lines a review unit holds on one side, numbered as the new run counts them. */
+type UnitLines = { start: number; lines: readonly string[] };
+
+const withoutEnding = (line: string): string => line.replace(/\r?\n$/, "");
+
+const unitLines = (
+	file: DiffFile | undefined,
+	oldStart: number,
+	side: PatchThreadRange["side"],
+): UnitLines | null => {
+	const hunk = file?.metadata.hunks.find((candidate) => candidate.deletionStart === oldStart);
+	if (!file || !hunk) return null;
+	const additions = side === "additions";
+	const start = additions ? hunk.additionStart : hunk.deletionStart;
+	const count = additions ? hunk.additionCount : hunk.deletionCount;
+	const index = additions ? hunk.additionLineIndex : hunk.deletionLineIndex;
+	const source = additions ? file.metadata.additionLines : file.metadata.deletionLines;
+	return { start, lines: source.slice(index, index + count).map(withoutEnding) };
+};
+
+/** The exact text a range covers, or null when the unit does not hold all of those lines. */
+const linesAt = (unit: UnitLines | null, startLine: number, endLine: number): string[] | null => {
+	if (!unit) return null;
+	const from = startLine - unit.start;
+	const to = endLine - unit.start;
+	if (from < 0 || to < from || to > unit.lines.length - 1) return null;
+	return unit.lines.slice(from, to + 1);
+};
+
+const sameLines = (left: readonly string[], right: readonly string[]): boolean =>
+	left.length === right.length && left.every((line, index) => line === right[index]);
+
+type PlacedUnit = UnitLines & { oldStart: number };
+
+/** Every unit of a file in one run, so code that moved between hunks is still findable. */
+const fileUnits = (file: DiffFile | undefined, side: PatchThreadRange["side"]): PlacedUnit[] =>
+	(file?.metadata.hunks ?? []).flatMap((hunk) => {
+		const unit = unitLines(file, hunk.deletionStart, side);
+		return unit ? [{ ...unit, oldStart: hunk.deletionStart }] : [];
+	});
+
+type FoundLines = { oldStart: number; startLine: number };
+
+const occurrencesIn = (unit: PlacedUnit, wanted: readonly string[]): FoundLines[] =>
+	unit.lines.flatMap((_, index) =>
+		sameLines(unit.lines.slice(index, index + wanted.length), wanted)
+			? [{ oldStart: unit.oldStart, startLine: unit.start + index }]
+			: [],
+	);
+
+/** Where the anchored text now sits, preferring the occurrence nearest where the anchor pointed. */
+const findLines = (
+	file: DiffFile | undefined,
+	side: PatchThreadRange["side"],
+	wanted: readonly string[],
+	near: number,
+): FoundLines | null =>
+	fileUnits(file, side)
+		.flatMap((unit) => occurrencesIn(unit, wanted))
+		.sort((left, right) => Math.abs(left.startLine - near) - Math.abs(right.startLine - near))[0] ??
+	null;
+
+/**
+ * Whether the lines immediately around the range came through untouched. That is what tells an
+ * edit the reviewer's comment answers — the fix rewrote the very lines it was left on — apart from
+ * a deletion that merely left unrelated code sitting at the same numbers.
+ */
+const framePreserved = (
+	before: UnitLines | null,
+	after: UnitLines | null,
+	range: PatchThreadRange,
+	shifted: PatchThreadRange,
+): boolean => {
+	const sides = [
+		[range.startLine - 1, shifted.startLine - 1],
+		[range.endLine + 1, shifted.endLine + 1],
+	] as const;
+	const pairs = sides.flatMap(([previousLine, currentLine]) => {
+		const previous = linesAt(before, previousLine, previousLine);
+		return previous ? [{ previous, current: linesAt(after, currentLine, currentLine) }] : [];
+	});
+	return (
+		pairs.length > 0 &&
+		pairs.every(({ previous, current }) => current && sameLines(previous, current))
+	);
+};
+
 /**
  * Where a carried anchor reads in the superseding run. A unit that came through with its content
- * intact shifts exactly, and one the change rewrote keeps the offset the reviewer commented at, so
- * feedback lands on the code that answers it. An anchor no unit of this run can hold keeps the
- * range it was written against: the run reports it as orphaned rather than moving it somewhere it
- * was never aimed.
+ * intact shifts exactly. Where the change rewrote the unit the anchor is followed by its content:
+ * the same text at the shifted position, failing that the shifted position when the lines framing it
+ * survived and so the fix answered the comment in place, failing that the same text wherever else
+ * in the file it went. Code the run no longer has anywhere is `lost` — the anchor keeps the range it
+ * was written against and the run reports it as orphaned, rather than pinning the reviewer's words
+ * to whatever now occupies those numbers.
  */
+type CarriedRangeOutcome =
+	| { kind: "mapped"; range: PatchThreadRange }
+	| { kind: "unmatched" }
+	| { kind: "lost" };
+
+type CarryContext = {
+	previousFiles: ReadonlyMap<string, DiffFile>;
+	currentFiles: ReadonlyMap<string, DiffFile>;
+	matches: Map<string, ReviewUnitMatch>;
+};
+
 const carriedRange = (
 	filePath: string,
 	range: PatchThreadRange,
-	matches: Map<string, ReviewUnitMatch>,
-): PatchThreadRange | null => {
+	{ previousFiles, currentFiles, matches }: CarryContext,
+): CarriedRangeOutcome => {
 	const match = matches.get(unitKey(filePath, range.oldStart));
-	if (!match) return null;
+	if (!match) return { kind: "unmatched" };
 	const before = unitSide(match.previous, range.side);
 	const after = unitSide(match.current, range.side);
 	const shift = after.start - before.start;
-	const startLine = range.startLine + shift;
-	const endLine = range.endLine + shift;
-	const outside = startLine < after.start || endLine > after.start + after.count - 1;
-	if (after.count === 0 || outside) return null;
-	return { ...range, oldStart: match.current.oldStart, startLine, endLine };
+	const shifted: PatchThreadRange = {
+		...range,
+		oldStart: match.current.oldStart,
+		startLine: range.startLine + shift,
+		endLine: range.endLine + shift,
+	};
+	const outside =
+		shifted.startLine < after.start || shifted.endLine > after.start + after.count - 1;
+	if (after.count === 0 || outside) return { kind: "unmatched" };
+	if (match.status === REVIEW_UNIT_STATUS.UNCHANGED) return { kind: "mapped", range: shifted };
+
+	const previousUnit = unitLines(previousFiles.get(filePath), range.oldStart, range.side);
+	const currentUnit = unitLines(currentFiles.get(filePath), shifted.oldStart, range.side);
+	const wanted = linesAt(previousUnit, range.startLine, range.endLine);
+	if (!wanted) return { kind: "lost" };
+	const settled = linesAt(currentUnit, shifted.startLine, shifted.endLine);
+	if (settled && sameLines(settled, wanted)) return { kind: "mapped", range: shifted };
+	// Where the frame held, the fix rewrote these very lines, which beats an identical line found
+	// somewhere else in the file: duplicate lines are common and a coincidence must not win.
+	if (framePreserved(previousUnit, currentUnit, range, shifted)) {
+		return { kind: "mapped", range: shifted };
+	}
+	const found = findLines(currentFiles.get(filePath), range.side, wanted, shifted.startLine);
+	if (!found) return { kind: "lost" };
+	return {
+		kind: "mapped",
+		range: {
+			...range,
+			oldStart: found.oldStart,
+			startLine: found.startLine,
+			endLine: found.startLine + wanted.length - 1,
+		},
+	};
 };
 
 type CarriedAnchor = { anchor: ThreadAnchor; migrationOrphaned: boolean };
 
-const carriedAnchor = (
-	anchor: ThreadAnchor,
-	matches: Map<string, ReviewUnitMatch>,
-	filesByPath: ReadonlyMap<string, DiffFile>,
-): CarriedAnchor => {
+const mappedRanges = (
+	outcomes: readonly CarriedRangeOutcome[],
+): [PatchThreadRange, ...PatchThreadRange[]] | null => {
+	const ranges = outcomes.flatMap((outcome) => (outcome.kind === "mapped" ? [outcome.range] : []));
+	const [first, ...rest] = ranges;
+	return first && ranges.length === outcomes.length ? [first, ...rest] : null;
+};
+
+const carriedPatchAnchor = (anchor: PatchThreadAnchor, context: CarryContext): CarriedAnchor => {
+	const ranges = mappedRanges(
+		anchor.ranges.map((range) => carriedRange(anchor.filePath, range, context)),
+	);
+	const authoritative = context.currentFiles.get(anchor.filePath);
+	if (!ranges || !authoritative) return { anchor, migrationOrphaned: true };
+	const normalized = canonicalizeDiffSelection(
+		{ filePath: anchor.filePath, ranges },
+		authoritative,
+	);
+	return { anchor: { ...anchor, ranges: normalized.ranges }, migrationOrphaned: false };
+};
+
+/**
+ * An excerpt anchor resolves against the frozen context rather than the patch, so it carries as it
+ * is. Every other anchor follows its content: one whose code this run no longer has anywhere is
+ * orphaned, while one whose unit simply left the run keeps its range for the reader to report.
+ */
+const carriedAnchor = (anchor: ThreadAnchor, context: CarryContext): CarriedAnchor => {
 	if (isExcerptAnchor(anchor)) return { anchor, migrationOrphaned: false };
-	if (isPatchAnchor(anchor)) {
-		const remapped = anchor.ranges.map((range) => carriedRange(anchor.filePath, range, matches));
-		if (remapped.some((range) => range === null)) return { anchor, migrationOrphaned: true };
-		const first = remapped[0];
-		if (!first) return { anchor, migrationOrphaned: true };
-		const ranges = remapped.slice(1).reduce<[PatchThreadRange, ...PatchThreadRange[]]>(
-			(result, range) => {
-				if (range) result.push(range);
-				return result;
-			},
-			[first],
-		);
-		const authoritative = filesByPath.get(anchor.filePath);
-		if (!authoritative) return { anchor, migrationOrphaned: true };
-		const normalized = canonicalizeDiffSelection(
-			{ filePath: anchor.filePath, ranges },
-			authoritative,
-		);
-		return {
-			anchor: { ...anchor, ranges: normalized.ranges },
-			migrationOrphaned: false,
-		};
+	if (isPatchAnchor(anchor)) return carriedPatchAnchor(anchor, context);
+	const outcome = carriedRange(anchor.filePath, anchor, context);
+	if (outcome.kind === "mapped") {
+		return { anchor: { ...anchor, ...outcome.range }, migrationOrphaned: false };
 	}
-	const remapped = carriedRange(anchor.filePath, anchor, matches);
-	return { anchor: remapped ? { ...anchor, ...remapped } : anchor, migrationOrphaned: false };
+	return { anchor, migrationOrphaned: outcome.kind === "lost" };
 };
 
 const carriedThread = (
 	thread: ReviewThread,
 	runId: string,
-	matches: Map<string, ReviewUnitMatch>,
-	filesByPath: ReadonlyMap<string, DiffFile>,
+	context: CarryContext,
 ): ReviewThread => {
-	// An atomic patch anchor that failed once is historical evidence, not a candidate for another
-	// mapping attempt. Later runs may coincidentally regain matching coordinates; preserving the
-	// original bytes prevents that coincidence from silently changing what the thread was about.
+	// An anchor that failed once is historical evidence, not a candidate for another mapping
+	// attempt. Later runs may coincidentally regain matching coordinates; preserving the original
+	// bytes prevents that coincidence from silently changing what the thread was about.
 	const carried = thread.migrationOrphaned
 		? { anchor: thread.anchor, migrationOrphaned: true }
-		: carriedAnchor(thread.anchor, matches, filesByPath);
+		: carriedAnchor(thread.anchor, context);
 	return {
 		...thread,
 		runId,
@@ -210,6 +342,16 @@ const carriedThread = (
 		anchor: carried.anchor,
 		...(carried.migrationOrphaned ? { migrationOrphaned: true } : { migrationOrphaned: undefined }),
 	};
+};
+
+/** Patch files by both the path a thread may name and the path the diff canonically uses. */
+const filesByPath = (patch: string): ReadonlyMap<string, DiffFile> => {
+	const files = new Map<string, DiffFile>();
+	for (const file of parsePatch(patch)) {
+		files.set(file.path, file);
+		files.set(file.metadata.name, file);
+	}
+	return files;
 };
 
 const withoutRun = (runs: ThreadStoreFile["runs"], runId: string): ThreadStoreFile["runs"] =>
@@ -243,12 +385,11 @@ export async function migrateSupersededThreads({
 	const { runId, supersedes } = run.manifest;
 	if (!supersedes) return null;
 	const predecessor = await loadPreparedRun(join(runsDirectory, supersedes));
-	const matches = matchReviewUnits(predecessor, run);
-	const filesByPath = new Map<string, DiffFile>();
-	for (const file of parsePatch(run.patch)) {
-		filesByPath.set(file.path, file);
-		filesByPath.set(file.metadata.name, file);
-	}
+	const context: CarryContext = {
+		matches: matchReviewUnits(predecessor, run),
+		previousFiles: filesByPath(predecessor.patch),
+		currentFiles: filesByPath(run.patch),
+	};
 	return withThreadStoreLock(threadsPath, () => {
 		const store = readThreadStoreFile(threadsPath);
 		const pending = store.runs[supersedes] ?? [];
@@ -257,7 +398,7 @@ export async function migrateSupersededThreads({
 		const known = new Set(settled.map((thread) => thread.id));
 		const carried = pending
 			.filter((thread) => !known.has(thread.id))
-			.map((thread) => carriedThread(thread, runId, matches, filesByPath));
+			.map((thread) => carriedThread(thread, runId, context));
 		persistThreadStoreFile(threadsPath, {
 			...store,
 			runs: {

@@ -85,19 +85,32 @@ test("an anchor states its kind, and a stored hunk anchor keeps parsing without 
 	expect(() => threadAnchorSchema.parse({ ...thread.anchor, kind: "narration" })).toThrow();
 });
 
-test("migrationOrphaned is a patch-migration marker, never a general corruption escape hatch", () => {
+test("migrationOrphaned is a migration marker, never a general corruption escape hatch", () => {
 	const patchAnchor = {
 		kind: THREAD_ANCHOR_KIND.PATCH,
 		filePath: "src/value.ts",
 		ranges: [{ oldStart: 4, side: "additions", startLine: 8, endLine: 8 }],
 	};
-	const migrated = { ...thread, anchor: patchAnchor, migratedFrom: "b".repeat(64) };
+	const migratedFrom = "b".repeat(64);
+	const migrated = { ...thread, anchor: patchAnchor, migratedFrom };
 	expect(reviewThreadSchema.parse({ ...migrated, migrationOrphaned: true }).migrationOrphaned).toBe(
 		true,
 	);
+	// A carried hunk anchor orphans the same way: supersession can delete the code either was on.
+	expect(
+		reviewThreadSchema.parse({ ...thread, migratedFrom, migrationOrphaned: true })
+			.migrationOrphaned,
+	).toBe(true);
+	const excerptAnchor = {
+		kind: THREAD_ANCHOR_KIND.EXCERPT,
+		filePath: "src/value.ts",
+		startLine: 8,
+		endLine: 8,
+	};
 	for (const invalid of [
 		{ ...migrated, migrationOrphaned: false },
-		{ ...thread, migratedFrom: "b".repeat(64), migrationOrphaned: true },
+		// An excerpt orphans against the frozen context at load; it is never marked in the store.
+		{ ...thread, anchor: excerptAnchor, migratedFrom, migrationOrphaned: true },
 		{ ...thread, anchor: patchAnchor, migrationOrphaned: true },
 	]) {
 		expect(() => reviewThreadSchema.parse(invalid)).toThrow();

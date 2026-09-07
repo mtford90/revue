@@ -3255,7 +3255,7 @@ test("a carried thread this run no longer anchors is marked, not hidden", async 
 	await t.renderOnce();
 	await press(t, "o");
 
-	expect(t.captureCharFrame()).toContain("retry.ts:1 · no longer quoted");
+	expect(t.captureCharFrame()).toContain("retry.ts:1 · code removed");
 	expect(t.captureCharFrame()).toContain("Share the retry budget");
 });
 
@@ -4430,7 +4430,7 @@ test("a validated migration orphan never decorates or mounts at coincidental coo
 
 	await press(t, "o");
 	expect(t.captureCharFrame()).toContain("Coincidental orphan");
-	expect(t.captureCharFrame()).toContain("no longer quoted");
+	expect(t.captureCharFrame()).toContain("code removed");
 	await press(t, "RETURN");
 	expect(t.captureCharFrame()).not.toContain("Coincidental orphan");
 });

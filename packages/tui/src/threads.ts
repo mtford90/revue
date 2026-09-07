@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { canonicalizeDiffSelection, type DiffFile, parsePatch } from "@revue/diff";
@@ -13,9 +13,11 @@ import {
 	withThreadStoreLock,
 } from "@revue/prep";
 import {
+	type ContextThreadAnchor,
 	type ExcerptThreadAnchor,
 	frozenExcerptContaining,
 	type HunkThreadAnchor,
+	isContextAnchor,
 	isExcerptAnchor,
 	isPatchAnchor,
 	type PatchThreadRange,
@@ -29,6 +31,7 @@ import {
 	threadAuthorSchema,
 	threadMessageSchema,
 } from "@revue/types";
+import { splitFileLines } from "./expand.ts";
 import type { ReviewRun } from "./load.ts";
 
 export {
@@ -328,7 +331,7 @@ export function openThreadStore(path: string, runId: string): ThreadStore {
 /** A thread the narration stopped quoting: kept, listed, and never rendered inline. */
 export type OrphanedThread = { thread: ReviewThread; reason: string };
 
-export const excerptAnchorLabel = (anchor: ExcerptThreadAnchor): string =>
+export const excerptAnchorLabel = (anchor: ExcerptThreadAnchor | ContextThreadAnchor): string =>
 	`${JSON.stringify(anchor.filePath)} ${anchor.startLine}-${anchor.endLine}`;
 
 /**
@@ -343,6 +346,43 @@ const excerptOrphan = (run: ReviewRun, thread: ReviewThread): OrphanedThread | n
 		thread,
 		reason: `no frozen excerpt of this run still quotes ${excerptAnchorLabel(thread.anchor)}`,
 	};
+};
+
+/** The new-side line count of a pinned file, or null when the run holds no text for it. */
+const pinnedLineCount = (run: ReviewRun, filePath: string): number | null => {
+	const file = run.manifest.files.find((candidate) => candidate.path === filePath);
+	if (!file?.newBlob || file.isBinary) return null;
+	try {
+		return splitFileLines(readFileSync(join(run.directory, "blobs", file.newBlob), "utf8")).length;
+	} catch {
+		return null;
+	}
+};
+
+/**
+ * Revealed context is the pinned new file itself, so the anchor holds as long as the run has that
+ * file and the range lies inside it. A run that dropped the file or shortened it past the range
+ * is a legitimate revision, not corruption, so the thread is orphaned rather than fatal.
+ */
+const contextOrphan = (
+	run: ReviewRun,
+	thread: ReviewThread,
+	anchor: ContextThreadAnchor,
+): OrphanedThread | null => {
+	const lines = pinnedLineCount(run, anchor.filePath);
+	if (lines === null) {
+		return {
+			thread,
+			reason: `this run pins no new-side text for ${JSON.stringify(anchor.filePath)}`,
+		};
+	}
+	if (anchor.endLine > lines) {
+		return {
+			thread,
+			reason: `${excerptAnchorLabel(anchor)} lies past the end of the pinned file (${lines} lines)`,
+		};
+	}
+	return null;
 };
 
 /** Why this anchor names no pinned review unit of the run, or null when it names exactly one. */
@@ -417,6 +457,11 @@ export function validateThreadsForRun(
 				thread,
 				reason: "the code this thread was written on is not in the run that superseded it",
 			});
+			continue;
+		}
+		if (isContextAnchor(thread.anchor)) {
+			const orphan = contextOrphan(run, thread, thread.anchor);
+			if (orphan) orphaned.push(orphan);
 			continue;
 		}
 		const anchors = isPatchAnchor(thread.anchor)

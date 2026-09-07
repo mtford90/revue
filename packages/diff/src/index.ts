@@ -20,6 +20,7 @@ export {
 export { drawMermaid } from "./mermaidAscii.ts";
 export { countDiffStats, createDiffFile, inferLanguage, parsePatch } from "./model.ts";
 export {
+	CONTEXT_HUNK_OLD_START,
 	type Diagram,
 	type DiagramKind,
 	type DiagramVisualPlan,

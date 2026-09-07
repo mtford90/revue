@@ -75,17 +75,20 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Line ref** — `(filePath, side, startLine, endLine)`. `side` is `additions` (new-side line
   numbers) or `deletions` (old-side).
 - **Thread** — the official mutable feedback aggregate, independently identified and anchored by one
-  of three anchor kinds. A `hunk` anchor is `(filePath, oldStart, side, startLine, endLine)` and
+  of four anchor kinds. A `hunk` anchor is `(filePath, oldStart, side, startLine, endLine)` and
   retains its historical one-hunk meaning. A `patch` anchor is one file path plus a non-empty,
   canonically ordered list of `(oldStart, side, startLine, endLine)` ranges; TUI diff comments use it
   even for one line, and it may cross sides and hunks but never files. An `excerpt` anchor is
   `(filePath, startLine, endLine)` over quoted code and
   resolves against the frozen context rather than the patch; it deliberately carries no `oldStart`
   and no `side`, because `oldStart: 0` is already the metadata review unit's sentinel and an excerpt
-  borrowing it would be indistinguishable from a thread on a file with no textual hunk. The two
-  kinds fail differently: a hunk anchor that no longer resolves is corruption and blocks the load,
-  while an excerpt anchor the frozen context no longer covers is surfaced as **orphaned** and never
-  pruned, because a re-narrated run legitimately drops a citation. A thread has ordered
+  borrowing it would be indistinguishable from a thread on a file with no textual hunk. A `context`
+  anchor has the same shape over unchanged lines the reviewer revealed around a hunk, and resolves
+  against the run's pinned new blob: revealed lines are the file itself, not a quotation. The kinds
+  fail differently: a hunk anchor that no longer resolves is corruption and blocks the load,
+  while an excerpt anchor the frozen context no longer covers, or a context anchor whose pinned file
+  the run no longer holds or no longer reaches, is surfaced as **orphaned** and never pruned, because
+  a re-narrated run legitimately drops a citation and a revision legitimately drops code. A thread has ordered
   messages and a thread-level `open` or reversible `dealt-with` status; multiple threads may share
   an anchor.
 - **Carried thread** — a thread prep moved onto a run from the run it **supersedes**, open and
@@ -150,9 +153,11 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   preference, computed by a pure module rather than generic truncation.
 - **Context expansion** — GitHub-style revealing of unchanged lines around hunks. Each inter-hunk
   gap is a numbered boundary; revealing rewrites the patch from the run's pinned blobs and
-  re-parses it. Blobs are the sole source of extra file content — `show` never touches Git — and
-  revealed lines never accept comment anchors. Distinct from a **context excerpt**, which is
-  narration and does accept them.
+  re-parses it. Blobs are the sole source of extra file content — `show` never touches Git. Revealed
+  lines accept comments through a `context` anchor, which names the file and a new-side range and
+  resolves against the same blob; a mixed selection of changed and revealed lines is refused, since
+  it has no one authority. Landing on such a thread reveals its lines. Distinct from a **context
+  excerpt**, which is narration.
 - **Context excerpt** — a range of *unchanged* code a chapter cites so the reviewer can see what the
   change has to satisfy: a file path, an inclusive new-side line range, and an optional caption.
   The agent cites; it never transcribes. `revue context freeze` resolves each citation against the
@@ -345,10 +350,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Context expansion synthesises patches; anchors stay on the git hunks.** See `docs/adr/0007`.
   Revealing unchanged lines rewrites a unified patch replayed through the one canonical pipeline
   rather than owning a renderer. Displayed geometry varies with what is revealed; hunk anchors
-  always resolve against the original git hunks, so synthesised-only lines refuse comments.
-  Narration-cited excerpts are a second anchor authority resolving against the frozen context
-  (see `docs/adr/0014`); *ad hoc* context expansion still refuses comments, because revealed lines
-  are not pinned narration.
+  always resolve against the original git hunks. Narration-cited excerpts are a second anchor
+  authority resolving against the frozen context (see `docs/adr/0014`), and revealed context is a
+  third, resolving against the pinned new blob (see `docs/adr/0022`); a thread on either has no
+  review unit and draws inline only while its lines are shown.
 - **One keymap registry; user-owned overrides.** See `docs/adr/0009`. Shortcuts exist once, in the
   typed registry; `~/.revue/keybindings.json` overrides action-to-keys with reserved keys,
   fixed-point merging, and per-entry lenient validation.

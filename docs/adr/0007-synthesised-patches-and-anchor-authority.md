@@ -68,6 +68,10 @@ displayed geometry can differ in each view. The authority of an anchor cannot.
   the original git hunks in every view, exactly as this ADR decides above. A context excerpt that
   the narration cites is a second authority: it resolves against the frozen context of the run, and
   its key is the run ID. An excerpt accepts comments, because it is pinned narration.
+- 2026-09-07 — [ADR 0022](0022-context-anchors-on-revealed-lines.md) extends this ADR. Revealed
+  context accepts comments through a third authority, the `context` anchor, which resolves against
+  the run's pinned new blob. "Revue refuses a comment on revealed unchanged context" above no longer
+  holds; the refusal remains for Difftastic alignment-only lines.
 
   An *ad hoc* context expansion still refuses comments, because a revealed line is not pinned
   narration. If an excerpt anchor no longer resolves, Revue shows it as orphaned. A hunk anchor that

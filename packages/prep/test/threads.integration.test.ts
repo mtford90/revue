@@ -514,6 +514,56 @@ test("a rewritten unit carries its thread to the line the fix now occupies", asy
 	});
 });
 
+test("a thread on revealed context follows the pinned file, and orphans when the file leaves", async () => {
+	const root = await repository({
+		"src/alpha.ts": numbered("alpha", 40),
+		"src/beta.ts": numbered("beta", 10),
+	});
+	await write(root, "src/alpha.ts", replaceLine(numbered("alpha", 40), 30, "alpha line thirty"));
+	await write(root, "src/beta.ts", replaceLine(numbered("beta", 10), 3, "beta line three"));
+	await commit(root, "Feature work");
+	const first = await prepareRun(["main", "HEAD"], root);
+	await narrate(first, [
+		chapter({ id: "alpha", order: 1, hunkRefs: [{ filePath: "src/alpha.ts", oldStart: 27 }] }),
+		chapter({ id: "beta", order: 2, hunkRefs: [{ filePath: "src/beta.ts", oldStart: 1 }] }),
+	]);
+	const onContext = feedback({
+		index: 1,
+		runId: first.manifest.runId,
+		anchor: {
+			kind: THREAD_ANCHOR_KIND.CONTEXT,
+			filePath: "src/alpha.ts",
+			startLine: 5,
+			endLine: 6,
+		},
+		body: "These unchanged lines look wrong too.",
+	});
+	seedThreads(root, first.manifest.runId, [onContext]);
+
+	// Two lines added at the top push the commented lines down without changing them.
+	await write(
+		root,
+		"src/alpha.ts",
+		`alpha header\nalpha header two\n${replaceLine(numbered("alpha", 40), 30, "alpha line thirty")}`,
+	);
+	await commit(root, "Add a header");
+	const second = await prepareRun(["main", "HEAD"], root);
+	const [shifted] = storedThreads(root, second.manifest.runId);
+	expect(shifted?.anchor).toEqual({ ...onContext.anchor, startLine: 7, endLine: 8 });
+	expect(shifted?.migrationOrphaned).toBeUndefined();
+
+	// Reverting the file takes it out of the run: the thread stays, detached, where it was written.
+	await write(root, "src/alpha.ts", numbered("alpha", 40));
+	await commit(root, "Revert alpha");
+	const third = await prepareRun(["main", "HEAD"], root);
+	const [orphaned] = storedThreads(root, third.manifest.runId);
+	expect(orphaned?.anchor).toEqual({ ...onContext.anchor, startLine: 7, endLine: 8 });
+	expect(orphaned?.migrationOrphaned).toBe(true);
+	expect(third.warnings).toEqual([
+		"1 carried thread point at code this run no longer has; they are listed as orphaned",
+	]);
+});
+
 test("re-preparing an unchanged scope carries nothing a second time", async () => {
 	const root = await repository({ "src/alpha.ts": numbered("alpha", 20) });
 	await write(root, "src/alpha.ts", replaceLine(numbered("alpha", 20), 5, "alpha line five"));

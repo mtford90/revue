@@ -547,3 +547,36 @@ test("a thread reads as sent only once a handoff has carried it and the agent ha
 	expect(threadSendState(closed, batch)).toBeNull();
 	expect(threadSendState(humanThread(ids[1], 0), batch)).toBe("unsent");
 });
+
+test("context anchors resolve against the pinned new file and orphan past it, never fatally", async () => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-context-threads-"));
+	try {
+		const { directory, runId, threadsPath } = await narratedRun(root, []);
+		const store = openThreadStore(threadsPath, runId);
+		const at = (filePath: string, startLine: number, endLine: number): ThreadAnchor => ({
+			kind: THREAD_ANCHOR_KIND.CONTEXT,
+			filePath,
+			startLine,
+			endLine,
+		});
+		// src/lib/apiClient.ts pins 54 new-side lines in the sample run.
+		const inside = store.create(at("src/lib/apiClient.ts", 10, 12), agent, "Unchanged, but why?", {
+			createdAt: "2026-08-07T10:00:00.000Z",
+		});
+		const past = store.create(at("src/lib/apiClient.ts", 50, 60), agent, "Past the file", {
+			createdAt: "2026-08-07T10:00:01.000Z",
+		});
+		const elsewhere = store.create(at("src/lib/missing.ts", 1, 1), agent, "Not in the run", {
+			createdAt: "2026-08-07T10:00:02.000Z",
+		});
+
+		const loaded = loadValidatedThreads(threadsPath, await loadReviewRun(directory));
+
+		expect(loaded.threads.map((thread) => thread.id)).toEqual([inside.id, past.id, elsewhere.id]);
+		expect(loaded.orphaned.map((entry) => entry.thread.id)).toEqual([past.id, elsewhere.id]);
+		expect(loaded.orphaned[0]?.reason).toContain("past the end of the pinned file (54 lines)");
+		expect(loaded.orphaned[1]?.reason).toContain("pins no new-side text");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

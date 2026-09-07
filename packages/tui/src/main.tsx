@@ -135,7 +135,7 @@ const THREADS_HELP = `usage: revue threads list <run-directory> --json [--all]
        revue threads create <run-directory> [--kind hunk] --file <path> --old-start <number>
                             --side additions|deletions --start-line <number> --end-line <number>
                             --author <agent-name> (--body <text> | --body-file <path|->)
-       revue threads create <run-directory> --kind excerpt --file <path>
+       revue threads create <run-directory> --kind excerpt|context --file <path>
                             --start-line <number> --end-line <number>
                             --author <agent-name> (--body <text> | --body-file <path|->)
        revue threads reply <run-directory> <thread-id> --author <agent-name>
@@ -572,17 +572,22 @@ const loadThreadCommand = async (directory: string) => {
 
 /**
  * The anchor a `threads create` invocation names. A hunk anchor pins a review unit and a side; an
- * excerpt anchor names quoted code, which has neither, so the two option sets are disjoint.
+ * excerpt anchor names quoted code and a context anchor unchanged code around a hunk, both of which
+ * have neither, so the option sets are disjoint.
  */
 const threadAnchorFrom = (options: CommandOptions): ThreadAnchor => {
 	const kind = options.values.get("--kind") ?? THREAD_ANCHOR_KIND.HUNK;
-	if (kind !== THREAD_ANCHOR_KIND.HUNK && kind !== THREAD_ANCHOR_KIND.EXCERPT) {
-		throw new Error("--kind must be hunk or excerpt");
+	if (
+		kind !== THREAD_ANCHOR_KIND.HUNK &&
+		kind !== THREAD_ANCHOR_KIND.EXCERPT &&
+		kind !== THREAD_ANCHOR_KIND.CONTEXT
+	) {
+		throw new Error("--kind must be hunk, excerpt, or context");
 	}
-	if (kind === THREAD_ANCHOR_KIND.EXCERPT) {
+	if (kind !== THREAD_ANCHOR_KIND.HUNK) {
 		for (const rejected of ["--old-start", "--side"]) {
 			if (options.values.has(rejected)) {
-				throw new Error(`${rejected} does not apply to an excerpt anchor`);
+				throw new Error(`${rejected} does not apply to a ${kind} anchor`);
 			}
 		}
 		return {

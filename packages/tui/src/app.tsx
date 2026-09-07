@@ -11,6 +11,7 @@ import {
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
 	anchorRowIndex,
+	CONTEXT_HUNK_OLD_START,
 	canonicalizeDiffSelection,
 	createDiffFile,
 	type DecorationAnchor,
@@ -63,11 +64,13 @@ import {
 import {
 	type Chapter,
 	type ContextExcerpt,
+	type ContextThreadAnchor,
 	emptyViewState,
 	excerptKey,
 	frozenExcerptContaining,
 	frozenExcerptFor,
 	type HandoffRecord,
+	isContextAnchor,
 	isExcerptAnchor,
 	isPatchAnchor,
 	type PatchThreadAnchor,
@@ -96,6 +99,12 @@ import {
 import { AgentTerminalPicker, AgentTerminalPickerBackdrop } from "./agentTerminalPicker.tsx";
 import { copyToClipboard } from "./clipboard.ts";
 import {
+	chapterOwnsContextAnchor,
+	contextAnchorFor,
+	contextSelectionKind,
+	gitRangeResolver,
+} from "./contextAnchor.ts";
+import {
 	type ChapterDiffFile,
 	contextQuotations,
 	type FileStat,
@@ -108,6 +117,7 @@ import {
 	expandBoundary,
 	expandedPatchText,
 	type FileExpansion,
+	revealingExpansion,
 } from "./expand.ts";
 import type { FeedbackController, SendOptions, SendOutcome } from "./feedback.ts";
 import { HelpSurface } from "./helpSurface.tsx";
@@ -1403,6 +1413,19 @@ const selectionForDiffRange = (range: DiffLineRange): DiffSelection => ({
 
 const selectionForAnchor = (anchor: ThreadAnchor): DiffSelection => {
 	if (isPatchAnchor(anchor)) return { filePath: anchor.filePath, ranges: anchor.ranges };
+	if (isContextAnchor(anchor)) {
+		return {
+			filePath: anchor.filePath,
+			ranges: [
+				{
+					oldStart: CONTEXT_HUNK_OLD_START,
+					side: "additions",
+					startLine: anchor.startLine,
+					endLine: anchor.endLine,
+				},
+			],
+		};
+	}
 	if (isExcerptAnchor(anchor)) {
 		return {
 			filePath: anchor.filePath,
@@ -1450,9 +1473,14 @@ const citationFor = (chapter: Chapter, { anchor }: ReviewThread): ContextExcerpt
 		: undefined;
 
 /** A patch selection renders inline only when every range shares this one chapter owner. */
-const chapterOwnsThread = (chapter: Chapter, thread: ReviewThread): boolean => {
+const chapterOwnsThread = (
+	chapter: Chapter,
+	thread: ReviewThread,
+	diffFiles: readonly DiffFile[] | null,
+): boolean => {
 	const { anchor } = thread;
 	if (isExcerptAnchor(anchor)) return citationFor(chapter, thread) !== undefined;
+	if (isContextAnchor(anchor)) return chapterOwnsContextAnchor(chapter, diffFiles, anchor);
 	const ranges = isPatchAnchor(anchor)
 		? anchor.ranges
 		: [
@@ -1476,11 +1504,19 @@ const chapterExcerptThreads = (
 	chapter: Chapter,
 	threads: readonly ReviewThread[],
 ): ReviewThread[] =>
-	threads.filter((thread) => isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread));
+	threads.filter(
+		(thread) => isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread, null),
+	);
 
-/** Threads on this chapter's own review units. */
-const chapterHunkThreads = (chapter: Chapter, threads: readonly ReviewThread[]): ReviewThread[] =>
-	threads.filter((thread) => !isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread));
+/** Threads on this chapter's own review units, and on the context revealed around them. */
+const chapterHunkThreads = (
+	chapter: Chapter,
+	threads: readonly ReviewThread[],
+	diffFiles: readonly DiffFile[] | null,
+): ReviewThread[] =>
+	threads.filter(
+		(thread) => !isExcerptAnchor(thread.anchor) && chapterOwnsThread(chapter, thread, diffFiles),
+	);
 
 function KeyChanges({
 	chapter,
@@ -2287,7 +2323,7 @@ function ChapterView({
 		};
 	};
 	const inlineAttachments: DiffInlineAttachment[] = [
-		...chapterHunkThreads(chapter, threads).map(mountThread),
+		...chapterHunkThreads(chapter, threads, diffFiles).map(mountThread),
 		...(threadDraft ? [threadDraft] : []),
 	];
 	const excerptAttachments: DiffInlineAttachment[] = [
@@ -2426,26 +2462,6 @@ function ChapterView({
 		</box>
 	);
 }
-
-/** Anchors emitted from revealed context rows resolve against the authoritative patch hunks. */
-const gitRangeResolver =
-	(diffFiles: DiffFile[] | null, path: string) =>
-	(side: DiffSide, line: number): DiffLineRange | null => {
-		const hunks = diffFiles?.find((candidate) => candidate.path === path)?.metadata.hunks ?? [];
-		const hunk = hunks.find((candidate) => {
-			const start = side === "additions" ? candidate.additionStart : candidate.deletionStart;
-			const count = side === "additions" ? candidate.additionCount : candidate.deletionCount;
-			return count > 0 && line >= start && line < start + count;
-		});
-		if (!hunk) return null;
-		return {
-			filePath: path,
-			hunkOldStart: hunk.deletionStart,
-			side,
-			startLine: line,
-			endLine: line,
-		};
-	};
 
 function ConfirmDialog({
 	message,
@@ -3125,8 +3141,8 @@ export function App({
 		[threads, orphanedThreads],
 	);
 	const chapterThreadList = useMemo(
-		() => (chapter ? chapterHunkThreads(chapter, inlineThreads) : []),
-		[chapter, inlineThreads],
+		() => (chapter ? chapterHunkThreads(chapter, inlineThreads, diffFiles) : []),
+		[chapter, inlineThreads, diffFiles],
 	);
 	const chapterQuotedThreads = useMemo(
 		() => (chapter ? chapterExcerptThreads(chapter, inlineThreads) : []),
@@ -3983,6 +3999,19 @@ export function App({
 		setPointerSelection(selection);
 	}
 	function commentOnPatchSelection(selection: DiffSelection) {
+		const kind = contextSelectionKind(selection);
+		if (kind === "mixed") {
+			setCopyNotice({
+				text: "Comment on changed lines or on revealed lines, not both",
+				nonce: Date.now(),
+			});
+			return;
+		}
+		if (kind === "context") {
+			setPointerSelection(selection);
+			startThread(contextAnchorFor(selection), selection);
+			return;
+		}
 		const authoritative = chapterDiffFiles.find(
 			(file) =>
 				file.chapterPath === selection.filePath || file.metadata.name === selection.filePath,
@@ -4243,7 +4272,7 @@ export function App({
 			? -1
 			: pages.findIndex(
 					(candidate) =>
-						candidate.kind === "chapter" && chapterOwnsThread(candidate.chapter, thread),
+						candidate.kind === "chapter" && chapterOwnsThread(candidate.chapter, thread, diffFiles),
 				);
 		const nextPage = chapterIndex >= 0 ? pages[chapterIndex] : filesPage;
 		const nextPageId = pageId(nextPage);
@@ -4273,6 +4302,7 @@ export function App({
 			(currentCollapsed) =>
 				new Set([...currentCollapsed].filter((entry) => entry !== thread.anchor.filePath)),
 		);
+		if (isContextAnchor(thread.anchor)) void revealContext(thread.anchor);
 		// A folded excerpt renders none of its threads, so landing on one has to open it.
 		const citation = owner ? citationFor(owner, thread) : undefined;
 		if (citation) {
@@ -4294,13 +4324,19 @@ export function App({
 	) {
 		const lines = fileLines.get(path);
 		if (!lines) return;
-		const nextExpansion = expandBoundary(
-			base.metadata.hunks,
-			expansions.get(path),
-			lines.length,
-			boundary,
-			action,
+		applyExpansion(
+			path,
+			base,
+			lines,
+			expandBoundary(base.metadata.hunks, expansions.get(path), lines.length, boundary, action),
 		);
+	}
+	function applyExpansion(
+		path: string,
+		base: DiffFileInput,
+		lines: readonly string[],
+		nextExpansion: FileExpansion,
+	) {
 		const parsed = parsePatch(
 			expandedPatchText({ file: base, newLines: lines, expansion: nextExpansion }),
 			`expanded:${path}`,
@@ -4310,6 +4346,24 @@ export function App({
 			setExpansions((previous) => new Map(previous).set(path, nextExpansion));
 			setExpandedVariants((previous) => new Map(previous).set(path, parsed));
 		});
+	}
+	/** A thread on revealed context has no row until its lines are shown, so landing on it shows them. */
+	async function revealContext(anchor: ContextThreadAnchor) {
+		const base = diffFiles?.find((candidate) => candidate.path === anchor.filePath);
+		const lines = fileLines.get(anchor.filePath) ?? (await loadFileLines?.(anchor.filePath));
+		if (!base || !lines) return;
+		applyExpansion(
+			anchor.filePath,
+			base,
+			lines,
+			revealingExpansion(
+				base.metadata.hunks,
+				expansions.get(anchor.filePath),
+				lines.length,
+				anchor.startLine,
+				anchor.endLine,
+			),
+		);
 	}
 	const contextExpansion: ContextExpansionUi = {
 		variantFor: (path) => expandedVariants.get(path),
@@ -4777,7 +4831,9 @@ export function App({
 					? "Reply to thread"
 					: isExcerptAnchor(threadDraft.anchor)
 						? "New review thread"
-						: `Comment on ${selectionSideLabel(threadDraft.selection)}`
+						: isContextAnchor(threadDraft.anchor)
+							? "Comment on unchanged lines"
+							: `Comment on ${selectionSideLabel(threadDraft.selection)}`
 			}
 			body={threadBody}
 			notice={threadNotice}

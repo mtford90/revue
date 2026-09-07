@@ -97,6 +97,44 @@ export function expandBoundary(
 	return result;
 }
 
+/** The boundary whose gap holds a new-side line: 0 above the first hunk, hunkCount below the last. */
+const boundaryHolding = (hunks: readonly HunkMetadata[], line: number): number => {
+	const below = hunks.findIndex((hunk) => line < newTop(hunk));
+	return below === -1 ? hunks.length : below;
+};
+
+const shownByHunk = (hunks: readonly HunkMetadata[], line: number): boolean =>
+	hunks.some((hunk) => line >= newTop(hunk) && line <= newBottom(hunk));
+
+/**
+ * The expansion that shows a range of unchanged new-side lines, on top of what is revealed already.
+ * A gap is opened the way "all" would: the hunk below absorbs it upward, except below the last hunk,
+ * where only the hunk above can reach down. Lines a hunk already shows need nothing.
+ */
+export function revealingExpansion(
+	hunks: readonly HunkMetadata[],
+	expansion: FileExpansion | undefined,
+	totalNewLines: number,
+	startLine: number,
+	endLine: number,
+): FileExpansion {
+	const result = new Map(expansion ?? []);
+	const first = hunks[0];
+	const last = hunks[hunks.length - 1];
+	if (!first || !last) return result;
+	if (shownByHunk(hunks, startLine) || shownByHunk(hunks, endLine)) return result;
+	const boundary = boundaryHolding(hunks, startLine);
+	if (boundaryHolding(hunks, endLine) !== boundary) return result;
+	const gap = remainingGap(hunks, undefined, totalNewLines, boundary);
+	const current = result.get(boundary) ?? { up: 0, down: 0 };
+	const below = hunks[boundary];
+	const next: BoundaryExpansion = below
+		? { ...current, up: Math.max(current.up, Math.min(gap, newTop(below) - startLine)) }
+		: { ...current, down: Math.max(current.down, Math.min(gap, endLine - newBottom(last))) };
+	result.set(boundary, next);
+	return result;
+}
+
 const stripEol = (line: string | undefined): string => (line ?? "").replace(/\r?\n$/, "");
 
 /** The hunk's original unified body, reconstructed from Pierre's parsed groups. */

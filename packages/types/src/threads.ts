@@ -14,6 +14,7 @@ export const THREAD_ANCHOR_KIND = {
 	HUNK: "hunk",
 	EXCERPT: "excerpt",
 	PATCH: "patch",
+	CONTEXT: "context",
 } as const;
 
 export type NonEmptyArray<Value> = [Value, ...Value[]];
@@ -80,6 +81,21 @@ export const excerptThreadAnchorSchema = z
 	.refine((anchor) => anchor.startLine <= anchor.endLine, orderedRange);
 export type ExcerptThreadAnchor = z.infer<typeof excerptThreadAnchorSchema>;
 
+/**
+ * A thread anchored to unchanged code the reviewer revealed around a hunk. Like an excerpt it
+ * names a new-side line range and no review unit, but it answers to the run's pinned new blob
+ * rather than to the narration's frozen context: revealed lines are the file itself, not a quote.
+ */
+export const contextThreadAnchorSchema = z
+	.strictObject({
+		kind: z.literal(THREAD_ANCHOR_KIND.CONTEXT),
+		filePath: z.string().min(1),
+		startLine: z.number().int().positive(),
+		endLine: z.number().int().positive(),
+	})
+	.refine((anchor) => anchor.startLine <= anchor.endLine, orderedRange);
+export type ContextThreadAnchor = z.infer<typeof contextThreadAnchorSchema>;
+
 export const patchThreadRangeSchema = z
 	.strictObject({
 		oldStart: z.number().int().nonnegative(),
@@ -102,6 +118,7 @@ export const threadAnchorSchema = z.union([
 	hunkThreadAnchorSchema,
 	excerptThreadAnchorSchema,
 	patchThreadAnchorSchema,
+	contextThreadAnchorSchema,
 ]);
 export type ThreadAnchor = z.infer<typeof threadAnchorSchema>;
 
@@ -110,6 +127,9 @@ export const isExcerptAnchor = (anchor: ThreadAnchor): anchor is ExcerptThreadAn
 
 export const isPatchAnchor = (anchor: ThreadAnchor): anchor is PatchThreadAnchor =>
 	anchor.kind === THREAD_ANCHOR_KIND.PATCH;
+
+export const isContextAnchor = (anchor: ThreadAnchor): anchor is ContextThreadAnchor =>
+	anchor.kind === THREAD_ANCHOR_KIND.CONTEXT;
 
 export const threadAuthorSchema = z.strictObject({
 	kind: z.enum(THREAD_AUTHOR_KIND),
@@ -150,7 +170,7 @@ export const reviewThreadSchema = z
 			context.addIssue({
 				code: "custom",
 				path: ["migrationOrphaned"],
-				message: "migrationOrphaned requires a migrated patch or hunk anchor",
+				message: "migrationOrphaned requires a migrated patch, hunk, or context anchor",
 			});
 		}
 		if (thread.messages[0]?.createdAt !== thread.createdAt) {

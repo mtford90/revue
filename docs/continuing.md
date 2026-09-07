@@ -147,7 +147,8 @@ Revue remaps each anchor through the same unit matching that powers `revue delta
 
 An anchor becomes orphaned when the run does not have its code anywhere. Revue does not move the
 comment to the code that now occupies those line numbers. Excerpt anchors resolve against the new
-frozen context, as before.
+frozen context, as before. Context anchors, on revealed unchanged lines, follow the pinned file the
+same way: same text, same place, or orphaned.
 
 Orphaned threads remain visible in Comments. Revue never removes feedback because a new narration cannot place it.
 

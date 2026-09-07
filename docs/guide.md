@@ -126,7 +126,7 @@ Press `?` at any time to see the keys that apply to the current surface. Run `re
 
 A `⋯` band appears above, below, or between hunks when more unchanged lines are available. Use its controls to reveal lines in steps or reveal the complete gap.
 
-Revue reads these lines from the fixed run snapshot. It does not read the current worktree. Ad hoc expanded lines cannot accept comments.
+Revue reads these lines from the fixed run snapshot. It does not read the current worktree. Revealed lines accept comments: drag or double-click their gutter as you would a changed line. A selection cannot mix changed and revealed lines. The thread shows inline while the lines are revealed, and opening it from Comments reveals them again.
 
 A narration excerpt is different. The agent selected and froze that code as part of the review. An excerpt can accept comments. It does not count as changed code or review progress.
 

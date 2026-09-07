@@ -285,6 +285,48 @@ test("expander bands reveal pinned context lines above a hunk", async () => {
 	expect(expanded).toContain("expand all"); // the last twenty lines fit one reveal
 });
 
+test("revealed context lines take a comment anchored to the pinned file", async () => {
+	const created: ThreadAnchor[] = [];
+	const diffFiles = await loadPatch(PATCH);
+	const blobLines = Array.from({ length: 60 }, (_, index) => `ctx ${index + 1}`);
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			loadFileLines={async (path) => (path === "src/lib/apiClient.ts" ? blobLines : null)}
+			threadActions={recordingThreadActions(created)}
+		/>,
+		{ width: 130, height: 60, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await nextChapter(t);
+	await settle(t);
+	const lines = t.captureCharFrame().split("\n");
+	const bandY = lines.findIndex((line) => line.includes("expand up"));
+	await click(t, (lines[bandY]?.indexOf("expand up") ?? -1) + 1, bandY);
+	await settle(t);
+
+	const revealed = gutterFor(t, "ctx 40", "40");
+	await act(async () => t.mockMouse.doubleClick(revealed.x, revealed.y));
+	await act(async () => t.renderOnce());
+	expect(t.captureCharFrame()).toContain("Comment on unchanged lines");
+	await act(async () => t.mockInput.typeText("Why is this still here?"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await settle(t);
+
+	expect(created).toEqual([
+		{
+			kind: THREAD_ANCHOR_KIND.CONTEXT,
+			filePath: "src/lib/apiClient.ts",
+			startLine: 40,
+			endLine: 40,
+		},
+	]);
+	// The new thread hangs under the revealed line it was written on.
+	expect(t.captureCharFrame()).toContain("Why is this still here?");
+});
+
 test("opens on the prologue with the chapter list and review progress", async () => {
 	const t = await testRender(<App file={file} />, { width: 130, height: 32 });
 	await t.renderOnce();

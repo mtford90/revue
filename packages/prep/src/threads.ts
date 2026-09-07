@@ -3,7 +3,9 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { canonicalizeDiffSelection, type DiffFile, parsePatch } from "@revue/diff";
 import {
+	type ContextThreadAnchor,
 	emptyThreadStoreFile,
+	isContextAnchor,
 	isExcerptAnchor,
 	isPatchAnchor,
 	type PatchThreadAnchor,
@@ -239,6 +241,67 @@ type CarryContext = {
 	previousFiles: ReadonlyMap<string, DiffFile>;
 	currentFiles: ReadonlyMap<string, DiffFile>;
 	matches: Map<string, ReviewUnitMatch>;
+	previousRun: PreparedRun;
+	currentRun: PreparedRun;
+};
+
+const splitLines = (text: string): string[] => {
+	const lines = text.split("\n");
+	if (lines.at(-1) === "") lines.pop();
+	return lines;
+};
+
+/** The pinned new-side text of a file, or null when the run holds none for it. */
+const pinnedLines = (run: PreparedRun, filePath: string): string[] | null => {
+	const file = run.manifest.files.find((candidate) => candidate.path === filePath);
+	if (!file?.newBlob || file.isBinary) return null;
+	try {
+		return splitLines(readFileSync(join(run.directory, "blobs", file.newBlob), "utf8"));
+	} catch {
+		return null;
+	}
+};
+
+const nearestOccurrence = (
+	lines: readonly string[],
+	wanted: readonly string[],
+	near: number,
+): number | undefined =>
+	lines
+		.flatMap((_, index) =>
+			sameLines(lines.slice(index, index + wanted.length), wanted) ? [index + 1] : [],
+		)
+		.sort((left, right) => Math.abs(left - near) - Math.abs(right - near))[0];
+
+/**
+ * A context anchor names lines of the pinned new file rather than of a review unit, so it follows
+ * its content through the blobs by the same rule: the same text at the same place, the same place
+ * when the lines framing it held, the same text wherever else it went, otherwise lost.
+ */
+const carriedContextAnchor = (
+	anchor: ContextThreadAnchor,
+	{ previousRun, currentRun }: CarryContext,
+): CarriedAnchor => {
+	const previous = pinnedLines(previousRun, anchor.filePath);
+	const current = pinnedLines(currentRun, anchor.filePath);
+	const wanted = previous?.slice(anchor.startLine - 1, anchor.endLine) ?? [];
+	if (!previous || !current || wanted.length !== anchor.endLine - anchor.startLine + 1) {
+		return { anchor, migrationOrphaned: true };
+	}
+	if (sameLines(current.slice(anchor.startLine - 1, anchor.endLine), wanted)) {
+		return { anchor, migrationOrphaned: false };
+	}
+	const frame = [anchor.startLine - 2, anchor.endLine];
+	const framePreserved = frame.every(
+		(index) => previous[index] !== undefined && previous[index] === current[index],
+	);
+	if (framePreserved) return { anchor, migrationOrphaned: false };
+	const found = nearestOccurrence(current, wanted, anchor.startLine);
+	if (found === undefined) return { anchor, migrationOrphaned: true };
+	return {
+		anchor: { ...anchor, startLine: found, endLine: found + wanted.length - 1 },
+		migrationOrphaned: false,
+	};
 };
 
 const carriedRange = (
@@ -316,6 +379,7 @@ const carriedPatchAnchor = (anchor: PatchThreadAnchor, context: CarryContext): C
  */
 const carriedAnchor = (anchor: ThreadAnchor, context: CarryContext): CarriedAnchor => {
 	if (isExcerptAnchor(anchor)) return { anchor, migrationOrphaned: false };
+	if (isContextAnchor(anchor)) return carriedContextAnchor(anchor, context);
 	if (isPatchAnchor(anchor)) return carriedPatchAnchor(anchor, context);
 	const outcome = carriedRange(anchor.filePath, anchor, context);
 	if (outcome.kind === "mapped") {
@@ -390,6 +454,8 @@ const carryContextFor = async (
 		matches: matchReviewUnits(predecessor, run),
 		previousFiles: filesByPath(predecessor.patch),
 		currentFiles: filesByPath(run.patch),
+		previousRun: predecessor,
+		currentRun: run,
 	};
 };
 

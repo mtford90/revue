@@ -527,6 +527,12 @@ export type PlanExcerptInput = {
  */
 export const EXCERPT_HUNK_OLD_START = 0;
 
+/**
+ * Revealed context is new-side file content outside every git hunk. A negative sentinel keeps it
+ * apart from real review units (non-negative) and from quoted excerpts (zero) in one selection.
+ */
+export const CONTEXT_HUNK_OLD_START = -1;
+
 /** The range one quoted line acts on, so excerpt lines answer the diff's verbs unchanged. */
 export const excerptLineRange = ({
 	filePath,

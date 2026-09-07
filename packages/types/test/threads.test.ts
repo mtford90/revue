@@ -83,6 +83,12 @@ test("an anchor states its kind, and a stored hunk anchor keeps parsing without 
 	expect(() => threadAnchorSchema.parse({ ...excerpt, endLine: 117 })).toThrow();
 	expect(() => threadAnchorSchema.parse({ ...excerpt, startLine: 0, endLine: 0 })).toThrow();
 	expect(() => threadAnchorSchema.parse({ ...thread.anchor, kind: "narration" })).toThrow();
+
+	// Revealed context is the same shape as a quotation, resolved against the pinned file instead.
+	const context = { ...excerpt, kind: THREAD_ANCHOR_KIND.CONTEXT };
+	expect(threadAnchorSchema.parse(context)).toEqual(context);
+	expect(() => threadAnchorSchema.parse({ ...context, oldStart: 0, side: "additions" })).toThrow();
+	expect(() => threadAnchorSchema.parse({ ...context, endLine: 117 })).toThrow();
 });
 
 test("migrationOrphaned is a migration marker, never a general corruption escape hatch", () => {
@@ -100,6 +106,21 @@ test("migrationOrphaned is a migration marker, never a general corruption escape
 	expect(
 		reviewThreadSchema.parse({ ...thread, migratedFrom, migrationOrphaned: true })
 			.migrationOrphaned,
+	).toBe(true);
+	// So does a context anchor, whose pinned file the superseding run may have dropped or cut.
+	const contextAnchor = {
+		kind: THREAD_ANCHOR_KIND.CONTEXT,
+		filePath: "src/value.ts",
+		startLine: 8,
+		endLine: 9,
+	};
+	expect(
+		reviewThreadSchema.parse({
+			...thread,
+			anchor: contextAnchor,
+			migratedFrom,
+			migrationOrphaned: true,
+		}).migrationOrphaned,
 	).toBe(true);
 	const excerptAnchor = {
 		kind: THREAD_ANCHOR_KIND.EXCERPT,

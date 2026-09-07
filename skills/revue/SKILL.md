@@ -688,6 +688,10 @@ revue threads create "$RUN" --kind excerpt \
   --author "review agent" --body-file -
 ```
 
+Unchanged code that no chapter quotes takes `--kind context` with the same options: the file and a
+new-side line range of the run's pinned file. The reviewer's own comments on lines they revealed
+around a hunk arrive with this kind.
+
 ### Deleting feedback
 
 Hard deletion is only for a thread or reply the reviewer identifies as erroneous. Never delete

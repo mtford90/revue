@@ -6,6 +6,7 @@ import {
 	expandedPatchText,
 	type FileExpansion,
 	remainingGap,
+	revealingExpansion,
 	splitFileLines,
 } from "./expand.ts";
 
@@ -127,4 +128,21 @@ test("splitFileLines drops only a trailing newline", () => {
 	expect(splitFileLines("a\nb\n")).toEqual(["a", "b"]);
 	expect(splitFileLines("a\nb")).toEqual(["a", "b"]);
 	expect(splitFileLines("")).toEqual([]);
+});
+
+test("revealing a range opens exactly the gap that holds it, the way 'all' would", () => {
+	const hunks = file().metadata.hunks;
+	const reveal = (start: number, end: number, expansion?: FileExpansion) =>
+		Object.fromEntries(revealingExpansion(hunks, expansion, 70, start, end));
+	// Above the first hunk the hunk below absorbs upward to the range's first line.
+	expect(reveal(10, 12)).toEqual({ 0: { up: 8, down: 0 } });
+	// Between hunks, likewise: the lower hunk (new line 53) reaches up to line 30.
+	expect(reveal(30, 31)).toEqual({ 1: { up: 23, down: 0 } });
+	// Below the last hunk only the hunk above can reach down.
+	expect(reveal(65, 66)).toEqual({ 2: { up: 0, down: 8 } });
+	// Lines a hunk already shows, or a range straddling two gaps, change nothing.
+	expect(reveal(20, 21)).toEqual({});
+	expect(reveal(30, 60)).toEqual({});
+	// A wider reveal already in place is kept.
+	expect(reveal(30, 31, new Map([[1, { up: 25, down: 0 }]]))).toEqual({ 1: { up: 25, down: 0 } });
 });

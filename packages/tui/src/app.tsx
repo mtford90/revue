@@ -1896,8 +1896,11 @@ function CommentRow({
 				{sendState ? SEND_STATE_LABEL[sendState] : "       "}
 			</text>
 			<text
-				flexShrink={0}
+				flexShrink={1}
+				minWidth={0}
+				maxWidth="40%"
 				wrapMode="none"
+				truncate
 				fg={orphaned ? theme.muted : active ? theme.accent : theme.text}
 			>
 				{threadLocation(thread)}

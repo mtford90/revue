@@ -3524,6 +3524,43 @@ const rowOf = (t: Awaited<ReturnType<typeof testRender>>, needle: string) =>
 		.split("\n")
 		.findIndex((line) => line.includes(needle));
 
+test("mixed comment locations leave room for feedback, status and Send in narrow terminals", async () => {
+	const thread: ReviewThread = {
+		...watchedThread({ line: 1, body: "Review retry budget" }),
+		anchor: {
+			kind: "selection",
+			filePath: "src/lib/apiClient.ts",
+			segments: [
+				{ kind: "context", side: "additions", startLine: 40, endLine: 40 },
+				{ kind: "patch", oldStart: 41, side: "additions", startLine: 41, endLine: 43 },
+				{ kind: "context", side: "deletions", startLine: 40, endLine: 40 },
+				{ kind: "patch", oldStart: 41, side: "deletions", startLine: 41, endLine: 44 },
+			],
+		},
+	};
+	const diffFiles = await loadPatch(PATCH);
+	for (const width of [100, 160]) {
+		const t = await testRender(
+			<App file={file} diffFiles={diffFiles} initialThreads={[thread]} />,
+			{
+				width,
+				height: 36,
+				kittyKeyboard: true,
+			},
+		);
+		await t.renderOnce();
+		await press(t, "o");
+		const row =
+			t
+				.captureCharFrame()
+				.split("\n")
+				.find((line) => line.includes("unsent src/")) ?? "";
+		expect(row).toContain("awaiting agent");
+		expect(row).toContain("Review");
+		expect(row).toContain("[send A]");
+	}
+});
+
 test("watched proposal replies update inline labels without resolving the thread", async () => {
 	const driver = updateDriver();
 	const thread = watchedThread({ line: 1, body: "Share the retry budget" });

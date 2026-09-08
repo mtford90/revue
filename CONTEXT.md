@@ -61,8 +61,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   which needs no hunks at all. `revue show --check` requires exactly one, ending the narration, of
   every run that inherited narration, and holds its thread citations to feedback the run has —
   there and nowhere else, because the reviewer deletes a cited thread whenever they please and no
-  command that merely reads a run may refuse to run over a citation that has gone stale. It is
-  new by definition, so it always presents unread.
+  command that merely reads a run may refuse to run over a citation that has gone stale. Its code completion derives from its hunks; a no-hunk epilogue starts unread as explicit narration.
 - **Hunk reference (`hunkRef`)** — `(filePath, oldStart)`. The stable identity of a review unit; the
   agent copies these from `hunks.txt` rather than inventing them. Textual hunks use their pre-image
   start. A file with no textual hunk (pure rename, mode-only change, or empty file) receives one
@@ -75,7 +74,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Line ref** — `(filePath, side, startLine, endLine)`. `side` is `additions` (new-side line
   numbers) or `deletions` (old-side).
 - **Thread** — the official mutable feedback aggregate, independently identified and anchored by one
-  of four anchor kinds. A `hunk` anchor is `(filePath, oldStart, side, startLine, endLine)` and
+  of five anchor kinds. A `hunk` anchor is `(filePath, oldStart, side, startLine, endLine)` and
   retains its historical one-hunk meaning. A `patch` anchor is one file path plus a non-empty,
   canonically ordered list of `(oldStart, side, startLine, endLine)` ranges; TUI diff comments use it
   even for one line, and it may cross sides and hunks but never files. An `excerpt` anchor is
@@ -84,7 +83,10 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   and no `side`, because `oldStart: 0` is already the metadata review unit's sentinel and an excerpt
   borrowing it would be indistinguishable from a thread on a file with no textual hunk. A `context`
   anchor has the same shape over unchanged lines the reviewer revealed around a hunk, and resolves
-  against the run's pinned new blob: revealed lines are the file itself, not a quotation. The kinds
+  against the run's pinned new blob: revealed lines are the file itself, not a quotation. A
+  `selection` anchor is one file plus a non-empty canonical list of independently authoritative
+  `patch` or `context` segments; context segments preserve the actual old/new side selected in the
+  TUI, while historical standalone context anchors remain new-side only. The kinds
   fail differently: a hunk anchor that no longer resolves is corruption and blocks the load,
   while an excerpt anchor the frozen context no longer covers, or a context anchor whose pinned file
   the run no longer holds or no longer reaches, is surfaced as **orphaned** and never pruned, because
@@ -97,18 +99,21 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   narrated) moves on again with the next prep, since threads follow the newest run of a lineage
   while chapters can only come from a narrated one; `--carry-from` a pending run continues the
   narrated run before it. Prep warns about every open thread it leaves behind. Threads move rather than copy — the superseded run is left with none — and keep their
-  identity, status, and every message, gaining only a note of the run they came from. Hunk and patch
-  anchors are re-mapped through the run delta's unit matching, and then **followed by their
-  content**: a unit that came through intact shifts exactly, while inside a unit the change rewrote
-  the anchor takes the shifted position only when the same lines are still there, else the same
-  lines wherever else in the file they went, else the shifted position when the lines framing it
-  survived and so the fix answered the comment in place. An anchor whose code the new run does not
-  have anywhere is **orphaned** rather than fatal, because supersession legitimately deletes code,
-  and orphaning is deliberately preferred to pinning the reviewer's words on whatever now occupies
-  those line numbers. Orphaning is sticky: coordinates that become remappable again in a later run
-  never revive it. That leniency is the carried thread's alone; an anchor written against the run it
-  names can only stop resolving through corruption. Excerpt anchors are re-resolved against the new
-  run's frozen context and orphan exactly as they always have.
+  identity, status, and every message, gaining only a note of the run they came from. Hunk, patch and context
+  anchors map only exact text with one occurrence in each pinned file on the same side. Every patch
+  range must map into the new patch or the whole thread detaches. Changed code detaches even when
+  neighbours match; duplicate occurrences never resolve by distance. Detachment is sticky. Threads
+  retain `originalEvidence` (source run, original anchor and exact lines per range) from creation or
+  the first carry of never-carried historical feedback. Already-carried legacy feedback without it
+  stays unverified and non-inline even when its coordinates fit, not reconstructed from potentially
+  replaced code. Comments shows the selected
+  detached thread's original code; the CLI lists the same evidence. Excerpt threads require frozen
+  destination coverage and unchanged, unambiguous evidence to draw inline. Missing narration is
+  derived unverified state, not permanent detachment. Context freeze remaps uniquely unchanged
+  quotations, including outside-patch moves, under the thread-store lock; changed or ambiguous
+  evidence in either the previous or replacement context becomes sticky before replacement.
+  Prep checks the latest frozen source under the same lock. Overlapping quotations of the same
+  physical lines count once.
 - **Thread message** — one independently identified root message or reply containing a terminal-safe
   body, creation time, and `{ kind: "human" | "agent", name }` author. Human TUI names resolve from
   repository-aware `git config user.name`, then the system login. Agent CLI messages require an
@@ -155,8 +160,9 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   gap is a numbered boundary; revealing rewrites the patch from the run's pinned blobs and
   re-parses it. Blobs are the sole source of extra file content — `show` never touches Git. Revealed
   lines accept comments through a `context` anchor, which names the file and a new-side range and
-  resolves against the same blob; a mixed selection of changed and revealed lines is refused, since
-  it has no one authority. Landing on such a thread reveals its lines. Distinct from a **context
+  resolves against the same blob. A new mixed selection of changed and revealed lines becomes one
+  segmented selection anchor preserving each patch/context range and actual side. Landing on such a
+  thread reveals its context lines. Distinct from a **context
   excerpt**, which is narration.
 - **Context excerpt** — a range of *unchanged* code a chapter cites so the reviewer can see what the
   change has to satisfy: a file path, an inclusive new-side line range, and an optional caption.
@@ -189,13 +195,17 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   old/new side motion (`h`/`l`, Left/Right), visual-row scrolling (Up/Down), file motion (`J`/`K`,
   Tab variants), and chapter motion (`[`/`]`); `revue keybindings` prints the effective map,
   including aliases the keys surface holds back.
-- **View state** — per-run review progress: which chapters / files / key changes are marked reviewed.
-  Ported from Stage's three-level model, flattened to id arrays (`chapter.id`,
-  `chapterId::filePath`, `chapterId#index`). Marking all of a chapter's files reviewed auto-completes
-  the chapter, and vice-versa. Every mouse, keyboard, and menu entry point for one review entity uses
-  the same transition: completing chapters or files collapses them and moves to the next unreviewed
-  work; reopening them expands and focuses them; key changes toggle in place. Excerpts appear in it
-  nowhere: quoted code is scenery, not work. Persisted locally, keyed by **run key**.
+- **View state** — code progress is a set of original `[filePath, oldStart]` units under
+  `.revue/state.json["code:" + runId]`, shared by Narrative and Diff and unchanged by narration
+  edits. Chapter and chapter-local file completion derive only from their constituent units.
+  `x`/`f` bulk-toggle those units, preserving collapse/advance on completion and expand/focus on
+  reopening. `m`, hunk checkboxes and the View menu toggle one original unit in place. Widened
+  display geometry maps back to pinned units; scenery and cross-hunk selections have no single
+  hunk action. Questions and explicit no-hunk chapters remain independent narration-keyed marks.
+  Carry requires an exact same-path signature unique in both complete run unit sets. Initialized
+  empty destinations are authoritative; the newest initialized pending state within the selected
+  lineage overrides ancestor positives. Flat reload provenance persists locally. Available
+  current/flat legacy marks migrate once; unknown historical narration ownership is never guessed.
 - **Review session state** — narration-sensitive location within one run: current page, focused
   file/hunk/question, collapsed files, which excerpts and diagrams have been opened (both fold shut
   by default, so only the openings are recorded), and scroll offsets. It is stored beside review progress under
@@ -218,27 +228,19 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   pre-copied with its hunk references and key-change line ranges re-mapped, and with the code it
   quotes re-frozen against the new run. Any other chapter is **stale**, named with the reason, and
   re-narrated rather than patched. What no carried chapter covers is the agent's worklist. Like
-  `chapters.json` and `context.json` the delta is narration-side and outside the run ID. The same
-  unit classification re-anchors **carried threads**, so feedback and narration follow the code by
-  one shared rule.
+  `chapters.json` and `context.json` the delta is narration-side and outside the run ID. Carried threads use a stricter exact, unambiguous text correspondence rather than
+  trusting the delta's unit classification.
 - **Run ID** — the full sha256 of the canonical prepared input: resolved scope/endpoints, patch and
   hunk hashes, file snapshots/modes, commit messages, effective ignore inputs, exclusions, and
   totals. Creation time and narration are deliberately excluded. Content-addressing means
   re-preparing an unchanged scope reproduces the same runId, which is what makes the TUI's reload
   action a true no-op when the reviewed content hasn't moved.
 - **Run key** — `sha256(runId + chapters)`, truncated for local persistence; a chapterless run
-  hashes `runId` plus a chapterless sentinel so its progress keys on the snapshot alone. Review
-  progress belongs to one pinned code snapshot narrated one specific way; changing either starts
-  fresh, except for three seeds into an as-yet unreviewed run: a newly narrated run inherits any
-  chapterless progress for the same snapshot (a one-way migration); a run opened by reload
-  inherits the progress of the run it replaced, keeping a file's mark only where that file's frozen
-  snapshots are identical in both runs; and a run **superseding** a narrated one inherits every mark
-  its predecessor carried on a chapter the **run delta** carried through verbatim — files and
-  answered key changes alike, since the code they speak for came through untouched — which is what
-  the reload's file rule cannot know. Threads use the full immutable **run ID** instead, so
-  feedback survives chapter regeneration for unchanged frozen code.
-- **Reviewed / mark-as-reviewed** — the core Stage mechanic. hunk has no such concept; it's entirely
-  revue's, persisted to `.revue/state.json` (a `{ [runKey]: ViewState }` map).
+  hashes runId plus a sentinel. Keys questions, explicit no-hunk chapter marks and session position,
+  not code completion. Code ticks and threads each use the full immutable runId and survive
+  narration regeneration for unchanged frozen code.
+- **Reviewed / mark-as-reviewed** — Revue-owned original-unit progress in `.revue/state.json`,
+  composed with independent narration marks. The shared diff renderer owns no review persistence.
 - **The chapters file** — `chapters.json` inside a run. It mirrors Stage’s agent output
   (`{ chapters, prologue? }`). The narration is the source of truth; there is no database.
 - **prep** — the CLI step that resolves committed/staged/unstaged/work scope, freezes the exact patch
@@ -321,14 +323,15 @@ boundary. The `revue` executable intentionally does not expose a pager command.
   collapse controls, application menus, and inline threads belong to Revue. Menu actions call the
   same Revue handlers as shortcuts; the renderer owns only patch presentation.
 - **Carried anchors follow their content, or orphan.** See `docs/adr/0021`, which extends ADRs 0018
-  and 0020. Position corroborates a carried anchor; it never establishes one, because a review unit
-  is a whole hunk and a rewrite can leave unrelated code at the same numbers.
+  and 0020. Neither position nor surviving neighbours establish a carried anchor. Exact text must have an
+  unambiguous correspondence; original evidence survives even when the thread detaches.
 - **File-scoped patch selections preserve old anchors.** See `docs/adr/0020`, which extends ADRs
   0004, 0007 and 0018. New TUI diff feedback uses a non-empty multi-range `patch` anchor; old `hunk`
   and `excerpt` data and CLI creation syntax retain their meaning. Patch ranges validate
-  independently, must already be canonically ordered/merged in the version-2 thread store, render
-  one box at the terminal range, and remap atomically across supersession. Strict version-1 reads
-  migrate historical hunk/excerpt stores without reinterpreting them; writes always emit version 2.
+  independently, must already be canonically ordered/merged, render one box at the terminal range,
+  and remap atomically across supersession. Strict version-1 reads migrate historical hunk/excerpt
+  stores and version-2 reads preserve patch-era anchors without reinterpreting them; writes always
+  emit version 3, which adds message intent and segmented selection anchors.
 - **Threads are mutable state keyed by immutable code.** See `docs/adr/0004`. Revue locates the
   reviewed repository from the supplied run, validates and atomically replaces its
   `.revue/threads.json`, keyed by full `runId`; prepared run directories remain immutable. Mutations
@@ -346,7 +349,7 @@ boundary. The `revue` executable intentionally does not expose a pager command.
 - **Chapters are an optional overlay, not required scaffolding.** See `docs/adr/0006`. A run
   without `chapters.json` opens as a flat diff through the same immutable-run pipeline, modelled
   internally as one synthetic chapter so every feature works in both modes by construction.
-  Chapterless progress seeds narrated progress one way.
+  Flat and narrated surfaces share the same original-unit code progress (ADR 0017 amendment).
 - **Context expansion synthesises patches; anchors stay on the git hunks.** See `docs/adr/0007`.
   Revealing unchanged lines rewrites a unified patch replayed through the one canonical pipeline
   rather than owning a renderer. Displayed geometry varies with what is revealed; hunk anchors

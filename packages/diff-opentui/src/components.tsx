@@ -31,6 +31,7 @@ import {
 	terminalSelectionRange,
 } from "@revue/diff";
 import type { Theme } from "@revue/theme";
+import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
 	attachmentsForExcerptLine,
@@ -711,6 +712,8 @@ function StackLine({
 }
 
 interface DiffBodyPaintProps {
+	/** Host-owned inline controls; null denotes the metadata-only body row. */
+	headerControls?: (hunkIndex: number | null) => ReactNode;
 	theme: Theme;
 	selectedHunkIndex?: number;
 	decorations?: readonly RangeDecoration[];
@@ -859,6 +862,7 @@ export function DiffBody(props: DiffBodyProps) {
 	const {
 		theme,
 		selectedHunkIndex = 0,
+		headerControls,
 		decorations = EMPTY_DECORATIONS,
 		focusedDecorationId,
 		selectedRange,
@@ -998,7 +1002,12 @@ export function DiffBody(props: DiffBodyProps) {
 		attachmentsForRow({ row, attachments: inlineAttachments, resolveRange });
 
 	if (normalized.isTooLarge || normalized.isBinary || !normalized.metadata.hunks.length)
-		return <text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>;
+		return (
+			<box flexDirection="row" height={1}>
+				{headerControls?.(null)}
+				<text fg={theme.muted}>{emptyBodyMessage(normalized)}</text>
+			</box>
+		);
 
 	const visibleRows = painted.rows;
 	const windowReachesEnd = !rowWindow || rowWindow.end > geometry.rows.length;
@@ -1030,7 +1039,8 @@ export function DiffBody(props: DiffBodyProps) {
 						<box key={row.key} flexDirection="column" width="100%">
 							{band}
 							{row.height ? (
-								<box width="100%" height={1} backgroundColor={theme.panel}>
+								<box width="100%" height={1} backgroundColor={theme.panel} flexDirection="row">
+									{headerControls?.(row.hunkIndex)}
 									<text fg={theme.accent} wrapMode="none" truncate>
 										{row.hunkIndex === selectedHunkIndex ? "▎" : " "} {row.text}
 									</text>

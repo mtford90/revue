@@ -5,6 +5,8 @@ import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { canonicalizeDiffSelection, type DiffFile, parsePatch } from "@revue/diff";
 import {
+	captureThreadEvidence,
+	excerptEvidenceState,
 	persistThreadStoreFile,
 	readThreadStoreFile,
 	sortThreads,
@@ -15,11 +17,11 @@ import {
 import {
 	type ContextThreadAnchor,
 	type ExcerptThreadAnchor,
-	frozenExcerptContaining,
 	type HunkThreadAnchor,
 	isContextAnchor,
 	isExcerptAnchor,
 	isPatchAnchor,
+	isSelectionAnchor,
 	type PatchThreadRange,
 	type ReviewThread,
 	reviewThreadSchema,
@@ -85,6 +87,7 @@ export type NewThreadOptions = {
 export type NewMessageOptions = {
 	id?: string;
 	createdAt?: string;
+	intent?: import("@revue/types").ThreadReplyIntent;
 };
 
 export type ThreadStore = {
@@ -168,6 +171,7 @@ export const createThreadMessage = (
 		author,
 		body: body.replace(/\r\n?/g, "\n"),
 		createdAt: options.createdAt ?? new Date().toISOString(),
+		intent: options.intent,
 	});
 
 export function createThread(
@@ -273,7 +277,7 @@ export const setThreadStatus = (
 	};
 };
 
-export function openThreadStore(path: string, runId: string): ThreadStore {
+export function openThreadStore(path: string, runId: string, run?: ReviewRun): ThreadStore {
 	let current = sortThreads(readThreadStoreFile(path).runs[runId] ?? []);
 	const mutate = <Value>(
 		transform: (threads: ReviewThread[]) => { threads: ReviewThread[]; value: Value },
@@ -295,7 +299,10 @@ export function openThreadStore(path: string, runId: string): ThreadStore {
 			return current;
 		},
 		create: (anchor, author, body, options) => {
-			const thread = createThread(runId, anchor, author, body, options);
+			const thread = {
+				...createThread(runId, anchor, author, body, options),
+				...(run ? { originalEvidence: captureThreadEvidence(run, anchor) } : {}),
+			};
 			return mutate((threads) => ({ threads: addThread(threads, thread), value: thread }));
 		},
 		reply: (threadId, author, body, options) => {
@@ -341,19 +348,30 @@ export const excerptAnchorLabel = (anchor: ExcerptThreadAnchor | ContextThreadAn
  */
 const excerptOrphan = (run: ReviewRun, thread: ReviewThread): OrphanedThread | null => {
 	if (!isExcerptAnchor(thread.anchor)) return null;
-	if (frozenExcerptContaining(run.context, thread.anchor)) return null;
+	const state = excerptEvidenceState(run.context, thread);
+	if (state === "verified") return null;
 	return {
 		thread,
-		reason: `no frozen excerpt of this run still quotes ${excerptAnchorLabel(thread.anchor)}`,
+		reason:
+			state === "unavailable"
+				? "original code unavailable; carried quotation cannot be verified"
+				: state === "changed"
+					? "the frozen quotation changed or its correspondence is ambiguous"
+					: `no frozen excerpt of this run still quotes ${excerptAnchorLabel(thread.anchor)}`,
 	};
 };
 
 /** The new-side line count of a pinned file, or null when the run holds no text for it. */
-const pinnedLineCount = (run: ReviewRun, filePath: string): number | null => {
+const pinnedLineCount = (
+	run: ReviewRun,
+	filePath: string,
+	side: "additions" | "deletions" = "additions",
+): number | null => {
 	const file = run.manifest.files.find((candidate) => candidate.path === filePath);
-	if (!file?.newBlob || file.isBinary) return null;
+	const blob = side === "additions" ? file?.newBlob : file?.oldBlob;
+	if (!blob || file?.isBinary) return null;
 	try {
-		return splitFileLines(readFileSync(join(run.directory, "blobs", file.newBlob), "utf8")).length;
+		return splitFileLines(readFileSync(join(run.directory, "blobs", blob), "utf8")).length;
 	} catch {
 		return null;
 	}
@@ -367,9 +385,11 @@ const pinnedLineCount = (run: ReviewRun, filePath: string): number | null => {
 const contextOrphan = (
 	run: ReviewRun,
 	thread: ReviewThread,
-	anchor: ContextThreadAnchor,
+	anchor: Pick<ContextThreadAnchor, "filePath" | "startLine" | "endLine"> & {
+		side?: "additions" | "deletions";
+	},
 ): OrphanedThread | null => {
-	const lines = pinnedLineCount(run, anchor.filePath);
+	const lines = pinnedLineCount(run, anchor.filePath, anchor.side);
 	if (lines === null) {
 		return {
 			thread,
@@ -379,7 +399,7 @@ const contextOrphan = (
 	if (anchor.endLine > lines) {
 		return {
 			thread,
-			reason: `${excerptAnchorLabel(anchor)} lies past the end of the pinned file (${lines} lines)`,
+			reason: `${JSON.stringify(anchor.filePath)} ${anchor.startLine}-${anchor.endLine} lies past the end of the pinned file (${lines} lines)`,
 		};
 	}
 	return null;
@@ -444,34 +464,52 @@ export function validateThreadsForRun(
 				`Thread ${thread.id} belongs to run ${thread.runId}, not verified run ${run.manifest.runId}`,
 			);
 		}
+		if (thread.migrationOrphaned) {
+			if (!thread.migratedFrom) {
+				throw staleAnchor(thread, "migrationOrphaned requires a migrated anchor");
+			}
+			orphaned.push({
+				thread,
+				reason:
+					"original code changed, is absent, or has no unambiguous correspondence" +
+					(thread.originalEvidence ? "" : "; original code unavailable"),
+			});
+			continue;
+		}
 		if (isExcerptAnchor(thread.anchor)) {
 			const orphan = excerptOrphan(run, thread);
 			if (orphan) orphaned.push(orphan);
 			continue;
 		}
-		if (thread.migrationOrphaned) {
-			if (!thread.migratedFrom) {
-				throw staleAnchor(thread, "migrationOrphaned requires a migrated patch or hunk anchor");
-			}
-			orphaned.push({
-				thread,
-				reason: "the code this thread was written on is not in the run that superseded it",
-			});
-			continue;
-		}
 		if (isContextAnchor(thread.anchor)) {
-			const orphan = contextOrphan(run, thread, thread.anchor);
+			const orphan = contextOrphan(run, thread, thread.anchor) ?? legacyCarriedOrphan(thread);
 			if (orphan) orphaned.push(orphan);
 			continue;
 		}
+		if (isSelectionAnchor(thread.anchor)) {
+			const contextIssue = thread.anchor.segments
+				.filter((segment) => segment.kind === "context")
+				.map((segment) =>
+					contextOrphan(run, thread, { ...segment, filePath: thread.anchor.filePath }),
+				)
+				.find((orphan): orphan is OrphanedThread => orphan !== null);
+			if (contextIssue) {
+				orphaned.push(contextIssue);
+				continue;
+			}
+		}
 		const anchors = isPatchAnchor(thread.anchor)
 			? thread.anchor.ranges.map((range) => patchRangeAsHunk(thread.anchor.filePath, range))
-			: [thread.anchor];
+			: isSelectionAnchor(thread.anchor)
+				? thread.anchor.segments
+						.filter((segment) => segment.kind === "patch")
+						.map((segment) => patchRangeAsHunk(thread.anchor.filePath, segment))
+				: [thread.anchor];
 		const issue = anchors
 			.map((anchor, index) => ({ index, issue: hunkAnchorIssue(files, anchor) }))
 			.find((entry) => entry.issue !== null);
 		if (issue?.issue) {
-			const patch = isPatchAnchor(thread.anchor);
+			const patch = isPatchAnchor(thread.anchor) || isSelectionAnchor(thread.anchor);
 			const detail = patch ? `patch range ${issue.index + 1}: ${issue.issue}` : issue.issue;
 			// Prep marks a failed atomic patch migration explicitly. A merely migrated patch that no
 			// longer resolves is corrupt; generic migratedFrom leniency remains only for historical hunks.
@@ -503,9 +541,16 @@ export function validateThreadsForRun(
 			const ownership = chapterRangeOwnershipIssue(run, anchor.filePath, anchor.oldStart);
 			if (ownership) throw staleAnchor(thread, ownership);
 		}
+		const legacy = legacyCarriedOrphan(thread);
+		if (legacy) orphaned.push(legacy);
 	}
 	return orphaned;
 }
+
+const legacyCarriedOrphan = (thread: ReviewThread): OrphanedThread | null =>
+	thread.migratedFrom && !thread.originalEvidence
+		? { thread, reason: "original code unavailable; carried anchor is unverified" }
+		: null;
 
 export type LoadedThreads = { threads: ReviewThread[]; orphaned: OrphanedThread[] };
 

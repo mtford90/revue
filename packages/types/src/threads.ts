@@ -1,7 +1,13 @@
 import { z } from "zod";
 
-export const THREAD_STORE_SCHEMA_VERSION = 2 as const;
+export const THREAD_STORE_SCHEMA_VERSION = 3 as const;
 export const HISTORICAL_THREAD_STORE_SCHEMA_VERSION = 1 as const;
+export const PREVIOUS_THREAD_STORE_SCHEMA_VERSION = 2 as const;
+export const THREAD_REPLY_INTENT = {
+	PROPOSAL: "proposal",
+	COMPLETED: "completed",
+} as const;
+export type ThreadReplyIntent = (typeof THREAD_REPLY_INTENT)[keyof typeof THREAD_REPLY_INTENT];
 export const THREAD_STATUS = {
 	OPEN: "open",
 	DEALT_WITH: "dealt-with",
@@ -114,11 +120,91 @@ export const patchThreadAnchorSchema = z.strictObject({
 });
 export type PatchThreadAnchor = z.infer<typeof patchThreadAnchorSchema>;
 
+/** One side-authoritative part of a mixed changed/revealed selection. */
+export const selectionThreadSegmentSchema = z.union([
+	z
+		.strictObject({ kind: z.literal(THREAD_ANCHOR_KIND.PATCH), ...patchThreadRangeSchema.shape })
+		.refine((segment) => segment.startLine <= segment.endLine, orderedRange),
+	z
+		.strictObject({
+			kind: z.literal(THREAD_ANCHOR_KIND.CONTEXT),
+			side: z.enum(["additions", "deletions"]),
+			startLine: z.number().int().positive(),
+			endLine: z.number().int().positive(),
+		})
+		.refine((segment) => segment.startLine <= segment.endLine, orderedRange),
+]);
+export type SelectionThreadSegment = z.infer<typeof selectionThreadSegmentSchema>;
+
+const selectionSegmentOrder = (
+	left: SelectionThreadSegment,
+	right: SelectionThreadSegment,
+): number =>
+	left.side.localeCompare(right.side) ||
+	left.startLine - right.startLine ||
+	left.endLine - right.endLine ||
+	left.kind.localeCompare(right.kind) ||
+	(left.kind === THREAD_ANCHOR_KIND.PATCH && right.kind === THREAD_ANCHOR_KIND.PATCH
+		? left.oldStart - right.oldStart
+		: 0);
+
+const sameSelectionAuthority = (
+	left: SelectionThreadSegment,
+	right: SelectionThreadSegment,
+): boolean =>
+	left.kind === right.kind &&
+	left.side === right.side &&
+	(left.kind !== THREAD_ANCHOR_KIND.PATCH ||
+		(right.kind === THREAD_ANCHOR_KIND.PATCH && left.oldStart === right.oldStart));
+
+/** Layout-independent persisted ordering for mixed patch/context selections. */
+export const canonicalizeSelectionSegments = (
+	segments: readonly SelectionThreadSegment[],
+): SelectionThreadSegment[] =>
+	segments
+		.slice()
+		.sort(selectionSegmentOrder)
+		.reduce<SelectionThreadSegment[]>((canonical, segment) => {
+			const previous = canonical.at(-1);
+			if (
+				previous &&
+				sameSelectionAuthority(previous, segment) &&
+				segment.startLine <= previous.endLine + 1
+			) {
+				canonical[canonical.length - 1] = {
+					...previous,
+					endLine: Math.max(previous.endLine, segment.endLine),
+				} as SelectionThreadSegment;
+			} else canonical.push(segment);
+			return canonical;
+		}, []);
+
+/** A persistent single thread spanning original patch and revealed-context segments in one file. */
+export const selectionThreadAnchorSchema = z
+	.strictObject({
+		kind: z.literal("selection"),
+		filePath: z.string().min(1),
+		segments: z.tuple([selectionThreadSegmentSchema], selectionThreadSegmentSchema),
+	})
+	.superRefine((anchor, context) => {
+		const canonical = canonicalizeSelectionSegments(anchor.segments);
+		if (JSON.stringify(canonical) !== JSON.stringify(anchor.segments)) {
+			context.addIssue({
+				code: "custom",
+				path: ["segments"],
+				message:
+					"Selection segments are not canonical (ordered, non-overlapping, and adjacent-merged)",
+			});
+		}
+	});
+export type SelectionThreadAnchor = z.infer<typeof selectionThreadAnchorSchema>;
+
 export const threadAnchorSchema = z.union([
 	hunkThreadAnchorSchema,
 	excerptThreadAnchorSchema,
 	patchThreadAnchorSchema,
 	contextThreadAnchorSchema,
+	selectionThreadAnchorSchema,
 ]);
 export type ThreadAnchor = z.infer<typeof threadAnchorSchema>;
 
@@ -131,19 +217,90 @@ export const isPatchAnchor = (anchor: ThreadAnchor): anchor is PatchThreadAnchor
 export const isContextAnchor = (anchor: ThreadAnchor): anchor is ContextThreadAnchor =>
 	anchor.kind === THREAD_ANCHOR_KIND.CONTEXT;
 
+export const isSelectionAnchor = (anchor: ThreadAnchor): anchor is SelectionThreadAnchor =>
+	anchor.kind === "selection";
+
 export const threadAuthorSchema = z.strictObject({
 	kind: z.enum(THREAD_AUTHOR_KIND),
 	name: terminalSafeName,
 });
 export type ThreadAuthor = z.infer<typeof threadAuthorSchema>;
 
-export const threadMessageSchema = z.strictObject({
-	id: z.uuid(),
-	author: threadAuthorSchema,
-	body: terminalSafeText("Thread message body"),
-	createdAt: z.iso.datetime(),
-});
+export const threadMessageSchema = z
+	.strictObject({
+		id: z.uuid(),
+		author: threadAuthorSchema,
+		body: terminalSafeText("Thread message body"),
+		createdAt: z.iso.datetime(),
+		intent: z.enum(THREAD_REPLY_INTENT).optional(),
+	})
+	.superRefine((message, context) => {
+		if (message.intent && message.author.kind !== THREAD_AUTHOR_KIND.AGENT) {
+			context.addIssue({
+				code: "custom",
+				path: ["intent"],
+				message: "Only an agent reply may declare reply intent",
+			});
+		}
+	});
 export type ThreadMessage = z.infer<typeof threadMessageSchema>;
+
+/** The one reply-state interpretation shared by status and review surfaces. */
+export type ThreadDisposition =
+	| "dealt-with"
+	| "awaiting-agent"
+	| "awaiting-reviewer-legacy"
+	| "awaiting-approval"
+	| "ready-to-verify";
+
+export const threadDisposition = (
+	thread: Pick<ReviewThread, "status" | "messages">,
+): ThreadDisposition => {
+	if (thread.status === THREAD_STATUS.DEALT_WITH) return "dealt-with";
+	const last = thread.messages.at(-1);
+	if (last?.author.kind !== THREAD_AUTHOR_KIND.AGENT) return "awaiting-agent";
+	if (last.intent === THREAD_REPLY_INTENT.PROPOSAL) return "awaiting-approval";
+	if (last.intent === THREAD_REPLY_INTENT.COMPLETED) return "ready-to-verify";
+	return "awaiting-reviewer-legacy";
+};
+
+/** User-visible protocol state shared by inline cards, Comments, and disk-backed status. */
+export const threadDispositionLabel = (thread: Pick<ReviewThread, "status" | "messages">): string =>
+	({
+		"dealt-with": "dealt with",
+		"awaiting-agent": "awaiting agent",
+		"awaiting-reviewer-legacy": "awaiting reviewer",
+		"awaiting-approval": "needs approval",
+		"ready-to-verify": "ready to verify",
+	})[threadDisposition(thread)];
+
+/** Original source lines, one array per anchor range; never rewritten by supersession. */
+export const threadEvidenceSchema = z
+	.strictObject({
+		runId: runIdSchema,
+		anchor: threadAnchorSchema,
+		lines: z.array(z.array(z.string())),
+	})
+	.superRefine((evidence, context) => {
+		const ranges = isPatchAnchor(evidence.anchor)
+			? evidence.anchor.ranges
+			: isSelectionAnchor(evidence.anchor)
+				? evidence.anchor.segments
+				: [evidence.anchor];
+		if (
+			evidence.lines.length !== ranges.length ||
+			ranges.some(
+				(range, index) => evidence.lines[index]?.length !== range.endLine - range.startLine + 1,
+			)
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["lines"],
+				message: "Original evidence must contain every line of every anchor range",
+			});
+		}
+	});
+export type ThreadEvidence = z.infer<typeof threadEvidenceSchema>;
 
 export const reviewThreadSchema = z
 	.strictObject({
@@ -156,21 +313,35 @@ export const reviewThreadSchema = z
 		 * so a hunk anchor the new run no longer holds is orphaned instead of treated as corruption.
 		 */
 		migratedFrom: runIdSchema.optional(),
-		/** Prep could not find the code this carried anchor was written on anywhere in the run. */
+		originalEvidence: threadEvidenceSchema.optional(),
+		/** Sticky detachment established by prep or context freeze. */
 		migrationOrphaned: z.literal(true).optional(),
 		status: z.enum(THREAD_STATUS),
 		createdAt: z.iso.datetime(),
 		messages: z.array(threadMessageSchema).min(1),
 	})
 	.superRefine((thread, context) => {
-		if (
-			thread.migrationOrphaned &&
-			(thread.anchor.kind === THREAD_ANCHOR_KIND.EXCERPT || !thread.migratedFrom)
-		) {
+		if (thread.migrationOrphaned && !thread.migratedFrom) {
 			context.addIssue({
 				code: "custom",
 				path: ["migrationOrphaned"],
-				message: "migrationOrphaned requires a migrated patch, hunk, or context anchor",
+				message: "migrationOrphaned requires a migrated anchor",
+			});
+		}
+		const evidence = thread.originalEvidence;
+		if (
+			evidence &&
+			(evidence.anchor.kind !== thread.anchor.kind ||
+				evidence.anchor.filePath !== thread.anchor.filePath ||
+				(!thread.migratedFrom &&
+					(evidence.runId !== thread.runId ||
+						JSON.stringify(evidence.anchor) !== JSON.stringify(thread.anchor))))
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["originalEvidence"],
+				message:
+					"Original evidence must match the authored run and anchor, or the carried anchor kind and path",
 			});
 		}
 		if (thread.messages[0]?.createdAt !== thread.createdAt) {
@@ -228,6 +399,14 @@ export const emptyThreadStoreFile = (): ThreadStoreFile => ({
 	runs: {},
 });
 
+/** Strict historical schemas never gain fields from newer messages. */
+const historicalThreadMessageSchema = z.strictObject({
+	id: z.uuid(),
+	author: threadAuthorSchema,
+	body: terminalSafeText("Thread message body"),
+	createdAt: z.iso.datetime(),
+});
+
 /** Strict historical schema: v1 predates patch anchors and their migration marker. */
 const historicalReviewThreadSchema = z
 	.strictObject({
@@ -237,7 +416,7 @@ const historicalReviewThreadSchema = z
 		migratedFrom: runIdSchema.optional(),
 		status: z.enum(THREAD_STATUS),
 		createdAt: z.iso.datetime(),
-		messages: z.array(threadMessageSchema).min(1),
+		messages: z.array(historicalThreadMessageSchema).min(1),
 	})
 	.superRefine((thread, context) => {
 		if (thread.messages[0]?.createdAt !== thread.createdAt) {
@@ -288,9 +467,60 @@ export const historicalThreadStoreFileSchema = z
 		}
 	});
 
-/** Read either format, preserving historical anchor kinds and upgrading only the envelope. */
+/** v2 evidence predates segmented selections, just as its message schema predates reply intent. */
+const previousThreadEvidenceSchema = z
+	.strictObject({
+		runId: runIdSchema,
+		anchor: z.union([
+			hunkThreadAnchorSchema,
+			excerptThreadAnchorSchema,
+			patchThreadAnchorSchema,
+			contextThreadAnchorSchema,
+		]),
+		lines: z.array(z.array(z.string())),
+	})
+	.superRefine((evidence, context) => {
+		const ranges = isPatchAnchor(evidence.anchor) ? evidence.anchor.ranges : [evidence.anchor];
+		if (
+			evidence.lines.length !== ranges.length ||
+			ranges.some(
+				(range, index) => evidence.lines[index]?.length !== range.endLine - range.startLine + 1,
+			)
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["lines"],
+				message: "Original evidence must contain every line of every anchor range",
+			});
+		}
+	});
+
+/** v2 had patch/context anchors and evidence, but messages had no reply intent. */
+const previousReviewThreadSchema = z.strictObject({
+	id: z.uuid(),
+	runId: runIdSchema,
+	anchor: z.union([
+		hunkThreadAnchorSchema,
+		excerptThreadAnchorSchema,
+		patchThreadAnchorSchema,
+		contextThreadAnchorSchema,
+	]),
+	migratedFrom: runIdSchema.optional(),
+	originalEvidence: previousThreadEvidenceSchema.optional(),
+	migrationOrphaned: z.literal(true).optional(),
+	status: z.enum(THREAD_STATUS),
+	createdAt: z.iso.datetime(),
+	messages: z.array(historicalThreadMessageSchema).min(1),
+});
+
+const previousThreadStoreFileSchema = z.strictObject({
+	schemaVersion: z.literal(PREVIOUS_THREAD_STORE_SCHEMA_VERSION),
+	runs: z.record(runIdSchema, z.array(previousReviewThreadSchema)),
+});
+
+/** Read historical envelopes strictly, then upgrade only their envelope. */
 export const threadStoreFileReaderSchema = z
-	.union([threadStoreFileSchema, historicalThreadStoreFileSchema])
+	.union([threadStoreFileSchema, previousThreadStoreFileSchema, historicalThreadStoreFileSchema])
 	.transform(
 		(store): ThreadStoreFile =>
 			store.schemaVersion === THREAD_STORE_SCHEMA_VERSION

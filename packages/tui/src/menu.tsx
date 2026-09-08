@@ -93,6 +93,8 @@ export const buildAppMenus = ({
 	canMovePrevious,
 	canMoveNext,
 	canChangeFiles,
+	canReviewHunk,
+	toggleHunkReview,
 	canMoveNextUnreviewed,
 	allFiles,
 	canToggleAllFiles,
@@ -130,6 +132,8 @@ export const buildAppMenus = ({
 	canMovePrevious: boolean;
 	canMoveNext: boolean;
 	canChangeFiles: boolean;
+	canReviewHunk: boolean;
+	toggleHunkReview: () => void;
 	canMoveNextUnreviewed: boolean;
 	allFiles: boolean;
 	canToggleAllFiles: boolean;
@@ -242,6 +246,13 @@ export const buildAppMenus = ({
 			checked: changeMarkers,
 			action: () => setChangeMarkers(!changeMarkers),
 		},
+		{
+			kind: "item",
+			label: "Toggle hunk reviewed",
+			hint: keymapHint("toggle-hunk-review", keymap),
+			disabled: !canReviewHunk,
+			action: toggleHunkReview,
+		},
 		{ kind: "separator", id: "diff-chrome" },
 		...FILE_DISPLAY_PREFERENCES.map(
 			({ preference, label }): MenuEntry => ({
@@ -280,6 +291,7 @@ export const buildAppMenus = ({
 			}),
 		),
 		{ kind: "separator", id: "sidebar" },
+
 		{
 			kind: "item",
 			label: "Collapse files",

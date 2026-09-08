@@ -6,6 +6,7 @@ import {
 	THREAD_STATUS,
 	THREAD_STORE_SCHEMA_VERSION,
 	threadAnchorSchema,
+	threadDisposition,
 	threadStoreFileSchema,
 } from "@revue/types/threads";
 
@@ -60,6 +61,28 @@ test("thread bodies allow prose while author names remain terminal-safe single l
 	expect(() =>
 		reviewThreadSchema.parse({ ...thread, createdAt: "2026-08-02T10:00:01.000Z" }),
 	).toThrow("root message");
+});
+
+test("agent reply intent is explicit and drives reviewer disposition", () => {
+	const proposal = reviewThreadSchema.parse({
+		...thread,
+		messages: [{ ...thread.messages[0], intent: "proposal" }],
+	});
+	expect(threadDisposition(proposal)).toBe("awaiting-approval");
+	const completed = reviewThreadSchema.parse({
+		...proposal,
+		messages: [{ ...proposal.messages[0], intent: "completed" }],
+	});
+	expect(threadDisposition(completed)).toBe("ready-to-verify");
+	expect(threadDisposition(reviewThreadSchema.parse(thread))).toBe("awaiting-reviewer-legacy");
+	expect(() =>
+		reviewThreadSchema.parse({
+			...thread,
+			messages: [
+				{ ...thread.messages[0], author: { kind: "human", name: "Ada" }, intent: "proposal" },
+			],
+		}),
+	).toThrow("Only an agent reply");
 });
 
 test("an anchor states its kind, and a stored hunk anchor keeps parsing without one", () => {
@@ -128,26 +151,122 @@ test("migrationOrphaned is a migration marker, never a general corruption escape
 		startLine: 8,
 		endLine: 8,
 	};
+	expect(
+		reviewThreadSchema.parse({
+			...thread,
+			anchor: excerptAnchor,
+			migratedFrom,
+			migrationOrphaned: true,
+		}).migrationOrphaned,
+	).toBe(true);
 	for (const invalid of [
 		{ ...migrated, migrationOrphaned: false },
-		// An excerpt orphans against the frozen context at load; it is never marked in the store.
-		{ ...thread, anchor: excerptAnchor, migratedFrom, migrationOrphaned: true },
+		{ ...thread, anchor: excerptAnchor, migrationOrphaned: true },
 		{ ...thread, anchor: patchAnchor, migrationOrphaned: true },
 	]) {
 		expect(() => reviewThreadSchema.parse(invalid)).toThrow();
 	}
 });
 
-test("version two is strict and does not admit patch anchors into historical stores", () => {
-	expect(THREAD_STORE_SCHEMA_VERSION).toBe(2);
+test("original evidence preserves raw code but rejects incomplete range evidence", () => {
+	const originalEvidence = {
+		runId: thread.runId,
+		anchor: thread.anchor,
+		lines: [["\tbefore\r", "\u001b[31mcode\u001b[0m", ""]],
+	};
+	expect(reviewThreadSchema.parse({ ...thread, originalEvidence }).originalEvidence?.lines).toEqual(
+		originalEvidence.lines,
+	);
+	for (const lines of [[], [["only one line"]], [...originalEvidence.lines, ["extra range"]]]) {
+		expect(() =>
+			reviewThreadSchema.parse({ ...thread, originalEvidence: { ...originalEvidence, lines } }),
+		).toThrow("every line of every anchor range");
+	}
+});
+
+test("original evidence belongs to the authored anchor and keeps its authority after carry", () => {
+	const anchor = threadAnchorSchema.parse(thread.anchor);
+	const originalEvidence = { runId: thread.runId, anchor, lines: [["one", "two", "three"]] };
+	const shifted = { ...anchor, oldStart: 14, startLine: 18, endLine: 20 };
+	for (const evidence of [
+		{ ...originalEvidence, runId: "b".repeat(64) },
+		{ ...originalEvidence, anchor: shifted },
+		{ ...originalEvidence, anchor: { ...anchor, side: "deletions" } },
+	]) {
+		expect(() => reviewThreadSchema.parse({ ...thread, originalEvidence: evidence })).toThrow(
+			"Original evidence",
+		);
+	}
+	const carried = {
+		...thread,
+		runId: "b".repeat(64),
+		migratedFrom: thread.runId,
+		anchor: shifted,
+		originalEvidence,
+	};
+	expect(reviewThreadSchema.parse(carried).originalEvidence).toEqual(originalEvidence);
+	for (const evidenceAnchor of [
+		{ ...anchor, filePath: "src/unrelated.ts" },
+		{ kind: "excerpt", filePath: anchor.filePath, startLine: 8, endLine: 10 },
+		{ kind: "context", filePath: anchor.filePath, startLine: 8, endLine: 10 },
+	]) {
+		expect(() =>
+			reviewThreadSchema.parse({
+				...carried,
+				originalEvidence: { ...originalEvidence, anchor: evidenceAnchor },
+			}),
+		).toThrow("Original evidence");
+	}
+});
+
+test("version three writes intent while rejecting future store fields", () => {
+	expect(THREAD_STORE_SCHEMA_VERSION).toBe(3);
 	const runId = "a".repeat(64);
 	const current = {
-		schemaVersion: 2,
+		schemaVersion: 3,
 		runs: { [runId]: [reviewThreadSchema.parse(thread)] },
 	};
 	expect(threadStoreFileSchema.parse(current)).toEqual(current);
-	expect(() => threadStoreFileSchema.parse({ ...current, schemaVersion: 1 })).toThrow();
+	expect(() => threadStoreFileSchema.parse({ ...current, schemaVersion: 2 })).toThrow();
 	expect(() => threadStoreFileSchema.parse({ ...current, futureField: true })).toThrow();
+});
+
+test("segmented selections preserve every patch and old-side context authority", () => {
+	const anchor = {
+		kind: "selection",
+		filePath: "src/value.ts",
+		segments: [
+			{ kind: "patch", oldStart: 4, side: "additions", startLine: 8, endLine: 8 },
+			{ kind: "context", side: "deletions", startLine: 6, endLine: 7 },
+		],
+	};
+	expect(threadAnchorSchema.parse(anchor)).toEqual(anchor);
+	expect(
+		reviewThreadSchema.parse({
+			...thread,
+			anchor,
+			originalEvidence: { runId: thread.runId, anchor, lines: [["changed"], ["old", "context"]] },
+		}).originalEvidence?.lines,
+	).toEqual([["changed"], ["old", "context"]]);
+	expect(() => threadAnchorSchema.parse({ ...anchor, segments: [] })).toThrow();
+});
+
+test("selection segments are canonicalized by authority and persisted disorder is rejected", () => {
+	const anchor = {
+		kind: "selection",
+		filePath: "src/value.ts",
+		segments: [
+			{ kind: "context", side: "additions", startLine: 5, endLine: 5 },
+			{ kind: "context", side: "additions", startLine: 6, endLine: 7 },
+		],
+	};
+	expect(() => threadAnchorSchema.parse(anchor)).toThrow("not canonical");
+	expect(
+		threadAnchorSchema.parse({
+			...anchor,
+			segments: [{ kind: "context", side: "additions", startLine: 5, endLine: 7 }],
+		}),
+	).toMatchObject({ kind: "selection" });
 });
 
 test("patch anchors are non-empty, file-scoped multi-ranges without changing old anchors", () => {

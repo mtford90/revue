@@ -18,9 +18,8 @@ import {
 	type HandoffRecord,
 	type ReviewThread,
 	type RunManifest,
-	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
-	type ThreadAuthor,
+	threadDisposition,
 } from "@revue/types";
 import { loadReviewRun } from "./load.ts";
 import { loadValidatedThreads } from "./threads.ts";
@@ -54,8 +53,11 @@ export type ThreadStatus = {
 	open: number;
 	/** Open threads whose last word came from a human: the agent owes a reply or a fix. */
 	awaitingAgent: number;
-	/** Open threads whose last word came from an agent: the reviewer owes a verdict. */
+	/** Compatibility aggregate for all open threads awaiting reviewer action. */
 	awaitingHuman: number;
+	awaitingApproval: number;
+	readyToVerify: number;
+	legacyAwaitingReviewer: number;
 	dealtWith: number;
 	orphaned: number;
 };
@@ -88,6 +90,9 @@ const EMPTY_THREADS: ThreadStatus = {
 	open: 0,
 	awaitingAgent: 0,
 	awaitingHuman: 0,
+	awaitingApproval: 0,
+	readyToVerify: 0,
+	legacyAwaitingReviewer: 0,
 	dealtWith: 0,
 	orphaned: 0,
 };
@@ -107,9 +112,6 @@ const runStatus = ({ directory, manifest, narrated }: RunRecord): RunStatus => (
 	},
 });
 
-const lastAuthorKind = (thread: ReviewThread): ThreadAuthor["kind"] | undefined =>
-	thread.messages.at(-1)?.author.kind;
-
 const threadStatus = (
 	runId: string,
 	threads: readonly ReviewThread[],
@@ -119,10 +121,14 @@ const threadStatus = (
 	return {
 		runId,
 		open: open.length,
-		awaitingAgent: open.filter((thread) => lastAuthorKind(thread) === THREAD_AUTHOR_KIND.HUMAN)
+		awaitingAgent: open.filter((thread) => threadDisposition(thread) === "awaiting-agent").length,
+		awaitingHuman: open.filter((thread) => threadDisposition(thread) !== "awaiting-agent").length,
+		awaitingApproval: open.filter((thread) => threadDisposition(thread) === "awaiting-approval")
 			.length,
-		awaitingHuman: open.filter((thread) => lastAuthorKind(thread) === THREAD_AUTHOR_KIND.AGENT)
-			.length,
+		readyToVerify: open.filter((thread) => threadDisposition(thread) === "ready-to-verify").length,
+		legacyAwaitingReviewer: open.filter(
+			(thread) => threadDisposition(thread) === "awaiting-reviewer-legacy",
+		).length,
 		dealtWith: threads.length - open.length,
 		orphaned,
 	};
@@ -225,7 +231,7 @@ const deltaLine = (pending: PendingRunStatus): string =>
 		: "no delta recorded";
 
 const threadsLine = (threads: ThreadStatus): string =>
-	`${plural(threads.open, "open thread")} (${threads.awaitingAgent} awaiting the agent, ${threads.awaitingHuman} awaiting the reviewer), ${threads.dealtWith} dealt with, ${threads.orphaned} orphaned`;
+	`${plural(threads.open, "open thread")} (${threads.awaitingAgent} awaiting the agent, ${threads.awaitingHuman} awaiting the reviewer) — ${threads.awaitingApproval} approval, ${threads.readyToVerify} ready to verify, ${threads.legacyAwaitingReviewer} legacy; ${threads.dealtWith} dealt with, ${threads.orphaned} orphaned`;
 
 const deliveryLabel = (delivery: HandoffDelivery): string => {
 	if (delivery.kind === "delivered") return `delivered to ${delivery.title}`;

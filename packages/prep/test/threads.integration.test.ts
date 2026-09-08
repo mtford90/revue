@@ -199,7 +199,7 @@ test("historical v1 hunk and excerpt stores migrate without reinterpretation", a
 	);
 
 	const migrated = readThreadStoreFile(path);
-	expect(migrated.schemaVersion).toBe(2);
+	expect(migrated.schemaVersion).toBe(3);
 	expect(migrated.runs[runId]?.map((thread) => thread.anchor.kind)).toEqual([
 		THREAD_ANCHOR_KIND.HUNK,
 		THREAD_ANCHOR_KIND.EXCERPT,
@@ -334,7 +334,8 @@ test("feedback follows the code onto the run that continues the review", async (
 	// An untouched review unit still holds the code the reviewer read.
 	expect(onAlpha?.anchor).toEqual(untouched.anchor);
 	expect(await anchoredLine(second, "src/alpha.ts", 5)).toBe("alpha line five");
-	// The rewritten unit is where the answer to the thread now lives, so the thread goes there.
+	// The answer replaced the commented code: keep the original anchor, but never draw it there.
+	expect(onBeta?.migrationOrphaned).toBe(true);
 	expect(onBeta?.anchor).toEqual(fixed.anchor);
 	expect(await anchoredLine(second, "src/beta.ts", 5)).toBe("beta line 5, fixed");
 	expect((await loadRunDelta(second))?.unnarrated).toContainEqual({
@@ -404,6 +405,21 @@ test("feedback left on a pending run follows the next prep of the review", async
 	expect(latest.warnings).toEqual([]);
 });
 
+test("already-carried legacy feedback never invents original evidence from its current coordinates", async () => {
+	const { root, pending } = await pendingReview();
+	const legacy = storedThreads(root, pending.manifest.runId).map(
+		({ originalEvidence: _evidence, ...thread }) => thread,
+	);
+	seedThreads(root, pending.manifest.runId, legacy);
+	await write(root, "src/beta.ts", replaceLine(numbered("beta", 20), 5, "another beta fix"));
+	await commit(root, "Continue the legacy review");
+	const latest = await prepareRun(["main", "HEAD"], root);
+	const [carried] = storedThreads(root, latest.manifest.runId);
+	expect(carried?.migrationOrphaned).toBe(true);
+	expect(carried?.originalEvidence).toBeUndefined();
+	expect(carried?.messages).toEqual(legacy[0]?.messages);
+});
+
 test("--carry-from a pending run continues the narrated run before it", async () => {
 	const { root, narrated, pending, onAlpha } = await pendingReview();
 	await write(
@@ -424,7 +440,7 @@ test("--carry-from a pending run continues the narrated run before it", async ()
 	expect(latest.warnings).toEqual([expect.stringContaining("continues its narrated ancestor")]);
 });
 
-test("prep says when it strands feedback and when every read mark starts over", async () => {
+test("prep says when it strands feedback and when all narration must be rewritten", async () => {
 	const { root, narrated, pending } = await pendingReview();
 	await write(
 		root,
@@ -444,7 +460,8 @@ test("prep says when it strands feedback and when every read mark starts over", 
 	const rewritten = await prepareRun(["main", "HEAD"], root);
 	expect(rewritten.manifest.supersedes).toBe(narrated.manifest.runId);
 	expect(rewritten.warnings).toEqual([
-		`none of the 2 chapters of ${narrated.manifest.runId.slice(0, 12)} carried forward: every read mark on that run starts over`,
+		`none of the 2 chapters of ${narrated.manifest.runId.slice(0, 12)} carried forward: narration must be rewritten`,
+		"1 carried thread detached: original code changed, is absent, or has no unambiguous correspondence",
 	]);
 	expect(
 		storedThreads(root, rewritten.manifest.runId).map((thread) => thread.migratedFrom),
@@ -481,7 +498,7 @@ test("an anchor whose lines moved beneath it is re-mapped onto the same code", a
 	expect(await anchoredLine(first, "src/app.ts", 25)).toBe("app line twenty-five");
 });
 
-test("a rewritten unit carries its thread to the line the fix now occupies", async () => {
+test("a rewritten unit detaches its thread even when the identical frame shifts with the fix", async () => {
 	const root = await repository({ "src/app.ts": numbered("app", 30) });
 	await write(root, "src/app.ts", replaceLine(numbered("app", 30), 25, "app line twenty-five"));
 	await commit(root, "Feature work");
@@ -505,7 +522,13 @@ test("a rewritten unit carries its thread to the line the fix now occupies", asy
 	const second = await prepareRun(["main", "HEAD"], root);
 
 	const [carried] = storedThreads(root, second.manifest.runId);
-	expect(carried?.anchor).toEqual(anchoredAt("src/app.ts", 22, 27));
+	expect(carried?.migrationOrphaned).toBe(true);
+	expect(carried?.anchor).toEqual(anchoredAt("src/app.ts", 22, 25));
+	expect(carried?.originalEvidence).toEqual({
+		runId: first.manifest.runId,
+		anchor: anchoredAt("src/app.ts", 22, 25),
+		lines: [["app line twenty-five"]],
+	});
 	expect(await anchoredLine(second, "src/app.ts", 27)).toBe("app line 25, fixed");
 	expect((await loadRunDelta(second))?.unnarrated).toContainEqual({
 		filePath: "src/app.ts",
@@ -561,7 +584,7 @@ test("a thread on revealed context follows the pinned file, and orphans when the
 	expect(orphaned?.anchor).toEqual(contextAnchor(7, 8));
 	expect(orphaned?.migrationOrphaned).toBe(true);
 	expect(third.warnings).toEqual([
-		"1 carried thread point at code this run no longer has; they are listed as orphaned",
+		"1 carried thread detached: original code changed, is absent, or has no unambiguous correspondence",
 	]);
 });
 
@@ -590,6 +613,125 @@ test("re-preparing an unchanged scope carries nothing a second time", async () =
 	const again = await prepareRun(["main", "HEAD"], root);
 	expect(again.manifest.runId).toBe(second.manifest.runId);
 	expect(readThreadStoreFile(threadStorePath(root))).toEqual(migrated);
+});
+
+test.each([
+	"moved",
+	"changed",
+	"ambiguous",
+] as const)("late excerpt feedback uses an already-frozen %s destination on deduplicated prep", async (scenario) => {
+	const caller = "before()\n\tuseOriginal()\nafter()\n";
+	const root = await repository({
+		".gitignore": ".revue/\n",
+		"value.ts": "value(1)\n",
+		"caller.ts": caller,
+	});
+	// The caller is quoted scenery outside this review's patch, even when it changes.
+	const scope = ["--ref", "work", "--ignore", "caller.ts"];
+	const excerpts = [{ filePath: "caller.ts", startLine: 1, endLine: 3 }];
+	await write(root, "value.ts", "value(2)\n");
+	const first = await prepareRun(scope, root);
+	await narrate(first, [
+		chapter({
+			id: "value",
+			order: 1,
+			hunkRefs: [{ filePath: "value.ts", oldStart: 1 }],
+			excerpts,
+		}),
+	]);
+	await write(root, "value.ts", "value(3)\n");
+	await write(
+		root,
+		"caller.ts",
+		scenario === "moved"
+			? `prelude()\n${caller}`
+			: scenario === "changed"
+				? caller.replace("useOriginal", "replacement")
+				: caller.replace("after()", "\tuseOriginal()"),
+	);
+	const second = await prepareRun(scope, root);
+	expect(second.manifest.files.map((file) => file.path)).toEqual(["value.ts"]);
+	const destinationChapters = await narrate(second, [
+		chapter({
+			id: "response",
+			order: 1,
+			role: "epilogue",
+			hunkRefs: [{ filePath: "value.ts", oldStart: 1 }],
+			excerpts: [{ filePath: "caller.ts", startLine: 1, endLine: scenario === "moved" ? 4 : 3 }],
+		}),
+	]);
+	// Feedback arrives on the predecessor only after the destination has been frozen.
+	const anchor: ThreadAnchor = {
+		kind: "excerpt",
+		filePath: "caller.ts",
+		startLine: 2,
+		endLine: 2,
+	};
+	const original = feedback({
+		index: 1,
+		runId: first.manifest.runId,
+		anchor,
+		body: "Can this remain synchronous?",
+	});
+	seedThreads(root, first.manifest.runId, [original]);
+	const again = await prepareRun([...scope, "--carry-from", first.manifest.runId], root);
+	expect(again.manifest.runId).toBe(second.manifest.runId);
+	expect(storedThreads(root, first.manifest.runId)).toEqual([]);
+	const [carried] = storedThreads(root, second.manifest.runId);
+	expect(carried?.anchor).toEqual(
+		scenario === "moved" ? { ...anchor, startLine: 3, endLine: 3 } : anchor,
+	);
+	expect(carried?.migrationOrphaned).toBe(scenario === "moved" ? undefined : true);
+	expect(carried?.messages).toEqual(original.messages);
+	expect(carried?.originalEvidence).toEqual({
+		runId: first.manifest.runId,
+		anchor,
+		lines: [["\tuseOriginal()"]],
+	});
+	// Restoring unique original text cannot revive a mismatch proven during migration.
+	await write(root, "caller.ts", `prelude()\n${caller}`);
+	await freezeRunContext(second, {
+		...destinationChapters,
+		chapters: destinationChapters.chapters.map((chapter) => ({
+			...chapter,
+			excerpts: [{ filePath: "caller.ts", startLine: 1, endLine: 4 }],
+		})),
+	});
+	const [refrozen] = storedThreads(root, second.manifest.runId);
+	expect(refrozen).toEqual(carried);
+});
+
+test("two-sided patch evidence retains the actual old and new bytes, not rendered text", async () => {
+	const oldCode = "\toldValue(\u001b[31m1\u001b[0m)\r";
+	const newCode = "\tnewValue(2)\r";
+	const root = await repository({ "value.ts": `${oldCode}\n` });
+	await write(root, "value.ts", `${newCode}\n`);
+	await commit(root, "Change the value");
+	const first = await prepareRun(["main", "HEAD"], root);
+	await narrate(first, [
+		chapter({ id: "value", order: 1, hunkRefs: [{ filePath: "value.ts", oldStart: 1 }] }),
+	]);
+	const anchor: ThreadAnchor = {
+		kind: "patch",
+		filePath: "value.ts",
+		ranges: [
+			{ oldStart: 1, side: "deletions", startLine: 1, endLine: 1 },
+			{ oldStart: 1, side: "additions", startLine: 1, endLine: 1 },
+		],
+	};
+	seedThreads(root, first.manifest.runId, [
+		feedback({ index: 1, runId: first.manifest.runId, anchor, body: "Compare both versions" }),
+	]);
+	await write(root, "other.ts", "other()\n");
+	await commit(root, "Unrelated addition");
+	const second = await prepareRun(["main", "HEAD"], root);
+	const [carried] = storedThreads(root, second.manifest.runId);
+	expect(carried?.migrationOrphaned).toBeUndefined();
+	expect(carried?.originalEvidence).toEqual({
+		runId: first.manifest.runId,
+		anchor,
+		lines: [[oldCode], [newCode]],
+	});
 });
 
 test("patch ranges remap atomically and orphan when any segment disappears", async () => {
@@ -640,7 +782,7 @@ test("patch ranges remap atomically and orphan when any segment disappears", asy
 		}),
 	]);
 
-	await write(root, "src/app.ts", replaceLine(baseline, 5, "app line 5, fixed"));
+	await write(root, "src/app.ts", replaceLine(baseline, 5, "app line five"));
 	await commit(root, "Address part of the review");
 	const second = await prepareRun(["main", "HEAD"], root);
 	const [carried, canonical] = storedThreads(root, second.manifest.runId);
@@ -668,11 +810,149 @@ test("patch ranges remap atomically and orphan when any segment disappears", asy
 	expect(stillOrphaned?.migrationOrphaned).toBe(true);
 	expect(stillOrphaned?.migratedFrom).toBe(second.manifest.runId);
 	expect(stillOrphaned?.anchor).toEqual(anchor);
+	expect(stillOrphaned?.originalEvidence).toEqual({
+		runId: first.manifest.runId,
+		anchor,
+		lines: [["app line five"], ["app line twenty-five"]],
+	});
+});
+
+test("segmented feedback carries atomically when context enters a destination hunk and detaches stickily when one segment changes", async () => {
+	const baseline = numbered("app", 30);
+	const root = await repository({ "src/app.ts": baseline });
+	await write(root, "src/app.ts", replaceLine(baseline, 5, "reviewed change"));
+	await commit(root, "Feature work");
+	const first = await prepareRun(["main", "HEAD"], root);
+	await narrate(first, [
+		chapter({ id: "app", order: 1, hunkRefs: [{ filePath: "src/app.ts", oldStart: 2 }] }),
+	]);
+	const anchor: ThreadAnchor = {
+		kind: "selection",
+		filePath: "src/app.ts",
+		segments: [
+			{ kind: "patch", oldStart: 2, side: "additions", startLine: 5, endLine: 5 },
+			{ kind: "context", side: "additions", startLine: 15, endLine: 15 },
+		],
+	};
+	seedThreads(root, first.manifest.runId, [
+		feedback({ index: 1, runId: first.manifest.runId, anchor, body: "Keep these together" }),
+	]);
+
+	// The second edit makes line 15 ordinary context inside a new original destination hunk. Its
+	// durable authority remains context even though it is displayable on that hunk's rows.
+	let secondCode = replaceLine(baseline, 5, "reviewed change");
+	secondCode = replaceLine(secondCode, 14, "nearby destination change");
+	await write(root, "src/app.ts", secondCode);
+	await commit(root, "Change beside selected context");
+	const second = await prepareRun(["main", "HEAD"], root);
+	const [carried] = storedThreads(root, second.manifest.runId);
+	expect(carried?.migrationOrphaned).toBeUndefined();
+	expect(carried?.anchor).toEqual(anchor);
+	expect(carried?.originalEvidence).toEqual({
+		runId: first.manifest.runId,
+		anchor,
+		lines: [["reviewed change"], ["app line 15"]],
+	});
+	await narrate(second, [
+		chapter({
+			id: "app",
+			order: 1,
+			hunkRefs: [
+				{ filePath: "src/app.ts", oldStart: 2 },
+				{ filePath: "src/app.ts", oldStart: 11 },
+			],
+		}),
+	]);
+
+	await write(root, "src/app.ts", replaceLine(secondCode, 15, "changed selected context"));
+	await commit(root, "Rewrite one selected segment");
+	const third = await prepareRun(["main", "HEAD"], root);
+	const [detached] = storedThreads(root, third.manifest.runId);
+	expect(detached?.migrationOrphaned).toBe(true);
+	expect(detached?.anchor).toEqual(anchor);
+	expect(detached?.originalEvidence).toEqual(carried?.originalEvidence);
+	await narrate(third, [
+		chapter({
+			id: "app",
+			order: 1,
+			hunkRefs: [
+				{ filePath: "src/app.ts", oldStart: 2 },
+				{ filePath: "src/app.ts", oldStart: 11 },
+			],
+		}),
+	]);
+
+	await write(root, "src/app.ts", secondCode);
+	await commit(root, "Restore selected text");
+	const fourth = await prepareRun(["main", "HEAD"], root);
+	const [stillDetached] = storedThreads(root, fourth.manifest.runId);
+	expect(stillDetached?.migrationOrphaned).toBe(true);
+	expect(stillDetached?.anchor).toEqual(anchor);
+	expect(stillDetached?.originalEvidence).toEqual(carried?.originalEvidence);
 });
 
 /** A file whose review unit is one long added block, as a regenerated implementation produces. */
 const withBlock = (block: readonly string[]): string =>
 	`${numbered("service", 6)}${block.map((line) => `${line}\n`).join("")}`;
+
+for (const kind of ["hunk", "patch", "context"] as const) {
+	for (const change of ["replacement", "duplicate destination", "duplicate source"] as const) {
+		test(`${kind} feedback detaches on ${change} and retains original evidence through another prep`, async () => {
+			const root = await repository({ "src/service.ts": numbered("service", 6) });
+			const original = ["before", "discussed code", "after"];
+			await write(
+				root,
+				"src/service.ts",
+				withBlock(change === "duplicate source" ? [...original, ...original] : original),
+			);
+			await commit(root, "Code under review");
+			const first = await prepareRun(["main", "HEAD"], root);
+			await narrate(first, [
+				chapter({
+					id: "service",
+					order: 1,
+					hunkRefs: [{ filePath: "src/service.ts", oldStart: 4 }],
+				}),
+			]);
+			const range = { oldStart: 4, side: "additions" as const, startLine: 8, endLine: 8 };
+			const anchor: ThreadAnchor =
+				kind === "patch"
+					? { kind, filePath: "src/service.ts", ranges: [range] }
+					: kind === "context"
+						? { kind, filePath: "src/service.ts", startLine: 8, endLine: 8 }
+						: { kind, filePath: "src/service.ts", ...range };
+			seedThreads(root, first.manifest.runId, [
+				feedback({ index: 1, runId: first.manifest.runId, anchor, body: "Please check this code" }),
+			]);
+			await write(
+				root,
+				"src/service.ts",
+				withBlock(
+					change === "replacement"
+						? ["before", "replacement code", "after"]
+						: change === "duplicate destination"
+							? [...original, ...original]
+							: original,
+				),
+			);
+			await commit(root, "Respond to feedback");
+			const second = await prepareRun(["main", "HEAD"], root);
+			const [detached] = storedThreads(root, second.manifest.runId);
+			expect(detached?.migrationOrphaned).toBe(true);
+			expect(detached?.originalEvidence).toEqual({
+				runId: first.manifest.runId,
+				anchor,
+				lines: [["discussed code"]],
+			});
+			await write(root, "src/service.ts", withBlock([...original, "later change"]));
+			await commit(root, "Another iteration");
+			const third = await prepareRun(["main", "HEAD"], root);
+			const [again] = storedThreads(root, third.manifest.runId);
+			expect(again?.migrationOrphaned).toBe(true);
+			expect(again?.originalEvidence).toEqual(detached?.originalEvidence);
+		});
+	}
+}
 
 const ALPHA = ["alpha one", "alpha two", "alpha three", "alpha four"];
 const BETA = [

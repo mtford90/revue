@@ -151,6 +151,6 @@ test("--carry-from a run with no narrated ancestor carries feedback alone and sa
 
 	expect(forced.manifest.supersedes).toBe(unnarrated.manifest.runId);
 	expect(forced.warnings).toEqual([
-		`--carry-from ${unnarrated.manifest.runId.slice(0, 12)} was never narrated and continues no narrated run: no chapters carry forward, so every read mark starts over`,
+		`--carry-from ${unnarrated.manifest.runId.slice(0, 12)} was never narrated and continues no narrated run: no chapters carry forward`,
 	]);
 });

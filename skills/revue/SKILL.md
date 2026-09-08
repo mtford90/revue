@@ -493,8 +493,7 @@ Judge every comment on its merits, the way a colleague would. A review comment i
 work order.
 
 **Clear, and you agree.** Change nothing yet. Reply with what you intend to change — which lines,
-the shape of the change, and why that answers them — and wait for the go-ahead. Start the reply
-with `Proposed:` so the reviewer can tell a plan from a done fix. Once they say go, in the thread or
+the shape of the change, and why that answers them — and wait for the go-ahead. Reply with `--intent proposal` so the reviewer can tell a plan from a done fix. Once they say go, in the thread or
 in chat, make the change and reply again naming what moved. The one exception is a comment that is
 itself an explicit instruction ("rename this to `retryCap`", "delete this branch", "use the helper
 here"): that is the go-ahead, so make the change and reply describing it.
@@ -514,7 +513,7 @@ Every lane ends in a reply. A thread you left unanswered reads as one you never 
 
 ```bash
 revue threads reply "$RUN" <thread-id> \
-  --author "revue agent" \
+  --author "revue agent" --intent completed \
   --body "The retry cap is 5s now, and the interactive path stays inside its budget."
 ```
 
@@ -524,8 +523,10 @@ lands, so write one considered reply per thread rather than a running commentary
 
 **Never mark a thread dealt-with.** A resolved thread means the reviewer checked the fix, so
 resolving one is theirs to do, from their own reader. `revue threads mark-dealt` and `revue threads
-reopen` exist for them, not for you, and this holds for a question you answered outright as much as
-for a fix. An open thread whose last message is yours is exactly how they see "ready to check".
+reopen` exist for them, not for you. A proposal waits for explicit instruction or human go-ahead;
+a completed reply records already authorised work and is ready to verify. Send is delivery only,
+never approval. Do not let an unanswered proposal block regenerating already authorised completed
+changes, and do not re-prep merely because an unchanged handoff remains.
 
 ### Report the pass in chat
 
@@ -613,9 +614,11 @@ stale. `unnarrated`: every review unit no carried chapter covers, marked `unchan
 `new` against the run this one supersedes. Read `$RUN/hunks.txt` for the units you have to narrate,
 exactly as in Step 2 — the references you cite come from this run's file, never the old one.
 
-**3. Copy the carried chapters in verbatim.** Field for field, `order` included. Read marks carry
-over only for chapters that come through byte-identical, so touching up a summary costs the reviewer
-a chapter they had already finished, for nothing.
+**3. Copy the carried chapters in verbatim.** Field for field, `order` included. This preserves the
+editorial narrative the delta already verified and avoids unnecessary re-reading. Code review ticks
+are separate: they are keyed by the immutable run's original hunk units and survive summary edits,
+reordering, and regrouping whenever those units are still the same. Question marks and explicit
+no-hunk chapter marks remain narration-specific.
 
 **4. Re-narrate every stale chapter in place.** Keep its id and its place in the order, and rewrite
 the summary against this run's hunks so it describes the code as it now stands. Never amend around

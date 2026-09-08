@@ -146,7 +146,7 @@ const explicitLineage = (records: readonly RunRecord[], runId: string): Resolved
 		return {
 			...continuing(records, named),
 			notes: [
-				`--carry-from ${shortId(runId)} was never narrated and continues no narrated run: no chapters carry forward, so every read mark starts over`,
+				`--carry-from ${shortId(runId)} was never narrated and continues no narrated run: no chapters carry forward`,
 			],
 		};
 	}

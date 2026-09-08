@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RGBA } from "@opentui/core";
 import { testRender as renderOpenTui } from "@opentui/react/test-utils";
 import { parsePatch } from "@revue/diff";
@@ -15,6 +17,7 @@ import {
 	type RunContextFile,
 	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
+	THREAD_REPLY_INTENT,
 	THREAD_STATUS,
 	type ThreadAnchor,
 	type ThreadAuthor,
@@ -29,10 +32,11 @@ import type { HostTerminal } from "./host.ts";
 import { mergeKeymap } from "./keybindings.ts";
 import { KEYMAP } from "./keymap.ts";
 import { defaultPanelWidth } from "./layout.ts";
+import { loadReviewRun } from "./load.ts";
 import type { Preferences } from "./preferences.ts";
 import type { PermalinkContext } from "./sourceLink.ts";
 import { parseCustomTheme } from "./themes.ts";
-import { createThread } from "./threads.ts";
+import { createThread, openThreadStore } from "./threads.ts";
 import { epilogueSession, type ReviewSessionState } from "./viewState.ts";
 
 const PATCH = `${import.meta.dir}/../../../examples/sample-run/diff.patch`;
@@ -131,7 +135,7 @@ test("a chapterless run opens straight onto every file with file-based progress"
 	expect(statusLine(t)).toContain("All files"); // the flat surface is the only page
 
 	await press(t, "f"); // review the focused file
-	expect(seen.at(-1)?.files).toContain("__files__::src/lib/apiClient.test.ts");
+	expect(seen.at(-1)?.hunks).toContain('["src/lib/apiClient.test.ts",0]');
 	expect(t.captureCharFrame()).toContain("1/3 files");
 });
 
@@ -285,7 +289,7 @@ test("expander bands reveal pinned context lines above a hunk", async () => {
 	expect(expanded).toContain("expand all"); // the last twenty lines fit one reveal
 });
 
-test("revealed context lines take a comment anchored to the pinned file", async () => {
+test("revealed old-side context retains its side in a segmented thread", async () => {
 	const created: ThreadAnchor[] = [];
 	const diffFiles = await loadPatch(PATCH);
 	const blobLines = Array.from({ length: 60 }, (_, index) => `ctx ${index + 1}`);
@@ -310,22 +314,305 @@ test("revealed context lines take a comment anchored to the pinned file", async 
 	const revealed = gutterFor(t, "ctx 40", "40");
 	await act(async () => t.mockMouse.doubleClick(revealed.x, revealed.y));
 	await act(async () => t.renderOnce());
-	expect(t.captureCharFrame()).toContain("Comment on unchanged lines");
+	expect(t.captureCharFrame()).toContain("Comment on old lines");
 	await act(async () => t.mockInput.typeText("Why is this still here?"));
 	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
 	await settle(t);
 
 	expect(created).toEqual([
 		{
-			kind: THREAD_ANCHOR_KIND.CONTEXT,
+			kind: "selection",
 			filePath: "src/lib/apiClient.ts",
-			startLine: 40,
-			endLine: 40,
+			segments: [{ kind: "context", side: "deletions", startLine: 40, endLine: 40 }],
 		},
 	]);
 	// The new thread hangs under the revealed line it was written on.
 	expect(t.captureCharFrame()).toContain("Why is this still here?");
+
+	// Reopening from Comments must map old-side geometry into one new-blob expansion without
+	// rewriting the durable deletion-side anchor.
+	const anchor = created[0];
+	if (!anchor) throw new Error("Expected the saved thread anchor");
+	const saved: ReviewThread = {
+		id: "00000000-0000-4000-8000-000000000091",
+		runId: "a".repeat(64),
+		anchor,
+		status: THREAD_STATUS.OPEN,
+		createdAt: "2026-09-08T10:00:00.000Z",
+		messages: [
+			{
+				id: "00000000-0000-4000-8000-000000000092",
+				author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada" },
+				body: "Why is this still here?",
+				createdAt: "2026-09-08T10:00:00.000Z",
+			},
+		],
+	};
+	const reopened = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			loadFileLines={async (path) => (path === "src/lib/apiClient.ts" ? blobLines : null)}
+			initialThreads={[saved]}
+		/>,
+		{ width: 130, height: 60, kittyKeyboard: true },
+	);
+	await reopened.renderOnce();
+	await press(reopened, "o");
+	await press(reopened, "RETURN");
+	await settle(reopened);
+	expect(reopened.captureCharFrame()).toContain("ctx 40");
+	expect(reopened.captureCharFrame()).toContain("Why is this still here?");
 });
+
+test("revealed additions-only context persists as a segmented selection", async () => {
+	const created: ThreadAnchor[] = [];
+	const diffFiles = await loadPatch(PATCH);
+	const blobLines = Array.from({ length: 60 }, (_, index) => `ctx ${index + 1}`);
+	const t = await testRender(
+		<App
+			file={file}
+			diffFiles={diffFiles}
+			loadFileLines={async (path) => (path === "src/lib/apiClient.ts" ? blobLines : null)}
+			threadActions={recordingThreadActions(created)}
+			initialPreferences={{ sidebarPreference: "hidden", diffPreference: "stacked" }}
+		/>,
+		{ width: 130, height: 60, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await nextChapter(t);
+	await nextChapter(t);
+	await settle(t);
+	const lines = t.captureCharFrame().split("\n");
+	const bandY = lines.findIndex((line) => line.includes("expand up"));
+	await click(t, (lines[bandY]?.indexOf("expand up") ?? -1) + 1, bandY);
+	await settle(t);
+	const revealed = gutterFor(t, "ctx 40", "40");
+	await act(async () => t.mockMouse.doubleClick(revealed.x, revealed.y));
+	await act(async () => t.renderOnce());
+	await act(async () => t.mockInput.typeText("Keep additions authority"));
+	await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+	await settle(t);
+
+	expect(created).toEqual([
+		{
+			kind: "selection",
+			filePath: "src/lib/apiClient.ts",
+			segments: [{ kind: "context", side: "additions", startLine: 40, endLine: 40 }],
+		},
+	]);
+});
+
+test("WINDOWED Comments jumps mount carried context once at its destination row and side", async () => {
+	const diffFiles = await loadPatch(PATCH);
+	const blobLines = Array.from({ length: 60 }, (_, index) => `ctx ${index + 1}`);
+	const cases = [
+		{ name: "partial", side: "additions" as const, startLine: 39, endLine: 42 },
+		{ name: "inside", side: "deletions" as const, startLine: 42, endLine: 42 },
+		{ name: "outside", side: "additions" as const, startLine: 40, endLine: 40 },
+	];
+	for (const [index, entry] of cases.entries()) {
+		const body = `carried-${entry.name}-context`;
+		const thread: ReviewThread = {
+			id: `00000000-0000-4000-8000-00000000010${index}`,
+			runId: "a".repeat(64),
+			anchor: {
+				kind: "selection",
+				filePath: "src/lib/apiClient.ts",
+				segments: [
+					{
+						kind: "context",
+						side: entry.side,
+						startLine: entry.startLine,
+						endLine: entry.endLine,
+					},
+				],
+			},
+			status: THREAD_STATUS.OPEN,
+			createdAt: `2026-09-08T10:00:0${index}.000Z`,
+			messages: [
+				{
+					id: `00000000-0000-4000-8000-00000000020${index}`,
+					author: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada" },
+					body,
+					createdAt: `2026-09-08T10:00:0${index}.000Z`,
+				},
+			],
+		};
+		const t = await testRender(
+			<App
+				file={file}
+				diffFiles={diffFiles}
+				loadFileLines={async (path) => (path === "src/lib/apiClient.ts" ? blobLines : null)}
+				initialThreads={[thread]}
+				initialPreferences={{ sidebarPreference: "hidden", diffPreference: "split" }}
+			/>,
+			{ width: 130, height: 18, kittyKeyboard: true },
+		);
+		await t.renderOnce();
+		await press(t, "o");
+		await press(t, "RETURN");
+		await settle(t);
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			await t.renderOnce();
+		});
+		const frame = t.captureCharFrame();
+		expect(frame.split(body)).toHaveLength(2);
+		const bodyLine = frame.split("\n").find((line) => line.includes(body)) ?? "";
+		const bodyX = bodyLine.indexOf(body);
+		expect(entry.side === "deletions" ? bodyX < 65 : bodyX > 65).toBe(true);
+		if (entry.name !== "inside") expect(frame).toContain("ctx 40");
+	}
+});
+
+for (const layout of ["split", "stacked"] as const) {
+	test(`pointer drag across changed and revealed old-side lines persists one canonical thread in ${layout}`, async () => {
+		const root = await mkdtemp(join(tmpdir(), `revue-selection-${layout}-`));
+		try {
+			const runId = "53ccae7e5270182901bbf8a35ebc149a2b32011261f6fb6f5be6f4e7694231cf";
+			const runDirectory = join(root, ".revue", "runs", runId);
+			await mkdir(join(root, ".git"));
+			await mkdir(join(root, ".revue", "runs"), { recursive: true });
+			await cp(join(import.meta.dir, "../../../examples/sample-run"), runDirectory, {
+				recursive: true,
+			});
+			const run = await loadReviewRun(runDirectory);
+			const threadsPath = join(root, ".revue", "threads.json");
+			const store = openThreadStore(threadsPath, runId, run);
+			const diffFiles = await preparePatch(run.patch, theme.syntaxTheme);
+			const blobLines = Array.from({ length: 60 }, (_, index) => `ctx ${index + 1}`);
+			const props = {
+				file,
+				diffFiles,
+				loadFileLines: async (path: string) => (path === "src/lib/apiClient.ts" ? blobLines : null),
+				threadActions: store,
+				humanAuthor: { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Ada" } as ThreadAuthor,
+				initialPreferences: { sidebarPreference: "hidden", diffPreference: layout } as Preferences,
+			};
+			const t = await testRender(<App {...props} />, {
+				width: 130,
+				height: 60,
+				kittyKeyboard: true,
+			});
+			await t.renderOnce();
+			await nextChapter(t);
+			await nextChapter(t);
+			await settle(t);
+			const initial = t.captureCharFrame().split("\n");
+			const bandY = initial.findIndex((line) => line.includes("expand up"));
+			await click(t, (initial[bandY]?.indexOf("expand up") ?? -1) + 1, bandY);
+			await settle(t);
+			const context = gutterFor(t, "ctx 40", "40");
+			const changed = gutterFor(t, "return fetch", "44");
+			await act(async () => t.mockMouse.drag(context.x, context.y, changed.x, changed.y));
+			await act(async () => t.renderOnce());
+			await press(t, "RETURN");
+			expect(t.captureCharFrame()).toContain(
+				layout === "split" ? "Comment on old lines" : "Comment on old + new lines",
+			);
+			await act(async () => t.mockInput.typeText(`Persisted ${layout} selection`));
+			await act(async () => t.mockInput.pressEnter({ ctrl: true }));
+			await settle(t);
+
+			const [saved] = store.reload();
+			const expectedAnchor = {
+				kind: "selection" as const,
+				filePath: "src/lib/apiClient.ts",
+				segments:
+					layout === "split"
+						? [
+								{
+									kind: "context" as const,
+									side: "deletions" as const,
+									startLine: 40,
+									endLine: 40,
+								},
+								{
+									kind: "patch" as const,
+									oldStart: 41,
+									side: "deletions" as const,
+									startLine: 41,
+									endLine: 44,
+								},
+							]
+						: [
+								{
+									kind: "context" as const,
+									side: "additions" as const,
+									startLine: 40,
+									endLine: 40,
+								},
+								{
+									kind: "patch" as const,
+									oldStart: 41,
+									side: "additions" as const,
+									startLine: 41,
+									endLine: 43,
+								},
+								{
+									kind: "patch" as const,
+									oldStart: 41,
+									side: "deletions" as const,
+									startLine: 41,
+									endLine: 44,
+								},
+							],
+			} as ThreadAnchor;
+			expect(saved?.anchor).toEqual(expectedAnchor);
+			expect(saved?.originalEvidence).toEqual({
+				runId,
+				anchor: expectedAnchor,
+				lines:
+					layout === "split"
+						? [
+								["// existing line 40"],
+								[
+									"// existing line 41",
+									"export class ApiClient {",
+									"\tasync get(path: string): Promise<Response> {",
+									"\t\treturn fetch(this.base + path);",
+								],
+							]
+						: [
+								["// existing line 40"],
+								[
+									"// existing line 41",
+									"export class ApiClient {",
+									"\tasync get(path: string): Promise<Response> {",
+								],
+								[
+									"// existing line 41",
+									"export class ApiClient {",
+									"\tasync get(path: string): Promise<Response> {",
+									"\t\treturn fetch(this.base + path);",
+								],
+							],
+			});
+			expect(t.captureCharFrame().split(`Persisted ${layout} selection`)).toHaveLength(2);
+
+			const reopenedRun = await loadReviewRun(runDirectory);
+			const reopenedStore = openThreadStore(threadsPath, runId, reopenedRun);
+			const reopened = await testRender(
+				<App {...props} threadActions={reopenedStore} initialThreads={reopenedStore.reload()} />,
+				{
+					width: 130,
+					height: 60,
+					kittyKeyboard: true,
+				},
+			);
+			await reopened.renderOnce();
+			await press(reopened, "o");
+			await press(reopened, "RETURN");
+			await settle(reopened);
+			const frame = reopened.captureCharFrame();
+			expect(frame).toContain("ctx 40");
+			expect(frame.split(`Persisted ${layout} selection`)).toHaveLength(2);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+}
 
 test("opens on the prologue with the chapter list and review progress", async () => {
 	const t = await testRender(<App file={file} />, { width: 130, height: 32 });
@@ -359,7 +646,7 @@ test("a chapter checkbox completes and reopens the chapter consistently", async 
 
 	await click(t, chapterLine.indexOf("[ ]") + 1, chapterY);
 	await settle(t);
-	expect(seen.at(-1)?.chapters).toContain("chapter-1");
+	expect(seen.at(-1)?.hunks).toContain('["src/lib/backoff.ts",0]');
 	expect(sessions.at(-1)?.pages["chapter-1"]?.collapsedFiles).toContain("src/lib/backoff.ts");
 	expect(statusLine(t)).toContain("Ch 2/3");
 
@@ -371,7 +658,7 @@ test("a chapter checkbox completes and reopens the chapter consistently", async 
 	await click(t, reviewedLine.indexOf("[x]") + 1, reviewedY);
 	await settle(t);
 
-	expect(seen.at(-1)?.chapters).not.toContain("chapter-1");
+	expect(seen.at(-1)?.hunks).not.toContain('["src/lib/backoff.ts",0]');
 	expect(sessions.at(-1)?.pages["chapter-1"]?.collapsedFiles).not.toContain("src/lib/backoff.ts");
 	expect(statusLine(t)).toContain("Ch 1/3");
 	expect(t.captureCharFrame()).toContain("[ ]▼");
@@ -660,7 +947,7 @@ test("the prologue chapter title navigates while its checkbox completes the chap
 	await click(t, (lines[entryY]?.indexOf("[ ]") ?? -1) + 1, entryY);
 	await settle(t);
 
-	expect(seen.at(-1)?.chapters).toContain("chapter-2");
+	expect(seen.at(-1)?.hunks).toContain('["src/lib/apiClient.ts",41]');
 	expect(statusLine(t)).toContain("Ch 3/3");
 });
 
@@ -798,6 +1085,7 @@ test("View menu shows only the focused file and file navigation replaces it", as
 	await arrow(t, "down");
 	await arrow(t, "down");
 	await arrow(t, "down");
+	await arrow(t, "down"); // past the hunk-review action to Focused display
 	await press(t, "RETURN");
 
 	expect(t.captureCharFrame()).toContain("MAX_RETRIES = 4");
@@ -888,7 +1176,10 @@ test("next unreviewed is unavailable when every chapter is reviewed", async () =
 			file={file}
 			diffFiles={diffFiles}
 			initialViewState={{
-				chapters: file.chapters.map((chapter) => chapter.id),
+				chapters: [],
+				hunks: file.chapters.flatMap((chapter) =>
+					chapter.hunkRefs.map((ref) => JSON.stringify([ref.filePath, ref.oldStart])),
+				),
 				files: [],
 				keyChanges: [],
 			}}
@@ -1195,7 +1486,7 @@ test("x marks a chapter reviewed, persists, and auto-advances", async () => {
 	await press(t, "x"); // mark reviewed
 	const frame = t.captureCharFrame();
 
-	expect(seen.at(-1)?.chapters).toContain("chapter-1");
+	expect(seen.at(-1)?.hunks).toContain('["src/lib/backoff.ts",0]');
 	expect(frame).toContain("1/3 files");
 	expect(statusLine(t)).toContain("Ch 2/3"); // auto-advanced from page 2 to page 3 (next unreviewed)
 });
@@ -1212,8 +1503,7 @@ test("f completes and collapses a file, while unchecking reopens and focuses it"
 	await press(t, "f");
 	await settle(t);
 
-	expect(seen.at(-1)?.files).toContain("chapter-1::src/lib/backoff.ts");
-	expect(seen.at(-1)?.chapters).toContain("chapter-1");
+	expect(seen.at(-1)?.hunks).toContain('["src/lib/backoff.ts",0]');
 	expect(statusLine(t)).toContain("Ch 2/3");
 
 	await press(t, "[");
@@ -1221,8 +1511,7 @@ test("f completes and collapses a file, while unchecking reopens and focuses it"
 	await press(t, "f");
 	await settle(t);
 
-	expect(seen.at(-1)?.files).not.toContain("chapter-1::src/lib/backoff.ts");
-	expect(seen.at(-1)?.chapters).not.toContain("chapter-1");
+	expect(seen.at(-1)?.hunks).not.toContain('["src/lib/backoff.ts",0]');
 	expect(statusLine(t)).toContain("Ch 1/3");
 	expect(t.captureCharFrame()).toContain("▸[ ]▼");
 });
@@ -1643,7 +1932,15 @@ test("number keys check a chapter's key changes", async () => {
 
 test("initialViewState is reflected on first render", async () => {
 	const t = await testRender(
-		<App file={file} initialViewState={{ chapters: ["chapter-1"], files: [], keyChanges: [] }} />,
+		<App
+			file={file}
+			initialViewState={{
+				chapters: [],
+				files: [],
+				keyChanges: [],
+				hunks: ['["src/lib/backoff.ts",0]'],
+			}}
+		/>,
 		{ width: 110, height: 32 },
 	);
 	await t.renderOnce();
@@ -2474,7 +2771,7 @@ test("a cited excerpt is folded scenery that contributes nothing to review progr
 
 	await press(t, "x");
 
-	expect(seen.at(-1)?.files).toEqual(["chapter-1::src/lib/backoff.ts"]);
+	expect(seen.at(-1)?.hunks).toEqual(['["src/lib/backoff.ts",0]']);
 	expect(t.captureCharFrame()).toContain("1/3 files");
 });
 
@@ -2821,7 +3118,7 @@ test("excerpt threads list in the Comments surface, marked when the narrative st
 	expect(list).toContain("src/lib/transport.ts:12");
 	expect(list).toContain("Why does this stay synchronous?");
 	// Kept and shown rather than pruned, and visibly distinguished from a live anchor.
-	expect(list).toContain("src/lib/transport.ts:90 · no longer quoted");
+	expect(list).toContain("src/lib/transport.ts:90 · quotation unverified");
 	expect(list).toContain("Raised against a range the narrative dropped");
 
 	await press(t, "RETURN");
@@ -3043,6 +3340,18 @@ diff --git a/retry.ts b/retry.ts
 		id: threadId,
 		runId,
 		migratedFrom: "b".repeat(64),
+		originalEvidence: {
+			runId: "b".repeat(64),
+			anchor: {
+				kind: "hunk",
+				filePath: "retry.ts",
+				oldStart: 1,
+				side: "additions",
+				startLine: 1,
+				endLine: 1,
+			},
+			lines: [["retry(shared)"]],
+		},
 		anchor: {
 			kind: THREAD_ANCHOR_KIND.HUNK,
 			filePath: "retry.ts",
@@ -3068,8 +3377,9 @@ diff --git a/retry.ts b/retry.ts
 			diffFiles={diffFiles}
 			initialThreads={[thread]}
 			initialViewState={{
-				chapters: ["carried"],
-				files: ["carried::value.ts"],
+				chapters: [],
+				files: [],
+				hunks: ['["value.ts",1]'],
 				keyChanges: [],
 			}}
 		/>,
@@ -3147,10 +3457,12 @@ const watchedThread = ({
 	line,
 	body,
 	reply,
+	intent,
 }: {
 	line: number;
 	body: string;
 	reply?: string;
+	intent?: "proposal" | "completed";
 }): ReviewThread => ({
 	id: `00000000-0000-4000-8000-00000000004${line}`,
 	runId: WATCHED_RUN,
@@ -3178,6 +3490,7 @@ const watchedThread = ({
 						author: AGENT,
 						body: reply,
 						createdAt: `2026-08-02T11:0${line}:00.000Z`,
+						...(intent ? { intent } : {}),
 					},
 				]
 			: []),
@@ -3211,7 +3524,7 @@ const rowOf = (t: Awaited<ReturnType<typeof testRender>>, needle: string) =>
 		.split("\n")
 		.findIndex((line) => line.includes(needle));
 
-test("an agent reply lands in the open review without a keypress, leaving the page where it was", async () => {
+test("watched proposal replies update inline labels without resolving the thread", async () => {
 	const driver = updateDriver();
 	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
 	const t = await testRender(
@@ -3231,7 +3544,12 @@ test("an agent reply lands in the open review without a keypress, leaving the pa
 	await driver.emit(t, {
 		kind: "threads",
 		threads: [
-			watchedThread({ line: 1, body: "Share the retry budget", reply: "Budget is shared now" }),
+			watchedThread({
+				line: 1,
+				body: "Share the retry budget",
+				reply: "Budget is shared now",
+				intent: THREAD_REPLY_INTENT.PROPOSAL,
+			}),
 		],
 		orphaned: [],
 	});
@@ -3239,9 +3557,13 @@ test("an agent reply lands in the open review without a keypress, leaving the pa
 	const frame = t.captureCharFrame();
 	expect(frame).toContain("Budget is shared now");
 	expect(frame).toContain("Review agent");
+	expect(frame).toContain("needs approval");
+	expect(frame).toContain("[Resolve]");
 	// The narration under the reviewer's eyes did not move, and neither did the page they were on.
 	expect(rowOf(t, "retry(alpha)")).toBe(before);
 	expect(statusLine(t)).toContain("Ch 1/1");
+	await press(t, "o");
+	expect(t.captureCharFrame()).toContain("needs approval");
 });
 
 test("threads awaiting the reviewer's verdict lead the Comments surface, and selection follows its thread", async () => {
@@ -3272,33 +3594,40 @@ test("threads awaiting the reviewer's verdict lead the Comments surface, and sel
 		threads: [
 			threads[0] as ReviewThread,
 			threads[1] as ReviewThread,
-			watchedThread({ line: 3, body: "Why three retries?", reply: "Three is the tested budget" }),
+			watchedThread({
+				line: 3,
+				body: "Why three retries?",
+				reply: "Three is the tested budget",
+				intent: THREAD_REPLY_INTENT.COMPLETED,
+			}),
 		],
 		orphaned: [],
 	});
 
-	// The answered thread is now the reviewer's to close, so it leads.
+	// The completed thread is now the reviewer's to verify, so it leads with the actual reply label.
 	expect(rowOf(t, "retry.ts:3")).toBeLessThan(rowOf(t, "retry.ts:1"));
+	expect(t.captureCharFrame().split("\n")[rowOf(t, "retry.ts:3")]).toContain("ready to verify");
 	// And the reviewer is still standing on the thread they picked, not on its old row.
 	expect(t.captureCharFrame().split("\n")[rowOf(t, "retry.ts:2")]).toContain("▸");
 });
 
-test("a carried thread this run no longer anchors is marked, not hidden", async () => {
-	const thread = watchedThread({ line: 1, body: "Share the retry budget" });
+test("valid-looking legacy carried coordinates stay unverified in Comments, never inline", async () => {
+	const thread = {
+		...watchedThread({ line: 1, body: "Share the retry budget" }),
+		migratedFrom: "b".repeat(64),
+	};
 	const t = await testRender(
-		<App
-			file={watchedChapters}
-			diffFiles={watchedDiff}
-			initialThreads={[thread]}
-			initialOrphanedThreads={[thread.id]}
-		/>,
+		<App file={watchedChapters} diffFiles={watchedDiff} initialThreads={[thread]} />,
 		{ width: 110, height: 34, kittyKeyboard: true },
 	);
 	await t.renderOnce();
 	await press(t, "o");
 
-	expect(t.captureCharFrame()).toContain("retry.ts:1 · code removed");
+	expect(t.captureCharFrame()).toContain("retry.ts:1 · anchor unverified");
+	expect(t.captureCharFrame()).toContain("Original code unavailable");
 	expect(t.captureCharFrame()).toContain("Share the retry budget");
+	await press(t, "w");
+	expect(t.captureCharFrame()).not.toContain("Share the retry budget");
 });
 
 test("a superseding run raises a banner, changes nothing on its own, and redirects the reload key", async () => {
@@ -4134,7 +4463,7 @@ test("j/k forms one revealed review-line stream across expanded files in a chapt
 	expect(copied).toEqual(["b.ts:1"]);
 	await press(t, "ESCAPE");
 	await press(t, "f");
-	expect(viewStates.at(-1)?.files).toContain("continuous-stream::b.ts");
+	expect(viewStates.at(-1)?.hunks).toContain('["b.ts",0]');
 });
 
 test("Enter comments on the ordinary one-line cursor without first pressing v", async () => {
@@ -4439,7 +4768,7 @@ new file mode 100644
 
 	expect(opened).toEqual(["b.ts"]);
 	expect(created[0]).toMatchObject({ kind: THREAD_ANCHOR_KIND.PATCH, filePath: "b.ts" });
-	expect(states.at(-1)?.files).toContain("two-files::b.ts");
+	expect(states.at(-1)?.hunks).toContain('["b.ts",0]');
 });
 
 test("a validated migration orphan never decorates or mounts at coincidental coordinates", async () => {
@@ -4448,6 +4777,18 @@ test("a validated migration orphan never decorates or mounts at coincidental coo
 		...base,
 		migratedFrom: "b".repeat(64),
 		migrationOrphaned: true,
+		originalEvidence: {
+			runId: "b".repeat(64),
+			anchor: {
+				kind: "hunk",
+				filePath: "retry.ts",
+				oldStart: 1,
+				side: "deletions",
+				startLine: 7,
+				endLine: 8,
+			},
+			lines: [["originalRetry(budget)", "\u001b[31moriginalFinish()\u001b[0m"]],
+		},
 		anchor: {
 			kind: THREAD_ANCHOR_KIND.PATCH,
 			filePath: "retry.ts",
@@ -4472,7 +4813,12 @@ test("a validated migration orphan never decorates or mounts at coincidental coo
 
 	await press(t, "o");
 	expect(t.captureCharFrame()).toContain("Coincidental orphan");
-	expect(t.captureCharFrame()).toContain("code removed");
+	expect(t.captureCharFrame()).toContain("detached");
+	expect(t.captureCharFrame()).toContain("Original code · run bbbbbbbbbbbb");
+	expect(t.captureCharFrame()).toContain("retry.ts · deletions 7-8");
+	expect(t.captureCharFrame()).toContain("7 │ originalRetry(budget)");
+	expect(t.captureCharFrame()).toContain("8 │ originalFinish()");
+	expect(t.captureCharFrame()).not.toContain("[31m");
 	await press(t, "RETURN");
 	expect(t.captureCharFrame()).not.toContain("Coincidental orphan");
 });
@@ -5587,4 +5933,223 @@ test("the focused card is marked in its title, whatever the theme's colours are"
 	const plain = resolveTheme(undefined);
 	expect(cardTint("Share the retry budget")).toBe(RGBA.fromHex(plain.panelAlt).toString());
 	expect(cardTint("Name this constant")).toBe(RGBA.fromHex(plain.panel).toString());
+});
+
+const progressPatch = `diff --git a/same.ts b/same.ts
+--- a/same.ts
++++ b/same.ts
+@@ -1 +1 @@
+-old first
++new first
+@@ -10 +10 @@
+-old second
++new second
+`;
+const progressChapters = RevueChaptersFileSchema.parse({
+	chapters: [
+		{
+			id: "first",
+			order: 1,
+			title: "First unit",
+			summary: "First",
+			hunkRefs: [{ filePath: "same.ts", oldStart: 1 }],
+			keyChanges: [
+				{
+					content: "Is first correct?",
+					severity: "info",
+					lineRefs: [{ filePath: "same.ts", side: "additions", startLine: 1, endLine: 1 }],
+				},
+			],
+		},
+		{
+			id: "second",
+			order: 2,
+			title: "Second unit",
+			summary: "Second",
+			hunkRefs: [{ filePath: "same.ts", oldStart: 10 }],
+			keyChanges: [],
+		},
+	],
+});
+
+test("original hunk ticks share partial file progress across Narrative and Diff and toggle in place", async () => {
+	const seen: ViewState[] = [];
+	const t = await testRender(
+		<App
+			file={progressChapters}
+			diffFiles={parsePatch(progressPatch)}
+			onViewStateChange={(state) => seen.push(state)}
+		/>,
+		{ width: 130, height: 44 },
+	);
+	await t.renderOnce();
+	await clickAction(t, "[ ] hunk 1");
+	expect(seen.at(-1)?.hunks).toEqual(['["same.ts",1]']);
+	expect(statusLine(t)).toContain("Ch 1/2");
+	expect(t.captureCharFrame()).toContain("new first");
+	expect(seen.at(-1)?.keyChanges).toEqual([]);
+	await press(t, "r");
+	expect(seen.at(-1)?.keyChanges).toEqual(["first#0"]);
+	await press(t, "w");
+	expect(t.captureCharFrame()).toContain("0/1 files");
+	expect(t.captureCharFrame()).toContain("[x] hunk 1");
+	expect(t.captureCharFrame()).toContain("[ ] hunk 10");
+	await clickAction(t, "[ ] hunk 10");
+	expect(t.captureCharFrame()).toContain("1/1 files");
+	await press(t, "w");
+	await press(t, "m");
+	expect(seen.at(-1)?.hunks).toEqual(['["same.ts",10]']);
+	expect(seen.at(-1)?.keyChanges).toEqual(["first#0"]);
+	expect(statusLine(t)).toContain("Ch 1/2");
+	await press(t, "f");
+	expect(seen.at(-1)?.hunks).toEqual(['["same.ts",10]', '["same.ts",1]']);
+	await nextChapter(t);
+	await press(t, "x");
+	expect(seen.at(-1)?.hunks).toEqual(['["same.ts",1]']);
+	await press(t, "w");
+	await press(t, "f");
+	expect(new Set(seen.at(-1)?.hunks)).toEqual(new Set(['["same.ts",1]', '["same.ts",10]']));
+});
+
+test("metadata review units have a clickable tick and the shared hunk shortcut", async () => {
+	const seen: ViewState[] = [];
+	const t = await testRender(
+		<App
+			file={null}
+			diffFiles={parsePatch("diff --git a/mode.ts b/mode.ts\nold mode 100644\nnew mode 100755\n")}
+			onViewStateChange={(state) => seen.push(state)}
+		/>,
+		{ width: 100, height: 36 },
+	);
+	await t.renderOnce();
+	await clickAction(t, "[ ] metadata");
+	expect(seen.at(-1)?.hunks).toEqual(['["mode.ts",0]']);
+	expect(t.captureCharFrame()).toContain("1/1 files");
+	await press(t, "m");
+	expect(seen.at(-1)?.hunks).toEqual([]);
+});
+
+test("widened display hunks keep controls on original units and revealed context is not review work", async () => {
+	const seen: ViewState[] = [];
+	const t = await act(async () =>
+		testRender(
+			<App
+				file={null}
+				diffFiles={parsePatch(progressPatch)}
+				loadFileLines={async () => [
+					"new first",
+					...Array.from({ length: 8 }, (_, i) => `context ${i + 2}`),
+					"new second",
+				]}
+				onViewStateChange={(state) => seen.push(state)}
+			/>,
+			{ width: 130, height: 44 },
+		),
+	);
+	await act(async () => {
+		await t.renderOnce();
+	});
+	await settle(t);
+	await clickAction(t, "↕ expand all");
+	await settle(t);
+	expect(t.captureCharFrame()).toContain("context 5");
+	const contextCell = excerptGutter(t, "context 5", "5");
+	await click(t, contextCell.x, contextCell.y);
+	await press(t, "m");
+	expect(seen).toEqual([]);
+	await clickAction(t, "[ ] hunk 10");
+	expect(seen.at(-1)?.hunks).toEqual(['["same.ts",10]']);
+	await clickAction(t, "[ ] hunk 1");
+	expect(new Set(seen.at(-1)?.hunks)).toEqual(new Set(['["same.ts",1]', '["same.ts",10]']));
+	expect(t.captureCharFrame()).not.toContain("hunk 2");
+});
+
+test("the hunk action's rebound key, help and menu agree, and cross-hunk selections have no single target", async () => {
+	const seen: ViewState[] = [];
+	const keymap = mergeKeymap(KEYMAP, { "toggle-hunk-review": ["z"] }).keymap;
+	const t = await testRender(
+		<App
+			file={null}
+			diffFiles={parsePatch(progressPatch)}
+			keymap={keymap}
+			initialPreferences={{ diffPreference: "stacked" }}
+			onViewStateChange={(state) => seen.push(state)}
+		/>,
+		{ width: 100, height: 36, kittyKeyboard: true },
+	);
+	await t.renderOnce();
+	await press(t, "m");
+	expect(seen).toHaveLength(0);
+	await press(t, "z");
+	expect(seen.at(-1)?.hunks).toEqual(['["same.ts",1]']);
+	await press(t, "?");
+	await press(t, "h");
+	await press(t, "u");
+	await press(t, "n");
+	await press(t, "k");
+	expect(t.captureCharFrame()).toContain("Toggle the focused original hunk reviewed in place");
+	await press(t, "ESCAPE"); // clear help search
+	await press(t, "ESCAPE");
+	const top = t.captureCharFrame().split("\n")[0] ?? "";
+	await click(t, top.indexOf("View") + 1, 0);
+	const rows = t.captureCharFrame().split("\n");
+	const menuRow = rows.find((line) => line.includes("Toggle hunk reviewed"));
+	expect(menuRow).toMatch(/Toggle hunk reviewed\s+z\b/);
+	await clickAction(t, "Toggle hunk reviewed");
+	expect(seen.at(-1)?.hunks).toEqual([]);
+	const first = excerptGutter(t, "new first", "1");
+	const second = excerptGutter(t, "new second", "10");
+	await act(async () => {
+		await t.mockMouse.drag(first.x, first.y, second.x, second.y);
+	});
+	await settle(t);
+	const count = seen.length;
+	await press(t, "z");
+	expect(seen).toHaveLength(count);
+});
+
+test("hunk review from restored collapsed focus uses pinned hunk order, not narration reference order", async () => {
+	const seen: ViewState[] = [];
+	const chapter = RevueChaptersFileSchema.parse({
+		chapters: [
+			{
+				id: "reversed",
+				order: 1,
+				title: "Both units",
+				summary: "References need not be in patch order.",
+				hunkRefs: [
+					{ filePath: "same.ts", oldStart: 10 },
+					{ filePath: "same.ts", oldStart: 1 },
+				],
+				keyChanges: [],
+			},
+		],
+	});
+	const t = await testRender(
+		<App
+			file={chapter}
+			diffFiles={parsePatch(progressPatch)}
+			initialSessionState={{
+				pageId: "reversed",
+				pages: {
+					reversed: {
+						selectedFile: 0,
+						selectedHunk: 1,
+						selectedKeyChange: 0,
+						collapsedFiles: ["same.ts"],
+						openExcerpts: [],
+						foldedDiagrams: [],
+						scrollTop: 0,
+						panelScrollTop: 0,
+					},
+				},
+			}}
+			onViewStateChange={(state) => seen.push(state)}
+		/>,
+		{ width: 100, height: 36 },
+	);
+	await t.renderOnce();
+	await press(t, "m");
+	expect(seen.at(-1)?.hunks).toEqual(['["same.ts",10]']);
+	expect(t.captureCharFrame()).not.toContain("new second");
 });

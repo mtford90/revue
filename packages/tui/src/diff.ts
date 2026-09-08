@@ -95,3 +95,22 @@ export function statsByPath(files: DiffFile[]): Map<string, FileStat> {
 	}
 	return map;
 }
+
+/** Expanded geometry may merge units; membership still comes from the chapter's pinned hunks. */
+export function originalHunksForDisplay(
+	original: DiffFileInput,
+	displayed: DiffFileInput,
+	index: number,
+): number[] {
+	const shown = displayed.metadata.hunks[index];
+	if (!shown) return [];
+	return original.metadata.hunks
+		.filter(
+			(hunk) =>
+				hunk.deletionStart >= shown.deletionStart &&
+				hunk.deletionStart + hunk.deletionCount <= shown.deletionStart + shown.deletionCount &&
+				hunk.additionStart >= shown.additionStart &&
+				hunk.additionStart + hunk.additionCount <= shown.additionStart + shown.additionCount,
+		)
+		.map((hunk) => hunk.deletionStart);
+}

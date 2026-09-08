@@ -11,7 +11,7 @@ Move the review line cursor to a changed line and press `Enter`. You can also cl
 Press `v` to select a range before you open the composer. A selection:
 
 - stays inside one file;
-- can include old and new lines;
+- can include changed and revealed context lines, while preserving their actual old or new side;
 - can cross multiple hunks;
 - uses real source line numbers.
 
@@ -41,9 +41,11 @@ Use resolved status for feedback that no longer needs action. Revue keeps resolv
 
 Press `o` to open Comments. This surface lists every thread in the review.
 
-Threads that await the reviewer appear first. These threads have an agent reply as their last message. Open threads that await the agent have a human message last.
+Threads that await the reviewer appear first. An agent reply marked `proposal` awaits approval; one marked `completed` is ready to verify. Older agent replies with no intent remain awaiting the reviewer. Open threads that await the agent have a human message last.
 
-Use `j` and `k` to select a thread. Press `Enter` to jump to its code. Orphaned threads stay in the list when their code or excerpt no longer exists in the current run.
+Use `j` and `k` to select a thread. Press `Enter` to jump to its code. Detached threads stay in the list
+when their code changed, disappeared or could not be mapped unambiguously. Selecting one shows its
+preserved original code and source run, or an explicit unavailable notice for historical feedback.
 
 ## Understand unsent feedback
 
@@ -109,13 +111,13 @@ The agent can reply:
 
 ```bash
 revue threads reply <run-directory> <thread-id> \
-  --author "Fix agent" \
+  --author "Fix agent" --intent completed \
   --body "Changed the limit and added the boundary check."
 ```
 
 Use `--body-file <path>` for a longer reply. Use `--body-file -` to read the body from standard input.
 
-Responding agents reply and leave each thread open. An open thread with an agent reply is ready for the reviewer to check. Only the reviewer resolves or reopens it.
+Responding agents reply and leave each thread open. Use `--intent proposal` for a change awaiting human approval and `--intent completed` only after authorised work is done. Omitting intent preserves a legacy reply that awaits the reviewer. Send delivery never approves a proposal. Only the reviewer resolves or reopens a thread.
 
 A reviewer can use the CLI when needed:
 
@@ -148,13 +150,16 @@ The default timeout is 15 minutes. A timeout exits with status 3. Use `--timeout
 
 ## Thread anchor types
 
-Revue stores three anchor forms:
+Revue stores five anchor forms:
 
 - A **patch anchor** contains one or more canonical ranges in one file. The TUI uses this form for new diff comments.
 - A **hunk anchor** contains one old hunk start and one range. The agent CLI supports this form.
 - An **excerpt anchor** contains a range in frozen quoted code. The agent CLI also supports this form.
+- A **context anchor** contains a historical new-side range in the pinned file, for revealed unchanged lines.
+- A **selection anchor** contains canonical side-aware patch and context segments in one file. The
+  TUI uses it when a new selection includes revealed code, preserving each segment's authority.
 
-A patch anchor can contain old and new ranges and can cross hunks. It cannot cross files.
+A patch or selection anchor can contain old and new ranges and can cross hunks. It cannot cross files.
 
 The agent CLI creates hunk or excerpt anchors:
 
@@ -169,7 +174,9 @@ revue threads create <run-directory> --kind excerpt \
   --author "Review agent" --body "Does this caller still hold?"
 ```
 
-`revue threads list` returns all anchor forms in JSON. Agents must preserve the supplied anchor meaning when they answer feedback.
+`revue threads list` returns all anchor forms in JSON, including `originalEvidence` when preserved.
+Each orphan entry reports `originalEvidenceAvailable`; missing legacy evidence is not reconstructed
+from replacement code. Agents must preserve the supplied anchor meaning when they answer feedback.
 
 ## Persistence and supersession
 
@@ -177,7 +184,10 @@ Threads live in `.revue/threads.json` at the reviewed repository root. They are 
 
 Each write takes a cross-process lock and reads the latest state before it writes. This prevents the TUI and an agent from replacing each other's messages.
 
-When a run supersedes an earlier run, prep moves its threads to the new run. Revue remaps anchors when possible. It marks a thread orphaned instead of deleting it when its code no longer exists.
+When a run supersedes an earlier run, prep moves its threads to the new run. Revue maps only exact,
+unambiguous code and detaches changed or ambiguous anchors instead of deleting feedback. Original
+evidence remains optional for historical data. Version-3 writes add segmented selections and reply
+intent; strict version-1 and version-2 stores remain readable, but older binaries may reject new writes.
 
 Read [Continue a review](continuing.md) for migration and epilogue behaviour.
 

@@ -309,6 +309,13 @@ const KEYMAP_DEF = [
 		section: "Review",
 	},
 	{
+		id: "toggle-hunk-review",
+		description: "Toggle the focused original hunk reviewed in place",
+		keys: ["m"],
+		context: "page",
+		section: "Review",
+	},
+	{
 		id: "toggle-file-review",
 		description: "Toggle the focused file reviewed",
 		keys: ["f"],

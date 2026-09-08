@@ -104,7 +104,8 @@ const metadataUnit = (file: RunFile): ReviewUnit => ({
 	),
 });
 
-const reviewUnits = (run: PreparedRun): ReviewUnit[] => {
+/** Original pinned review units, independent of narration and expanded display geometry. */
+export const reviewUnits = (run: PreparedRun): ReviewUnit[] => {
 	const diffs = new Map(parsePatch(run.patch).map((file) => [file.path, file]));
 	return run.manifest.files.flatMap((file) => {
 		const diff = diffs.get(file.path);

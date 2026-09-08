@@ -3,9 +3,16 @@ import {
 	type DiffFile,
 	type DiffLineRange,
 	type DiffSelection,
+	type DiffSelectionRange,
 	type DiffSide,
 } from "@revue/diff";
-import { type Chapter, type ContextThreadAnchor, THREAD_ANCHOR_KIND } from "@revue/types";
+import {
+	type Chapter,
+	type ContextThreadAnchor,
+	canonicalizeSelectionSegments,
+	type SelectionThreadAnchor,
+	THREAD_ANCHOR_KIND,
+} from "@revue/types";
 
 // Revealed context is the file itself, read from the run's pinned new blob, so a comment on it
 // names a new-side line range and no review unit — the same shape as a quoted excerpt, resolved
@@ -35,6 +42,65 @@ export const newLineForOld = (hunks: readonly Hunk[], oldLine: number): number =
 };
 
 /**
+ * Expansion geometry is new-blob based. An unchanged old-side gap can therefore be revealed only
+ * after mapping it to its identical new-side bytes; the durable anchor remains old-side.
+ */
+export const newRangeForOldContext = (
+	hunks: readonly Hunk[],
+	startLine: number,
+	endLine: number,
+): { startLine: number; endLine: number } | null => {
+	if (
+		hunks.some(
+			(hunk) =>
+				holds(hunk, "deletions", startLine) ||
+				holds(hunk, "deletions", endLine) ||
+				(hunk.deletionStart > startLine && hunk.deletionStart <= endLine),
+		)
+	)
+		return null;
+	return {
+		startLine: newLineForOld(hunks, startLine),
+		endLine: newLineForOld(hunks, endLine),
+	};
+};
+
+/**
+ * Resolve durable context authority into destination display geometry. A carried range may straddle
+ * ordinary rows already present in original hunks and rows revealed only by expansion; each piece
+ * keeps its semantic side while taking the row identity the renderer actually mounts.
+ */
+export const displayRangesForContext = (
+	hunks: readonly Hunk[],
+	side: DiffSide,
+	startLine: number,
+	endLine: number,
+): DiffSelectionRange[] => {
+	const ranges: DiffSelectionRange[] = [];
+	let cursor = startLine;
+	const intersecting = hunks
+		.flatMap((hunk) => {
+			const hunkStart = side === "additions" ? hunk.additionStart : hunk.deletionStart;
+			const count = side === "additions" ? hunk.additionCount : hunk.deletionCount;
+			const from = Math.max(startLine, hunkStart);
+			const to = Math.min(endLine, hunkStart + count - 1);
+			return count > 0 && from <= to ? [{ hunk, from, to }] : [];
+		})
+		.sort((left, right) => left.from - right.from);
+	for (const { hunk, from, to } of intersecting) {
+		if (cursor < from) {
+			ranges.push({ oldStart: CONTEXT_HUNK_OLD_START, side, startLine: cursor, endLine: from - 1 });
+		}
+		ranges.push({ oldStart: hunk.deletionStart, side, startLine: from, endLine: to });
+		cursor = to + 1;
+	}
+	if (cursor <= endLine) {
+		ranges.push({ oldStart: CONTEXT_HUNK_OLD_START, side, startLine: cursor, endLine });
+	}
+	return ranges;
+};
+
+/**
  * Where a displayed line of an expanded file resolves: inside a git hunk it is that review unit's
  * line, and outside every hunk it is revealed context, which both sides name by its new-side number.
  */
@@ -52,13 +118,12 @@ export const gitRangeResolver =
 				endLine: line,
 			};
 		}
-		const newLine = side === "additions" ? line : newLineForOld(hunks, line);
 		return {
 			filePath: path,
 			hunkOldStart: CONTEXT_HUNK_OLD_START,
-			side: "additions",
-			startLine: newLine,
-			endLine: newLine,
+			side,
+			startLine: line,
+			endLine: line,
 		};
 	};
 
@@ -66,9 +131,8 @@ const isContextRange = (range: DiffSelection["ranges"][number]): boolean =>
 	range.oldStart === CONTEXT_HUNK_OLD_START;
 
 /**
- * What a diff-body selection asks for: a patch anchor when it lies on review units, a context
- * anchor when every range is revealed context, and nothing when it mixes the two — a mixed
- * selection has no one authority to resolve against.
+ * Classify which authorities a diff-body selection spans before the TUI persists its segmented
+ * selection anchor.
  */
 export const contextSelectionKind = (selection: DiffSelection): "patch" | "context" | "mixed" => {
 	const context = selection.ranges.filter(isContextRange).length;
@@ -76,11 +140,28 @@ export const contextSelectionKind = (selection: DiffSelection): "patch" | "conte
 	return context === selection.ranges.length ? "context" : "mixed";
 };
 
-export const contextAnchorFor = (selection: DiffSelection): ContextThreadAnchor => ({
-	kind: THREAD_ANCHOR_KIND.CONTEXT,
+/** Preserve each displayed authority; context geometry's private oldStart never reaches storage. */
+export const selectionAnchorFor = (selection: DiffSelection): SelectionThreadAnchor => ({
+	kind: "selection",
 	filePath: selection.filePath,
-	startLine: Math.min(...selection.ranges.map((range) => range.startLine)),
-	endLine: Math.max(...selection.ranges.map((range) => range.endLine)),
+	segments: canonicalizeSelectionSegments(
+		selection.ranges.map((range) =>
+			isContextRange(range)
+				? {
+						kind: THREAD_ANCHOR_KIND.CONTEXT,
+						side: range.side,
+						startLine: range.startLine,
+						endLine: range.endLine,
+					}
+				: {
+						kind: THREAD_ANCHOR_KIND.PATCH,
+						oldStart: range.oldStart,
+						side: range.side,
+						startLine: range.startLine,
+						endLine: range.endLine,
+					},
+		),
+	) as SelectionThreadAnchor["segments"],
 });
 
 const distance = (hunk: Hunk, anchor: ContextThreadAnchor): number => {

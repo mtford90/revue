@@ -53,7 +53,8 @@ If the scope is unchanged, Revue reuses the same run. It keeps:
 
 If the code changed, Revue creates a new run. A direct reload can open that run as a flat diff before the agent updates the narration. The status bar reports that the narration is stale.
 
-For this direct changed-code reload, Revue carries file progress only when the fixed file snapshots still match. It does not carry old key-change answers into stale narration.
+For a changed-code reload, Revue carries uniquely identical hunks independently, even inside a
+partly changed file or after line shifts. It does not carry old key-change answers into new narration.
 
 ### Reload a PR review
 
@@ -119,38 +120,53 @@ For a local fix, the epilogue presents the new or modified units and cites the t
 
 For a large structural change, it can instead tell the reviewer which chapters need another read. This form can contain no hunks.
 
-The epilogue is always unread. It is the entry point for the next review pass.
+The epilogue is the entry point for the next review pass. Its code completion comes from its
+hunks; a no-hunk orientation note starts unread and is marked read explicitly.
 
 ## Carry review progress
 
-A carried chapter describes unchanged code. Revue can carry its completed state into the superseding run.
+Code ticks belong to the fixed run, not to chapter wording or grouping. Narrative and Diff share
+one set of original-hunk marks, including metadata-only changes. A file or chapter derives its
+completion from the units it covers; questions and no-hunk chapters remain narration-specific.
 
-This includes:
+Across runs, a hunk carries only when its exact signature occurs once in each complete same-path
+unit set. Changed, new or ambiguous hunks stay unread. Editorial chapter carry does not decide code
+progress, and a changed neighbour does not erase an unchanged hunk's tick.
 
-- chapter progress;
-- file progress;
-- answered key changes.
+An already initialized destination, even one you cleared completely, keeps its own state. Within
+the selected lineage, the newest initialized pending review takes precedence over older positives,
+including manual unread marks. Direct flat reload continuity persists across reopening too.
 
-A stale chapter does not keep those marks. Its new narration can ask different questions about different code.
+Older chapter/file records migrate once using available current or flat narration. Revue does not
+guess ownership from an unavailable historical narration.
 
 ## Move threads to the new run
 
 Prep moves open and resolved threads from the superseded run to the new run. It does not leave a second copy on the old run.
 
-Revue remaps each anchor through the same unit matching that powers `revue delta`:
+Hunk, patch and revealed-context anchors follow exact code only when it occurs once in both
+pinned files on the same side. A patch must map every range into the new patch or detach as a whole.
+Changed code detaches even when its neighbours survived. Duplicate matches detach rather than
+choosing the nearest occurrence. Detachment recorded by prep is sticky across later runs.
 
-- unchanged code follows its new location;
-- rewritten code keeps the comment when the same lines are still there, or when the lines around the
-  comment did not change and the fix thus rewrote the commented lines in place;
-- moved code takes the comment with it, anywhere in the same file;
-- deleted code becomes orphaned.
+Threads preserve `originalEvidence`: the source run, original anchor and exact lines for every
+range. Select a detached thread in Comments to read that code; `threads list --json` includes it
+alongside the conversation. Historical stores still load. Evidence is captured on the first carry
+only for never-carried historical threads; an already-carried thread without evidence is unverified
+and non-inline even when its coordinates fit. It reports evidence unavailable rather than pretending
+those coordinates are original.
 
-An anchor becomes orphaned when the run does not have its code anywhere. Revue does not move the
-comment to the code that now occupies those line numbers. Excerpt anchors resolve against the new
-frozen context, as before. Context anchors, on revealed unchanged lines, follow the pinned file the
-same way: same text, same place, or orphaned.
+Excerpt threads need frozen destination coverage and unchanged, unambiguous evidence before they
+render inline. Missing narration is temporarily unverified, not proof of changed code: an identical
+quotation can become visible after freezing, even when it moved outside the patch. Freeze remaps a
+unique exact frozen destination and records changed or ambiguous evidence from either the previous
+or replacement context as permanent detachment before replacing context. Restoring a quotation and
+freezing the same run again cannot revive detached feedback. Prep and freeze use the same thread
+lock and preserve concurrent replies. Reading a run never writes thread state. Overlapping
+quotations of the same physical lines count as one occurrence.
 
-Orphaned threads remain visible in Comments. Revue never removes feedback because a new narration cannot place it.
+Detached and unverified threads remain in Comments, never on replacement code. Revue never removes
+feedback because a new narration cannot place it.
 
 ## Receive updates in an open TUI
 
@@ -188,7 +204,7 @@ Use an explicit predecessor when automatic detection selects the wrong run:
 revue prep <scope> --carry-from <run-id>
 ```
 
-Prep prints a warning when a choice costs the reviewer something: open threads on a run this run does not continue, a carried thread whose code is gone, or a narrated predecessor of which no chapter carried, which resets every read mark.
+Prep prints a warning when a choice costs the reviewer something: open threads on a run this run does not continue, a carried thread that detached, or a narrated predecessor of which no chapter carried, which needs new narration. Code ticks are independent of that editorial result.
 
 Start a new review without inherited chapters, threads, or progress when that is intentional:
 

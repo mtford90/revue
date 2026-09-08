@@ -3,16 +3,18 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { canonicalizeDiffSelection, type DiffFile, parsePatch } from "@revue/diff";
 import {
-	type ContextThreadAnchor,
+	canonicalizeSelectionSegments,
 	emptyThreadStoreFile,
+	frozenExcerptContaining,
 	isContextAnchor,
 	isExcerptAnchor,
 	isPatchAnchor,
-	type PatchThreadAnchor,
+	isSelectionAnchor,
 	type PatchThreadRange,
-	REVIEW_UNIT_STATUS,
 	type ReviewThread,
+	type RunContextFile,
 	type ThreadAnchor,
+	type ThreadEvidence,
 	type ThreadStoreFile,
 	threadStoreFileReaderSchema,
 	threadStoreFileSchema,
@@ -20,11 +22,11 @@ import {
 import { z } from "zod";
 import { loadPreparedRun, type PreparedRun } from "./artifact.ts";
 import { writeFileAtomically } from "./atomic.ts";
-import { matchReviewUnits, type ReviewUnitMatch, unitKey, unitSide } from "./delta.ts";
+import { loadRunContextSync } from "./context.ts";
 
 // Threads are the mutable overlay on immutable runs, so the store lives beside the runs rather than
-// inside them and every writer takes the same cross-process lock. Prep writes here for one reason:
-// when a run supersedes another, the feedback on the superseded run has to follow the code.
+// inside them and every writer takes the same cross-process lock. Prep moves feedback onto a
+// superseding run; context freeze settles excerpt anchors against the newly quoted code.
 
 export class ThreadStoreError extends Error {}
 
@@ -136,256 +138,320 @@ export function persistThreadStoreFile(path: string, file: ThreadStoreFile): voi
 	}
 }
 
-/** The lines a review unit holds on one side, numbered as the new run counts them. */
-type UnitLines = { start: number; lines: readonly string[] };
-
-const withoutEnding = (line: string): string => line.replace(/\r?\n$/, "");
-
-const unitLines = (
-	file: DiffFile | undefined,
-	oldStart: number,
-	side: PatchThreadRange["side"],
-): UnitLines | null => {
-	const hunk = file?.metadata.hunks.find((candidate) => candidate.deletionStart === oldStart);
-	if (!file || !hunk) return null;
-	const additions = side === "additions";
-	const start = additions ? hunk.additionStart : hunk.deletionStart;
-	const count = additions ? hunk.additionCount : hunk.deletionCount;
-	const index = additions ? hunk.additionLineIndex : hunk.deletionLineIndex;
-	const source = additions ? file.metadata.additionLines : file.metadata.deletionLines;
-	return { start, lines: source.slice(index, index + count).map(withoutEnding) };
-};
-
-/** The exact text a range covers, or null when the unit does not hold all of those lines. */
-const linesAt = (unit: UnitLines | null, startLine: number, endLine: number): string[] | null => {
-	if (!unit) return null;
-	const from = startLine - unit.start;
-	const to = endLine - unit.start;
-	if (from < 0 || to < from || to > unit.lines.length - 1) return null;
-	return unit.lines.slice(from, to + 1);
-};
-
-const sameLines = (left: readonly string[], right: readonly string[]): boolean =>
-	left.length === right.length && left.every((line, index) => line === right[index]);
-
-type PlacedUnit = UnitLines & { oldStart: number };
-
-/** Every unit of a file in one run, so code that moved between hunks is still findable. */
-const fileUnits = (file: DiffFile | undefined, side: PatchThreadRange["side"]): PlacedUnit[] =>
-	(file?.metadata.hunks ?? []).flatMap((hunk) => {
-		const unit = unitLines(file, hunk.deletionStart, side);
-		return unit ? [{ ...unit, oldStart: hunk.deletionStart }] : [];
-	});
-
-type FoundLines = { oldStart: number; startLine: number };
-
-const occurrencesIn = (unit: PlacedUnit, wanted: readonly string[]): FoundLines[] =>
-	unit.lines.flatMap((_, index) =>
-		sameLines(unit.lines.slice(index, index + wanted.length), wanted)
-			? [{ oldStart: unit.oldStart, startLine: unit.start + index }]
-			: [],
-	);
-
-/** Where the anchored text now sits, preferring the occurrence nearest where the anchor pointed. */
-const findLines = (
-	file: DiffFile | undefined,
-	side: PatchThreadRange["side"],
-	wanted: readonly string[],
-	near: number,
-): FoundLines | null =>
-	fileUnits(file, side)
-		.flatMap((unit) => occurrencesIn(unit, wanted))
-		.sort((left, right) => Math.abs(left.startLine - near) - Math.abs(right.startLine - near))[0] ??
-	null;
-
-/**
- * Whether the lines immediately around the range came through untouched. That is what tells an
- * edit the reviewer's comment answers — the fix rewrote the very lines it was left on — apart from
- * a deletion that merely left unrelated code sitting at the same numbers.
- */
-const framePreserved = (
-	before: UnitLines | null,
-	after: UnitLines | null,
-	range: PatchThreadRange,
-	shifted: PatchThreadRange,
-): boolean => {
-	const sides = [
-		[range.startLine - 1, shifted.startLine - 1],
-		[range.endLine + 1, shifted.endLine + 1],
-	] as const;
-	const pairs = sides.flatMap(([previousLine, currentLine]) => {
-		const previous = linesAt(before, previousLine, previousLine);
-		return previous ? [{ previous, current: linesAt(after, currentLine, currentLine) }] : [];
-	});
-	return (
-		pairs.length > 0 &&
-		pairs.every(({ previous, current }) => current && sameLines(previous, current))
-	);
-};
-
-/**
- * Where a carried anchor reads in the superseding run. A unit that came through with its content
- * intact shifts exactly. Where the change rewrote the unit the anchor is followed by its content:
- * the same text at the shifted position, failing that the shifted position when the lines framing it
- * survived and so the fix answered the comment in place, failing that the same text wherever else
- * in the file it went. Code the run no longer has anywhere is `lost` — the anchor keeps the range it
- * was written against and the run reports it as orphaned, rather than pinning the reviewer's words
- * to whatever now occupies those numbers.
- */
-type CarriedRangeOutcome =
-	| { kind: "mapped"; range: PatchThreadRange }
-	| { kind: "unmatched" }
-	| { kind: "lost" };
-
-type CarryContext = {
-	previousFiles: ReadonlyMap<string, DiffFile>;
-	currentFiles: ReadonlyMap<string, DiffFile>;
-	matches: Map<string, ReviewUnitMatch>;
-	previousRun: PreparedRun;
-	currentRun: PreparedRun;
-};
-
+/** Exact file lines, preserving tabs, control bytes and carriage returns in stored evidence. */
 const splitLines = (text: string): string[] => {
 	const lines = text.split("\n");
 	if (lines.at(-1) === "") lines.pop();
 	return lines;
 };
 
-/** The pinned new-side text of a file, or null when the run holds none for it. */
-const pinnedLines = (run: PreparedRun, filePath: string): string[] | null => {
+const pinnedLines = (
+	run: PreparedRun,
+	filePath: string,
+	side: PatchThreadRange["side"] = "additions",
+): string[] | null => {
 	const file = run.manifest.files.find((candidate) => candidate.path === filePath);
-	if (!file?.newBlob || file.isBinary) return null;
+	const blob = side === "additions" ? file?.newBlob : file?.oldBlob;
+	if (!blob || file?.isBinary) return null;
 	try {
-		return splitLines(readFileSync(join(run.directory, "blobs", file.newBlob), "utf8"));
+		return splitLines(readFileSync(join(run.directory, "blobs", blob), "utf8"));
 	} catch {
 		return null;
 	}
 };
 
-const nearestOccurrence = (
-	lines: readonly string[],
-	wanted: readonly string[],
-	near: number,
-): number | undefined =>
-	lines
-		.flatMap((_, index) =>
-			sameLines(lines.slice(index, index + wanted.length), wanted) ? [index + 1] : [],
+const sameLines = (left: readonly string[], right: readonly string[]): boolean =>
+	left.length === right.length && left.every((line, index) => line === right[index]);
+
+const occurrences = (lines: readonly string[], wanted: readonly string[]): number[] =>
+	lines.flatMap((_, index) =>
+		sameLines(lines.slice(index, index + wanted.length), wanted) ? [index + 1] : [],
+	);
+
+type EvidenceRun = PreparedRun & { context?: RunContextFile | null };
+
+/** Capture only from the run the author actually read, never from a carried anchor's replacement. */
+export const captureThreadEvidence = (
+	run: EvidenceRun,
+	anchor: ThreadAnchor,
+): ThreadEvidence | undefined => {
+	const ranges = isPatchAnchor(anchor)
+		? anchor.ranges
+		: isSelectionAnchor(anchor)
+			? anchor.segments
+			: [anchor];
+	const lines = ranges.map((range) => {
+		if (isExcerptAnchor(anchor)) {
+			const excerpt = frozenExcerptContaining(run.context ?? null, anchor);
+			return excerpt?.lines.slice(
+				anchor.startLine - excerpt.startLine,
+				anchor.endLine - excerpt.startLine + 1,
+			);
+		}
+		return pinnedLines(run, anchor.filePath, "side" in range ? range.side : "additions")?.slice(
+			range.startLine - 1,
+			range.endLine,
+		);
+	});
+	if (
+		lines.some(
+			(value, index) =>
+				!value ||
+				value.length !== (ranges[index]?.endLine ?? 0) - (ranges[index]?.startLine ?? 0) + 1,
 		)
-		.sort((left, right) => Math.abs(left - near) - Math.abs(right - near))[0];
+	)
+		return undefined;
+	return { runId: run.manifest.runId, anchor, lines: lines as string[][] };
+};
+
+/** Overlapping quotations name one physical occurrence, not several competing destinations. */
+const frozenOccurrences = (
+	context: RunContextFile | null,
+	filePath: string,
+	wanted: readonly string[],
+): number[] => [
+	...new Set(
+		(context?.excerpts ?? [])
+			.filter((excerpt) => excerpt.filePath === filePath)
+			.flatMap((excerpt) =>
+				occurrences(excerpt.lines, wanted).map((line) => line + excerpt.startLine - 1),
+			),
+	),
+];
+
+type ExcerptResolution = {
+	state: "verified" | "unresolved" | "changed" | "unavailable";
+	anchor: ThreadAnchor;
+};
+
+/** Search frozen destinations before consulting historical coordinates: outside-patch quotes move. */
+const resolveExcerptEvidence = (
+	context: RunContextFile | null,
+	thread: ReviewThread,
+): ExcerptResolution => {
+	const { anchor } = thread;
+	if (!isExcerptAnchor(anchor)) return { state: "unresolved", anchor };
+	if (thread.migrationOrphaned) return { state: "changed", anchor };
+	const excerpt = frozenExcerptContaining(context, anchor);
+	if (!thread.originalEvidence) {
+		return {
+			state: thread.migratedFrom ? "unavailable" : excerpt ? "verified" : "unresolved",
+			anchor,
+		};
+	}
+	const wanted = thread.originalEvidence.lines[0] ?? [];
+	const found = frozenOccurrences(context, anchor.filePath, wanted);
+	const [startLine] = found;
+	if (found.length > 1) return { state: "changed", anchor };
+	if (startLine !== undefined) {
+		return {
+			state: "verified",
+			anchor: { ...anchor, startLine, endLine: startLine + wanted.length - 1 },
+		};
+	}
+	return { state: excerpt ? "changed" : "unresolved", anchor };
+};
 
 /**
- * A context anchor names lines of the pinned new file rather than of a review unit, so it follows
- * its content through the blobs by the same rule: the same text at the same place, the same place
- * when the lines framing it held, the same text wherever else it went, otherwise lost.
+ * Called under the thread-store lock. Save old/new proven mismatches before context replacement;
+ * return the publication of verified coordinates for after that replacement succeeds.
  */
-const carriedContextAnchor = (
-	anchor: ContextThreadAnchor,
-	{ previousRun, currentRun }: CarryContext,
-): CarriedAnchor => {
-	const previous = pinnedLines(previousRun, anchor.filePath);
-	const current = pinnedLines(currentRun, anchor.filePath);
-	const wanted = previous?.slice(anchor.startLine - 1, anchor.endLine) ?? [];
-	if (!previous || !current || wanted.length !== anchor.endLine - anchor.startLine + 1) {
-		return { anchor, migrationOrphaned: true };
-	}
-	if (sameLines(current.slice(anchor.startLine - 1, anchor.endLine), wanted)) {
-		return { anchor, migrationOrphaned: false };
-	}
-	const frame = [anchor.startLine - 2, anchor.endLine];
-	const framePreserved = frame.every(
-		(index) => previous[index] !== undefined && previous[index] === current[index],
+export const reconcileFrozenExcerptThreads = (
+	path: string,
+	runId: string,
+	previous: RunContextFile | null,
+	current: RunContextFile,
+): (() => void) => {
+	const store = readThreadStoreFile(path);
+	const threads = store.runs[runId] ?? [];
+	const reconciled = threads.map((thread) => {
+		if (
+			!thread.migratedFrom ||
+			!isExcerptAnchor(thread.anchor) ||
+			thread.migrationOrphaned ||
+			!thread.originalEvidence
+		)
+			return thread;
+		const before = resolveExcerptEvidence(previous, thread);
+		const after = resolveExcerptEvidence(current, { ...thread, anchor: before.anchor });
+		if (before.state === "changed" || after.state === "changed")
+			return { ...thread, migrationOrphaned: true as const };
+		return after.state === "verified" ? { ...thread, anchor: after.anchor } : thread;
+	});
+	const detached = threads.map((thread, index) =>
+		reconciled[index]?.migrationOrphaned ? { ...thread, migrationOrphaned: true as const } : thread,
 	);
-	if (framePreserved) return { anchor, migrationOrphaned: false };
-	const found = nearestOccurrence(current, wanted, anchor.startLine);
-	if (found === undefined) return { anchor, migrationOrphaned: true };
-	return {
-		anchor: { ...anchor, startLine: found, endLine: found + wanted.length - 1 },
-		migrationOrphaned: false,
+	const persist = (next: ReviewThread[]) =>
+		persistThreadStoreFile(path, { ...store, runs: { ...store.runs, [runId]: next } });
+	if (JSON.stringify(detached) !== JSON.stringify(threads)) persist(detached);
+	return () => {
+		if (JSON.stringify(reconciled) !== JSON.stringify(detached)) persist(reconciled);
 	};
+};
+
+/** Missing narration is unresolved, not proof that code changed. Reads never persist detachment. */
+export const excerptEvidenceState = (
+	context: RunContextFile | null,
+	thread: ReviewThread,
+): "verified" | "unresolved" | "changed" | "unavailable" => {
+	if (!isExcerptAnchor(thread.anchor)) return "unresolved";
+	if (thread.migratedFrom) {
+		const resolved = resolveExcerptEvidence(context, thread);
+		return resolved.state === "verified" &&
+			JSON.stringify(resolved.anchor) !== JSON.stringify(thread.anchor)
+			? "unresolved"
+			: resolved.state;
+	}
+	const excerpt = frozenExcerptContaining(context, thread.anchor);
+	if (!thread.originalEvidence)
+		return thread.migratedFrom ? "unavailable" : excerpt ? "verified" : "unresolved";
+	if (!excerpt) return "unresolved";
+	const wanted = thread.originalEvidence.lines[0] ?? [];
+	const actual = excerpt.lines.slice(
+		thread.anchor.startLine - excerpt.startLine,
+		thread.anchor.endLine - excerpt.startLine + 1,
+	);
+	return sameLines(actual, wanted) &&
+		(!thread.migratedFrom ||
+			frozenOccurrences(context, thread.anchor.filePath, wanted).length === 1)
+		? "verified"
+		: "changed";
+};
+
+type CarryContext = {
+	currentFiles: ReadonlyMap<string, DiffFile>;
+	previousRun: EvidenceRun;
+	currentRun: EvidenceRun;
+};
+type CarriedAnchor = { anchor: ThreadAnchor; migrationOrphaned: boolean };
+
+/** Correspondence must be unique in both files. Neither position nor surviving neighbours prove it. */
+const uniqueDestination = (
+	previous: readonly string[] | null,
+	current: readonly string[] | null,
+	start: number,
+	end: number,
+): number | null => {
+	const wanted = previous?.slice(start - 1, end);
+	if (!previous || !current || !wanted || wanted.length !== end - start + 1) return null;
+	const before = occurrences(previous, wanted);
+	const after = occurrences(current, wanted);
+	return before.length === 1 && after.length === 1 ? (after[0] ?? null) : null;
 };
 
 const carriedRange = (
 	filePath: string,
 	range: PatchThreadRange,
-	{ previousFiles, currentFiles, matches }: CarryContext,
-): CarriedRangeOutcome => {
-	const match = matches.get(unitKey(filePath, range.oldStart));
-	if (!match) return { kind: "unmatched" };
-	const before = unitSide(match.previous, range.side);
-	const after = unitSide(match.current, range.side);
-	const shift = after.start - before.start;
-	const shifted: PatchThreadRange = {
-		...range,
-		oldStart: match.current.oldStart,
-		startLine: range.startLine + shift,
-		endLine: range.endLine + shift,
-	};
-	const outside =
-		shifted.startLine < after.start || shifted.endLine > after.start + after.count - 1;
-	if (after.count === 0 || outside) return { kind: "unmatched" };
-	if (match.status === REVIEW_UNIT_STATUS.UNCHANGED) return { kind: "mapped", range: shifted };
-
-	const previousUnit = unitLines(previousFiles.get(filePath), range.oldStart, range.side);
-	const currentUnit = unitLines(currentFiles.get(filePath), shifted.oldStart, range.side);
-	const wanted = linesAt(previousUnit, range.startLine, range.endLine);
-	if (!wanted) return { kind: "lost" };
-	const settled = linesAt(currentUnit, shifted.startLine, shifted.endLine);
-	if (settled && sameLines(settled, wanted)) return { kind: "mapped", range: shifted };
-	// Where the frame held, the fix rewrote these very lines, which beats an identical line found
-	// somewhere else in the file: duplicate lines are common and a coincidence must not win.
-	if (framePreserved(previousUnit, currentUnit, range, shifted)) {
-		return { kind: "mapped", range: shifted };
-	}
-	const found = findLines(currentFiles.get(filePath), range.side, wanted, shifted.startLine);
-	if (!found) return { kind: "lost" };
-	return {
-		kind: "mapped",
-		range: {
-			...range,
-			oldStart: found.oldStart,
-			startLine: found.startLine,
-			endLine: found.startLine + wanted.length - 1,
-		},
-	};
-};
-
-type CarriedAnchor = { anchor: ThreadAnchor; migrationOrphaned: boolean };
-
-const mappedRanges = (
-	outcomes: readonly CarriedRangeOutcome[],
-): [PatchThreadRange, ...PatchThreadRange[]] | null => {
-	const ranges = outcomes.flatMap((outcome) => (outcome.kind === "mapped" ? [outcome.range] : []));
-	const [first, ...rest] = ranges;
-	return first && ranges.length === outcomes.length ? [first, ...rest] : null;
-};
-
-const carriedPatchAnchor = (anchor: PatchThreadAnchor, context: CarryContext): CarriedAnchor => {
-	const ranges = mappedRanges(
-		anchor.ranges.map((range) => carriedRange(anchor.filePath, range, context)),
+	context: CarryContext,
+): PatchThreadRange | null => {
+	const startLine = uniqueDestination(
+		pinnedLines(context.previousRun, filePath, range.side),
+		pinnedLines(context.currentRun, filePath, range.side),
+		range.startLine,
+		range.endLine,
 	);
-	const authoritative = context.currentFiles.get(anchor.filePath);
-	if (!ranges || !authoritative) return { anchor, migrationOrphaned: true };
-	const normalized = canonicalizeDiffSelection(
-		{ filePath: anchor.filePath, ranges },
-		authoritative,
-	);
-	return { anchor: { ...anchor, ranges: normalized.ranges }, migrationOrphaned: false };
+	if (startLine === null) return null;
+	const endLine = startLine + range.endLine - range.startLine;
+	const hunks =
+		context.currentFiles.get(filePath)?.metadata.hunks.filter((hunk) => {
+			const start = range.side === "additions" ? hunk.additionStart : hunk.deletionStart;
+			const count = range.side === "additions" ? hunk.additionCount : hunk.deletionCount;
+			return startLine >= start && endLine < start + count;
+		}) ?? [];
+	const [hunk] = hunks;
+	return hunks.length === 1 && hunk
+		? { ...range, oldStart: hunk.deletionStart, startLine, endLine }
+		: null;
 };
 
-/**
- * An excerpt anchor resolves against the frozen context rather than the patch, so it carries as it
- * is. Every other anchor follows its content: one whose code this run no longer has anywhere is
- * orphaned, while one whose unit simply left the run keeps its range for the reader to report.
- */
-const carriedAnchor = (anchor: ThreadAnchor, context: CarryContext): CarriedAnchor => {
-	if (isExcerptAnchor(anchor)) return { anchor, migrationOrphaned: false };
-	if (isContextAnchor(anchor)) return carriedContextAnchor(anchor, context);
-	if (isPatchAnchor(anchor)) return carriedPatchAnchor(anchor, context);
-	const outcome = carriedRange(anchor.filePath, anchor, context);
-	if (outcome.kind === "mapped") {
-		return { anchor: { ...anchor, ...outcome.range }, migrationOrphaned: false };
+const carriedAnchor = (thread: ReviewThread, context: CarryContext): CarriedAnchor => {
+	const { anchor } = thread;
+	const lost = { anchor, migrationOrphaned: true };
+	if (isExcerptAnchor(anchor)) {
+		const source = excerptEvidenceState(context.previousRun.context ?? null, {
+			...thread,
+			migratedFrom: thread.migratedFrom ?? thread.runId,
+		});
+		if (source === "changed" || source === "unavailable") return lost;
+		const wanted = thread.originalEvidence?.lines[0];
+		if (!wanted) return lost;
+		const previous = pinnedLines(context.previousRun, anchor.filePath);
+		if (
+			previous &&
+			(!sameLines(previous.slice(anchor.startLine - 1, anchor.endLine), wanted) ||
+				occurrences(previous, wanted).length !== 1)
+		)
+			return lost;
+		const destination = resolveExcerptEvidence(context.currentRun.context ?? null, thread);
+		if (destination.state === "changed") return lost;
+		if (destination.state === "verified")
+			return { anchor: destination.anchor, migrationOrphaned: false };
+		const current = pinnedLines(context.currentRun, anchor.filePath);
+		// Files outside the patch may be frozen only after prep. Missing narration is not a deletion.
+		if (!current)
+			return context.currentRun.manifest.files.some((file) => file.path === anchor.filePath)
+				? lost
+				: { anchor, migrationOrphaned: false };
+		const found = occurrences(current, wanted);
+		const [startLine] = found;
+		return found.length === 1 && startLine !== undefined
+			? {
+					anchor: { ...anchor, startLine, endLine: startLine + wanted.length - 1 },
+					migrationOrphaned: false,
+				}
+			: lost;
 	}
-	return { anchor, migrationOrphaned: outcome.kind === "lost" };
+	if (isContextAnchor(anchor)) {
+		const startLine = uniqueDestination(
+			pinnedLines(context.previousRun, anchor.filePath),
+			pinnedLines(context.currentRun, anchor.filePath),
+			anchor.startLine,
+			anchor.endLine,
+		);
+		return startLine === null
+			? lost
+			: {
+					anchor: { ...anchor, startLine, endLine: startLine + anchor.endLine - anchor.startLine },
+					migrationOrphaned: false,
+				};
+	}
+	if (isPatchAnchor(anchor)) {
+		const ranges = anchor.ranges.map((range) => carriedRange(anchor.filePath, range, context));
+		const file = context.currentFiles.get(anchor.filePath);
+		if (ranges.some((range) => !range) || !file) return lost;
+		const canonical = canonicalizeDiffSelection(
+			{ filePath: anchor.filePath, ranges: ranges as [PatchThreadRange, ...PatchThreadRange[]] },
+			file,
+		);
+		return { anchor: { ...anchor, ranges: canonical.ranges }, migrationOrphaned: false };
+	}
+	if (isSelectionAnchor(anchor)) {
+		const segments = anchor.segments.map((segment) => {
+			if (segment.kind === "patch") return carriedRange(anchor.filePath, segment, context);
+			const startLine = uniqueDestination(
+				pinnedLines(context.previousRun, anchor.filePath, segment.side),
+				pinnedLines(context.currentRun, anchor.filePath, segment.side),
+				segment.startLine,
+				segment.endLine,
+			);
+			return startLine === null
+				? null
+				: { ...segment, startLine, endLine: startLine + segment.endLine - segment.startLine };
+		});
+		return segments.some((segment) => !segment)
+			? lost
+			: {
+					anchor: {
+						...anchor,
+						segments: canonicalizeSelectionSegments(
+							segments as typeof anchor.segments,
+						) as typeof anchor.segments,
+					},
+					migrationOrphaned: false,
+				};
+	}
+	const range = carriedRange(anchor.filePath, anchor, context);
+	return range ? { anchor: { ...anchor, ...range }, migrationOrphaned: false } : lost;
 };
 
 const carriedThread = (
@@ -393,18 +459,20 @@ const carriedThread = (
 	runId: string,
 	context: CarryContext,
 ): ReviewThread => {
-	// An anchor that failed once is historical evidence, not a candidate for another mapping
-	// attempt. Later runs may coincidentally regain matching coordinates; preserving the original
-	// bytes prevents that coincidence from silently changing what the thread was about.
-	const carried = thread.migrationOrphaned
-		? { anchor: thread.anchor, migrationOrphaned: true }
-		: carriedAnchor(thread.anchor, context);
+	const originalEvidence =
+		thread.originalEvidence ??
+		(!thread.migratedFrom ? captureThreadEvidence(context.previousRun, thread.anchor) : undefined);
+	const withEvidence = { ...thread, originalEvidence };
+	const carried =
+		thread.migrationOrphaned || (!originalEvidence && thread.migratedFrom)
+			? { anchor: thread.anchor, migrationOrphaned: true }
+			: carriedAnchor(withEvidence, context);
 	return {
-		...thread,
+		...withEvidence,
 		runId,
 		migratedFrom: thread.runId,
 		anchor: carried.anchor,
-		...(carried.migrationOrphaned ? { migrationOrphaned: true } : { migrationOrphaned: undefined }),
+		migrationOrphaned: carried.migrationOrphaned ? true : undefined,
 	};
 };
 
@@ -451,8 +519,6 @@ const carryContextFor = async (
 ): Promise<CarryContext> => {
 	const predecessor = await loadPreparedRun(join(runsDirectory, source));
 	return {
-		matches: matchReviewUnits(predecessor, run),
-		previousFiles: filesByPath(predecessor.patch),
 		currentFiles: filesByPath(run.patch),
 		previousRun: predecessor,
 		currentRun: run,
@@ -485,6 +551,11 @@ export async function migrateSupersededThreads({
 		),
 	);
 	return withThreadStoreLock(threadsPath, () => {
+		// Freeze uses this same lock: do not map against context read before another writer froze it.
+		for (const context of contexts.values()) {
+			context.previousRun.context = loadRunContextSync(context.previousRun);
+			context.currentRun.context = loadRunContextSync(context.currentRun);
+		}
 		const store = readThreadStoreFile(threadsPath);
 		const moved = wanted.filter((source) => (store.runs[source] ?? []).length > 0);
 		if (!moved.length) return null;

@@ -19,16 +19,17 @@ by narration; a revealed line is those bytes pinned by the run's blob.
 A `context` anchor is `(filePath, startLine, endLine)` on the new side, like an excerpt anchor,
 and resolves against the run's pinned new blob for that file.
 
-- The TUI resolves every revealed row of an expanded file to a context range; a selection made
-  only of revealed rows becomes a context anchor. A selection mixing changed and revealed lines is
-  refused with a status notice, because it has no single authority.
+- Historical standalone `context` anchors remain new-side ranges. The TUI resolves every revealed
+  row of an expanded file to a side-aware context segment. A new selection made only of revealed
+  rows, or mixing changed and revealed lines, becomes one version-3 segmented `selection` anchor;
+  every patch/context segment retains its actual side and authority.
 - A context thread renders inline only while its lines are revealed. Landing on it from the
   Comments surface reveals them. Its chapter is the one narrating the nearest hunk of its file.
 - Validation orphans, never fails, a context anchor whose file the run does not pin or whose range
   lies past the pinned file's end.
-- Prep carries a context anchor by content through the two runs' blobs: the same text at the same
-  place, the same place when the framing lines held, the same text wherever else it moved,
-  otherwise orphaned, as ADR 0021 does for hunk anchors.
+- Prep carries a context anchor by exact, unique content through the two runs' blobs. Changed or
+  ambiguous content detaches, even with an identical frame, under the 2026-09-08 amendment to
+  ADR 0021. The thread preserves its original code evidence.
 - `revue threads create --kind context` writes one from the CLI.
 
 ## Options considered
@@ -43,5 +44,6 @@ and resolves against the run's pinned new blob for that file.
 ## Consequences
 
 - The sentinel `hunkOldStart` for context rows in the TUI is negative, apart from real units (non-negative) and excerpts (zero).
-- The thread schema gains a fourth anchor kind; historical stores are unaffected.
+- The historical context addition was the fourth anchor kind. Version 3 adds `selection` as the
+  fifth kind while migrating strict version-1 and version-2 stores without reinterpretation.
 - A context thread has no gutter presence until its lines are revealed, so the Comments surface is where it is found.

@@ -76,3 +76,16 @@ The run key hashes the parsed chapters. Reviewer progress is keyed by the run ke
 
 - 2026-08-19 — [ADR 0019](0019-agent-directed-review-granularity.md) removes `revue export`, so the
   coverage validation named above now runs only in `revue show` and `revue threads`.
+- 2026-09-08 — Durable per-original-unit progress is active in initial opening, normal reload and
+  watched supersession. This amends the progress portions of
+  ADRs 0006 and 0010: code marks key on full runId, with original `[filePath, oldStart]` identities;
+  questions, explicit no-hunk narration and position remain narration-keyed. File/chapter completion
+  derives from their constituent units, including hunk-bearing epilogues. Cross-run carry requires
+  a same-path signature unique in both complete unit sets; editorial matching is unchanged and is
+  not review evidence. Saved empty destinations never reseed. Newer initialized pending progress
+  wins over ancestor positives, and explicit flat reload continuity persists locally. Legacy marks
+  migrate once using available current/flat narration only; unavailable historical ownership is not
+  guessed. `m` and original-hunk/metadata checkboxes toggle in place on both surfaces; `x`/`f`
+  retain bulk collapse/advance behaviour and never answer questions. Revealed geometry does not
+  introduce review units. Pending discovery stops at a different narrated branch, rather than
+  inheriting that branch's unread state through an older shared ancestor.

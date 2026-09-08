@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { isAbsolute, join, normalize } from "node:path";
 import {
 	type ExcerptRange,
@@ -14,6 +13,7 @@ import {
 } from "@revue/types";
 import { z } from "zod";
 import { digest, type PreparedRun, RunArtifactError } from "./artifact.ts";
+import { writeFileAtomically } from "./atomic.ts";
 import {
 	findGitContext,
 	type GitContext,
@@ -22,6 +22,7 @@ import {
 	type Snapshot,
 	type SnapshotSource,
 } from "./git.ts";
+import { reconcileFrozenExcerptThreads, threadStorePath, withThreadStoreLock } from "./threads.ts";
 
 // Freezing is narration-side work: it writes context.json beside chapters.json and touches nothing
 // the run ID hashes, so pinning quoted code can never invalidate the prepared diff it quotes.
@@ -152,16 +153,9 @@ const resolveCitation = async (
 	return freeze(range, snapshot);
 };
 
-const writeRunContext = async (directory: string, file: RunContextFile): Promise<string> => {
+const writeRunContext = (directory: string, file: RunContextFile): string => {
 	const path = runContextPath(directory);
-	const temporary = `${path}.tmp-${randomUUID()}`;
-	try {
-		await writeFile(temporary, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-		await rename(temporary, path);
-	} catch (error) {
-		await rm(temporary, { force: true });
-		throw error;
-	}
+	writeFileAtomically(path, `${JSON.stringify(file, null, 2)}\n`);
 	return path;
 };
 
@@ -199,15 +193,36 @@ export async function freezeRunContext(
 	chapters: RevueChaptersFile,
 ): Promise<FreezeContextResult> {
 	const resolved = await resolveRunContext(run, chapters);
-	return { ...resolved, path: await writeRunContext(run.directory, resolved.context) };
+	const repository = await findGitContext(run.directory);
+	const threadsPath = threadStorePath(repository.root);
+	const path = withThreadStoreLock(threadsPath, () => {
+		const previous = loadRunContextSync(run);
+		// Persist proven detachment before replacing its evidence. Publish remapped anchors only
+		// after the new context exists; an interrupted freeze can be unresolved, never guessed inline.
+		const publish = reconcileFrozenExcerptThreads(
+			threadsPath,
+			run.manifest.runId,
+			previous,
+			resolved.context,
+		);
+		const path = writeRunContext(run.directory, resolved.context);
+		publish();
+		return path;
+	});
+	return { ...resolved, path };
 }
 
 /** Read a run's frozen context, or null when nothing has been frozen for it yet. */
 export async function loadRunContext(run: PreparedRun): Promise<RunContextFile | null> {
+	return loadRunContextSync(run);
+}
+
+/** Synchronous reads let freeze and prep reconcile the latest context under the thread lock. */
+export function loadRunContextSync(run: PreparedRun): RunContextFile | null {
 	const path = runContextPath(run.directory);
 	let raw: string;
 	try {
-		raw = await readFile(path, "utf8");
+		raw = readFileSync(path, "utf8");
 	} catch (error) {
 		if (Reflect.get(Object(error), "code") === "ENOENT") return null;
 		throw new RunArtifactError(`Could not read ${path}: ${describe(error)}`);

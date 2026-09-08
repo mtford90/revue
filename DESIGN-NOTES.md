@@ -13,11 +13,12 @@ is itself an instruction ("rename this to X"), which is the go-ahead. Regenerati
 changes, never the proposal round. The chat report counts proposed / changed on instruction /
 pushed back / needs your call.
 
-**CLI "proposed" state — recommended, not built.** Keep the two stored statuses (ADR 0018). Add an
-optional message-level `intent: "proposal"` written by `revue threads reply --propose`. Derived
-state "awaiting go-ahead" = open thread whose last message is an agent proposal. TUI: Comments row
-badge *needs your go-ahead*, sorted with awaiting-reviewer; `revue status` splits `awaitingHuman`
-into `awaitingGoAhead` and `awaitingVerification`. The `Proposed:` convention holds until then.
+**Message intent — landed.** The two stored thread statuses remain unchanged. Agent replies may
+carry `intent: "proposal" | "completed"` through `revue threads reply --intent ...`; absent intent
+retains the legacy awaiting-reviewer meaning. Inline cards and Comments share the labels *needs
+approval*, *ready to verify*, *awaiting reviewer*, *awaiting agent*, and *dealt with*. Status reports
+split the reviewer-facing aggregate into approval, verification, and legacy counters. Sending does
+not approve anything; only the reviewer marks a thread dealt-with.
 
 ## 2. Regeneration lost every read mark
 
@@ -38,58 +39,77 @@ into `awaitingGoAhead` and `awaitingVerification`. The `Proposed:` convention ho
 pending run of the lineage, each remapped against the run it sat on; `--carry-from <pending>`
 resolves to its narrated ancestor and says so. `prepareRun` returns warnings the CLI prints: open
 threads left on runs this one does not continue (with the `--carry-from` to fix it), carried threads
-orphaned, and a narrated predecessor of which no chapter carried ("every read mark starts over").
+orphaned, and a narrated predecessor of which no chapter carried (narration must be rewritten).
 
-**Per-unit read state — design.**
+**Per-unit read state — active in the TUI.**
 
-- *Identity:* `(filePath, signature)` where signature is the hunk-body digest `delta.ts` already
-  computes (`hunkUnit`); metadata units keep their manifest signature. Export `reviewUnits(run)` from
-  `@revue/prep` so the TUI derives the same ids from the pinned patch.
-- *Storage:* `.revue/state.json[runId].readUnits: string[]`, keyed by **run ID**, not run key —
-  read marks are about code, not narration. Session state (page, scroll) stays on the run key.
-- *Derived marks:* file read ⇔ all its units read; chapter read ⇔ all its units read. Interludes and
-  the epilogue keep an explicit mark in `chapters` (the epilogue is always unread on open). Marking a
-  chapter or file marks its units. Key-change ticks stay per chapter: they are narration.
-- *Carry:* on open, seed from the nearest run on the `supersedes` chain (then the reload predecessor)
-  that has marks, intersected by identity. No delta needed; survives re-narration, touched-up
-  summaries, chapterless ↔ narrated, and reload. Replaces `carryReviewProgress`,
-  `carrySupersededProgress`, and the chapterless seed with one rule.
-- *Migration:* first open of a run whose old-format state exists under its run key converts file
-  marks to that file's units, then writes the new shape.
-- *UI:* hunk header gains a read tick and a `toggle-hunk-review` key; file and chapter ticks derive;
-  progress reads "n/m units". `j`/`k` unchanged.
+- `@revue/prep.reviewUnits(run)` exports the existing pinned-unit extraction. Run-local ids are
+  JSON `[filePath, oldStart]`, not content-only ids that conflate duplicate hunks.
+- `openCodeReviewStore` (`packages/tui/src/codeProgress.ts`) composes
+  `.revue/state.json["code:" + runId] = { version: 1, hunks, continuedFrom? }` with narration-keyed
+  question ticks, explicit no-hunk chapter marks and session position. Initialization is saved even
+  when empty. Reword/reorder/regroup/flat↔narrated therefore share the code record.
+- Chapter/file predicates accept the actual chapter and derive completion from its original units;
+  a chapter-local file touches only that chapter's units. Bulk toggles leave questions alone. A
+  hunk-bearing epilogue has no hidden narration veto; no-hunk narration remains explicit.
+- Carry requires the same-path signature to occur once in each **complete** run unit set. Changed,
+  new or ambiguous units stay unread; uniquely identical shifted units carry independently of the
+  editorial delta matcher. Metadata units participate; excerpts/revealed context/diagrams do not.
+- Current/flat legacy records migrate only with available narration. Saved empty destinations win;
+  unknown historical narration hashes are never decoded or guessed. The newest initialized pending
+  continuation, including empty/manual-unread state, beats an older explicit reload predecessor.
+  Reload provenance and initialized marks persist for entirely flat reviews too.
+- Initial open, ordinary reload and watched supersession all use that store with the actual
+  previous run. The shell uses only hunk-derived code completion. `m`, per-original-hunk and
+  metadata checkboxes, and View → Toggle hunk reviewed share an in-place transition. Existing
+  `x`/`f` actions retain collapse/advance and reopening behaviour; `r` remains independent.
+- Widened display hunks resolve back to the chapter's original pinned units. Current expansion
+  deliberately keeps touching hunks separate. Scenery and cross-hunk selections cannot become an
+  arbitrary hunk target. Pending discovery stops at a different narrated branch.
 
 ## 3. Expanded context was not selectable
 
 **Cause.** `gitRangeResolver` (was in `app.tsx`) returned `null` for lines outside every git hunk, so
 `selectableStops` in `@revue/diff-opentui` dropped them — the ADR 0007 decision.
 
-**Landed** (ADR 0022). A `context` anchor `(filePath, startLine, endLine)`, new-side, resolved against
-the run's pinned new blob. The resolver maps revealed rows (both sides) to a negative-sentinel
-context range; a selection of only revealed rows becomes a context anchor; a mixed selection is
-refused with a notice. Context threads render inline while their lines are shown, jumping to one
+**Landed** (ADR 0022). Historical `context` anchors remain new-side ranges resolved against the
+run's pinned new blob. The resolver maps revealed rows to side-aware context segments. New
+changed/revealed selections persist as one version-3 `selection` anchor whose patch/context segments
+retain their actual sides. Context segments render inline while their lines are shown; jumping to one
 reveals them, and their chapter is the one narrating the nearest hunk. Validation orphans (never
-fails) when the file is gone or the range is past EOF. Prep carries them by content through the two
-blobs (same place → frame held → moved → orphaned). `revue threads create --kind context`.
+fails) when the file is gone or the range is past EOF. Prep carries them by exact, unique content through the two
+blobs; changed or ambiguous code detaches, regardless of its frame. `revue threads create --kind context`.
 
 ## 4. Stale threads landed on unrelated code
 
 **Cause.** `carriedRange` kept the reviewer's offset inside a *modified* unit; a hunk is large, so a
 deletion left the hunk and the arithmetic in place and the thread moved onto whatever slid up.
 
-**Decision: orphan explicitly, never draw inline — after following content.** Branch
-`mtford-carewell/stale-thread-anchors-on-supersede` (`1e918ad`, ADR 0021) already did this and is
-merged here: same lines at the shifted place → keep; framing lines held → in-place edit, keep;
-same lines elsewhere in the file → move; otherwise `migrationOrphaned`, listed in Comments as
-"· code removed", counted by `revue status`, no gutter presence. Sticky across later runs.
+**Landed in this slice.** Hunk, patch and context anchors require exact text with a unique
+occurrence in both pinned files. No frame fallback, nearest-duplicate choice or delta-unit shortcut.
+A changed or ambiguous range detaches the whole thread, permanently across subsequent prep runs.
 
-- Not option 1 (pin to the old run's snapshot in a "stale" epilogue section): the epilogue is agent
-  prose, and drawing another run's rows needs a second render authority for one thread.
-- Not option 2 (nearest surviving line with a marker): that is the guess ADR 0021 rejects — the
-  reviewer cannot tell a guess from a hit by looking.
-- Follow-up worth doing: pin the anchored lines' text onto the thread at orphan time
-  (`orphanedLines`) so Comments and `threads list` show what the comment was about.
+Threads preserve `originalEvidence: { runId, anchor, lines }` at creation or first carry of
+never-carried historical feedback. It retains every original range and its actual code, including
+mixed old/new patch ranges. Already-carried legacy feedback without evidence stays unverified and
+non-inline on load, with evidence unavailable; fitting coordinates are not proof of the subject. Comments shows selected detached
+feedback's labelled original code; `threads list --json` includes the evidence and availability.
+
+Excerpts remain unverified/non-inline until frozen destination coverage verifies the original code.
+Missing narration alone is not sticky. A changed frozen source is detached at load and marked
+permanently by the next prep before it can map onward; overlapping quotations count once.
+Reads never write thread state. Original bytes stay raw in storage; terminal display sanitises them.
+Original evidence introduced during the version-2 era remains optional for historical reads. New
+writes are version 3 (segmented selections and reply intent); strict version-1 and version-2 stores
+migrate without reinterpreting their anchors, while older binaries may reject version-3 writes.
 
 ## Verification
 
-`bun run typecheck`, `bun run lint`, `bun test` (all packages), `bun run check`. Not pushed.
+Regression red/green and verification logs are outside the repository (`/tmp/revue-*.log`).
+State and component regressions cover persisted empty/manual-unread lineage, flat continuation,
+partial files split across chapters, both surfaces, bulk actions, hunk ticks, metadata, widened
+original-unit controls, independent questions and keymap/menu routing. Verification uses a temporary,
+checkout-scoped Git include to exclude only the protected user transcript from release enumeration;
+fixture repositories retain their own excludes. Legitimate generated route markers are refreshed.
+Manual visual capture remains unperformed: sandbox socket creation is blocked, and no socket attempts
+were made. Changes remain unstaged and uncommitted; independent review is still required.

@@ -4,11 +4,13 @@ import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { parsePatch } from "@revue/diff";
+import { freezeRunContext, prepareRun } from "@revue/prep";
 import {
 	type ContextExcerpt,
 	emptyThreadStoreFile,
 	type PatchThreadRange,
 	type RevueChaptersFile,
+	RevueChaptersFileSchema,
 	THREAD_ANCHOR_KIND,
 	THREAD_AUTHOR_KIND,
 	THREAD_STATUS,
@@ -55,6 +57,166 @@ const waitForPath = async (path: string, attempts = 200): Promise<void> => {
 	await Bun.sleep(10);
 	return waitForPath(path, attempts - 1);
 };
+
+test.each([
+	"changed",
+	"moved",
+	"previous mismatch",
+	"ambiguous",
+	"ambiguous source",
+])("carried excerpts reconcile %s frozen evidence without reviving detached feedback", async (scenario) => {
+	const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-excerpt-evidence-"));
+	try {
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-C", root, ...args], { stdio: "ignore" });
+		git("init", "-b", "main");
+		git("config", "user.email", "revue@example.com");
+		git("config", "user.name", "Revue Test");
+		await writeFile(join(root, "value.ts"), "value(1)\n");
+		const caller =
+			scenario === "ambiguous source"
+				? "before()\n\tuseOriginal()\n\tuseOriginal()\n"
+				: "before()\n\tuseOriginal()\nafter()\n";
+		await writeFile(join(root, "caller.ts"), caller);
+		git("add", "-A");
+		git("commit", "-m", "Baseline");
+		const chapters = RevueChaptersFileSchema.parse({
+			chapters: [
+				{
+					id: "value",
+					order: 1,
+					title: "Value",
+					summary: "The caller constrains this change.",
+					hunkRefs: [{ filePath: "value.ts", oldStart: 1 }],
+					keyChanges: [],
+					excerpts: [
+						{ filePath: "caller.ts", startLine: 1, endLine: 3 },
+						{ filePath: "caller.ts", startLine: 2, endLine: 2 },
+					],
+				},
+			],
+		});
+		await writeFile(join(root, "value.ts"), "value(2)\n");
+		const first = await prepareRun(["--ref", "work"], root);
+		await writeFile(join(first.directory, "chapters.json"), JSON.stringify(chapters));
+		await freezeRunContext(first, chapters);
+		const originalRun = await loadReviewRun(first.directory);
+		const path = join(root, ".revue", "threads.json");
+		const original = openThreadStore(path, first.manifest.runId, originalRun).create(
+			{ kind: "excerpt", filePath: "caller.ts", startLine: 2, endLine: 2 },
+			human,
+			"Can this remain synchronous?",
+		);
+		expect(original.originalEvidence).toEqual({
+			runId: first.manifest.runId,
+			anchor: original.anchor,
+			lines: [["\tuseOriginal()"]],
+		});
+		await writeFile(join(root, "value.ts"), "value(3)\n");
+		const second = await prepareRun(["--ref", "work"], root);
+		const pending = loadValidatedThreads(path, await loadReviewRun(second.directory));
+		expect(pending.orphaned.map((entry) => entry.thread.id)).toEqual([original.id]);
+		if (scenario === "ambiguous source") {
+			expect(pending.threads[0]?.migrationOrphaned).toBe(true);
+			await writeFile(join(root, "caller.ts"), "before()\n\tuseOriginal()\nafter()\n");
+			await freezeRunContext(second, chapters);
+			const detached = loadValidatedThreads(path, await loadReviewRun(second.directory));
+			expect(detached.orphaned.map((entry) => entry.thread.id)).toEqual([original.id]);
+			expect(detached.threads[0]?.originalEvidence).toEqual(original.originalEvidence);
+			return;
+		}
+		expect(pending.threads[0]?.migrationOrphaned).toBeUndefined();
+		const offset = scenario === "moved" ? 4 : 0;
+		const destinationCaller = `${"prelude()\n".repeat(offset)}${caller}`;
+		const destinationChapters = RevueChaptersFileSchema.parse({
+			chapters: chapters.chapters.map((chapter) => ({
+				...chapter,
+				role: "epilogue",
+				excerpts: chapter.excerpts.map((excerpt) => ({
+					...excerpt,
+					startLine: excerpt.startLine + offset,
+					endLine: excerpt.endLine + offset,
+				})),
+			})),
+		});
+		await writeFile(join(root, "caller.ts"), destinationCaller);
+		await writeFile(join(second.directory, "chapters.json"), JSON.stringify(destinationChapters));
+		await freezeRunContext(second, destinationChapters);
+		const verified = loadValidatedThreads(path, await loadReviewRun(second.directory));
+		expect(verified.orphaned).toEqual([]);
+		expect(verified.threads[0]?.anchor).toEqual({
+			kind: "excerpt",
+			filePath: "caller.ts",
+			startLine: 2 + offset,
+			endLine: 2 + offset,
+		});
+		if (scenario === "moved") {
+			const omitted = RevueChaptersFileSchema.parse({
+				chapters: destinationChapters.chapters.map((chapter) => ({ ...chapter, excerpts: [] })),
+			});
+			await writeFile(join(second.directory, "chapters.json"), JSON.stringify(omitted));
+			await freezeRunContext(second, omitted);
+			const unresolved = loadValidatedThreads(path, await loadReviewRun(second.directory));
+			expect(unresolved.orphaned.map((entry) => entry.thread.id)).toEqual([original.id]);
+			expect(unresolved.threads[0]?.migrationOrphaned).toBeUndefined();
+			await writeFile(join(second.directory, "chapters.json"), JSON.stringify(destinationChapters));
+			await freezeRunContext(second, destinationChapters);
+			expect(loadValidatedThreads(path, await loadReviewRun(second.directory)).orphaned).toEqual(
+				[],
+			);
+		}
+		const replyStore = openThreadStore(path, second.manifest.runId);
+		const reply = replyStore.reply(original.id, human, "Please retain this conversation.");
+		// Outside-patch worktree quotations can change again without a new prepared run.
+		if (scenario === "previous mismatch") {
+			const contextPath = join(second.directory, "context.json");
+			const raw = await Bun.file(contextPath).text();
+			await writeFile(contextPath, raw.replaceAll("useOriginal", "replacement"));
+			const beforeRead = await Bun.file(path).text();
+			expect(
+				loadValidatedThreads(path, await loadReviewRun(second.directory)).orphaned.map(
+					(entry) => entry.thread.id,
+				),
+			).toEqual([original.id]);
+			expect(await Bun.file(path).text()).toBe(beforeRead);
+		} else {
+			await writeFile(
+				join(root, "caller.ts"),
+				scenario === "ambiguous"
+					? destinationCaller.replace("after()", "\tuseOriginal()")
+					: destinationCaller.replace("useOriginal", "replacement"),
+			);
+		}
+		await freezeRunContext(second, destinationChapters);
+		const changed = loadValidatedThreads(path, await loadReviewRun(second.directory));
+		expect(changed.orphaned.map((entry) => entry.thread.id)).toEqual([original.id]);
+		expect(changed.threads[0]?.originalEvidence).toEqual(original.originalEvidence);
+		expect(changed.threads[0]?.migrationOrphaned).toBe(true);
+		expect(changed.threads[0]?.messages).toEqual(reply.messages);
+		// A store opened before freezing must transform the latest state, not undo detachment.
+		const laterReply = replyStore.reply(original.id, agent, "I retained the original evidence.");
+		expect(laterReply.migrationOrphaned).toBe(true);
+		await writeFile(join(root, "caller.ts"), destinationCaller);
+		await freezeRunContext(second, destinationChapters);
+		const restored = loadValidatedThreads(path, await loadReviewRun(second.directory));
+		expect(restored.orphaned.map((entry) => entry.thread.id)).toEqual([original.id]);
+		expect(restored.threads[0]?.migrationOrphaned).toBe(true);
+		await writeFile(join(root, "caller.ts"), caller);
+		await writeFile(join(root, "value.ts"), "value(4)\n");
+		const third = await prepareRun(["--ref", "work"], root);
+		const thirdChapters = RevueChaptersFileSchema.parse({
+			chapters: chapters.chapters.map((chapter) => ({ ...chapter, role: "epilogue" })),
+		});
+		await writeFile(join(third.directory, "chapters.json"), JSON.stringify(thirdChapters));
+		await freezeRunContext(third, thirdChapters);
+		const latest = loadValidatedThreads(path, await loadReviewRun(third.directory));
+		expect(latest.orphaned.map((entry) => entry.thread.id)).toEqual([original.id]);
+		expect(latest.threads[0]?.migrationOrphaned).toBe(true);
+		expect(latest.threads[0]?.originalEvidence).toEqual(original.originalEvidence);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
 
 test("thread paths and human identity follow the reviewed repository", async () => {
 	const repository = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "revue-thread-root-"));

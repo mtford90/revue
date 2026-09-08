@@ -50,6 +50,7 @@ import {
 	OPENTUI_DIFF_CHROME,
 	useResolvedInlineAttachmentPlacement,
 } from "@revue/diff-opentui";
+import { excerptEvidenceState } from "@revue/prep";
 import {
 	type Appearance,
 	FOLLOW_TERMINAL,
@@ -67,12 +68,13 @@ import {
 	type ContextThreadAnchor,
 	emptyViewState,
 	excerptKey,
-	frozenExcerptContaining,
 	frozenExcerptFor,
 	type HandoffRecord,
+	type HunkReference,
 	isContextAnchor,
 	isExcerptAnchor,
 	isPatchAnchor,
+	isSelectionAnchor,
 	type PatchThreadAnchor,
 	type Prologue,
 	type ReviewThread,
@@ -84,6 +86,8 @@ import {
 	type ThreadAnchor,
 	type ThreadAuthor,
 	type ThreadMessage,
+	threadDisposition,
+	threadDispositionLabel,
 	threadReferences,
 	type ViewState,
 } from "@revue/types";
@@ -100,14 +104,17 @@ import { AgentTerminalPicker, AgentTerminalPickerBackdrop } from "./agentTermina
 import { copyToClipboard } from "./clipboard.ts";
 import {
 	chapterOwnsContextAnchor,
-	contextAnchorFor,
 	contextSelectionKind,
+	displayRangesForContext,
 	gitRangeResolver,
+	newRangeForOldContext,
+	selectionAnchorFor,
 } from "./contextAnchor.ts";
 import {
 	type ChapterDiffFile,
 	contextQuotations,
 	type FileStat,
+	originalHunksForDisplay,
 	selectChapterFiles,
 	statsByPath,
 } from "./diff.ts";
@@ -205,11 +212,13 @@ import {
 	chapterFilePaths,
 	isChapterReviewed,
 	isFileReviewed,
+	isHunkReviewed,
 	isKeyChangeChecked,
 	nextUnreviewedChapter,
 	type ReviewSessionState,
 	toggleChapter,
 	toggleFile,
+	toggleHunk,
 	toggleKeyChange,
 } from "./viewState.ts";
 import {
@@ -492,7 +501,7 @@ function PageIndexRows({
 	const theme = useTheme();
 	return pages.map((page, index) => {
 		const active = index === current;
-		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter.id);
+		const done = page.kind === "chapter" && isChapterReviewed(vs, page.chapter);
 		const glyph = page.kind === "chapter" && isInterlude(page.chapter) ? `${INTERLUDE_GLYPH} ` : "";
 		const label =
 			page.kind === "chapter" ? `${glyph}${page.chapter.order}. ${page.label}` : page.label;
@@ -636,7 +645,7 @@ function PageNavStrip({
 	const chapter = page?.kind === "chapter" ? page.chapter : null;
 	// The Files surface is outside the page sequence, so it gets no Prev/Next.
 	const filesSurface = page?.kind === "files";
-	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
+	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter) : false;
 	const compact = width < COMPACT_STRIP_WIDTH;
 	return (
 		<box flexDirection="row" height={1} flexShrink={0} paddingLeft={1} paddingRight={1}>
@@ -818,7 +827,7 @@ function ChapterPanel({
 	const briefChapter = page?.kind === "chapter" || page?.kind === "files" ? page.chapter : null;
 	// The Files surface deliberately drops all story chrome so it reads as its own screen.
 	const filesSurface = page?.kind === "files";
-	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter.id) : false;
+	const chapterReviewed = chapter ? isChapterReviewed(vs, chapter) : false;
 	const compact = width < COMPACT_NAV_WIDTH;
 	const rule = "─".repeat(Math.max(1, width - 1));
 
@@ -1009,13 +1018,13 @@ function PrologueChapters({
 					>
 						<text
 							flexShrink={0}
-							fg={isChapterReviewed(vs, page.chapter.id) ? theme.badgeAdded : theme.muted}
+							fg={isChapterReviewed(vs, page.chapter) ? theme.badgeAdded : theme.muted}
 							onMouseDown={(event) => {
 								event.stopPropagation();
 								onToggleReview(page.chapter);
 							}}
 						>
-							{`[${isChapterReviewed(vs, page.chapter.id) ? "x" : " "}] ${page.chapter.order}. `}
+							{`[${isChapterReviewed(vs, page.chapter) ? "x" : " "}] ${page.chapter.order}. `}
 						</text>
 						<text flexGrow={1} minWidth={0} wrapMode="none" truncate fg={theme.accent}>
 							{page.chapter.title}
@@ -1260,7 +1269,7 @@ function FileList({
 						key={row.path}
 						path={row.path}
 						label={label}
-						done={isFileReviewed(vs, chapter.id, row.path)}
+						done={isFileReviewed(vs, chapter, row.path)}
 						active={index === selected}
 						stat={stat}
 						onSelect={() => onSelect(index)}
@@ -1411,19 +1420,50 @@ const selectionForDiffRange = (range: DiffLineRange): DiffSelection => ({
 	],
 });
 
-const selectionForAnchor = (anchor: ThreadAnchor): DiffSelection => {
-	if (isPatchAnchor(anchor)) return { filePath: anchor.filePath, ranges: anchor.ranges };
-	if (isContextAnchor(anchor)) {
+const selectionForAnchor = (
+	anchor: ThreadAnchor,
+	displayFiles?: readonly DiffFile[] | null,
+): DiffSelection => {
+	if (isSelectionAnchor(anchor)) {
+		const file = displayFiles?.find(
+			(candidate) =>
+				candidate.path === anchor.filePath || candidate.metadata.name === anchor.filePath,
+		);
 		return {
 			filePath: anchor.filePath,
-			ranges: [
-				{
-					oldStart: CONTEXT_HUNK_OLD_START,
-					side: "additions",
-					startLine: anchor.startLine,
-					endLine: anchor.endLine,
-				},
-			],
+			ranges: anchor.segments.flatMap((segment) =>
+				segment.kind === THREAD_ANCHOR_KIND.CONTEXT
+					? displayRangesForContext(
+							file?.metadata.hunks ?? [],
+							segment.side,
+							segment.startLine,
+							segment.endLine,
+						)
+					: [
+							{
+								oldStart: segment.oldStart,
+								side: segment.side,
+								startLine: segment.startLine,
+								endLine: segment.endLine,
+							},
+						],
+			) as DiffSelection["ranges"],
+		};
+	}
+	if (isPatchAnchor(anchor)) return { filePath: anchor.filePath, ranges: anchor.ranges };
+	if (isContextAnchor(anchor)) {
+		const file = displayFiles?.find(
+			(candidate) =>
+				candidate.path === anchor.filePath || candidate.metadata.name === anchor.filePath,
+		);
+		return {
+			filePath: anchor.filePath,
+			ranges: displayRangesForContext(
+				file?.metadata.hunks ?? [],
+				"additions",
+				anchor.startLine,
+				anchor.endLine,
+			) as DiffSelection["ranges"],
 		};
 	}
 	if (isExcerptAnchor(anchor)) {
@@ -1453,13 +1493,18 @@ const selectionForAnchor = (anchor: ThreadAnchor): DiffSelection => {
 };
 
 /** One attachment is mounted at a selection's canonical terminal range. */
-const diffRangeForAnchor = (anchor: ThreadAnchor): DiffLineRange => {
-	const selection = selectionForAnchor(anchor);
+const diffRangeForAnchor = (
+	anchor: ThreadAnchor,
+	displayFiles?: readonly DiffFile[] | null,
+): DiffLineRange => {
+	const selection = selectionForAnchor(anchor, displayFiles);
 	return diffRangeForSelectionRange(selection.filePath, terminalSelectionRange(selection));
 };
 
-const threadAnchorRange = (thread: ReviewThread | undefined): DiffLineRange | undefined =>
-	thread ? diffRangeForAnchor(thread.anchor) : undefined;
+const threadAnchorRange = (
+	thread: ReviewThread | undefined,
+	diffFiles: readonly DiffFile[] | null,
+): DiffLineRange | undefined => (thread ? diffRangeForAnchor(thread.anchor, diffFiles) : undefined);
 
 /** The chapter citation whose quoted range contains this thread's anchor, if it has one. */
 const citationFor = (chapter: Chapter, { anchor }: ReviewThread): ContextExcerpt | undefined =>
@@ -1481,6 +1526,31 @@ const chapterOwnsThread = (
 	const { anchor } = thread;
 	if (isExcerptAnchor(anchor)) return citationFor(chapter, thread) !== undefined;
 	if (isContextAnchor(anchor)) return chapterOwnsContextAnchor(chapter, diffFiles, anchor);
+	if (isSelectionAnchor(anchor)) {
+		const source = diffFiles?.find((file) => file.path === anchor.filePath);
+		return selectionForAnchor(anchor, diffFiles).ranges.every((range) => {
+			if (range.oldStart !== CONTEXT_HUNK_OLD_START)
+				return chapter.hunkRefs.some(
+					(reference) =>
+						reference.filePath === anchor.filePath && reference.oldStart === range.oldStart,
+				);
+			const geometry =
+				range.side === "deletions"
+					? source
+						? newRangeForOldContext(source.metadata.hunks, range.startLine, range.endLine)
+						: null
+					: range;
+			return Boolean(
+				geometry &&
+					chapterOwnsContextAnchor(chapter, diffFiles, {
+						kind: THREAD_ANCHOR_KIND.CONTEXT,
+						filePath: anchor.filePath,
+						startLine: geometry.startLine,
+						endLine: geometry.endLine,
+					}),
+			);
+		});
+	}
 	const ranges = isPatchAnchor(anchor)
 		? anchor.ranges
 		: [
@@ -1681,6 +1751,7 @@ function InlineThread({
 	const theme = useTheme();
 	const placement = useResolvedInlineAttachmentPlacement();
 	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
+	const disposition = threadDispositionLabel(thread);
 	// A button press is a press on the card, so the cursor arrives before the action runs.
 	const claimButton = (run: () => void) => (event: OpenTUIMouseEvent) =>
 		claimClick(event, () => {
@@ -1701,6 +1772,7 @@ function InlineThread({
 			gap={1}
 			onMouseDown={() => onFocus(thread)}
 		>
+			<text fg={dealtWith ? theme.muted : theme.badgeModified}>{disposition}</text>
 			{thread.messages.map((message, index) => (
 				<ThreadMessageView
 					key={message.id}
@@ -1738,13 +1810,11 @@ function InlineThread({
 
 const commentRowId = (index: number) => `comment-row:${index}`;
 
-/**
- * An open thread whose last word came from an agent: the reviewer is the one who closes threads, so
- * this is the pile waiting on them. Deliberately implicit — no status of its own to keep in step.
- */
+/** Reviewer-facing replies sort ahead of feedback still awaiting an agent. */
 const awaitsVerification = (thread: ReviewThread): boolean =>
-	thread.status === THREAD_STATUS.OPEN &&
-	thread.messages.at(-1)?.author.kind === THREAD_AUTHOR_KIND.AGENT;
+	["awaiting-reviewer-legacy", "awaiting-approval", "ready-to-verify"].includes(
+		threadDisposition(thread),
+	);
 
 const threadLocation = (thread: ReviewThread) => {
 	const selection = selectionForAnchor(thread.anchor);
@@ -1760,13 +1830,17 @@ const threadLocation = (thread: ReviewThread) => {
 };
 
 /** The narration stopped quoting this thread's code; it is kept and shown, never pruned. */
-const ORPHANED_EXCERPT_NOTE = " · no longer quoted";
+const ORPHANED_EXCERPT_NOTE = " · quotation unverified";
 
 /** A carried anchor whose code the superseding run does not have; the thread is detached, not moved. */
-const ORPHANED_ANCHOR_NOTE = " · code removed";
+const ORPHANED_ANCHOR_NOTE = " · detached";
 
 const orphanedNote = (thread: ReviewThread): string =>
-	isExcerptAnchor(thread.anchor) ? ORPHANED_EXCERPT_NOTE : ORPHANED_ANCHOR_NOTE;
+	thread.migratedFrom && !thread.originalEvidence
+		? " · anchor unverified"
+		: isExcerptAnchor(thread.anchor) && !thread.migrationOrphaned
+			? ORPHANED_EXCERPT_NOTE
+			: ORPHANED_ANCHOR_NOTE;
 
 /** The send column, padded so the locations below it still line up when a row has nothing to say. */
 const SEND_STATE_LABEL: Record<"unsent" | "sent", string> = {
@@ -1795,6 +1869,7 @@ function CommentRow({
 }) {
 	const theme = useTheme();
 	const dealtWith = thread.status === THREAD_STATUS.DEALT_WITH;
+	const disposition = threadDispositionLabel(thread);
 	const root = thread.messages[0];
 	const replies = thread.messages.length - 1;
 	const snippet = root?.body.split("\n")[0] ?? "";
@@ -1832,7 +1907,7 @@ function CommentRow({
 					{orphanedNote(thread)}
 				</text>
 			) : null}
-			<text flexShrink={0} fg={theme.muted}>{` ${root?.author.name ?? ""} `}</text>
+			<text flexShrink={0} fg={theme.muted}>{` · ${disposition} `}</text>
 			<text
 				flexGrow={1}
 				minWidth={0}
@@ -1856,6 +1931,42 @@ function CommentRow({
 					{` [send ${sendKey}]`}
 				</text>
 			) : null}
+		</box>
+	);
+}
+
+function OriginalThreadCode({ thread }: { thread: ReviewThread }) {
+	const theme = useTheme();
+	const evidence = thread.originalEvidence;
+	if (!evidence)
+		return (
+			<text fg={theme.muted}>
+				Original code unavailable — historical thread has no preserved evidence.
+			</text>
+		);
+	const ranges = isPatchAnchor(evidence.anchor)
+		? evidence.anchor.ranges
+		: isSelectionAnchor(evidence.anchor)
+			? evidence.anchor.segments
+			: [evidence.anchor];
+	const text = ranges
+		.map((range, index) => {
+			const side = "side" in range ? range.side : evidence.anchor.kind;
+			const heading = `${plainTerminalLine(evidence.anchor.filePath)} · ${side} ${range.startLine}-${range.endLine}`;
+			return [
+				heading,
+				...(evidence.lines[index] ?? []).map(
+					(line, offset) => `${range.startLine + offset} │ ${plainTerminalLine(line)}`,
+				),
+			].join("\n");
+		})
+		.join("\n");
+	return (
+		<box flexDirection="column" width="100%" paddingLeft={2} paddingBottom={1}>
+			<text
+				fg={theme.muted}
+			>{`Original code · run ${evidence.runId.slice(0, 12)} · ${evidence.anchor.kind}`}</text>
+			<text fg={theme.text}>{text}</text>
 		</box>
 	);
 }
@@ -1915,17 +2026,21 @@ function CommentsView({
 			</box>
 			<box height={1} />
 			{threads.map((thread, index) => (
-				<CommentRow
-					key={thread.id}
-					thread={thread}
-					index={index}
-					active={index === selected}
-					orphaned={orphaned.has(thread.id)}
-					sendState={sendState(thread)}
-					sendKey={keys.send}
-					onJump={onJump}
-					onSend={onSend}
-				/>
+				<box key={thread.id} flexDirection="column" width="100%">
+					<CommentRow
+						thread={thread}
+						index={index}
+						active={index === selected}
+						orphaned={orphaned.has(thread.id)}
+						sendState={sendState(thread)}
+						sendKey={keys.send}
+						onJump={onJump}
+						onSend={onSend}
+					/>
+					{index === selected && orphaned.has(thread.id) ? (
+						<OriginalThreadCode thread={thread} />
+					) : null}
+				</box>
 			))}
 		</box>
 	);
@@ -2207,6 +2322,7 @@ function ChapterView({
 	onExcerptRangeContextMenu,
 	onToggleCollapse,
 	onToggleFileReview,
+	onToggleHunkReview,
 	onSelectThreadRange,
 	onActivateThreadRange,
 	onRangeStart,
@@ -2256,6 +2372,7 @@ function ChapterView({
 	onExcerptRangeContextMenu: (range: DiffLineRange, position: { x: number; y: number }) => void;
 	onToggleCollapse: (path: string) => void;
 	onToggleFileReview: (path: string) => void;
+	onToggleHunkReview: (reference: HunkReference) => void;
 	onSelectThreadRange: (selection: DiffSelection) => void;
 	onActivateThreadRange: (selection: DiffSelection) => void;
 	onRangeStart: (range: DiffLineRange) => void;
@@ -2300,10 +2417,11 @@ function ChapterView({
 		];
 	}, [chapter, selectedKeyChange, focusedDecorationId, keyboardCursor]);
 	const mountThread = (thread: ReviewThread): DiffInlineAttachment => {
-		const placement = selectionAttachmentPlacement(selectionForAnchor(thread.anchor));
+		const selection = selectionForAnchor(thread.anchor, diffFiles);
+		const placement = selectionAttachmentPlacement(selection);
 		return {
 			id: thread.id,
-			anchor: diffRangeForAnchor(thread.anchor),
+			anchor: diffRangeForAnchor(thread.anchor, diffFiles),
 			placement,
 			content: (
 				<InlineThread
@@ -2397,7 +2515,7 @@ function ChapterView({
 				}
 				if (kind === "head") {
 					const collapsed = collapsedFiles.has(path);
-					const reviewed = isFileReviewed(vs, chapter.id, path);
+					const reviewed = isFileReviewed(vs, chapter, path);
 					return (
 						<box
 							key={item.id}
@@ -2443,6 +2561,31 @@ function ChapterView({
 						key={item.id}
 						plan={plan}
 						theme={diffTheme}
+						headerControls={(index) => {
+							const references =
+								index === null
+									? chapter.hunkRefs.filter(
+											(reference) => reference.filePath === path && reference.oldStart === 0,
+										)
+									: originalHunksForDisplay(diffFile, displayed, index).map((oldStart) => ({
+											filePath: path,
+											oldStart,
+										}));
+							return references.map((reference) => (
+								<text
+									key={reference.oldStart}
+									flexShrink={0}
+									selectable={false}
+									fg={isHunkReviewed(vs, reference) ? theme.badgeAdded : theme.muted}
+									onMouseDown={(event) => {
+										event.stopPropagation();
+										onToggleHunkReview(reference);
+									}}
+								>
+									{`[${isHunkReviewed(vs, reference) ? "x" : " "}] ${index === null ? "metadata" : `hunk ${reference.oldStart}`} `}
+								</text>
+							));
+						}}
 						selectedHunkIndex={focused ? selectedHunkIndex : -1}
 						decorations={decorations}
 						focusedDecorationId={focusedDecorationId}
@@ -2652,14 +2795,19 @@ const defaultHumanAuthor: ThreadAuthor = {
 	name: "Reviewer",
 };
 
-const diffRangeForThread = (thread: ReviewThread): DiffLineRange =>
-	diffRangeForAnchor(thread.anchor);
+const diffRangeForThread = (
+	thread: ReviewThread,
+	diffFiles: readonly DiffFile[] | null,
+): DiffLineRange => diffRangeForAnchor(thread.anchor, diffFiles);
 
 /** A thread reduced to what the viewport needs to reserve room for it. */
-const measuredAnchor = (thread: ReviewThread): DiffInlineAttachment => ({
+const measuredAnchor = (
+	thread: ReviewThread,
+	diffFiles: readonly DiffFile[] | null,
+): DiffInlineAttachment => ({
 	id: thread.id,
-	anchor: diffRangeForAnchor(thread.anchor),
-	placement: selectionAttachmentPlacement(selectionForAnchor(thread.anchor)),
+	anchor: diffRangeForAnchor(thread.anchor, diffFiles),
+	placement: selectionAttachmentPlacement(selectionForAnchor(thread.anchor, diffFiles)),
 	content: null,
 });
 
@@ -2672,10 +2820,13 @@ const sameDiffLine = (left: DiffLineRange, right: DiffLineRange): boolean =>
 	left.side === right.side &&
 	left.startLine === right.startLine;
 
-const threadReviewStop = (thread: ReviewThread): ReviewStop => ({
+const threadReviewStop = (
+	thread: ReviewThread,
+	diffFiles: readonly DiffFile[] | null,
+): ReviewStop => ({
 	kind: "thread",
 	threadId: thread.id,
-	anchor: diffRangeForAnchor(thread.anchor),
+	anchor: diffRangeForAnchor(thread.anchor, diffFiles),
 });
 
 export function App({
@@ -2684,7 +2835,7 @@ export function App({
 	omittedNotice = null,
 	diffFiles = null,
 	loadFileLines,
-	initialViewState = emptyViewState(),
+	initialViewState = { ...emptyViewState(), hunks: [] },
 	initialSessionState = { pages: {} },
 	initialPreferences = {},
 	initialThemeChoice = {},
@@ -3130,7 +3281,10 @@ export function App({
 				...threads
 					.filter(
 						(thread) =>
-							isExcerptAnchor(thread.anchor) && !frozenExcerptContaining(context, thread.anchor),
+							thread.migrationOrphaned ||
+							(thread.migratedFrom && !thread.originalEvidence) ||
+							(isExcerptAnchor(thread.anchor) &&
+								excerptEvidenceState(context, thread) !== "verified"),
 					)
 					.map((thread) => thread.id),
 			]),
@@ -3177,7 +3331,10 @@ export function App({
 		? (orderedThreads[selectedThread] ?? null)
 		: (threads.find((thread) => thread.id === cursorThreadId) ?? null);
 	/** The cards hanging from diff lines: the stops the cursor shares with the source it annotates. */
-	const diffCards = useMemo(() => chapterThreadList.map(measuredAnchor), [chapterThreadList]);
+	const diffCards = useMemo(
+		() => chapterThreadList.map((thread) => measuredAnchor(thread, diffFiles)),
+		[chapterThreadList, diffFiles],
+	);
 	/** Every card this page mounts, quoted ones included, so the cursor knows when its card is gone. */
 	const pageCardIds = useMemo(
 		() => new Set([...chapterThreadList, ...chapterQuotedThreads].map((thread) => thread.id)),
@@ -3202,12 +3359,12 @@ export function App({
 	);
 	const excerptAttachmentAnchors = useMemo<DiffInlineAttachment[]>(
 		() => [
-			...chapterQuotedThreads.map(measuredAnchor),
+			...chapterQuotedThreads.map((thread) => measuredAnchor(thread, diffFiles)),
 			...(threadDraft?.kind === "thread" && quotedDraft
 				? [{ id: THREAD_COMPOSER_ID, anchor: threadDraft.range, content: null }]
 				: []),
 		],
-		[chapterQuotedThreads, threadDraft, quotedDraft],
+		[chapterQuotedThreads, threadDraft, quotedDraft, diffFiles],
 	);
 	const plannedViewportFiles = useMemo<PlannedViewportFile[]>(
 		() =>
@@ -3678,10 +3835,10 @@ export function App({
 	}, [reviewCursor]);
 
 	useEffect(() => {
-		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length) return;
-		const host = showChapterPanel ? panelScroll : pageScroll;
+		if (!chapter || keyFocusRequest === 0 || !chapter.keyChanges.length || !showChapterPanel)
+			return;
 		const anchorFocusedKeyChange = () =>
-			host.current?.scrollChildIntoView(keyChangeId(chapter.id, selectedKeyChange));
+			panelScroll.current?.scrollChildIntoView(keyChangeId(chapter.id, selectedKeyChange));
 		anchorFocusedKeyChange();
 		const retry = setTimeout(anchorFocusedKeyChange, 50);
 		return () => clearTimeout(retry);
@@ -3719,7 +3876,7 @@ export function App({
 		const thread = threadsRef.current.find(
 			(candidate) => candidate.id === threadFocusTarget.threadId,
 		);
-		const anchor = threadAnchorRange(thread);
+		const anchor = threadAnchorRange(thread, diffFiles);
 		const offset = thread && anchor ? attachmentOffset(thread.anchor, anchor) : null;
 		if (offset !== null) {
 			centreContentOffset({
@@ -3736,7 +3893,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [threadFocusTarget, attachmentOffset]);
+	}, [threadFocusTarget, attachmentOffset, diffFiles]);
 
 	useEffect(() => {
 		if (!copyNotice) return;
@@ -3763,7 +3920,8 @@ export function App({
 				? threads.find((thread) => thread.id === threadDraft.threadId)
 				: undefined;
 		const threadAnchor = threadDraft.kind === "thread" ? threadDraft.anchor : replied?.anchor;
-		const anchor = threadDraft.kind === "thread" ? threadDraft.range : threadAnchorRange(replied);
+		const anchor =
+			threadDraft.kind === "thread" ? threadDraft.range : threadAnchorRange(replied, diffFiles);
 		const offset = threadAnchor && anchor ? attachmentOffset(threadAnchor, anchor) : null;
 		if (offset !== null) {
 			revealContentOffset({
@@ -3780,7 +3938,7 @@ export function App({
 			clearTimeout(retry);
 			clearTimeout(lateRetry);
 		};
-	}, [threadDraft, threads, attachmentOffset]);
+	}, [threadDraft, threads, attachmentOffset, diffFiles]);
 
 	function previousPathFor(filePath: string) {
 		return diffFiles?.find((candidate) => candidate.path === filePath)?.previousPath;
@@ -3925,7 +4083,7 @@ export function App({
 	/** A comment leaves the reviewer on the card it became, revealed like any other cursor move. */
 	function focusSavedThread(thread: ReviewThread) {
 		lineMotionRequest.current += 1;
-		setReviewCursor(threadReviewStop(thread));
+		setReviewCursor(threadReviewStop(thread, diffFiles));
 		setLineSelectionAnchor(null);
 	}
 	/** Extension walks source lines alone; ordinary motion walks the stops, cards among them. */
@@ -4001,15 +4159,17 @@ export function App({
 	function commentOnPatchSelection(selection: DiffSelection) {
 		const kind = contextSelectionKind(selection);
 		if (kind === "mixed") {
-			setCopyNotice({
-				text: "Comment on changed lines or on revealed lines, not both",
-				nonce: Date.now(),
-			});
+			const anchor = selectionAnchorFor(selection);
+			const canonical = selectionForAnchor(anchor, diffFiles);
+			setPointerSelection(canonical);
+			startThread(anchor, canonical);
 			return;
 		}
 		if (kind === "context") {
-			setPointerSelection(selection);
-			startThread(contextAnchorFor(selection), selection);
+			const anchor = selectionAnchorFor(selection);
+			const canonical = selectionForAnchor(anchor, diffFiles);
+			setPointerSelection(canonical);
+			startThread(anchor, canonical);
 			return;
 		}
 		const authoritative = chapterDiffFiles.find(
@@ -4049,7 +4209,7 @@ export function App({
 			kind: "reply",
 			threadId: thread.id,
 			selection: selectionForAnchor(thread.anchor),
-			range: diffRangeForThread(thread),
+			range: diffRangeForThread(thread, diffFiles),
 		});
 		setThreadBody("");
 		setThreadNotice(null);
@@ -4302,14 +4462,21 @@ export function App({
 			(currentCollapsed) =>
 				new Set([...currentCollapsed].filter((entry) => entry !== thread.anchor.filePath)),
 		);
-		if (isContextAnchor(thread.anchor)) void revealContext(thread.anchor);
+		if (isContextAnchor(thread.anchor)) void revealContext([thread.anchor]);
+		if (isSelectionAnchor(thread.anchor)) {
+			void revealContext(
+				thread.anchor.segments
+					.filter((segment) => segment.kind === THREAD_ANCHOR_KIND.CONTEXT)
+					.map((segment) => ({ ...segment, filePath: thread.anchor.filePath })),
+			);
+		}
 		// A folded excerpt renders none of its threads, so landing on one has to open it.
 		const citation = owner ? citationFor(owner, thread) : undefined;
 		if (citation) {
 			const key = excerptKey(citation);
 			setOpenExcerpts((currentOpen) => new Set([...currentOpen, key]));
 		}
-		setReviewCursor(threadReviewStop(thread));
+		setReviewCursor(threadReviewStop(thread, diffFiles));
 	}
 	/** A citation names a thread the chapter answers; the cursor goes to the card that holds it. */
 	function focusCitedThread(threadId: string) {
@@ -4348,22 +4515,42 @@ export function App({
 		});
 	}
 	/** A thread on revealed context has no row until its lines are shown, so landing on it shows them. */
-	async function revealContext(anchor: ContextThreadAnchor) {
-		const base = diffFiles?.find((candidate) => candidate.path === anchor.filePath);
-		const lines = fileLines.get(anchor.filePath) ?? (await loadFileLines?.(anchor.filePath));
+	async function revealContext(anchors: readonly (ContextThreadAnchor & { side?: DiffSide })[]) {
+		const path = anchors[0]?.filePath;
+		if (!path || anchors.some((anchor) => anchor.filePath !== path)) return;
+		const base = diffFiles?.find((candidate) => candidate.path === path);
+		const lines = fileLines.get(path) ?? (await loadFileLines?.(path));
 		if (!base || !lines) return;
-		applyExpansion(
-			anchor.filePath,
-			base,
-			lines,
-			revealingExpansion(
+		setFileLines((previous) => new Map(previous).set(path, lines));
+		const ranges = anchors.flatMap((anchor): ContextThreadAnchor[] =>
+			displayRangesForContext(
 				base.metadata.hunks,
-				expansions.get(anchor.filePath),
-				lines.length,
+				anchor.side ?? "additions",
 				anchor.startLine,
 				anchor.endLine,
-			),
+			)
+				.filter((range) => range.oldStart === CONTEXT_HUNK_OLD_START)
+				.flatMap((range) => {
+					if (range.side !== "deletions") {
+						return [{ ...anchor, startLine: range.startLine, endLine: range.endLine }];
+					}
+					const mapped = newRangeForOldContext(base.metadata.hunks, range.startLine, range.endLine);
+					return mapped ? [{ ...anchor, ...mapped }] : [];
+				}),
 		);
+		if (ranges.length === 0) return;
+		const next = ranges.reduce(
+			(expansion, anchor) =>
+				revealingExpansion(
+					base.metadata.hunks,
+					expansion,
+					lines.length,
+					anchor.startLine,
+					anchor.endLine,
+				),
+			expansions.get(path) ?? new Map(),
+		);
+		applyExpansion(path, base, lines, next);
 	}
 	const contextExpansion: ContextExpansionUi = {
 		variantFor: (path) => expandedVariants.get(path),
@@ -4482,8 +4669,47 @@ export function App({
 		setSelectedFile(0);
 		setSelectedHunkIndex(0);
 	}
+	function toggleHunkReview(reference: HunkReference) {
+		if (
+			!chapter?.hunkRefs.some(
+				(unit) => unit.filePath === reference.filePath && unit.oldStart === reference.oldStart,
+			)
+		)
+			return;
+		commit(toggleHunk(vs, reference));
+	}
+	// Selection must name one original unit. Scenery and cross-hunk selections have no target.
+	function focusedHunkReference(): HunkReference | undefined {
+		if (!chapter || focusedExcerpt || focusedThread) return undefined;
+		const selection = lineSelection ?? pointerSelection;
+		if (selection) {
+			const starts = new Set(selection.ranges.map((range) => range.oldStart));
+			if (starts.size !== 1) return undefined;
+			return chapter.hunkRefs.find(
+				(unit) =>
+					unit.filePath === selection.filePath && unit.oldStart === selection.ranges[0]?.oldStart,
+			);
+		}
+		if (cursorLine)
+			return chapter.hunkRefs.find(
+				(unit) =>
+					unit.filePath === cursorLine.filePath && unit.oldStart === cursorLine.hunkOldStart,
+			);
+		const original = chapterDiffFiles.find((file) => file.chapterPath === focusedReviewPath);
+		if (!original) return undefined;
+		const oldStart = original.metadata.hunks.length
+			? original.metadata.hunks[selectedHunkIndex]?.deletionStart
+			: 0;
+		return chapter.hunkRefs.find(
+			(unit) => unit.filePath === focusedReviewPath && unit.oldStart === oldStart,
+		);
+	}
+	function toggleFocusedHunkReview() {
+		const reference = focusedHunkReference();
+		if (reference) toggleHunkReview(reference);
+	}
 	function toggleChapterReview(targetChapter: Chapter) {
-		const wasReviewed = isChapterReviewed(vs, targetChapter.id);
+		const wasReviewed = isChapterReviewed(vs, targetChapter);
 		const next = toggleChapter(vs, targetChapter);
 		commit(next);
 		if (wasReviewed) {
@@ -4507,7 +4733,7 @@ export function App({
 		if (fileIndex < 0) return;
 		clearReviewSelection();
 
-		const wasReviewed = isFileReviewed(vs, chapter.id, path);
+		const wasReviewed = isFileReviewed(vs, chapter, path);
 		const next = toggleFile(vs, chapter, path);
 		commit(next);
 
@@ -4523,7 +4749,7 @@ export function App({
 			return;
 		}
 
-		if (isChapterReviewed(next, chapter.id)) {
+		if (isChapterReviewed(next, chapter)) {
 			const destination = nextUnreviewedChapter(chapters, next, chapter.order);
 			if (!destination) {
 				setChapterReviewLayout({ targetChapter: chapter, reviewed: true });
@@ -4541,7 +4767,7 @@ export function App({
 		setCollapsedFiles((currentCollapsed) => new Set(currentCollapsed).add(path));
 		const nextUnreviewed = paths
 			.map((candidate, index) => ({ candidate, index }))
-			.filter(({ candidate }) => !isFileReviewed(next, chapter.id, candidate))
+			.filter(({ candidate }) => !isFileReviewed(next, chapter, candidate))
 			.sort((a, b) => {
 				const aDistance = (a.index - fileIndex + paths.length) % paths.length;
 				const bDistance = (b.index - fileIndex + paths.length) % paths.length;
@@ -4744,11 +4970,13 @@ export function App({
 	}
 
 	const menus = buildAppMenus({
+		canReviewHunk: Boolean(focusedHunkReference()),
+		toggleHunkReview: toggleFocusedHunkReview,
 		canMovePrevious: current > 0,
 		canMoveNext: current < pages.length - 1,
 		canChangeFiles: Boolean(chapter),
 		canMoveNextUnreviewed:
-			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate.id)),
+			Boolean(chapter) && chapters.some((candidate) => !isChapterReviewed(vs, candidate)),
 		allFiles: surface === "files",
 		canToggleAllFiles: Boolean(file),
 		toggleAllFiles,
@@ -5181,6 +5409,9 @@ export function App({
 			case "expand-files":
 				if (chapter) expandFiles();
 				break;
+			case "toggle-hunk-review":
+				toggleFocusedHunkReview();
+				break;
 			case "toggle-chapter-review":
 				if (chapter) toggleChapterReview(chapter);
 				break;
@@ -5205,17 +5436,13 @@ export function App({
 	});
 
 	const filesPaths = chapterFilePaths(filesChapter);
-	const reviewedFiles = filesPaths.filter((path) =>
-		isFileReviewed(vs, ALL_FILES_CHAPTER_ID, path),
-	).length;
+	const reviewedFiles = filesPaths.filter((path) => isFileReviewed(vs, filesChapter, path)).length;
 	const storyProgress = chapters.reduce(
 		(acc, c) => {
 			const paths = chapterFilePaths(c);
-			const chapterDone = isChapterReviewed(vs, c.id);
 			return {
 				total: acc.total + paths.length,
-				reviewed:
-					acc.reviewed + paths.filter((p) => chapterDone || isFileReviewed(vs, c.id, p)).length,
+				reviewed: acc.reviewed + paths.filter((p) => isFileReviewed(vs, c, p)).length,
 			};
 		},
 		{ total: 0, reviewed: 0 },
@@ -5465,6 +5692,7 @@ export function App({
 									diffTheme={diffTheme}
 									diffFiles={diffFiles}
 									visibleDiffFiles={visibleChapterFiles}
+									onToggleHunkReview={toggleHunkReview}
 									bodyPlans={bodyPlans}
 									diagrams={chapterDiagrams}
 									excerpts={chapterExcerpts}
@@ -5510,7 +5738,7 @@ export function App({
 									onRangeStart={repositionLineCursor}
 									onRangeContextMenu={openRangeContextMenu}
 									focusedThreadId={cursorThreadId}
-									onFocusThread={(thread) => setReviewCursor(threadReviewStop(thread))}
+									onFocusThread={(thread) => setReviewCursor(threadReviewStop(thread, diffFiles))}
 									onReplyThread={startThreadReply}
 									onSendThread={sendOneThread}
 									onDeleteThread={requestThreadDelete}

@@ -275,7 +275,7 @@ export async function previewRunId(args: string[], directory?: string): Promise<
 
 /** A prepared run and what prep has to say about the review it did or did not continue. */
 export type PreparedRunOutcome = PreparedRun & {
-	/** Carry decisions that cost the reviewer feedback or read marks, printed by the CLI. */
+	/** Carry decisions that cost the reviewer feedback or narration, printed by the CLI. */
 	warnings: string[];
 };
 
@@ -283,13 +283,13 @@ const shortId = (runId: string): string => runId.slice(0, 12);
 
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-/** Nothing of a narrated predecessor came through: the reviewer's every read mark starts over. */
+/** No chapter carried verbatim; code review marks are independent of editorial carry. */
 const narrationWarnings = (delta: RunDeltaFile | null): string[] => {
 	if (!delta) return [];
 	const narrated = delta.carried.length + delta.stale.length;
 	if (!narrated || delta.carried.length) return [];
 	return [
-		`none of the ${plural(narrated, "chapter")} of ${shortId(delta.supersedes)} carried forward: every read mark on that run starts over`,
+		`none of the ${plural(narrated, "chapter")} of ${shortId(delta.supersedes)} carried forward: narration must be rewritten`,
 	];
 };
 
@@ -297,7 +297,7 @@ const orphanWarnings = (migration: ThreadMigration | null): string[] => {
 	const orphaned = migration?.carried.filter((thread) => thread.migrationOrphaned).length ?? 0;
 	return orphaned
 		? [
-				`${plural(orphaned, "carried thread")} point at code this run no longer has; they are listed as orphaned`,
+				`${plural(orphaned, "carried thread")} detached: original code changed, is absent, or has no unambiguous correspondence`,
 			]
 		: [];
 };

@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { writeHandoff } from "@revue/prep";
 import {
 	type ReviewThread,
@@ -29,6 +30,44 @@ const run = async (cwd: string, args: string[], env?: Record<string, string>) =>
 	]);
 	return { stdout, stderr, exitCode };
 };
+
+const preparedDirectory = (
+	root: string,
+	result: { stdout: string; stderr: string; exitCode: number },
+): string => {
+	expect(result.exitCode).toBe(0);
+	const directory = result.stdout.trim();
+	if (!isAbsolute(directory))
+		throw new Error(`prep returned a non-absolute run path: ${directory}`);
+	const runsRoot = realpathSync(join(root, ".revue", "runs"));
+	const canonical = realpathSync(directory);
+	const child = relative(runsRoot, canonical);
+	if (!/^[a-f0-9]{64}$/.test(child)) {
+		throw new Error(`prep returned a path outside the fixture run root: ${directory}`);
+	}
+	return directory;
+};
+
+test("prepared-run guard rejects empty, relative, and foreign paths", async () => {
+	const root = await mkdtemp(join(tmpdir(), "revue-prepared-guard-"));
+	const foreign = await mkdtemp(join(tmpdir(), "revue-prepared-foreign-"));
+	const runId = "a".repeat(64);
+	try {
+		await mkdir(join(root, ".revue", "runs", runId), { recursive: true });
+		await mkdir(join(foreign, ".revue", "runs", runId), { recursive: true });
+		const result = (stdout: string) => ({ stdout, stderr: "", exitCode: 0 });
+		expect(() => preparedDirectory(root, result(""))).toThrow("non-absolute");
+		expect(() => preparedDirectory(root, result(join(".revue", "runs", runId)))).toThrow(
+			"non-absolute",
+		);
+		expect(() => preparedDirectory(root, result(join(foreign, ".revue", "runs", runId)))).toThrow(
+			"outside the fixture run root",
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+		await rm(foreign, { recursive: true, force: true });
+	}
+});
 
 const git = async (cwd: string, ...args: string[]): Promise<void> => {
 	const child = Bun.spawn(["git", ...args], { cwd, stdout: "ignore", stderr: "pipe" });
@@ -71,6 +110,11 @@ test("thread CLI creates authored conversations and exposes lifecycle operations
 		]);
 		expect(created).toMatchObject({ exitCode: 0, stderr: "" });
 		const thread = JSON.parse(created.stdout).thread;
+		expect(thread.originalEvidence).toEqual({
+			runId: manifest.runId,
+			anchor: thread.anchor,
+			lines: [["\tconst cap = 5_000;", "\treturn Math.min(cap, base * 2 ** attempt);", "}"]],
+		});
 		expect(thread.messages[0]).toMatchObject({
 			author: { kind: THREAD_AUTHOR_KIND.AGENT, name: "Review agent" },
 			body: "Use a lower retry cap\nfor interactive requests.",
@@ -97,7 +141,7 @@ test("thread CLI creates authored conversations and exposes lifecycle operations
 		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
 		expect(JSON.parse(listed.stdout)).toMatchObject({
 			runId: manifest.runId,
-			threads: [{ id: thread.id, messages: [{}, {}] }],
+			threads: [{ id: thread.id, messages: [{}, {}], originalEvidence: thread.originalEvidence }],
 		});
 		const alias = await run(root, ["comments", "list", reviewRun, "--json"]);
 		expect(JSON.parse(alias.stdout).threads).toHaveLength(1);
@@ -191,7 +235,7 @@ test("the thread CLI round-trips an excerpt anchor and keeps it when the narrati
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Change value");
 
-		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const runDirectory = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
 		const reference = manifest.files[0];
 		const oldStart = reference?.referenceStarts[0];
@@ -312,9 +356,8 @@ test("prep composes persistent and session ignore controls without mutating the 
 			"*.generated.ts",
 			"--show-ignored",
 		]);
-		const runDirectory = prepared.stdout.trim();
+		const runDirectory = preparedDirectory(root, prepared);
 
-		expect(prepared.exitCode).toBe(0);
 		expect(prepared.stderr).toContain("1 files, 1 review units, +1 -1, 2 omitted");
 		expect(prepared.stderr).toContain(
 			'Effective review ignore patterns (.revueignore, then --ignore):\n  .revueignore "fixtures/**"\n  --ignore     "*.generated.ts"',
@@ -353,8 +396,7 @@ test("prep prints only the run path and show validates that same run", async () 
 		await git(root, "commit", "-m", "Change value");
 
 		const prepared = await run(root, ["prep", "main", "HEAD"]);
-		const runDirectory = prepared.stdout.trim();
-		expect(prepared.exitCode).toBe(0);
+		const runDirectory = preparedDirectory(root, prepared);
 		expect(prepared.stdout).toBe(`${runDirectory}\n`);
 		expect(prepared.stderr).toContain("Prepared committed run");
 		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
@@ -420,7 +462,7 @@ test("context freeze pins cited code and --check refuses a narrative that skippe
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Change value");
 
-		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const runDirectory = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
 		const reference = manifest.files[0];
 		const oldStart = reference?.referenceStarts[0];
@@ -501,7 +543,7 @@ test("delta hands the agent the worklist a superseding run left it", async () =>
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Feature work");
 
-		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const first = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const chapter = (id: string, order: number, filePath: string) => ({
 			id,
 			order,
@@ -527,7 +569,7 @@ test("delta hands the agent the worklist a superseding run left it", async () =>
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Address the review");
 		const preped = await run(root, ["prep", "main", "HEAD"]);
-		const second = preped.stdout.trim();
+		const second = preparedDirectory(root, preped);
 		expect(preped.stderr).toContain(`supersedes ${first.split("/").at(-1)?.slice(0, 12)}`);
 		expect(preped.stderr).toContain("1 chapter carried, 1 chapter stale");
 
@@ -591,7 +633,7 @@ test("--check holds a superseding run to its epilogue and the threads it cites",
 			return run(root, ["show", directory, "--check"]);
 		};
 
-		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const first = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		expect(
 			await narrate(first, [
 				chapter("alpha", 1, "src/alpha.ts"),
@@ -624,7 +666,7 @@ test("--check holds a superseding run to its epilogue and the threads it cites",
 		await writeFile(join(root, "src", "beta.ts"), "export const beta = 3;\n");
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Address the review");
-		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const second = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const carried = JSON.parse((await run(root, ["delta", second])).stdout).carried;
 
 		const withoutEpilogue = await narrate(second, [
@@ -706,7 +748,7 @@ test("status orients a cold agent on the active run, its threads, and working-tr
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Feature work");
 
-		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const first = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const firstRunId = first.split("/").at(-1) ?? "";
 		const chapter = (id: string, order: number, filePath: string) => ({
 			id,
@@ -741,6 +783,12 @@ test("status orients a cold agent on the active run, its threads, and working-tr
 			);
 		const answered = reviewerThread("src/alpha.ts", "Is two the right constant?");
 		reviewerThread("src/beta.ts", "Why does beta move at all?");
+		const legacy = reviewerThread("src/alpha.ts", "Should this remain compatible?");
+		// A strict version-2 store is a real upgrade boundary: the first intent-bearing write must
+		// preserve its legacy conversations and emit version 3.
+		const threadsPath = join(root, ".revue", "threads.json");
+		const versionTwo = await Bun.file(threadsPath).json();
+		await writeFile(threadsPath, `${JSON.stringify({ ...versionTwo, schemaVersion: 2 })}\n`);
 		expect(
 			await run(root, [
 				"threads",
@@ -749,10 +797,34 @@ test("status orients a cold agent on the active run, its threads, and working-tr
 				answered.id,
 				"--author",
 				"Review agent",
+				"--intent",
+				"proposal",
 				"--body",
 				"Two matches the caller.",
 			]),
 		).toMatchObject({ exitCode: 0 });
+		store.reply(
+			legacy.id,
+			{ kind: THREAD_AUTHOR_KIND.AGENT, name: "Legacy agent" },
+			"No intent on this historical reply.",
+		);
+		expect((await Bun.file(threadsPath).json()).schemaVersion).toBe(3);
+		const beforeInvalid = await Bun.file(threadsPath).text();
+		const invalidIntent = await run(root, [
+			"threads",
+			"reply",
+			first,
+			answered.id,
+			"--author",
+			"Review agent",
+			"--intent",
+			"approved",
+			"--body",
+			"This must not land.",
+		]);
+		expect(invalidIntent).toMatchObject({ exitCode: 1, stdout: "" });
+		expect(invalidIntent.stderr).toContain("--intent must be proposal or completed");
+		expect(await Bun.file(threadsPath).text()).toBe(beforeInvalid);
 
 		const narrated = await run(root, ["status", "--json"]);
 		expect(narrated).toMatchObject({ exitCode: 0, stderr: "" });
@@ -774,20 +846,51 @@ test("status orients a cold agent on the active run, its threads, and working-tr
 			pendingRun: null,
 			threads: {
 				runId: firstRunId,
-				open: 2,
+				open: 3,
 				awaitingAgent: 1,
-				awaitingHuman: 1,
+				awaitingHuman: 2,
+				awaitingApproval: 1,
+				readyToVerify: 0,
+				legacyAwaitingReviewer: 1,
 				dealtWith: 0,
 				orphaned: 0,
 			},
 			drift: { since: firstRunId, changed: false },
 		});
 
+		// A human follow-up returns the proposal to the agent; the agent can then report completed,
+		// but only the reviewer can close the thread.
+		store.reply(answered.id, { kind: THREAD_AUTHOR_KIND.HUMAN, name: "Reviewer" }, "Go ahead.");
+		expect(
+			store
+				.reload()
+				.find((thread) => thread.id === answered.id)
+				?.messages.at(-1)?.author.kind,
+		).toBe(THREAD_AUTHOR_KIND.HUMAN);
+		const completed = await run(root, [
+			"threads",
+			"reply",
+			first,
+			answered.id,
+			"--author",
+			"Review agent",
+			"--intent",
+			"completed",
+			"--body",
+			"Implemented and ready for review.",
+		]);
+		const completedThread = JSON.parse(completed.stdout).thread;
+		expect(completedThread.status).toBe("open");
+		expect(completedThread.messages.at(-1)).toMatchObject({
+			intent: "completed",
+			body: "Implemented and ready for review.",
+		});
+
 		// The agent responds to the reviewer, so the next prep supersedes the run they read.
 		await writeFile(join(root, "src", "beta.ts"), "export const beta = 3;\n");
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Address the review");
-		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const second = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const secondRunId = second.split("/").at(-1) ?? "";
 
 		const superseded = await run(root, ["status", "--json"]);
@@ -802,7 +905,15 @@ test("status orients a cold agent on the active run, its threads, and working-tr
 				delta: { carried: 1, stale: 1, unnarrated: 1 },
 			},
 			// The threads followed the code onto the superseding run.
-			threads: { runId: secondRunId, open: 2, awaitingAgent: 1, awaitingHuman: 1 },
+			threads: {
+				runId: secondRunId,
+				open: 3,
+				awaitingAgent: 1,
+				awaitingHuman: 2,
+				awaitingApproval: 0,
+				readyToVerify: 1,
+				legacyAwaitingReviewer: 1,
+			},
 			drift: { since: firstRunId, changed: true },
 		});
 
@@ -812,7 +923,7 @@ test("status orients a cold agent on the active run, its threads, and working-tr
 		expect(human.stdout).toContain(`Pending    ${secondRunId.slice(0, 12)} not narrated`);
 		expect(human.stdout).toContain("1 chapter carried, 1 chapter stale, 1 review unit to narrate");
 		expect(human.stdout).toContain(
-			"2 open threads (1 awaiting the agent, 1 awaiting the reviewer)",
+			"3 open threads (1 awaiting the agent, 2 awaiting the reviewer)",
 		);
 		expect(human.stdout).toContain("the scope has changed since this run was prepped");
 	} finally {
@@ -837,7 +948,7 @@ test("status reports the last handoff against the run its threads are on now", a
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Feature work");
 
-		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const first = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const firstRunId = first.split("/").at(-1) ?? "";
 		await writeFile(
 			join(first, "chapters.json"),
@@ -903,7 +1014,7 @@ test("status reports the last handoff against the run its threads are on now", a
 		await writeFile(join(root, "src", "beta.ts"), "export const beta = 3;\n");
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Address the review");
-		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const second = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 
 		const migrated = await run(root, ["status", "--json"]);
 		expect(migrated).toMatchObject({ exitCode: 0, stderr: "" });
@@ -1081,7 +1192,7 @@ test("threads carry onto the superseding run, orphaned rather than lost when the
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Feature work");
 
-		const first = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const first = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		await writeFile(
 			join(first, "chapters.json"),
 			`${JSON.stringify({
@@ -1139,7 +1250,7 @@ test("threads carry onto the superseding run, orphaned rather than lost when the
 		await writeFile(join(root, "src", "gamma.ts"), "export const gamma = 1;\n");
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Address the review");
-		const second = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const second = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 
 		const listed = await run(root, ["threads", "list", second, "--json", "--all"]);
 		expect(listed).toMatchObject({ exitCode: 0, stderr: "" });
@@ -1157,10 +1268,35 @@ test("threads carry onto the superseding run, orphaned rather than lost when the
 		]);
 		// The reverted change took its review unit with it: the thread is kept and listed, not pruned,
 		// and the run still loads.
-		expect(payload.threads[1]).toMatchObject({ id: doomed, status: "dealt-with" });
+		expect(payload.threads[1]).toMatchObject({
+			id: doomed,
+			status: "dealt-with",
+			originalEvidence: {
+				runId: first.split("/").at(-1),
+				anchor: { filePath: "src/gamma.ts", side: "additions", startLine: 1, endLine: 1 },
+				lines: [["export const gamma = 2;"]],
+			},
+		});
 		expect(payload.orphaned).toEqual([
-			{ id: doomed, reason: expect.stringContaining("carried from a superseded run") },
+			{
+				id: doomed,
+				reason: expect.stringContaining("no unambiguous correspondence"),
+				originalEvidenceAvailable: true,
+			},
 		]);
+
+		// An older binary may have carried valid-looking coordinates without preserving evidence.
+		const storePath = join(root, ".revue", "threads.json");
+		const legacyStore = await Bun.file(storePath).json();
+		delete legacyStore.runs[payload.runId][0].originalEvidence;
+		await writeFile(storePath, JSON.stringify(legacyStore));
+		const legacy = await run(root, ["threads", "list", second, "--json", "--all"]);
+		expect(legacy.exitCode).toBe(0);
+		expect(JSON.parse(legacy.stdout).orphaned).toContainEqual({
+			id: kept,
+			reason: "original code unavailable; carried anchor is unverified",
+			originalEvidenceAvailable: false,
+		});
 
 		const superseded = await run(root, ["threads", "list", first, "--json", "--all"]);
 		expect(superseded).toMatchObject({ exitCode: 0, stderr: "" });
@@ -1187,7 +1323,7 @@ test("--check says how much of the change an ignore rule kept out of the run", a
 		await git(root, "add", "-A");
 		await git(root, "commit", "-m", "Change value");
 
-		const runDirectory = (await run(root, ["prep", "main", "HEAD"])).stdout.trim();
+		const runDirectory = preparedDirectory(root, await run(root, ["prep", "main", "HEAD"]));
 		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
 		const reference = manifest.files[0];
 		const oldStart = reference?.referenceStarts[0];
@@ -1497,6 +1633,9 @@ test("keybindings lists every action and flags overrides and issues", async () =
 		const listing = await run(root, ["keybindings"], { HOME: root });
 		expect(listing.exitCode).toBe(0);
 		expect(listing.stdout).toContain("line-up");
+		expect(listing.stdout).toMatch(
+			/toggle-hunk-review\s+m\s+Toggle the focused original hunk reviewed in place/,
+		);
 		expect(listing.stdout).toMatch(/quit\s+z\s+Quit \(overridden, default: q\/Q\)/);
 		expect(listing.stdout).toContain("Issues:");
 		expect(listing.stdout).toContain('not-a-real-action: unknown action "not-a-real-action"');
@@ -1613,7 +1752,7 @@ test("prep --pr fetches a pull request head from the remote and pins it as the c
 		const prepped = await run(clone, ["prep", "--pr", "1"]);
 		expect(prepped.exitCode).toBe(0);
 		expect(prepped.stderr).toContain("head  pull/1/head");
-		const runDirectory = prepped.stdout.trim();
+		const runDirectory = preparedDirectory(clone, prepped);
 		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
 		expect(manifest.scope.mode).toBe("committed");
 		expect(manifest.scope.head.ref).toBe("pull/1/head");
@@ -1649,9 +1788,9 @@ test("prep under Orca variables records the agent's pane, including on a dedupli
 		await seedFeatureRepo(root);
 
 		const first = await run(root, ["prep", "main", "HEAD"], orcaEnv);
-		expect(first.exitCode).toBe(0);
+		const firstDirectory = preparedDirectory(root, first);
 		const manifest = runManifestSchema.parse(
-			await Bun.file(join(first.stdout.trim(), "run.json")).json(),
+			await Bun.file(join(firstDirectory, "run.json")).json(),
 		);
 		const recorded = await Bun.file(agentOriginFile(root)).json();
 		expect(recorded).toMatchObject({
@@ -1669,8 +1808,7 @@ test("prep under Orca variables records the agent's pane, including on a dedupli
 			ORCA_WORKTREE_ID: "worktree-1",
 			ORCA_PANE_KEY: "tab-2:leaf-2",
 		});
-		expect(second.exitCode).toBe(0);
-		expect(second.stdout.trim()).toBe(first.stdout.trim());
+		expect(preparedDirectory(root, second)).toBe(firstDirectory);
 		const recordedAfterDedup = await Bun.file(agentOriginFile(root)).json();
 		expect(recordedAfterDedup).toMatchObject({ paneKey: "tab-2:leaf-2", runId: manifest.runId });
 	} finally {
@@ -1682,7 +1820,10 @@ test("threads reply under Orca variables records the agent's pane", async () => 
 	const root = await mkdtemp(join(tmpdir(), "revue-agent-origin-reply-"));
 	try {
 		await seedFeatureRepo(root);
-		const runDirectory = (await run(root, ["prep", "main", "HEAD"], noOrcaEnv)).stdout.trim();
+		const runDirectory = preparedDirectory(
+			root,
+			await run(root, ["prep", "main", "HEAD"], noOrcaEnv),
+		);
 		expect(await Bun.file(agentOriginFile(root)).exists()).toBe(false);
 		const manifest = runManifestSchema.parse(await Bun.file(join(runDirectory, "run.json")).json());
 
@@ -1733,7 +1874,10 @@ test("a failed prep or reply under Orca variables writes nothing", async () => {
 		expect(await Bun.file(agentOriginFile(root)).exists()).toBe(false);
 
 		await seedFeatureRepo(root);
-		const runDirectory = (await run(root, ["prep", "main", "HEAD"], noOrcaEnv)).stdout.trim();
+		const runDirectory = preparedDirectory(
+			root,
+			await run(root, ["prep", "main", "HEAD"], noOrcaEnv),
+		);
 		const failedReply = await run(
 			root,
 			[

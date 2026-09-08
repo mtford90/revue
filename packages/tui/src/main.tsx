@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	AgentOriginError,
 	defaultRunsDirectory,
@@ -38,7 +38,7 @@ import {
 	THREAD_AUTHOR_KIND,
 	type ThreadAnchor,
 	type ThreadAuthor,
-	type ViewState,
+	threadDisposition,
 } from "@revue/types";
 import type { ReviewUpdate } from "./app.tsx";
 import { runDoctor } from "./doctor.ts";
@@ -75,13 +75,7 @@ import {
 	validateThreadsForRun,
 } from "./threads.ts";
 import { REVUE_VERSION } from "./version.ts";
-import {
-	carryReviewProgress,
-	defaultStatePath,
-	epilogueSession,
-	type ReviewSessionState,
-	supersededProgress,
-} from "./viewState.ts";
+import { defaultStatePath, epilogueSession, type ReviewSessionState } from "./viewState.ts";
 import { watchRun } from "./watch.ts";
 
 const HELP = `revue — narrative code review in your terminal
@@ -139,7 +133,7 @@ const THREADS_HELP = `usage: revue threads list <run-directory> --json [--all]
                             --start-line <number> --end-line <number>
                             --author <agent-name> (--body <text> | --body-file <path|->)
        revue threads reply <run-directory> <thread-id> --author <agent-name>
-                           (--body <text> | --body-file <path|->)
+                           [--intent proposal|completed] (--body <text> | --body-file <path|->)
        revue threads delete <run-directory> <thread-id>
        revue threads delete-message <run-directory> <thread-id> <message-id>
        revue threads mark-dealt <run-directory> <thread-id>
@@ -552,6 +546,13 @@ const agentAuthor = (options: CommandOptions): ThreadAuthor => ({
 	name: requiredOption(options, "--author"),
 });
 
+const replyIntent = (options: CommandOptions) => {
+	const intent = options.values.get("--intent");
+	if (intent === undefined) return undefined;
+	if (intent === "proposal" || intent === "completed") return intent;
+	throw new Error("--intent must be proposal or completed");
+};
+
 const threadBody = async (options: CommandOptions): Promise<string> => {
 	const body = options.values.get("--body");
 	const bodyFile = options.values.get("--body-file");
@@ -567,7 +568,7 @@ const loadThreadCommand = async (directory: string) => {
 	const run = await loadReviewRun(directory);
 	const path = defaultThreadsPath(directory);
 	const { threads, orphaned } = loadValidatedThreads(path, run);
-	return { run, store: openThreadStore(path, run.manifest.runId), threads, orphaned };
+	return { run, store: openThreadStore(path, run.manifest.runId, run), threads, orphaned };
 };
 
 /**
@@ -635,8 +636,15 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 				`${JSON.stringify(
 					{
 						runId: run.manifest.runId,
-						threads: selected,
-						orphaned: orphaned.map((entry) => ({ id: entry.thread.id, reason: entry.reason })),
+						threads: selected.map((thread) => ({
+							...thread,
+							disposition: threadDisposition(thread),
+						})),
+						orphaned: orphaned.map((entry) => ({
+							id: entry.thread.id,
+							reason: entry.reason,
+							originalEvidenceAvailable: !!entry.thread.originalEvidence,
+						})),
 					},
 					null,
 					2,
@@ -680,14 +688,17 @@ async function cmdThreads(args: string[], commandName = "threads"): Promise<numb
 			return 0;
 		}
 		if (operation === "reply") {
-			const options = parseCommandOptions(rest, ["--author", "--body", "--body-file"]);
+			const options = parseCommandOptions(rest, ["--author", "--body", "--body-file", "--intent"]);
 			const [directory, rawThreadId] = options.positionals;
 			if (!directory || options.positionals.length !== 2) {
 				throw new Error(`${commandName} reply requires a run directory and thread ID`);
 			}
 			const threadId = requireEntityId(rawThreadId, "Thread");
 			const { run, store } = await loadThreadCommand(directory);
-			const thread = store.reply(threadId, agentAuthor(options), await threadBody(options));
+			const intent = replyIntent(options);
+			const thread = store.reply(threadId, agentAuthor(options), await threadBody(options), {
+				intent,
+			});
 			recordOrigin(directory, run.manifest.runId);
 			process.stdout.write(`${JSON.stringify({ action: operation, thread }, null, 2)}\n`);
 			return 0;
@@ -856,25 +867,6 @@ async function reprepForReload(
 	}
 }
 
-/**
- * The marks the reviewer keeps when they open the run that continues their review. The delta names
- * what came through the change untouched, so it decides this in place of the reload's file-snapshot
- * rule, which knows what code moved but not which narration was read.
- */
-const supersededSeed = async (
-	directory: string,
-	run: Awaited<ReturnType<typeof loadReviewRun>>,
-): Promise<ViewState | undefined> => {
-	const root = repositoryRootForRun(directory);
-	if (!run.delta || !run.chapters || !root) return undefined;
-	return supersededProgress({
-		statePath: defaultStatePath(),
-		runsDirectory: defaultRunsDirectory(root),
-		delta: run.delta,
-		chapters: run.chapters,
-	});
-};
-
 /** What the banner says the agent did: the chapters it had to re-narrate, and the account of why. */
 const supersedeSummary = (run: ReviewRun): string => {
 	const revised = run.delta?.stale.length ?? 0;
@@ -1007,12 +999,12 @@ async function showRun(
 	// reviewer named; `runApp` re-prepares if detection lands somewhere else.
 	const startupTheme = resolveThemeChoice(themeChoice, null, customThemes);
 
-	const [{ runApp }, { preparePatch, prepareContextQuotations }, { openRunStateStore }] =
-		await Promise.all([import("./app.tsx"), import("./diff.ts"), import("./viewState.ts")]);
+	const [{ runApp }, { preparePatch, prepareContextQuotations }, { openCodeReviewStore }] =
+		await Promise.all([import("./app.tsx"), import("./diff.ts"), import("./codeProgress.ts")]);
 
 	let currentDirectory = directory;
 	let carriedSessionState: ReviewSessionState | undefined;
-	let carriedProgress: ViewState | undefined;
+	let previousReviewRun: ReviewRun | undefined;
 	let notice: StatusNotice | undefined;
 
 	for (;;) {
@@ -1035,14 +1027,18 @@ async function showRun(
 			syntaxWarning = warning;
 		});
 		await prepareContextQuotations(run.context, startupTheme.syntaxTheme);
-		const store = await openRunStateStore(
-			defaultStatePath(),
+		const store = await openCodeReviewStore({
+			path: defaultStatePath(),
+			run,
+			runsDirectory: dirname(currentDirectory),
+			previous: previousReviewRun,
+		});
+		previousReviewRun = undefined;
+		const threadStore = openThreadStore(
+			defaultThreadsPath(currentDirectory),
 			run.manifest.runId,
-			run.chapters,
-			(await supersededSeed(currentDirectory, run)) ?? carriedProgress,
+			run,
 		);
-		carriedProgress = undefined;
-		const threadStore = openThreadStore(defaultThreadsPath(currentDirectory), run.manifest.runId);
 		const repositoryRoot = repositoryRootForRun(currentDirectory);
 		const humanAuthor = resolveHumanAuthor(repositoryRoot);
 		// The handoff is repository-local, so a run opened outside a checkout has nowhere to record
@@ -1121,6 +1117,7 @@ async function showRun(
 		const superseding = watched.superseding();
 		if (superseding) {
 			const supersededRun = run;
+			previousReviewRun = run;
 			currentDirectory = superseding.directory;
 			run = superseding.run;
 			carriedSessionState = epilogueSession(run.chapters) ?? carriedSessionState;
@@ -1128,7 +1125,6 @@ async function showRun(
 			continue;
 		}
 
-		const previous = { files: run.manifest.files, chapters: run.chapters, state: store.get() };
 		const repreped = await reprepForReload(run, currentDirectory, options.prepArgs);
 		if ("notice" in repreped) {
 			notice = repreped.notice;
@@ -1150,12 +1146,7 @@ async function showRun(
 			}
 			throw error;
 		}
-		if (run.manifest.runId !== previousRun.manifest.runId) {
-			carriedProgress = carryReviewProgress({
-				previous,
-				next: { files: run.manifest.files, chapters: run.chapters },
-			});
-		}
+		previousReviewRun = previousRun;
 		notice = reloadNotice(previousRun, run);
 	}
 }

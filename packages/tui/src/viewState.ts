@@ -5,14 +5,12 @@ import { dirname, join } from "node:path";
 import {
 	type Chapter,
 	emptyViewState,
+	type HunkReference,
 	isEpilogue,
 	type RevueChaptersFile,
-	RevueChaptersFileSchema,
-	type RunDeltaFile,
-	type RunFile,
 	type ViewState,
 	ViewStateSchema,
-	viewStateFileId,
+	viewStateHunkId,
 	viewStateKeyChangeId,
 } from "@revue/types";
 import { z } from "zod";
@@ -26,17 +24,24 @@ export function chapterFilePaths(chapter: Chapter): string[] {
 }
 
 // ── Queries ─────────────────────────────────────────────────────────────────
-export const isChapterReviewed = (vs: ViewState, chapterId: string) =>
-	vs.chapters.includes(chapterId);
+export const isHunkReviewed = (vs: ViewState, reference: HunkReference): boolean =>
+	vs.hunks?.includes(viewStateHunkId(reference.filePath, reference.oldStart)) ?? false;
 
-export const isFileReviewed = (vs: ViewState, chapterId: string, filePath: string) =>
-	vs.files.includes(viewStateFileId(chapterId, filePath));
+export const isChapterReviewed = (vs: ViewState, chapter: Chapter): boolean =>
+	chapter.hunkRefs.length
+		? chapter.hunkRefs.every((reference) => isHunkReviewed(vs, reference))
+		: vs.chapters.includes(chapter.id);
+
+export const isFileReviewed = (vs: ViewState, chapter: Chapter, filePath: string): boolean => {
+	const references = chapter.hunkRefs.filter((reference) => reference.filePath === filePath);
+	return references.length > 0 && references.every((reference) => isHunkReviewed(vs, reference));
+};
 
 export const isKeyChangeChecked = (vs: ViewState, chapterId: string, index: number) =>
 	vs.keyChanges.includes(viewStateKeyChangeId(chapterId, index));
 
 export function reviewedChapterCount(vs: ViewState, chapters: Chapter[]): number {
-	return chapters.filter((c) => isChapterReviewed(vs, c.id)).length;
+	return chapters.filter((c) => isChapterReviewed(vs, c)).length;
 }
 
 /** The next chapter at or after `fromOrder` that isn't reviewed yet, wrapping once. */
@@ -46,8 +51,8 @@ export function nextUnreviewedChapter(
 	fromOrder: number,
 ): Chapter | undefined {
 	const ordered = [...chapters].sort((a, b) => a.order - b.order);
-	const after = ordered.find((c) => c.order > fromOrder && !isChapterReviewed(vs, c.id));
-	return after ?? ordered.find((c) => !isChapterReviewed(vs, c.id));
+	const after = ordered.find((c) => c.order > fromOrder && !isChapterReviewed(vs, c));
+	return after ?? ordered.find((c) => !isChapterReviewed(vs, c));
 }
 
 // ── Mutations (pure — return a new ViewState) ────────────────────────────────
@@ -55,31 +60,44 @@ function toggleMember(arr: string[], value: string): string[] {
 	return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
 }
 
-/** Toggle a whole chapter. Marking it reviewed marks all its files too (and vice-versa). */
-export function toggleChapter(vs: ViewState, chapter: Chapter): ViewState {
-	const willReview = !isChapterReviewed(vs, chapter.id);
-	const ids = chapterFilePaths(chapter).map((p) => viewStateFileId(chapter.id, p));
+const setHunksReviewed = (
+	vs: ViewState,
+	references: HunkReference[],
+	reviewed: boolean,
+): ViewState => {
+	const ids = references.map((reference) =>
+		viewStateHunkId(reference.filePath, reference.oldStart),
+	);
 	return {
 		...vs,
-		chapters: toggleMember(vs.chapters, chapter.id),
-		files: willReview
-			? [...new Set([...vs.files, ...ids])]
-			: vs.files.filter((f) => !ids.includes(f)),
+		hunks: reviewed
+			? [...new Set([...(vs.hunks ?? []), ...ids])]
+			: (vs.hunks ?? []).filter((id) => !ids.includes(id)),
 	};
+};
+
+/** Bulk-toggle exactly this chapter's original units; no-hunk narration remains explicit. */
+export function toggleChapter(vs: ViewState, chapter: Chapter): ViewState {
+	return chapter.hunkRefs.length
+		? setHunksReviewed(vs, chapter.hunkRefs, !isChapterReviewed(vs, chapter))
+		: { ...vs, chapters: toggleMember(vs.chapters, chapter.id) };
 }
 
-/** Toggle one file within a chapter; a chapter auto-(un)marks when all/not-all its files are reviewed. */
+/** Bulk-toggle only the original units this chapter cites in the selected file. */
 export function toggleFile(vs: ViewState, chapter: Chapter, filePath: string): ViewState {
-	const files = toggleMember(vs.files, viewStateFileId(chapter.id, filePath));
-	const paths = chapterFilePaths(chapter);
-	// An interlude has no files to complete vacuously; only the mark-read key finishes it.
-	if (!paths.length) return { ...vs, files };
-	const allReviewed = paths.every((p) => files.includes(viewStateFileId(chapter.id, p)));
-	let chapters = vs.chapters;
-	if (allReviewed && !chapters.includes(chapter.id)) chapters = [...chapters, chapter.id];
-	if (!allReviewed && chapters.includes(chapter.id))
-		chapters = chapters.filter((c) => c !== chapter.id);
-	return { ...vs, files, chapters };
+	return setHunksReviewed(
+		vs,
+		chapter.hunkRefs.filter((reference) => reference.filePath === filePath),
+		!isFileReviewed(vs, chapter, filePath),
+	);
+}
+
+/** Toggle an original pinned review unit in place, independently of narrative questions. */
+export function toggleHunk(vs: ViewState, reference: HunkReference): ViewState {
+	return {
+		...vs,
+		hunks: toggleMember(vs.hunks ?? [], viewStateHunkId(reference.filePath, reference.oldStart)),
+	};
 }
 
 export function toggleKeyChange(vs: ViewState, chapter: Chapter, index: number): ViewState {
@@ -89,174 +107,10 @@ export function toggleKeyChange(vs: ViewState, chapter: Chapter, index: number):
 	};
 }
 
-// ── Reload carry-over ────────────────────────────────────────────────────────
-type ReviewedRun = { files: RunFile[]; chapters: RevueChaptersFile | null };
-
-/** A file's diff identity: both frozen snapshots and how they relate. */
-const fileSnapshot = (file: RunFile): string =>
-	[file.status, file.previousPath, file.oldBlob, file.newBlob, file.oldMode, file.newMode].join(
-		"\0",
-	);
-
-const flatChapter = (files: RunFile[]): Chapter => ({
-	id: ALL_FILES_CHAPTER_ID,
-	order: 0,
-	title: "All files",
-	summary: "",
-	hunkRefs: files.map((file) => ({ filePath: file.path, oldStart: 0 })),
-	keyChanges: [],
-	excerpts: [],
-});
-
-/** Every surface a file can be marked reviewed on: each narrated chapter, plus the flat page. */
-const reviewSurfaces = (run: ReviewedRun): Chapter[] => [
-	...(run.chapters?.chapters ?? []),
-	flatChapter(run.files),
-];
-
-/** Paths the reviewer marked reviewed, whichever surface they marked them on. */
-const reviewedPaths = (run: ReviewedRun, state: ViewState): Set<string> =>
-	new Set(
-		reviewSurfaces(run).flatMap((chapter) =>
-			chapterFilePaths(chapter).filter(
-				(path) => isChapterReviewed(state, chapter.id) || isFileReviewed(state, chapter.id, path),
-			),
-		),
-	);
-
-/** Paths whose diff is identical in both runs; anything added, removed, or edited is absent. */
-const unchangedPaths = (previous: RunFile[], next: RunFile[]): Set<string> => {
-	const before = new Map(previous.map((file) => [file.path, fileSnapshot(file)]));
-	const survived = next.filter((file) => before.get(file.path) === fileSnapshot(file));
-	return new Set(survived.map((file) => file.path));
-};
-
-const markChapter = (
-	state: ViewState,
-	chapter: Chapter,
-	isCarried: (path: string) => boolean,
-): ViewState => {
-	const paths = chapterFilePaths(chapter);
-	const reviewed = paths.filter(isCarried);
-	const done = paths.length > 0 && reviewed.length === paths.length;
-	return {
-		...state,
-		chapters: done ? [...state.chapters, chapter.id] : state.chapters,
-		files: [...state.files, ...reviewed.map((path) => viewStateFileId(chapter.id, path))],
-	};
-};
-
-/**
- * Review progress for the run a reload just opened, carried over from the run it replaced.
- * A file keeps its mark only where its diff is unchanged, so an edited file comes back
- * unreviewed and takes its chapter with it. Key-change ticks are dropped: they answer
- * questions about a snapshot the reviewer has moved past.
- */
-export function carryReviewProgress(args: {
-	previous: ReviewedRun & { state: ViewState };
-	next: ReviewedRun;
-}): ViewState {
-	const { previous, next } = args;
-	const reviewed = reviewedPaths(previous, previous.state);
-	const unchanged = unchangedPaths(previous.files, next.files);
-	const isCarried = (path: string) => reviewed.has(path) && unchanged.has(path);
-	return reviewSurfaces(next).reduce(
-		(state, chapter) => markChapter(state, chapter, isCarried),
-		emptyViewState(),
-	);
-}
-
-// ── Supersession carry-over ──────────────────────────────────────────────────
-
-/**
- * Whether the reviewer would be reading exactly what they already read. The delta pre-copies a
- * carried chapter with its references re-mapped, so what proves nothing was re-narrated is the
- * chapter the agent published matching that copy field for field — both come off the one schema,
- * which is what makes comparing their JSON meaningful.
- */
-const carriedVerbatim = (carried: Chapter | undefined, published: Chapter): boolean =>
-	carried !== undefined && JSON.stringify(carried) === JSON.stringify(published);
-
-const keepChapterMarks = (state: ViewState, previous: ViewState, chapter: Chapter): ViewState => ({
-	chapters: isChapterReviewed(previous, chapter.id)
-		? [...state.chapters, chapter.id]
-		: state.chapters,
-	files: [
-		...state.files,
-		...chapterFilePaths(chapter)
-			.filter((path) => isFileReviewed(previous, chapter.id, path))
-			.map((path) => viewStateFileId(chapter.id, path)),
-	],
-	keyChanges: [
-		...state.keyChanges,
-		...chapter.keyChanges.flatMap((_, index) =>
-			isKeyChangeChecked(previous, chapter.id, index)
-				? [viewStateKeyChangeId(chapter.id, index)]
-				: [],
-		),
-	],
-});
-
-/**
- * Review progress for a run that supersedes another. A chapter carried through the change verbatim
- * keeps every mark it had — including its answered questions, which are about code that came
- * through unchanged — while a stale, re-narrated or newly written chapter presents unread. The
- * epilogue is new by definition, so it is always the reviewer's next unread page.
- */
-export function carrySupersededProgress(args: {
-	previous: ViewState;
-	carried: readonly Chapter[];
-	chapters: RevueChaptersFile;
-}): ViewState {
-	const carried = new Map(args.carried.map((chapter) => [chapter.id, chapter]));
-	return args.chapters.chapters
-		.filter((chapter) => carriedVerbatim(carried.get(chapter.id), chapter))
-		.reduce((state, chapter) => keepChapterMarks(state, args.previous, chapter), emptyViewState());
-}
-
-/**
- * The narration of the run this one supersedes, or null when it is not on disk. Progress keys on
- * the exact chapters a run was reviewed under, so only the predecessor's own file can name it.
- */
-const supersededNarration = async (
-	runsDirectory: string,
-	runId: string,
-): Promise<RevueChaptersFile | null> => {
-	try {
-		const raw = await readFile(join(runsDirectory, runId, "chapters.json"), "utf8");
-		const parsed = RevueChaptersFileSchema.safeParse(JSON.parse(raw));
-		return parsed.success ? parsed.data : null;
-	} catch {
-		return null;
-	}
-};
-
-/**
- * What the reviewer keeps when they move onto the run that continues their review, or undefined
- * when there is nothing to carry and the run should seed itself however it otherwise would.
- */
-export async function supersededProgress(args: {
-	statePath: string;
-	runsDirectory: string;
-	delta: RunDeltaFile;
-	chapters: RevueChaptersFile;
-}): Promise<ViewState | undefined> {
-	if (!args.delta.carried.length) return undefined;
-	const narration = await supersededNarration(args.runsDirectory, args.delta.supersedes);
-	if (!narration) return undefined;
-	const previous = await loadViewState(args.statePath, runKey(args.delta.supersedes, narration));
-	const carried = carrySupersededProgress({
-		previous,
-		carried: args.delta.carried,
-		chapters: args.chapters,
-	});
-	return hasProgress(carried) ? carried : undefined;
-}
-
 // ── Persistence ──────────────────────────────────────────────────────────────
 /**
- * Review progress belongs to one pinned code snapshot narrated one specific way;
- * a chapterless run keys on the snapshot alone so its progress survives narration.
+ * Narration-sensitive questions, explicit no-hunk marks and session position.
+ * Code progress lives separately under the full immutable runId.
  */
 export function runKey(runId: string, file: RevueChaptersFile | null): string {
 	return createHash("sha256")
@@ -286,7 +140,7 @@ const ReviewPageStateSchema = z.object({
 	panelScrollTop: z.number().nonnegative(),
 });
 
-const ReviewSessionStateSchema = z.object({
+export const ReviewSessionStateSchema = z.object({
 	pageId: z.string().optional(),
 	pages: z.record(z.string(), ReviewPageStateSchema).default({}),
 });
@@ -312,38 +166,6 @@ export interface ViewStateStore {
 	set(next: ViewState): void;
 	getSession(): ReviewSessionState;
 	setSession(next: ReviewSessionState): void;
-}
-
-/**
- * A store backed by a single JSON file holding `{ [runKey]: ViewState }`, so one repo
- * accumulates progress for many runs. Writes are synchronous because the file is tiny and
- * keystrokes are infrequent.
- */
-export async function loadViewState(path: string, key: string): Promise<ViewState> {
-	const all = await readAllRuns(path);
-	return all[key] ? ViewStateSchema.parse(all[key]) : emptyViewState();
-}
-
-const hasProgress = (state: ViewState): boolean =>
-	state.chapters.length > 0 || state.files.length > 0 || state.keyChanges.length > 0;
-
-/**
- * A newly narrated run starts from any progress made reviewing it chapterless; a run a reload
- * opened starts from the `carried` progress of the run it replaced. Either seed applies only to
- * a run nobody has reviewed yet, so returning to a started review never loses it.
- */
-export async function openRunStateStore(
-	path: string,
-	runId: string,
-	file: RevueChaptersFile | null,
-	carried?: ViewState,
-): Promise<ViewStateStore> {
-	const store = await openFileStore(path, runKey(runId, file));
-	if (hasProgress(store.get())) return store;
-	const seed =
-		carried ?? (file ? await loadViewState(path, runKey(runId, null)) : emptyViewState());
-	if (hasProgress(seed)) store.set(seed);
-	return store;
 }
 
 export async function openFileStore(path: string, key: string): Promise<ViewStateStore> {

@@ -116,7 +116,7 @@ The review line cursor moves across lines that can accept review actions.
 - Press `Enter` to comment on the cursor or selection.
 - Press `Escape` to cancel the current interaction.
 
-A selection stays inside one file. It can include old and new ranges and can cross multiple hunks. Revue stores those ranges as one comment anchor.
+A selection stays inside one file. It can include changed and revealed context lines, old and new ranges, and multiple hunks. Revue stores those segments as one comment anchor while preserving the authority of each actual side.
 
 The arrow keys scroll the visual rows without moving the review line cursor. Use `d` and `u` for half pages. Use `Space` and `b` for full pages. Press `g` or `G` to reach the top or bottom.
 
@@ -126,22 +126,28 @@ Press `?` at any time to see the keys that apply to the current surface. Run `re
 
 A `⋯` band appears above, below, or between hunks when more unchanged lines are available. Use its controls to reveal lines in steps or reveal the complete gap.
 
-Revue reads these lines from the fixed run snapshot. It does not read the current worktree. Revealed lines accept comments: drag or double-click their gutter as you would a changed line. A selection cannot mix changed and revealed lines. The thread shows inline while the lines are revealed, and opening it from Comments reveals them again.
+Revue reads these lines from the fixed run snapshot. It does not read the current worktree. Revealed lines accept comments: drag or double-click their gutter as you would a changed line. One selection can cross changed and revealed lines. The thread shows inline while required revealed lines are open, and opening it from Comments reveals them again.
 
 A narration excerpt is different. The agent selected and froze that code as part of the review. An excerpt can accept comments. It does not count as changed code or review progress.
 
 ## Track review progress
 
-Revue records progress for chapters, files, and key changes.
+Revue records code progress per original hunk, including metadata-only changes.
 
-- Press `x` to mark the current chapter reviewed.
-- Press `f` to mark the focused file reviewed.
-- Press `r` to mark the focused key change reviewed.
+- Press `m` or click a hunk's checkbox to toggle that unit in place.
+- Press `x` to bulk-toggle the current chapter's units.
+- Press `f` to bulk-toggle the focused file's units in this chapter; on Diff, it covers the whole file.
+- Press `r` to mark the focused key-change question reviewed, independently of code.
 - Press `{` or `}` to move between key changes.
 
-Completing a chapter completes its files and moves to the next unreviewed chapter. Completing all files in a chapter completes that chapter. Reopening an item returns focus to it.
+A file or chapter completes when all its units are reviewed. Bulk completion collapses the work
+and moves to the next unreviewed item; reopening expands and focuses it. A hunk toggle does neither.
+A selection spanning multiple hunks has no single hunk target. Revealed context, excerpts and
+diagrams are not review work. A chapter with no hunks is marked read explicitly with `x`.
 
-Progress belongs to the fixed code snapshot and its narration. Revue stores it in `.revue/state.json` beside the repository. It also stores your position, open files, excerpt state, and scroll positions.
+Narrative and Diff share the same ticks. Rewording, reordering or regrouping chapters does not
+reset code progress. Revue stores it in `.revue/state.json` beside the repository; questions and
+your position, open files and scroll positions remain specific to the narration.
 
 Read [Continue a review](continuing.md) to learn what happens when the code changes.
 

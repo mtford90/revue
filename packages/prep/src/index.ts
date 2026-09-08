@@ -40,6 +40,7 @@ export {
 	type RunDeltaInput,
 	type RunDeltaResult,
 	recordRunDelta,
+	reviewUnits,
 	runDeltaPath,
 } from "./delta.ts";
 export { exclusionSource } from "./format.ts";
@@ -68,6 +69,8 @@ export {
 	type ScopeRequest,
 } from "./scope.ts";
 export {
+	captureThreadEvidence,
+	excerptEvidenceState,
 	migrateSupersededThreads,
 	persistThreadStoreFile,
 	readThreadStoreFile,

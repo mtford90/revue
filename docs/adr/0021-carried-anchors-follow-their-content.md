@@ -4,7 +4,31 @@
 - Date: 2026-09-04
 - Extends: [ADR 0018](0018-feedback-conversation-across-supersession.md), [ADR 0020](0020-file-scoped-patch-selections.md)
 
-## Context
+## Current amendment — 2026-09-08
+
+The approved feedback-loop iteration replaces the mapping decision below. The earlier rationale is
+historical: keeping replacement code because its frame survived is no longer acceptable.
+
+- Hunk, patch and context anchors require exact text with one occurrence in both pinned files on
+  the same side. No frame fallback, nearest duplicate or unchanged-unit shortcut. All patch ranges
+  must map into the new patch, or the thread detaches atomically. Prep detachment is sticky.
+- Optional version-2 `originalEvidence: { runId, anchor, lines: string[][] }` records source run,
+  original anchor and actual code per range. Capture at creation or first migration of never-carried
+  historical feedback; never infer it for already-carried legacy threads. Those threads are unverified
+  and non-inline on load even when their coordinates fit. Validate range/line counts; uncarried
+  evidence must match the thread's run and anchor, and carried evidence must retain its kind and path.
+  Older stores remain readable; older binaries may reject new writes.
+- Comments shows selected detached feedback's original code; JSON listing includes evidence and
+  availability. Preserve raw code in storage and sanitise terminal display. No second patch renderer.
+- Excerpts need unchanged, unambiguous frozen destination coverage before rendering inline. Missing
+  narration is derived unverified state, not sticky detachment. Freeze reconciles carried excerpts
+  under the thread-store lock: persist changed/ambiguous evidence from the previous or replacement
+  context before replacing it, then publish uniquely unchanged destination coordinates. This also
+  follows quotations moving outside the pinned patch; missing coverage stays unresolved. Prep reads
+  the latest contexts under the same lock. Destination pinned blobs can establish a unique location
+  before freezing; overlapping quotations count one physical occurrence. Reads never write.
+
+## Historical context
 
 [ADR 0018](0018-feedback-conversation-across-supersession.md) re-maps a carried anchor with the run delta's unit match: an unchanged unit shifts the anchor exactly, a modified unit keeps the offset the reviewer commented at, and only a unit the new run has lost orphans the thread.
 

@@ -2,6 +2,23 @@
 
 All notable changes to Revue are documented here. Release notes are grouped from the commits between adjacent release tags.
 
+## [0.12.0](https://github.com/mtford90/revue/compare/v0.11.1...v0.12.0) (2026-09-09)
+
+
+### Features
+
+* preserve review progress and feedback across revisions ([5e047cb](https://github.com/mtford90/revue/commit/5e047cbc8784407a625fe9c9499206df7c566383))
+* **threads:** comment on revealed context through a blob-backed anchor ([3d6dd12](https://github.com/mtford90/revue/commit/3d6dd126fc59cc1bea270149fd72fe9f1cb00c04))
+* **tui:** add open-in-editor to diff context menu ([3baa591](https://github.com/mtford90/revue/commit/3baa59164295cc517b9dd44807a7dd6fdffbcbd8))
+* **tui:** add open-in-editor to the diff context menu ([0cf45b2](https://github.com/mtford90/revue/commit/0cf45b2760a9d8783dcd71d855ef5e3ad2f9e2d2))
+
+
+### Bug Fixes
+
+* keep comment details visible beside long locations ([19220f8](https://github.com/mtford90/revue/commit/19220f851d1a7efd9ee707c543828d1690d629fd))
+* **prep:** chain lineage through pending runs and warn when carry costs the reviewer ([1e3a5d6](https://github.com/mtford90/revue/commit/1e3a5d6553e8161d360616609ffef36e4e0af73c))
+* **prep:** follow carried anchors by content, orphan when the code is gone ([1e918ad](https://github.com/mtford90/revue/commit/1e918adc919180857db3ced8a5e6c5485910bcb4))
+
 ## [0.11.1](https://github.com/mtford90/revue/compare/v0.11.0...v0.11.1) (2026-09-04)
 
 

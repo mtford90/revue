@@ -1,6 +1,6 @@
 {
 	"name": "@revue/revuediff",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"private": true,
 	"description": "A standalone ANSI diff formatter and pager for Git and Lazygit.",
 	"type": "module",
